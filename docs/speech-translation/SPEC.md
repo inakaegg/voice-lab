@@ -31,14 +31,35 @@
 7. 必要ならvoice conversionで話者類似度を調整する。
 8. backendが文字起こし、翻訳文、出力音声、処理時間、プロバイダ情報を返す。
 
+## UI状態
+
+- 録音またはファイル選択後、ユーザーは入力音声を変換前に再生確認できる。
+- 録音開始時は既存のファイル選択をクリアし、ファイル選択時は既存の録音をクリアする。
+- ブラウザが入力デバイス一覧を返せる場合は、録音に使うマイクをUIで選択できる。
+- 録音中は入力レベルを表示し、録音後はMIME typeとサイズを表示する。
+- MediaRecorderのMIME typeとアップロードファイル名の拡張子は、実際の録音形式に合わせる。
+- 画面には現在の実行モードとprovider名を表示する。
+- 現在のproviderで使えない `voice_mode` は選べない状態にする。
+- local providerのUIでは `default` を表示しない。`convert` が利用可能な場合は初期選択にする。
+- 変換中は、現在の処理段階とモデル名を表示する。最小段階はASR、翻訳、テキスト加工、音声生成、声質変換とする。
+- 変換中も、完了した段階から順に文字起こし、翻訳、加工後の表示を更新する。
+- fake providerで動いている場合、録音内容ではなく固定のデモ応答になることが分かる表示にする。
+
 ## 初期プロバイダ候補
 
-最初は大きいダウンロードを避けるため、ローカルで扱いやすいプロバイダから選ぶ。
+最初の縦切りでは軽いproviderから始めたが、実用品質評価ではASRと翻訳を上位providerへ切り替える。
 
-- ASR: ローカルPoCは `faster-whisper-small` から始める。基本動作が通った後に `faster-whisper-large-v3` を比較する。
-- 翻訳: `facebook/nllb-200-distilled-600M` を初期候補にする。インドネシア語、日本語、中国語を1モデルで扱える。PLaMoは日本語/英語寄りでサイズも大きいため、最初のローカルMVP候補からは外す。
-- ローカルTTS: 最初の縦切りでは、macOSのOS TTSなど軽量プロバイダを使えるようにする。後で差し替えられる境界を必ず作る。
-- GPU TTS / 声質クローン候補: Qwen3-TTS、CosyVoice2/3、OpenVoiceV2、Seed-VC。
+- ASR: 既定は `faster-whisper` の `turbo` とする。GPU環境では `large-v3` や `distil-large-v3` も比較する。
+- 翻訳: 既定はQwen3系のローカルLLMとする。会話文脈や口語表現の品質を見る。
+- TTS / 声質クローン候補: Qwen3-TTS、CosyVoice2/3、OpenVoiceV2、Seed-VC。
+
+`MO_PROVIDER_MODE=local` では以下を使う。
+
+- ASR: `faster-whisper` のローカルキャッシュ済みモデル。
+- 翻訳: Qwen3系のローカルキャッシュ済みモデル。
+- TTS / 声質クローン: Qwen3-TTSまたはSeed-VC。`MO_TTS_PROVIDER` で明示する。
+
+詳細は [LOCAL_PROVIDERS.md](LOCAL_PROVIDERS.md) を正とする。
 
 ## 声の扱い
 
@@ -46,11 +67,17 @@
 
 段階は以下のように分ける。
 
-- 段階0: 出力言語の既定音声だけを使う。初期実装ではここまででよい。
-- 段階1: 入力音声を参照音声として、出力言語の声質クローンTTSを使う。MVP完成までに必要。
+- 段階1: 入力音声を参照音声として、出力言語の声質クローンTTSを使う。
 - 段階2: 高品質な出力言語TTSを生成した後、Seed-VCなどの声質変換で声質を寄せる。段階1で声の類似度が足りない場合に検討する。
 
-実装順は段階0からでよい。ただし、完成形のMVPでは段階1以上を満たす必要がある。
+完成形のMVPでは段階1以上を満たす必要がある。
+
+MVPの声寄せ推奨経路:
+
+- `id-ID -> ja-JP`: `convert` を本命にする。Qwen3-TTSの `clone` は参照テキストのインドネシア語対応が弱いため、Seed-VCのような音声参照中心のvoice conversionを優先する。
+- `ja-JP -> zh-CN`: `clone` と `convert` を比較対象にする。日本語参照テキストはQwen3-TTSの対応範囲内にある。
+
+UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert` は「Qwenで生成後にSeed-VCで声質変換」として表示する。声質の類似度評価ではSeed-VCの方が入力音声に近いため、初期選択は `convert` とする。
 
 ## テキスト加工
 
@@ -61,7 +88,10 @@
 - 加工IDは `append_suffix` とする。
 - 付加文字列はリクエストで指定できる。
 - 既定では翻訳文をそのまま使い、明示された場合だけ末尾付加を行う。
-- 文単位で付加するか、出力全体の末尾に1回だけ付加するかは実装前にテストで固定する。
+- `unit=text` の場合は出力全体の末尾に1回だけ付加する。
+- `unit=sentence` の場合は文ごとの末尾に付加する。
+
+文字列として付加した効果音や語尾をTTSに読ませても、期待した音声表現にならない場合がある。録音または音声ファイルで指定した効果音を末尾へ継ぎ足す機能は、別の加工として扱う。この場合も最終出力は入力話者の声へ寄せる必要があるため、単純に未変換の音声を末尾結合するのではなく、声質変換の前段に入れる、または効果音側も同じvoice conversionを通す。
 
 例:
 
@@ -81,6 +111,7 @@
 - `voice_mode`: `default`、`clone`、`convert`
 - `text_transform`: 任意の加工ID。例 `append_suffix`
 - `text_transform_options`: 任意の加工設定。例 `{"suffix":"モー"}`
+- multipart formでは、初期実装として `text_transform_suffix` と `text_transform_unit` を受け取る。
 
 レスポンス:
 
@@ -88,6 +119,7 @@
 - `translated_text`
 - `transformed_text`
 - `audio_url` またはinline音声bytes
+- `audio_mime_type`
 - `timings`
 - `providers`
 - `warnings`

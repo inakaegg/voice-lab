@@ -15,13 +15,14 @@
 
 | モデル | 概算容量 | メモ |
 | --- | ---: | --- |
-| `Systran/faster-whisper-small` | 0.49 GB | ローカルASRの開始候補。 |
+| `mobiuslabsgmbh/faster-whisper-large-v3-turbo` | 約1.5 GiB | faster-whisperの既定ASR候補。`turbo` 指定時に取得されるCTranslate2モデル。 |
 | `Systran/faster-whisper-large-v3` | 3.09 GB | MVP後に比較するASR候補。 |
-| `facebook/nllb-200-distilled-600M` | 2.48 GB | インドネシア語、日本語、中国語を扱うローカル翻訳候補。 |
-| `facebook/nllb-200-1.3B` | 5.51 GB | より重い翻訳候補。 |
 | `pfnet/plamo-2-translate` | 19.07 GB | 日本語/英語翻訳モデル。licenseと商用条件の確認が必要。 |
-| `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | 2.52 GB | 声質クローン対応TTS候補。 |
-| `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | 4.52 GB | より大きいQwen3-TTS候補。 |
+| `Qwen/Qwen3-4B` | 約7.5 GiB | 既定のローカルLLM翻訳候補。 |
+| `Qwen/Qwen3-8B` | 要再確認 | 翻訳品質比較候補。 |
+| `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | 2.52 GB | 速度比較用の軽量TTS候補。 |
+| `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | 約4.5 GB | 既定のQwen3-TTS候補。 |
+| `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | 4.52 GB | 声色制御を比較するQwen3-TTS候補。 |
 | `FunAudioLLM/CosyVoice2-0.5B` | 4.86 GB | 多言語zero-shot声質クローン候補。 |
 | `Plachta/Seed-VC` | 全ファイル取得時は3.94 GB | 個別チェックポイントはより小さい。不要な全取得を避ける。 |
 | `myshell-ai/OpenVoiceV2` | 0.13 GB | 変換器の重みのみ。実際の構成ではbase TTSや依存関係が別途必要になる可能性がある。 |
@@ -35,6 +36,8 @@
 ## RunPod方針
 
 低アクセスMVPでは、ワーカーを0までスケールダウンでき、ワーカー実行中だけ計算リソース課金されるRunPod Serverlessが有力。ただし、永続モデル保存の費用は残る。
+
+公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Pages/Worker側、RunPodはASR、翻訳、TTS、声質変換の推論API側として扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
 推奨するRunPod構成:
 

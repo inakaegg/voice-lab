@@ -1,0 +1,42 @@
+[project]
+name = "mo-speech"
+version = "0.1.0"
+description = "Local-first speech translation web app prototype."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.117",
+  "python-multipart>=0.0.20",
+  "uvicorn>=0.37",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4",
+]
+local = [
+  "accelerate>=1.0",
+  "faster-whisper>=1.1",
+  "torch>=2.6",
+  "transformers>=4.57.3,<6",
+]
+voice = [
+  "qwen-tts==0.1.1",
+  "seed-vc==0.4.3",
+]
+deploy = [
+  "runpod>=1.7",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mo_speech = ["web/*.html", "web/*.css", "web/*.js"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

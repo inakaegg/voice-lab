@@ -6,13 +6,16 @@ models/
 model-cache/
 .cache/
 hf-cache/
+checkpoints/
 
 # Python / Node build artifacts for the future web app.
 __pycache__/
 .pytest_cache/
+*.egg-info/
 .venv/
 venv/
 node_modules/
+test-results/
 dist/
 build/
 .env

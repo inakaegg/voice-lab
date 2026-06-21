@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>音声翻訳</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="toolbar">
+        <div>
+          <p class="eyebrow">Local speech translation</p>
+          <h1>音声翻訳</h1>
+        </div>
+        <div class="status" id="status" role="status" aria-live="polite">待機中</div>
+      </header>
+
+      <section class="workspace" aria-label="音声翻訳フォーム">
+        <form id="translation-form" class="control-panel">
+          <section class="runtime-panel" aria-label="実行モード">
+            <div>
+              <span>mode</span>
+              <strong id="runtime-mode">確認中</strong>
+            </div>
+            <p id="runtime-note">実行モードを確認しています。</p>
+            <dl id="runtime-providers"></dl>
+          </section>
+
+          <div class="field-row">
+            <label for="source_language">入力言語</label>
+            <select id="source_language" name="source_language">
+              <option value="id-ID">インドネシア語</option>
+              <option value="ja-JP">日本語</option>
+            </select>
+          </div>
+
+          <div class="field-row">
+            <label for="target_language">出力言語</label>
+            <select id="target_language" name="target_language">
+              <option value="ja-JP">日本語</option>
+              <option value="zh-CN">中国語（普通話）</option>
+            </select>
+          </div>
+          <p id="route-hint" class="route-hint"></p>
+
+          <div class="field-row">
+            <label for="voice_mode">声</label>
+            <select id="voice_mode" name="voice_mode">
+              <option value="convert">Qwen生成後にSeed-VC変換</option>
+              <option value="clone">Qwenで直接声寄せ</option>
+            </select>
+          </div>
+          <p id="voice-mode-hint" class="route-hint"></p>
+
+          <div class="field-row">
+            <label for="audio">音声ファイル</label>
+            <input id="audio" name="audio" type="file" accept="audio/*" />
+          </div>
+
+          <div class="field-row">
+            <label for="audio_device">マイク</label>
+            <select id="audio_device" name="audio_device">
+              <option value="">既定のマイク</option>
+            </select>
+            <button type="button" id="audio-device-refresh" class="secondary-button">マイク一覧を更新</button>
+          </div>
+
+          <div class="recording-controls">
+            <button type="button" id="record-button">録音</button>
+            <button type="button" id="stop-button" disabled>停止</button>
+            <span id="recording-label">録音なし</span>
+          </div>
+          <div class="input-level-row">
+            <label for="input-level">入力レベル</label>
+            <meter id="input-level" min="0" max="1" low="0.05" high="0.5" optimum="0.75" value="0"></meter>
+          </div>
+          <p id="recording-details" class="recording-details">入力音声なし</p>
+          <audio id="input-audio" class="input-audio" controls hidden></audio>
+
+          <fieldset class="suffix-panel">
+            <legend>末尾付加</legend>
+            <label class="checkbox-row">
+              <input id="enable_suffix" type="checkbox" />
+              有効にする
+            </label>
+            <div class="field-row">
+              <label for="suffix">付加文字列</label>
+              <input id="suffix" name="suffix" type="text" value="モー" />
+            </div>
+            <div class="field-row">
+              <label for="suffix_unit">単位</label>
+              <select id="suffix_unit" name="suffix_unit">
+                <option value="text">全体末尾</option>
+                <option value="sentence">文ごと</option>
+              </select>
+            </div>
+          </fieldset>
+
+          <button type="submit" id="submit-button">変換</button>
+          <p id="error-message" class="error-message" hidden></p>
+        </form>
+
+        <section class="result-panel" aria-label="変換結果">
+          <section id="processing-panel" class="processing-panel" aria-label="処理状況" hidden>
+            <h2>処理状況</h2>
+            <p id="processing-current">待機中</p>
+            <ol id="processing-steps"></ol>
+          </section>
+          <div class="result-grid">
+            <article>
+              <h2>文字起こし</h2>
+              <p id="transcript" class="result-text empty">未実行</p>
+            </article>
+            <article>
+              <h2>翻訳</h2>
+              <p id="translated-text" class="result-text empty">未実行</p>
+            </article>
+            <article>
+              <h2>加工後</h2>
+              <p id="transformed-text" class="result-text empty">未実行</p>
+            </article>
+          </div>
+          <audio id="output-audio" controls></audio>
+          <dl id="timings" class="timings"></dl>
+          <dl id="providers" class="timings"></dl>
+          <ul id="warnings" class="warnings"></ul>
+        </section>
+      </section>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
