@@ -1,0 +1,20 @@
+_ai/
+tmp/
+
+# Local model/runtime caches must stay outside git.
+models/
+model-cache/
+.cache/
+hf-cache/
+
+# Python / Node build artifacts for the future web app.
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
