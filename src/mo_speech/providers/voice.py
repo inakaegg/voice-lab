@@ -14,8 +14,7 @@ from typing import Protocol
 from ..pipeline import PipelineProgress, ProgressCallback, TtsOutput
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[3]
-QWEN_HELPER_SCRIPT = PACKAGE_ROOT / "scripts" / "qwen_tts_synthesize.py"
+QWEN_HELPER_MODULE = "mo_speech.qwen_tts_synthesize"
 
 QWEN_LANGUAGE_NAMES = {
     "ja-JP": "Japanese",
@@ -48,7 +47,7 @@ class BasicTtsProvider(Protocol):
 class QwenVoiceCloneTtsProvider:
     python_executable: str = field(default_factory=lambda: os.getenv("QWEN_TTS_PYTHON", sys.executable))
     model_id: str = field(default_factory=lambda: os.getenv("QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"))
-    script_path: Path = QWEN_HELPER_SCRIPT
+    helper_module: str = field(default_factory=lambda: os.getenv("QWEN_TTS_HELPER_MODULE", QWEN_HELPER_MODULE))
     device_map: str = field(default_factory=lambda: os.getenv("QWEN_TTS_DEVICE_MAP", "cpu"))
     dtype: str = field(default_factory=lambda: os.getenv("QWEN_TTS_DTYPE", "float32"))
     attn_implementation: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("QWEN_TTS_ATTN")))
@@ -98,7 +97,8 @@ class QwenVoiceCloneTtsProvider:
                 input_json.flush()
                 command = [
                     _resolve_executable(self.python_executable),
-                    str(self.script_path),
+                    "-m",
+                    self.helper_module,
                     "--input-json",
                     input_json.name,
                     "--output",
@@ -126,6 +126,11 @@ class SeedVcVoiceConversionTtsProvider:
     fp16: bool = field(default_factory=lambda: _str_to_bool(os.getenv("SEED_VC_FP16", "false")))
     checkpoint: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("SEED_VC_CHECKPOINT")))
     config: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("SEED_VC_CONFIG")))
+    reference_max_seconds: float = field(default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", "12")))
+    reference_sample_rate: int = field(default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_SAMPLE_RATE", "24000")))
+    reference_prepare_timeout_seconds: int = field(
+        default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_PREPARE_TIMEOUT_SECONDS", "90"))
+    )
     timeout_seconds: int = field(default_factory=lambda: int(os.getenv("SEED_VC_TIMEOUT_SECONDS", "1200")))
 
     name = "seed-vc-conversion"
@@ -162,11 +167,20 @@ class SeedVcVoiceConversionTtsProvider:
         tts_ms = _elapsed_ms(tts_started)
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        conversion_started = perf_counter()
         with TemporaryDirectory(dir=self.work_dir) as temp_dir:
             temp_path = Path(temp_dir)
             source_audio_path = temp_path / "source.wav"
             source_audio_path.write_bytes(base_output.audio_bytes)
+            reference_audio_for_seed = temp_path / "reference.wav"
+            reference_prepare_started = perf_counter()
+            _prepare_seed_reference_audio(
+                reference_audio_path,
+                reference_audio_for_seed,
+                max_seconds=self.reference_max_seconds,
+                sample_rate=self.reference_sample_rate,
+                timeout_seconds=self.reference_prepare_timeout_seconds,
+            )
+            reference_prepare_ms = _elapsed_ms(reference_prepare_started)
             output_dir = temp_path / "output"
             output_dir.mkdir()
 
@@ -177,7 +191,7 @@ class SeedVcVoiceConversionTtsProvider:
                 "--source",
                 str(source_audio_path),
                 "--target",
-                str(reference_audio_path.resolve()),
+                str(reference_audio_for_seed),
                 "--output",
                 str(output_dir),
                 "--diffusion-steps",
@@ -201,12 +215,14 @@ class SeedVcVoiceConversionTtsProvider:
                 command.extend(["--config", self.config])
 
             _notify_progress(progress_callback, "voice_conversion", "声質変換", _seed_vc_model_name(self))
+            conversion_started = perf_counter()
             _run_command(command, timeout_seconds=self.timeout_seconds, cwd=self.work_dir)
             converted_audio_path = _find_single_wav(output_dir)
             audio_bytes = converted_audio_path.read_bytes()
 
         timings_ms = dict(base_output.timings_ms)
         timings_ms["tts"] = timings_ms.get("tts", tts_ms)
+        timings_ms["voice_reference_prepare"] = reference_prepare_ms
         timings_ms["voice_conversion"] = _elapsed_ms(conversion_started)
         return TtsOutput(
             audio_bytes=audio_bytes,
@@ -310,6 +326,29 @@ def _find_single_wav(output_dir: Path) -> Path:
     return outputs[0]
 
 
+def _prepare_seed_reference_audio(
+    input_path: Path,
+    output_path: Path,
+    *,
+    max_seconds: float,
+    sample_rate: int,
+    timeout_seconds: int,
+) -> None:
+    command = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(input_path.resolve()),
+    ]
+    if max_seconds > 0:
+        command.extend(["-t", _format_seconds(max_seconds)])
+    command.extend(["-ac", "1", "-ar", str(sample_rate), str(output_path)])
+    _run_command(command, timeout_seconds=timeout_seconds)
+
+
 def _synthesize_seed_source_audio(
     base_tts: BasicTtsProvider,
     text: str,
@@ -404,6 +443,10 @@ def _seed_vc_model_name(provider: SeedVcVoiceConversionTtsProvider) -> str:
 
 def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
+
+
+def _format_seconds(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
 def _empty_to_none(value: str | None) -> str | None:

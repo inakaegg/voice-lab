@@ -47,7 +47,7 @@ def test_qwen_voice_clone_provider_invokes_helper_with_reference_text(
     assert result.audio_bytes == b"qwen wav"
     assert result.audio_mime_type == "audio/wav"
     assert result.timings_ms["tts"] >= 0
-    assert captured["command"][:2] == ["voice-python", str(provider.script_path)]
+    assert captured["command"][:3] == ["voice-python", "-m", "mo_speech.qwen_tts_synthesize"]
     assert captured["input"] == {
         "model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         "text": "谢谢。",
@@ -138,12 +138,19 @@ def test_seed_vc_provider_converts_default_tts_audio_to_reference_voice(
     captured: dict[str, object] = {}
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffmpeg":
+            output_path = Path(command[-1])
+            captured["ffmpeg_command"] = command
+            output_path.write_bytes(b"prepared reference wav")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
         output_dir = Path(command[command.index("--output") + 1])
         source_path = Path(command[command.index("--source") + 1])
         target_path = Path(command[command.index("--target") + 1])
         captured["command"] = command
         captured["source_bytes"] = source_path.read_bytes()
         captured["target_path"] = target_path
+        captured["target_bytes"] = target_path.read_bytes()
         captured["kwargs"] = kwargs
         (output_dir / "converted.wav").write_bytes(b"seed vc wav")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -170,10 +177,14 @@ def test_seed_vc_provider_converts_default_tts_audio_to_reference_voice(
     assert result.audio_bytes == b"seed vc wav"
     assert result.audio_mime_type == "audio/wav"
     assert result.timings_ms["tts"] >= 0
+    assert result.timings_ms["voice_reference_prepare"] >= 0
     assert result.timings_ms["voice_conversion"] >= 0
+    assert captured["ffmpeg_command"][:6] == ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i"]
+    assert "-t" in captured["ffmpeg_command"]
     assert captured["command"][:3] == ["voice-python", "-m", "seed_vc.inference"]
     assert captured["source_bytes"].startswith(b"FAKE-WAV:zh-CN:")
-    assert captured["target_path"] == reference_audio
+    assert captured["target_path"] != reference_audio
+    assert captured["target_bytes"] == b"prepared reference wav"
     assert "--diffusion-steps" in captured["command"]
     assert "--fp16" in captured["command"]
 
@@ -215,6 +226,11 @@ def test_seed_vc_provider_can_use_clone_only_source_tts(
             return b"clone source wav"
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffmpeg":
+            output_path = Path(command[-1])
+            output_path.write_bytes(b"prepared reference wav")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
         output_dir = Path(command[command.index("--output") + 1])
         source_path = Path(command[command.index("--source") + 1])
         captured["source_bytes"] = source_path.read_bytes()
@@ -279,6 +295,11 @@ def test_seed_vc_provider_reports_conversion_progress(
             return b"clone source wav"
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffmpeg":
+            output_path = Path(command[-1])
+            output_path.write_bytes(b"prepared reference wav")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
         output_dir = Path(command[command.index("--output") + 1])
         (output_dir / "converted.wav").write_bytes(b"seed vc wav")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
