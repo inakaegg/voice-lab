@@ -39,15 +39,28 @@
 
 公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Pages/Worker側、RunPodはASR、翻訳、TTS、声質変換の推論API側として扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
+初回のGPUスモーク確認では、Web UIとAPIを含むFastAPIをRunPod Podで一体起動する。これはモデルロード、GPU利用、録音またはファイルアップロードから音声出力までを先に確認するための検証構成であり、公開MVPの本番構成ではない。RunPod CLI手順は [RUNPOD.md](RUNPOD.md) を参照する。
+
 推奨するRunPod構成:
 
 1. コードと依存関係だけを含む小さいコンテナを作る。
 2. モデル重みはRunPod Network Volumeへ置く。単一のHugging Faceモデルで足りる場合だけRunPod cached modelsも検討する。
-3. Serverlessではvolumeを `/runpod-volume` にmountして読む。
+3. PodとServerlessで `MODEL_CACHE_DIR=/runpod-volume/models`、`HF_HOME=/runpod-volume/huggingface`、`HF_HUB_CACHE=/runpod-volume/huggingface/hub` に揃える。
 4. 低アクセスMVPでは `workersMin=0` を使う。
 5. 最初はREST APIまたはCLIスクリプトで自動化し、ローカル縦切りが動いてからGitHub Actionsを追加する。
 
 複数モデル、選択したチェックポイントだけの取得、独自フォルダ構成が必要な場合はNetwork Volumeが向く。Cached modelsは単一Hugging Faceモデルでは簡単だが、複数モデルを組み合わせる音声パイプラインでは柔軟性が低い。
+
+RunPodで最初に使うモデル配置:
+
+| 用途 | 既定モデル | 保存先 |
+| --- | --- | --- |
+| ASR | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` | `/runpod-volume/models/faster-whisper` |
+| 翻訳 | `Qwen/Qwen3-4B` | `/runpod-volume/huggingface/hub` |
+| TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | `/runpod-volume/huggingface/hub` |
+| 声質変換 | Seed-VC checkpoint | `/runpod-volume/huggingface/hub` または `SEED_VC_CHECKPOINT` で指定したpath |
+
+初回取得後は、モデル更新による挙動差を避けるため、必要に応じて `FASTER_WHISPER_LOCAL_FILES_ONLY=1` と `QWEN_TRANSLATION_LOCAL_FILES_ONLY=1` に切り替える。
 
 ## Modal方針
 

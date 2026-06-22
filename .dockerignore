@@ -17,3 +17,4 @@ dist/
 build/
 .env
 .env.*
+.runpod.env

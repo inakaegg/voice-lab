@@ -1,0 +1,58 @@
+ARG BASE_IMAGE=runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml /app/
+COPY src /app/src
+COPY scripts /app/scripts
+
+RUN python -m pip install --upgrade pip \
+    && python -m pip install ".[local,voice,deploy]"
+
+ENV MO_PROVIDER_MODE=local
+ENV MO_ASR_PROVIDER=faster-whisper
+ENV MO_TRANSLATION_PROVIDER=qwen3
+ENV MO_TTS_PROVIDER=qwen-seed-vc
+ENV MO_PRELOAD_MODELS=0
+
+ENV MODEL_CACHE_DIR=/runpod-volume/models
+ENV HF_HOME=/runpod-volume/huggingface
+ENV HF_HUB_CACHE=/runpod-volume/huggingface/hub
+ENV FASTER_WHISPER_CACHE_DIR=/runpod-volume/models/faster-whisper
+ENV SEED_VC_WORK_DIR=/runpod-volume/work/seed-vc
+
+ENV FASTER_WHISPER_MODEL=mobiuslabsgmbh/faster-whisper-large-v3-turbo
+ENV FASTER_WHISPER_DEVICE=cuda
+ENV FASTER_WHISPER_COMPUTE_TYPE=float16
+ENV FASTER_WHISPER_LOCAL_FILES_ONLY=0
+
+ENV QWEN_TRANSLATION_MODEL=Qwen/Qwen3-4B
+ENV QWEN_TRANSLATION_DEVICE_MAP=auto
+ENV QWEN_TRANSLATION_DTYPE=auto
+ENV QWEN_TRANSLATION_LOCAL_FILES_ONLY=0
+
+ENV QWEN_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-Base
+ENV QWEN_TTS_DEVICE_MAP=auto
+ENV QWEN_TTS_DTYPE=float16
+
+ENV SEED_VC_FP16=true
+ENV SEED_VC_REFERENCE_MAX_SECONDS=12
+ENV SEED_VC_REFERENCE_SAMPLE_RATE=24000
+ENV SEED_VC_REFERENCE_PREPARE_TIMEOUT_SECONDS=90
+ENV SEED_VC_DIFFUSION_STEPS=8
+
+RUN mkdir -p /runpod-volume/models /runpod-volume/huggingface/hub /runpod-volume/work/seed-vc
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "mo_speech.api:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -10,14 +10,15 @@
 - ブラウザUIから、音声アップロード、録音、末尾付加設定、結果表示、音声再生を操作できる。
 - `MO_PROVIDER_MODE=local` で、faster-whisper、Qwen3翻訳、Qwen3-TTS/Seed-VCを使うローカル実プロバイダを選択できる。
 - `voice_mode` のAPI契約、応答時間計測、Qwen3-TTS/Seed-VC provider、Dockerfile、RunPod handler、README、既知の制限を追加済み。
+- RunPod GPU用DockerfileとCLI補助スクリプトを追加し、初回はPodでWeb UIとAPIを一体確認、その後Serverlessへ分ける方針にした。
 
 ## 次にやること
 
 実装フェーズは [docs/speech-translation/PHASES.md](docs/speech-translation/PHASES.md) を正とする。
 
 1. Qwen3-TTSとSeed-VCの声質、速度、GPU費用を比較し、採用経路を決める。
-2. RunPodまたは代替GPU環境の認証、model volume、endpoint作成方法を決める。
-3. 選んだGPU環境で、デプロイ先 `/health` と短いfixture音声のスモーク確認を行う。
+2. RunPodのAPIキー、Docker registry、Network Volume IDを設定し、GPU Podを作成する。
+3. RunPod上で、デプロイ先 `/health` と短いfixture音声のスモーク確認を行う。
 4. スマホ実機録音、Safari/Firefox、voice profile保存方針を必要に応じて追加確認する。
 
 ## 実装時に追加する検証
