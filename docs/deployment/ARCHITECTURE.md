@@ -14,6 +14,8 @@
 Browser
   -> Cloudflare Pages: 静的UI
   -> Cloudflare Worker: API gateway、認証、CORS、RunPod API keyの秘匿
+  -> Cloudflare R2: 保存が必要な録音、生成音声
+  -> Cloudflare D1 または KV: 音声履歴metadata
   -> RunPod Serverless または代替GPU API: ASR、翻訳、TTS、声質変換
   -> RunPod Network Volume または同等の永続volume: モデル重み
 ```
@@ -27,11 +29,13 @@ Browser
 - Cloudflare Workers Freeにはリクエスト数やCPU時間の制限があるため、重い処理は置かず、薄いgatewayに限定する。
 - RunPod Serverlessはワーカー実行中の秒単位課金とscale to zeroが使えるため、低アクセスMVPではGPU推論だけを載せる方が無駄が少ない。
 - RunPod API keyをブラウザに直接持たせるべきではないため、公開UIから直接RunPodへ投げるより、Workerなどのgatewayを挟む。
+- サーバー運用で録音や生成音声を保存する場合、GPU workerのローカルファイルやRunPod Network Volumeを履歴保存先にしない。音声blobはR2、一覧や削除管理に必要なmetadataはD1またはKVへ分ける。
 
 ## トレードオフ
 
 - 分離すると、CORS、認証、gateway、API base URL、job polling、エラー伝播、アップロードサイズ制限の設計が増える。
 - 音声ファイルをWorker経由で転送する場合、request body size、実行時間、base64化の有無を確認する必要がある。
+- 音声履歴を残す場合は、保存期間、削除UI、同意表示、共有可否を先に仕様化する必要がある。
 - 低遅延化では、単純なHTTP一括処理だけでなく、非同期job、polling、またはstreaming responseの設計が必要になる。
 - 初回のGPUスモーク確認だけなら、FastAPIまたはRunPod handlerをGPU環境で直接動かす方が速い。その後、公開MVPへ向けてCloudflare側へUI/gatewayを分ける。
 

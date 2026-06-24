@@ -201,6 +201,23 @@ def test_translate_speech_api_accepts_audio_upload() -> None:
     assert payload["audio_base64"] != ""
 
 
+def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
+    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/translate-speech",
+        data={"source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
+        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    assert len(list((tmp_path / "history" / "recordings").glob("*.webm"))) == 1
+    assert len(list((tmp_path / "history" / "outputs").glob("*.wav"))) == 1
+
+
 def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> None:
     captured_request = None
 

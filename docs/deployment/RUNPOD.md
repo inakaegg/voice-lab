@@ -235,6 +235,26 @@ python scripts/runpod_smoke_serverless.py \
   --voice-mode convert
 ```
 
+VC単体を測る場合は、翻訳パイプラインを通さず `operation_mode=voice_conversion` を使う。
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+python scripts/runpod_smoke_serverless.py \
+  --operation-mode voice_conversion \
+  --audio /path/to/source.wav \
+  --reference-audio /path/to/reference.wav \
+  --voice-backend seed-vc \
+  --seed-vc-diffusion-steps 30 \
+  --seed-vc-reference-max-seconds 10
+```
+
+Serverless handlerのレスポンスには、通常の `timings_ms` に加えて `serverless_timings_ms` と `serverless` を含める。`serverless_timings_ms.pipeline_load` または `serverless_timings_ms.voice_conversion_service_load` が大きい場合は、worker cold startまたはモデルpreloadが支配的である。`serverless.worker_cold=true` の実行と、同じworker上でのwarm実行を分けて記録する。
+
+Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker起動とモデルロードが入る。検証時は `MO_RUNPOD_PRELOAD_ON_START=1` を使い、worker起動時にpipelineを先にロードしてからhandlerを受け付ける。低アクセス本番ではcold startを許容し、録音開始時のwarmup jobやCloudflare Worker側の進行表示で体感を補う。
+
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` を使い、handler起動時にVC serviceを初期化する。ただし現状のSeed-VC providerは変換時にCLI subprocessを起動するため、モデルを完全に常駐させる構成ではない。Seed-VCだけを本番の主処理にする場合は、次の高速化として「Seed-VCモデルをworker process内に常駐させるprovider」を別途実装する。
+
 ## 完了条件
 
 RunPod移行の初回完了条件は以下。

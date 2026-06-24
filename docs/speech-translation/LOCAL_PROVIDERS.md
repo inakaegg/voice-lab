@@ -124,6 +124,9 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 | `CHATTERBOX_PYTHON` | 現在のPython | Chatterbox VCを実行するPython。 |
 | `CHATTERBOX_DEVICE` | `auto` | Chatterboxのdevice。Mac M1では `auto` でMPSを優先する。 |
 | `CHATTERBOX_REFERENCE_MAX_SECONDS` | `10` | Chatterboxに渡す参照音声の上限秒数。 |
+| `MO_AUDIO_HISTORY_ENABLED` | `1` | ローカル音声履歴を保存する。RunPodなどのサーバー環境では `0` を既定にする。 |
+| `MO_AUDIO_HISTORY_DIR` | `tmp/audio-history` | 録音と生成音声の保存先。git管理外に置く。 |
+| `MO_AUDIO_HISTORY_LIMIT` | `10` | `recordings` と `outputs` それぞれに残す件数。 |
 
 ## 対応ルート
 

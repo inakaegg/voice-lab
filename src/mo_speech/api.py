@@ -13,8 +13,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .audio_history import AudioHistoryStore
+from .factory import create_pipeline_from_env
 from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline
-from .providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from .providers.voice import (
     SeedVcRuntimeSettings,
     VoiceConversionRequest,
@@ -30,12 +31,14 @@ WEB_DIR = PACKAGE_DIR / "web"
 def create_app(
     pipeline: SpeechTranslationPipeline | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
+    audio_history_store: AudioHistoryStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="mo speech translation")
     active_pipeline = pipeline or create_pipeline_from_env()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
-    job_store = TranslationJobStore(active_pipeline)
-    voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service)
+    active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
+    job_store = TranslationJobStore(active_pipeline, active_audio_history_store)
+    voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -71,8 +74,22 @@ def create_app(
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
     ) -> dict[str, object]:
+        audio_bytes = await audio.read()
+        input_suffix = _upload_suffix(audio.filename)
+        active_audio_history_store.save_recording(
+            audio_bytes,
+            suffix=input_suffix,
+            metadata={
+                "endpoint": "translate-speech",
+                "source_language": source_language,
+                "target_language": target_language,
+                "voice_mode": voice_mode,
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
-            temp_audio.write(await audio.read())
+            temp_audio.write(audio_bytes)
             temp_audio.flush()
 
             request = _create_pipeline_request(
@@ -95,6 +112,17 @@ def create_app(
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+        active_audio_history_store.save_output(
+            result.output_audio_bytes,
+            suffix=_mime_suffix(result.output_audio_mime_type),
+            metadata={
+                "endpoint": "translate-speech",
+                "source_language": source_language,
+                "target_language": target_language,
+                "voice_mode": voice_mode,
+                "audio_mime_type": result.output_audio_mime_type,
+            },
+        )
         return _serialize_pipeline_result(result)
 
     @app.post("/api/translate-speech-jobs")
@@ -111,8 +139,22 @@ def create_app(
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
     ) -> dict[str, object]:
+        audio_bytes = await audio.read()
+        input_suffix = _upload_suffix(audio.filename)
+        active_audio_history_store.save_recording(
+            audio_bytes,
+            suffix=input_suffix,
+            metadata={
+                "endpoint": "translate-speech-jobs",
+                "source_language": source_language,
+                "target_language": target_language,
+                "voice_mode": voice_mode,
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename), delete=False) as temp_audio:
-            temp_audio.write(await audio.read())
+            temp_audio.write(audio_bytes)
             temp_audio.flush()
             audio_path = Path(temp_audio.name)
 
@@ -148,13 +190,26 @@ def create_app(
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
     ) -> dict[str, object]:
+        source_audio_bytes = await source_audio.read()
+        source_suffix = _upload_suffix(source_audio.filename)
+        active_audio_history_store.save_recording(
+            source_audio_bytes,
+            suffix=source_suffix,
+            metadata={
+                "endpoint": "voice-conversion-jobs",
+                "voice_backend": voice_backend,
+                "filename": source_audio.filename or "",
+                "content_type": source_audio.content_type or "",
+            },
+        )
         with NamedTemporaryFile(suffix=_upload_suffix(source_audio.filename), delete=False) as temp_source:
-            temp_source.write(await source_audio.read())
+            temp_source.write(source_audio_bytes)
             temp_source.flush()
             source_audio_path = Path(temp_source.name)
 
+        reference_audio_bytes = await reference_audio.read()
         with NamedTemporaryFile(suffix=_upload_suffix(reference_audio.filename), delete=False) as temp_reference:
-            temp_reference.write(await reference_audio.read())
+            temp_reference.write(reference_audio_bytes)
             temp_reference.flush()
             reference_audio_path = Path(temp_reference.name)
 
@@ -195,6 +250,7 @@ class TranslationJob:
 @dataclass
 class TranslationJobStore:
     pipeline: SpeechTranslationPipeline
+    audio_history_store: AudioHistoryStore
     jobs: dict[str, TranslationJob] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
@@ -232,6 +288,18 @@ class TranslationJobStore:
                 self._update_progress(job_id, progress)
 
             result = self.pipeline.run(request, progress_callback=report_progress)
+            self.audio_history_store.save_output(
+                result.output_audio_bytes,
+                suffix=_mime_suffix(result.output_audio_mime_type),
+                metadata={
+                    "endpoint": "translate-speech-jobs",
+                    "job_id": job_id,
+                    "source_language": request.source_language,
+                    "target_language": request.target_language,
+                    "voice_mode": request.voice_mode,
+                    "audio_mime_type": result.output_audio_mime_type,
+                },
+            )
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "succeeded"
@@ -274,6 +342,7 @@ class VoiceConversionJob:
 @dataclass
 class VoiceConversionJobStore:
     service: VoiceConversionService
+    audio_history_store: AudioHistoryStore
     jobs: dict[str, VoiceConversionJob] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
@@ -310,6 +379,16 @@ class VoiceConversionJobStore:
                 self._update_progress(job_id, progress)
 
             result = self.service.convert(request, progress_callback=report_progress)
+            self.audio_history_store.save_output(
+                result.output_audio_bytes,
+                suffix=_mime_suffix(result.output_audio_mime_type),
+                metadata={
+                    "endpoint": "voice-conversion-jobs",
+                    "job_id": job_id,
+                    "voice_backend": request.backend_id,
+                    "audio_mime_type": result.output_audio_mime_type,
+                },
+            )
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "succeeded"
@@ -335,40 +414,6 @@ class VoiceConversionJobStore:
                     break
             else:
                 job.stages.append(item)
-
-
-def create_pipeline_from_env() -> SpeechTranslationPipeline:
-    if os.getenv("MO_PROVIDER_MODE") == "local":
-        return create_local_pipeline()
-    return create_demo_pipeline()
-
-
-def create_demo_pipeline() -> SpeechTranslationPipeline:
-    return SpeechTranslationPipeline(
-        asr=FakeAsrProvider(
-            {
-                "id-ID": "Selamat pagi. Terima kasih.",
-                "ja-JP": "ありがとう。",
-            }
-        ),
-        translator=FakeTranslationProvider(
-            {
-                ("id-ID", "ja-JP", "Selamat pagi. Terima kasih."): "おはようございます。ありがとうございます。",
-                ("ja-JP", "zh-CN", "ありがとう。"): "谢谢。",
-            }
-        ),
-        tts=FakeTtsProvider(),
-    )
-
-
-def create_local_pipeline() -> SpeechTranslationPipeline:
-    from .providers.local import create_local_asr_provider, create_local_translation_provider, create_local_tts_provider
-
-    return SpeechTranslationPipeline(
-        asr=create_local_asr_provider(),
-        translator=create_local_translation_provider(),
-        tts=create_local_tts_provider(),
-    )
 
 
 app = create_app()
@@ -559,3 +604,13 @@ def _upload_suffix(filename: str | None) -> str:
     if not suffix or len(suffix) > 12:
         return ".audio"
     return suffix
+
+
+def _mime_suffix(audio_mime_type: str | None) -> str:
+    if audio_mime_type == "audio/mp4":
+        return ".m4a"
+    if audio_mime_type == "audio/webm":
+        return ".webm"
+    if audio_mime_type == "audio/mpeg":
+        return ".mp3"
+    return ".wav"

@@ -10,7 +10,7 @@ from tempfile import NamedTemporaryFile
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from mo_speech.api import create_demo_pipeline, create_local_pipeline
+from mo_speech.factory import create_demo_pipeline, create_local_pipeline
 from mo_speech.benchmark import run_benchmark
 from mo_speech.pipeline import PipelineRequest, SpeechTranslationPipeline
 
