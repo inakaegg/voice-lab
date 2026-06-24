@@ -151,6 +151,7 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
   - `seed_vc_reference_max_seconds`: 声質参照に使う先頭秒数。
   - `seed_vc_length_adjust`: 出力長の補正倍率。
   - `seed_vc_inference_cfg_rate`: Seed-VCのCFG係数。
+  - UIでは、高速確認、リーズナブル、品質優先、最高品質検証のプリセットを提供する。既定は品質優先。
 
 レスポンス:
 

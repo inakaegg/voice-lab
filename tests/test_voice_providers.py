@@ -10,6 +10,10 @@ from mo_speech.providers.fake import FakeTtsProvider
 from mo_speech.pipeline import PipelineProgress, TtsOutput
 from mo_speech.providers.voice import (
     ChatterboxDirectVoiceConversionProvider,
+    DEFAULT_SEED_VC_DIFFUSION_STEPS,
+    DEFAULT_SEED_VC_INFERENCE_CFG_RATE,
+    DEFAULT_SEED_VC_LENGTH_ADJUST,
+    DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS,
     QwenSeedVcTtsProvider,
     QwenVoiceCloneTtsProvider,
     SeedVcDirectVoiceConversionProvider,
@@ -17,6 +21,22 @@ from mo_speech.providers.voice import (
     SeedVcVoiceConversionTtsProvider,
     create_voice_conversion_service_from_env,
 )
+
+
+def test_seed_vc_default_settings_are_quality_preset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SEED_VC_DIFFUSION_STEPS", raising=False)
+    monkeypatch.delenv("SEED_VC_LENGTH_ADJUST", raising=False)
+    monkeypatch.delenv("SEED_VC_INFERENCE_CFG_RATE", raising=False)
+    monkeypatch.delenv("SEED_VC_REFERENCE_MAX_SECONDS", raising=False)
+
+    provider = SeedVcDirectVoiceConversionProvider()
+
+    assert DEFAULT_SEED_VC_DIFFUSION_STEPS == 30
+    assert DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS == 10.0
+    assert provider.diffusion_steps == DEFAULT_SEED_VC_DIFFUSION_STEPS
+    assert provider.reference_max_seconds == DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS
+    assert provider.length_adjust == DEFAULT_SEED_VC_LENGTH_ADJUST
+    assert provider.inference_cfg_rate == DEFAULT_SEED_VC_INFERENCE_CFG_RATE
 
 
 def test_qwen_voice_clone_provider_invokes_helper_with_reference_text(

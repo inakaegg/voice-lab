@@ -122,6 +122,16 @@
           <fieldset id="seed-vc-settings" class="suffix-panel" hidden>
             <legend>Seed-VC詳細設定</legend>
             <div class="field-row">
+              <label for="seed_vc_preset">プリセット</label>
+              <select id="seed_vc_preset" name="seed_vc_preset">
+                <option value="fast">高速確認</option>
+                <option value="reasonable">リーズナブル</option>
+                <option value="quality" selected>品質優先</option>
+                <option value="best">最高品質検証</option>
+                <option value="custom">カスタム</option>
+              </select>
+            </div>
+            <div class="field-row">
               <label for="seed_vc_diffusion_steps">diffusion steps</label>
               <input
                 id="seed_vc_diffusion_steps"
@@ -130,7 +140,7 @@
                 min="1"
                 max="80"
                 step="1"
-                value="8"
+                value="30"
               />
             </div>
             <div class="field-row">
@@ -142,7 +152,7 @@
                 min="0.5"
                 max="30"
                 step="0.5"
-                value="12"
+                value="10"
               />
             </div>
             <div class="field-row">
@@ -169,7 +179,7 @@
                 value="0.7"
               />
             </div>
-            <p class="route-hint">速度比較はstepsと参照音声秒数、声質比較はcfgとlengthを中心に見る。</p>
+            <p class="route-hint">通常は品質優先、速度を見たい時は高速確認、最終比較では最高品質検証を使う。</p>
           </fieldset>
 
           <button type="submit" id="submit-button">変換</button>

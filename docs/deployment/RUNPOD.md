@@ -134,7 +134,7 @@ RunPod PodではCLIの `--volume-mount-path /runpod-volume` で揃える。Serve
 | ASR | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` | `FASTER_WHISPER_MODEL`、`FASTER_WHISPER_DEVICE=cuda`、`FASTER_WHISPER_COMPUTE_TYPE=float16` |
 | 翻訳 | `Qwen/Qwen3-4B` | `QWEN_TRANSLATION_MODEL`、`QWEN_TRANSLATION_DEVICE_MAP=auto` |
 | TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | `QWEN_TTS_MODEL`、`QWEN_TTS_DEVICE_MAP=auto`、`QWEN_TTS_DTYPE=float16` |
-| 声質変換 | Seed-VC | `SEED_VC_FP16=true`、`SEED_VC_DIFFUSION_STEPS=8` |
+| 声質変換 | Seed-VC | `SEED_VC_FP16=true`、`SEED_VC_DIFFUSION_STEPS=30`、`SEED_VC_REFERENCE_MAX_SECONDS=10` |
 
 次に試す上位または比較候補:
 

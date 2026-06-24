@@ -27,6 +27,9 @@ def test_root_serves_browser_ui() -> None:
     assert "voice_backend" in response.text
     assert "reference_audio" in response.text
     assert "seed-vc-settings" in response.text
+    assert "seed_vc_preset" in response.text
+    assert "品質優先" in response.text
+    assert "最高品質検証" in response.text
     assert "seed_vc_diffusion_steps" in response.text
     assert "seed_vc_reference_max_seconds" in response.text
     assert "seed_vc_length_adjust" in response.text
@@ -73,6 +76,9 @@ def test_static_assets_are_served() -> None:
     assert "syncVoiceBackendAvailability" in js_response.text
     assert "syncSeedVcSettingsVisibility" in js_response.text
     assert "appendSeedVcSettings" in js_response.text
+    assert "seedVcPresets" in js_response.text
+    assert "applySeedVcPreset" in js_response.text
+    assert "syncSeedVcPresetSelection" in js_response.text
     assert "selectedVoiceBackend" in js_response.text
     assert "translationOnlyElements" in js_response.text
     assert "textResultSection" in js_response.text

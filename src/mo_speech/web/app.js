@@ -7,6 +7,7 @@ const operationModeSelect = document.querySelector("#operation_mode");
 const voiceBackendSelect = document.querySelector("#voice_backend");
 const voiceBackendHint = document.querySelector("#voice-backend-hint");
 const seedVcSettingsPanel = document.querySelector("#seed-vc-settings");
+const seedVcPresetSelect = document.querySelector("#seed_vc_preset");
 const seedVcDiffusionStepsInput = document.querySelector("#seed_vc_diffusion_steps");
 const seedVcReferenceMaxSecondsInput = document.querySelector("#seed_vc_reference_max_seconds");
 const seedVcLengthAdjustInput = document.querySelector("#seed_vc_length_adjust");
@@ -45,6 +46,33 @@ const voiceModeLabels = {
   convert: "Qwen生成後にSeed-VC変換",
 };
 
+const seedVcPresets = {
+  fast: {
+    diffusion_steps: 10,
+    reference_max_seconds: 5,
+    length_adjust: 1.0,
+    inference_cfg_rate: 0.7,
+  },
+  reasonable: {
+    diffusion_steps: 25,
+    reference_max_seconds: 8,
+    length_adjust: 1.0,
+    inference_cfg_rate: 0.7,
+  },
+  quality: {
+    diffusion_steps: 30,
+    reference_max_seconds: 10,
+    length_adjust: 1.0,
+    inference_cfg_rate: 0.7,
+  },
+  best: {
+    diffusion_steps: 50,
+    reference_max_seconds: 15,
+    length_adjust: 1.0,
+    inference_cfg_rate: 0.7,
+  },
+};
+
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordedBlob = null;
@@ -76,6 +104,10 @@ form.voice_mode.addEventListener("change", () => {
   syncVoiceModeHint();
   syncSeedVcSettingsVisibility();
 });
+seedVcPresetSelect.addEventListener("change", applySeedVcPreset);
+[seedVcDiffusionStepsInput, seedVcReferenceMaxSecondsInput, seedVcLengthAdjustInput, seedVcInferenceCfgRateInput].forEach(
+  (input) => input.addEventListener("input", syncSeedVcPresetSelection),
+);
 form.addEventListener("submit", submitCurrentOperation);
 syncTargetOptions();
 syncVoiceModeAvailability();
@@ -789,6 +821,7 @@ function syncSeedVcSettingsDefaults() {
   setInputValue(seedVcReferenceMaxSecondsInput, settings.reference_max_seconds);
   setInputValue(seedVcLengthAdjustInput, settings.length_adjust);
   setInputValue(seedVcInferenceCfgRateInput, settings.inference_cfg_rate);
+  syncSeedVcPresetSelection();
 }
 
 function syncSeedVcSettingsVisibility() {
@@ -819,6 +852,45 @@ function appendSeedVcSettings(formData, voiceBackend) {
   appendNumberSetting(formData, "seed_vc_reference_max_seconds", seedVcReferenceMaxSecondsInput.value);
   appendNumberSetting(formData, "seed_vc_length_adjust", seedVcLengthAdjustInput.value);
   appendNumberSetting(formData, "seed_vc_inference_cfg_rate", seedVcInferenceCfgRateInput.value);
+}
+
+function applySeedVcPreset() {
+  const preset = seedVcPresets[seedVcPresetSelect.value];
+  if (!preset) {
+    return;
+  }
+  setInputValue(seedVcDiffusionStepsInput, preset.diffusion_steps);
+  setInputValue(seedVcReferenceMaxSecondsInput, preset.reference_max_seconds);
+  setInputValue(seedVcLengthAdjustInput, preset.length_adjust);
+  setInputValue(seedVcInferenceCfgRateInput, preset.inference_cfg_rate);
+}
+
+function syncSeedVcPresetSelection() {
+  const current = currentSeedVcSettings();
+  const matched = Object.entries(seedVcPresets).find(([, preset]) => sameSeedVcSettings(current, preset));
+  seedVcPresetSelect.value = matched ? matched[0] : "custom";
+}
+
+function currentSeedVcSettings() {
+  return {
+    diffusion_steps: Number(seedVcDiffusionStepsInput.value),
+    reference_max_seconds: Number(seedVcReferenceMaxSecondsInput.value),
+    length_adjust: Number(seedVcLengthAdjustInput.value),
+    inference_cfg_rate: Number(seedVcInferenceCfgRateInput.value),
+  };
+}
+
+function sameSeedVcSettings(left, right) {
+  return (
+    numbersEqual(left.diffusion_steps, right.diffusion_steps) &&
+    numbersEqual(left.reference_max_seconds, right.reference_max_seconds) &&
+    numbersEqual(left.length_adjust, right.length_adjust) &&
+    numbersEqual(left.inference_cfg_rate, right.inference_cfg_rate)
+  );
+}
+
+function numbersEqual(left, right) {
+  return Math.abs(Number(left) - Number(right)) < 0.0001;
 }
 
 function appendNumberSetting(formData, name, value) {

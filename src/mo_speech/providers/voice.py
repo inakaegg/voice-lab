@@ -36,6 +36,11 @@ QWEN_REFERENCE_LANGUAGE_NAMES = {
     "it-IT": "Italian",
 }
 
+DEFAULT_SEED_VC_DIFFUSION_STEPS = 30
+DEFAULT_SEED_VC_LENGTH_ADJUST = 1.0
+DEFAULT_SEED_VC_INFERENCE_CFG_RATE = 0.7
+DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS = 10.0
+
 
 class BasicTtsProvider(Protocol):
     name: str
@@ -226,13 +231,21 @@ class SeedVcVoiceConversionTtsProvider:
     base_tts: BasicTtsProvider
     python_executable: str = field(default_factory=lambda: os.getenv("SEED_VC_PYTHON", sys.executable))
     work_dir: Path = field(default_factory=lambda: Path(os.getenv("SEED_VC_WORK_DIR", "~/.cache/mo-speech/seed-vc")).expanduser())
-    diffusion_steps: int = field(default_factory=lambda: int(os.getenv("SEED_VC_DIFFUSION_STEPS", "8")))
-    length_adjust: float = field(default_factory=lambda: float(os.getenv("SEED_VC_LENGTH_ADJUST", "1.0")))
-    inference_cfg_rate: float = field(default_factory=lambda: float(os.getenv("SEED_VC_INFERENCE_CFG_RATE", "0.7")))
+    diffusion_steps: int = field(
+        default_factory=lambda: int(os.getenv("SEED_VC_DIFFUSION_STEPS", str(DEFAULT_SEED_VC_DIFFUSION_STEPS)))
+    )
+    length_adjust: float = field(
+        default_factory=lambda: float(os.getenv("SEED_VC_LENGTH_ADJUST", str(DEFAULT_SEED_VC_LENGTH_ADJUST)))
+    )
+    inference_cfg_rate: float = field(
+        default_factory=lambda: float(os.getenv("SEED_VC_INFERENCE_CFG_RATE", str(DEFAULT_SEED_VC_INFERENCE_CFG_RATE)))
+    )
     fp16: bool = field(default_factory=lambda: _str_to_bool(os.getenv("SEED_VC_FP16", "false")))
     checkpoint: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("SEED_VC_CHECKPOINT")))
     config: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("SEED_VC_CONFIG")))
-    reference_max_seconds: float = field(default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", "12")))
+    reference_max_seconds: float = field(
+        default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", str(DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS)))
+    )
     reference_sample_rate: int = field(default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_SAMPLE_RATE", "24000")))
     reference_prepare_timeout_seconds: int = field(
         default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_PREPARE_TIMEOUT_SECONDS", "90"))
@@ -344,14 +357,22 @@ class SeedVcVoiceConversionTtsProvider:
 class SeedVcDirectVoiceConversionProvider:
     python_executable: str = field(default_factory=lambda: os.getenv("SEED_VC_PYTHON", sys.executable))
     work_dir: Path = field(default_factory=lambda: Path(os.getenv("SEED_VC_WORK_DIR", "~/.cache/mo-speech/seed-vc")).expanduser())
-    diffusion_steps: int = field(default_factory=lambda: int(os.getenv("SEED_VC_DIFFUSION_STEPS", "8")))
-    length_adjust: float = field(default_factory=lambda: float(os.getenv("SEED_VC_LENGTH_ADJUST", "1.0")))
-    inference_cfg_rate: float = field(default_factory=lambda: float(os.getenv("SEED_VC_INFERENCE_CFG_RATE", "0.7")))
+    diffusion_steps: int = field(
+        default_factory=lambda: int(os.getenv("SEED_VC_DIFFUSION_STEPS", str(DEFAULT_SEED_VC_DIFFUSION_STEPS)))
+    )
+    length_adjust: float = field(
+        default_factory=lambda: float(os.getenv("SEED_VC_LENGTH_ADJUST", str(DEFAULT_SEED_VC_LENGTH_ADJUST)))
+    )
+    inference_cfg_rate: float = field(
+        default_factory=lambda: float(os.getenv("SEED_VC_INFERENCE_CFG_RATE", str(DEFAULT_SEED_VC_INFERENCE_CFG_RATE)))
+    )
     fp16: bool = field(default_factory=lambda: _str_to_bool(os.getenv("SEED_VC_FP16", "false")))
     checkpoint: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("SEED_VC_CHECKPOINT")))
     config: str | None = field(default_factory=lambda: _empty_to_none(os.getenv("SEED_VC_CONFIG")))
     source_sample_rate: int = field(default_factory=lambda: int(os.getenv("VC_SOURCE_SAMPLE_RATE", "24000")))
-    reference_max_seconds: float = field(default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", "12")))
+    reference_max_seconds: float = field(
+        default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", str(DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS)))
+    )
     reference_sample_rate: int = field(default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_SAMPLE_RATE", "24000")))
     audio_prepare_timeout_seconds: int = field(
         default_factory=lambda: int(os.getenv("VC_AUDIO_PREPARE_TIMEOUT_SECONDS", "90"))
