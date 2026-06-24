@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from mo_speech.api import create_app
 from mo_speech.pipeline import PipelineProgress, PipelineResult
 from mo_speech.providers.voice import (
+    SeedVcRuntimeSettings,
     VoiceConversionBackendInfo,
     VoiceConversionService,
 )
@@ -25,6 +26,11 @@ def test_root_serves_browser_ui() -> None:
     assert "voice_mode" in response.text
     assert "voice_backend" in response.text
     assert "reference_audio" in response.text
+    assert "seed-vc-settings" in response.text
+    assert "seed_vc_diffusion_steps" in response.text
+    assert "seed_vc_reference_max_seconds" in response.text
+    assert "seed_vc_length_adjust" in response.text
+    assert "seed_vc_inference_cfg_rate" in response.text
     assert "translation-only" in response.text
     assert "audio-label" in response.text
     assert "source-audio-hint" in response.text
@@ -65,6 +71,8 @@ def test_static_assets_are_served() -> None:
     assert "pollVoiceConversionJob" in js_response.text
     assert "syncOperationMode" in js_response.text
     assert "syncVoiceBackendAvailability" in js_response.text
+    assert "syncSeedVcSettingsVisibility" in js_response.text
+    assert "appendSeedVcSettings" in js_response.text
     assert "selectedVoiceBackend" in js_response.text
     assert "translationOnlyElements" in js_response.text
     assert "textResultSection" in js_response.text
@@ -107,6 +115,7 @@ def test_runtime_api_returns_active_mode_and_provider_names() -> None:
                 "provider": "fake-vc-provider",
                 "available": True,
                 "reason": "",
+                "settings": {},
             }
         ],
     }
@@ -141,6 +150,7 @@ def test_runtime_api_marks_unavailable_voice_conversion_backend() -> None:
             "provider": "fake-vc-provider",
             "available": False,
             "reason": "not installed",
+            "settings": {},
         }
     ]
 
@@ -183,6 +193,48 @@ def test_translate_speech_api_accepts_audio_upload() -> None:
     assert payload["providers"] == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
     assert payload["audio_mime_type"] == "audio/wav"
     assert payload["audio_base64"] != ""
+
+
+def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> None:
+    captured_request = None
+
+    class CapturingPipeline:
+        def run(self, request, progress_callback=None) -> PipelineResult:
+            nonlocal captured_request
+            captured_request = request
+            return PipelineResult(
+                transcript="こんにちは。",
+                translated_text="你好。",
+                transformed_text="你好。",
+                output_audio_bytes=b"wav",
+                output_audio_mime_type="audio/wav",
+                timings_ms={"total": 1.0},
+                providers={"asr": "capture-asr", "translation": "capture-translation", "tts": "capture-tts"},
+            )
+
+    client = TestClient(create_app(pipeline=CapturingPipeline()))  # type: ignore[arg-type]
+
+    response = client.post(
+        "/api/translate-speech",
+        data={
+            "source_language": "ja-JP",
+            "target_language": "zh-CN",
+            "voice_mode": "convert",
+            "seed_vc_diffusion_steps": "6",
+            "seed_vc_length_adjust": "0.95",
+            "seed_vc_inference_cfg_rate": "0.6",
+            "seed_vc_reference_max_seconds": "5",
+        },
+        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert captured_request is not None
+    settings = captured_request.voice_settings["seed_vc"]
+    assert settings.diffusion_steps == 6
+    assert settings.length_adjust == 0.95
+    assert settings.inference_cfg_rate == 0.6
+    assert settings.reference_max_seconds == 5.0
 
 
 def test_translate_speech_job_api_reports_progress_and_result() -> None:
@@ -330,6 +382,41 @@ def test_voice_conversion_job_api_runs_selected_backend() -> None:
     assert status_payload["result"]["timings_ms"]["voice_conversion"] == 1.0
 
 
+def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
+    provider = FakeVoiceConversionProvider()
+    client = TestClient(create_app(voice_conversion_service=VoiceConversionService(providers=[provider])))
+
+    response = client.post(
+        "/api/voice-conversion-jobs",
+        data={
+            "voice_backend": "fake-vc",
+            "seed_vc_diffusion_steps": "5",
+            "seed_vc_length_adjust": "1.2",
+            "seed_vc_inference_cfg_rate": "0.55",
+            "seed_vc_reference_max_seconds": "4.5",
+        },
+        files={
+            "source_audio": ("source.wav", b"source audio", "audio/wav"),
+            "reference_audio": ("reference.wav", b"reference audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    for _ in range(20):
+        status_payload = client.get(f"/api/voice-conversion-jobs/{response.json()['job_id']}").json()
+        if status_payload["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("voice conversion job did not finish")
+
+    assert provider.last_seed_vc_settings is not None
+    assert provider.last_seed_vc_settings.diffusion_steps == 5
+    assert provider.last_seed_vc_settings.length_adjust == 1.2
+    assert provider.last_seed_vc_settings.inference_cfg_rate == 0.55
+    assert provider.last_seed_vc_settings.reference_max_seconds == 4.5
+
+
 def test_translate_speech_api_rejects_unsupported_route() -> None:
     client = TestClient(create_app())
 
@@ -383,6 +470,7 @@ class FakeVoiceConversionProvider:
 
     def __init__(self, *, available: bool = True) -> None:
         self.available = available
+        self.last_seed_vc_settings: SeedVcRuntimeSettings | None = None
 
     def backend_info(self) -> VoiceConversionBackendInfo:
         return VoiceConversionBackendInfo(
@@ -398,8 +486,10 @@ class FakeVoiceConversionProvider:
         *,
         source_audio_path: Path,
         reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback=None,
     ):
+        self.last_seed_vc_settings = seed_vc_settings
         if progress_callback is not None:
             progress_callback(PipelineProgress("voice_conversion", "声質変換", self.name))
         return type(

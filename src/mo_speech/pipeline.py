@@ -72,6 +72,7 @@ class PipelineRequest:
     voice_mode: str = "default"
     text_transform: str | None = None
     text_transform_options: dict[str, str] = field(default_factory=dict)
+    voice_settings: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,7 @@ class SpeechTranslationPipeline:
                     reference_text=transcript,
                     reference_language=request.source_language,
                     voice_mode=request.voice_mode,
+                    voice_settings=request.voice_settings,
                     progress_callback=progress_callback,
                 )
             )
@@ -238,6 +240,7 @@ def _call_synthesize_with_voice(
     reference_text: str,
     reference_language: str,
     voice_mode: str,
+    voice_settings: dict[str, object],
     progress_callback: ProgressCallback | None,
 ):
     kwargs = {
@@ -246,6 +249,8 @@ def _call_synthesize_with_voice(
         "reference_language": reference_language,
         "voice_mode": voice_mode,
     }
+    if "voice_settings" in inspect.signature(synthesize_with_voice).parameters:
+        kwargs["voice_settings"] = voice_settings
     if "progress_callback" in inspect.signature(synthesize_with_voice).parameters:
         kwargs["progress_callback"] = progress_callback
     else:

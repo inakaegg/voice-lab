@@ -13,6 +13,7 @@ from mo_speech.providers.voice import (
     QwenSeedVcTtsProvider,
     QwenVoiceCloneTtsProvider,
     SeedVcDirectVoiceConversionProvider,
+    SeedVcRuntimeSettings,
     SeedVcVoiceConversionTtsProvider,
     create_voice_conversion_service_from_env,
 )
@@ -179,6 +180,14 @@ def test_seed_vc_provider_converts_default_tts_audio_to_reference_voice(
         reference_text="ありがとう。",
         reference_language="ja-JP",
         voice_mode="convert",
+        voice_settings={
+            "seed_vc": SeedVcRuntimeSettings(
+                diffusion_steps=5,
+                length_adjust=1.1,
+                inference_cfg_rate=0.45,
+                reference_max_seconds=2.5,
+            )
+        },
     )
 
     assert result.audio_bytes == b"seed vc wav"
@@ -192,7 +201,10 @@ def test_seed_vc_provider_converts_default_tts_audio_to_reference_voice(
     assert captured["source_bytes"].startswith(b"FAKE-WAV:zh-CN:")
     assert captured["target_path"] != reference_audio
     assert captured["target_bytes"] == b"prepared reference wav"
-    assert "--diffusion-steps" in captured["command"]
+    assert captured["ffmpeg_command"][captured["ffmpeg_command"].index("-t") + 1] == "2.5"
+    assert captured["command"][captured["command"].index("--diffusion-steps") + 1] == "5"
+    assert captured["command"][captured["command"].index("--length-adjust") + 1] == "1.1"
+    assert captured["command"][captured["command"].index("--inference-cfg-rate") + 1] == "0.45"
     assert "--fp16" in captured["command"]
 
 
@@ -381,6 +393,58 @@ def test_seed_vc_direct_provider_converts_source_to_reference_voice(
     assert captured["source_bytes"] == b"prepared:source.wav"
     assert captured["target_bytes"] == b"prepared:reference.wav"
     assert "--diffusion-steps" in captured["command"]
+
+
+def test_seed_vc_direct_provider_uses_runtime_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_audio = tmp_path / "source.webm"
+    reference_audio = tmp_path / "reference.wav"
+    source_audio.write_bytes(b"source audio")
+    reference_audio.write_bytes(b"reference audio")
+    captured: dict[str, object] = {}
+    ffmpeg_commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffmpeg":
+            ffmpeg_commands.append(command)
+            Path(command[-1]).write_bytes(b"prepared wav")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        output_dir = Path(command[command.index("--output") + 1])
+        captured["command"] = command
+        (output_dir / "converted.wav").write_bytes(b"runtime tuned seed vc wav")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("mo_speech.providers.voice.subprocess.run", fake_run)
+
+    provider = SeedVcDirectVoiceConversionProvider(
+        python_executable="voice-python",
+        work_dir=tmp_path / "seed-work",
+        diffusion_steps=8,
+        length_adjust=1.0,
+        inference_cfg_rate=0.7,
+        reference_max_seconds=12,
+    )
+
+    result = provider.convert(
+        source_audio_path=source_audio,
+        reference_audio_path=reference_audio,
+        seed_vc_settings=SeedVcRuntimeSettings(
+            diffusion_steps=4,
+            length_adjust=1.15,
+            inference_cfg_rate=0.5,
+            reference_max_seconds=3.5,
+        ),
+    )
+
+    command = captured["command"]
+    assert result.audio_bytes == b"runtime tuned seed vc wav"
+    assert command[command.index("--diffusion-steps") + 1] == "4"
+    assert command[command.index("--length-adjust") + 1] == "1.15"
+    assert command[command.index("--inference-cfg-rate") + 1] == "0.5"
+    assert any("-t" in command and "3.5" in command for command in ffmpeg_commands)
 
 
 def test_chatterbox_direct_provider_invokes_helper(

@@ -126,6 +126,7 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - `text_transform`: 任意の加工ID。例 `append_suffix`
 - `text_transform_options`: 任意の加工設定。例 `{"suffix":"モー"}`
 - multipart formでは、初期実装として `text_transform_suffix` と `text_transform_unit` を受け取る。
+- `voice_mode=convert` でSeed-VCを使う場合は、`seed_vc_diffusion_steps`、`seed_vc_reference_max_seconds`、`seed_vc_length_adjust`、`seed_vc_inference_cfg_rate` を任意指定できる。
 
 レスポンス:
 
@@ -145,6 +146,11 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - `source_audio`: 変換元音声ファイル
 - `reference_audio`: 声質参照音声ファイル
 - `voice_backend`: 例 `seed-vc`、`chatterbox`
+- `voice_backend=seed-vc` 選択時の任意設定:
+  - `seed_vc_diffusion_steps`: 変換steps。大きいほど遅くなるが品質比較対象になる。
+  - `seed_vc_reference_max_seconds`: 声質参照に使う先頭秒数。
+  - `seed_vc_length_adjust`: 出力長の補正倍率。
+  - `seed_vc_inference_cfg_rate`: Seed-VCのCFG係数。
 
 レスポンス:
 

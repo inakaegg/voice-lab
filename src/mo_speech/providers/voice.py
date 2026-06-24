@@ -52,6 +52,15 @@ class VoiceConversionBackendInfo:
     provider: str
     available: bool
     reason: str = ""
+    settings: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SeedVcRuntimeSettings:
+    diffusion_steps: int | None = None
+    length_adjust: float | None = None
+    inference_cfg_rate: float | None = None
+    reference_max_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +68,7 @@ class VoiceConversionRequest:
     source_audio_path: Path
     reference_audio_path: Path
     backend_id: str
+    seed_vc_settings: SeedVcRuntimeSettings = field(default_factory=SeedVcRuntimeSettings)
 
 
 @dataclass(frozen=True)
@@ -84,6 +94,7 @@ class DirectVoiceConversionProvider(Protocol):
         *,
         source_audio_path: Path,
         reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
         raise NotImplementedError
@@ -124,6 +135,7 @@ class VoiceConversionService:
         output = provider.convert(
             source_audio_path=request.source_audio_path,
             reference_audio_path=request.reference_audio_path,
+            seed_vc_settings=request.seed_vc_settings,
             progress_callback=progress_callback,
         )
         timings_ms = dict(output.timings_ms)
@@ -243,10 +255,12 @@ class SeedVcVoiceConversionTtsProvider:
         reference_text: str,
         reference_language: str,
         voice_mode: str,
+        voice_settings: dict[str, object] | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
         if voice_mode != "convert":
             raise RuntimeError(f"voice_mode={voice_mode} is not supported by {self.name}")
+        settings = _effective_seed_vc_settings(self, _seed_vc_settings_from_voice_settings(voice_settings))
 
         tts_started = perf_counter()
         base_output = _synthesize_seed_source_audio(
@@ -270,7 +284,7 @@ class SeedVcVoiceConversionTtsProvider:
             _prepare_seed_reference_audio(
                 reference_audio_path,
                 reference_audio_for_seed,
-                max_seconds=self.reference_max_seconds,
+                max_seconds=settings.reference_max_seconds,
                 sample_rate=self.reference_sample_rate,
                 timeout_seconds=self.reference_prepare_timeout_seconds,
             )
@@ -289,11 +303,11 @@ class SeedVcVoiceConversionTtsProvider:
                 "--output",
                 str(output_dir),
                 "--diffusion-steps",
-                str(self.diffusion_steps),
+                str(settings.diffusion_steps),
                 "--length-adjust",
-                str(self.length_adjust),
+                _format_float(settings.length_adjust),
                 "--inference-cfg-rate",
-                str(self.inference_cfg_rate),
+                _format_float(settings.inference_cfg_rate),
                 "--f0-condition",
                 "False",
                 "--auto-f0-adjust",
@@ -366,15 +380,30 @@ class SeedVcDirectVoiceConversionProvider:
                 False,
                 f"{self.python_executable} で seed_vc をimportできません。",
             )
-        return VoiceConversionBackendInfo(self.backend_id, self.label, self.name, True)
+        return VoiceConversionBackendInfo(
+            self.backend_id,
+            self.label,
+            self.name,
+            True,
+            settings={
+                "seed_vc": {
+                    "diffusion_steps": self.diffusion_steps,
+                    "length_adjust": self.length_adjust,
+                    "inference_cfg_rate": self.inference_cfg_rate,
+                    "reference_max_seconds": self.reference_max_seconds,
+                }
+            },
+        )
 
     def convert(
         self,
         *,
         source_audio_path: Path,
         reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
+        settings = _effective_seed_vc_settings(self, seed_vc_settings)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(dir=self.work_dir) as temp_dir:
             temp_path = Path(temp_dir)
@@ -396,7 +425,7 @@ class SeedVcDirectVoiceConversionProvider:
             _prepare_vc_audio(
                 reference_audio_path,
                 reference_wav,
-                max_seconds=self.reference_max_seconds,
+                max_seconds=settings.reference_max_seconds,
                 sample_rate=self.reference_sample_rate,
                 timeout_seconds=self.audio_prepare_timeout_seconds,
             )
@@ -415,11 +444,11 @@ class SeedVcDirectVoiceConversionProvider:
                 "--output",
                 str(output_dir),
                 "--diffusion-steps",
-                str(self.diffusion_steps),
+                str(settings.diffusion_steps),
                 "--length-adjust",
-                str(self.length_adjust),
+                _format_float(settings.length_adjust),
                 "--inference-cfg-rate",
-                str(self.inference_cfg_rate),
+                _format_float(settings.inference_cfg_rate),
                 "--f0-condition",
                 "False",
                 "--auto-f0-adjust",
@@ -495,6 +524,7 @@ class ChatterboxDirectVoiceConversionProvider:
         *,
         source_audio_path: Path,
         reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -578,6 +608,7 @@ class OpenVoiceDirectVoiceConversionProvider:
         *,
         source_audio_path: Path,
         reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
         raise RuntimeError(self.backend_info().reason)
@@ -619,6 +650,7 @@ class _UnsupportedDirectVoiceConversionProvider:
         *,
         source_audio_path: Path,
         reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
         raise RuntimeError(self.backend_info().reason)
@@ -649,6 +681,7 @@ class QwenSeedVcTtsProvider:
         reference_text: str,
         reference_language: str,
         voice_mode: str,
+        voice_settings: dict[str, object] | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
         if voice_mode == "clone":
@@ -663,6 +696,7 @@ class QwenSeedVcTtsProvider:
                     reference_text=reference_text,
                     reference_language=reference_language,
                     voice_mode=voice_mode,
+                    voice_settings=voice_settings or {},
                     progress_callback=progress_callback,
                 )
             )
@@ -680,6 +714,7 @@ class QwenSeedVcTtsProvider:
                     reference_text=reference_text,
                     reference_language=reference_language,
                     voice_mode=voice_mode,
+                    voice_settings=voice_settings or {},
                     progress_callback=progress_callback,
                 )
             )
@@ -835,6 +870,7 @@ def _call_synthesize_with_voice(
     reference_text: str,
     reference_language: str,
     voice_mode: str,
+    voice_settings: dict[str, object],
     progress_callback: ProgressCallback | None,
 ):
     kwargs = {
@@ -843,11 +879,39 @@ def _call_synthesize_with_voice(
         "reference_language": reference_language,
         "voice_mode": voice_mode,
     }
+    if "voice_settings" in inspect.signature(synthesize_with_voice).parameters:
+        kwargs["voice_settings"] = voice_settings
     if "progress_callback" in inspect.signature(synthesize_with_voice).parameters:
         kwargs["progress_callback"] = progress_callback
     else:
         _notify_progress(progress_callback, "tts", "音声生成", provider_name)
     return synthesize_with_voice(text, target_language, **kwargs)
+
+
+def _seed_vc_settings_from_voice_settings(voice_settings: dict[str, object] | None) -> SeedVcRuntimeSettings | None:
+    if not voice_settings:
+        return None
+    seed_vc_settings = voice_settings.get("seed_vc")
+    if isinstance(seed_vc_settings, SeedVcRuntimeSettings):
+        return seed_vc_settings
+    return None
+
+
+def _effective_seed_vc_settings(
+    provider: object,
+    runtime_settings: SeedVcRuntimeSettings | None,
+) -> SeedVcRuntimeSettings:
+    runtime_settings = runtime_settings or SeedVcRuntimeSettings()
+    return SeedVcRuntimeSettings(
+        diffusion_steps=runtime_settings.diffusion_steps or provider.diffusion_steps,
+        length_adjust=runtime_settings.length_adjust or provider.length_adjust,
+        inference_cfg_rate=(
+            provider.inference_cfg_rate
+            if runtime_settings.inference_cfg_rate is None
+            else runtime_settings.inference_cfg_rate
+        ),
+        reference_max_seconds=runtime_settings.reference_max_seconds or provider.reference_max_seconds,
+    )
 
 
 def _seed_vc_model_name(provider: object) -> str:
@@ -863,6 +927,12 @@ def _elapsed_ms(started: float) -> float:
 
 def _format_seconds(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _format_float(value: float | int | None) -> str:
+    if value is None:
+        raise ValueError("Seed-VC setting must not be None")
+    return f"{float(value):.6f}".rstrip("0").rstrip(".")
 
 
 def _empty_to_none(value: str | None) -> str | None:

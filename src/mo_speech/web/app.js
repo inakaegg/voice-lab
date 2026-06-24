@@ -6,6 +6,11 @@ const referenceAudioInput = document.querySelector("#reference_audio");
 const operationModeSelect = document.querySelector("#operation_mode");
 const voiceBackendSelect = document.querySelector("#voice_backend");
 const voiceBackendHint = document.querySelector("#voice-backend-hint");
+const seedVcSettingsPanel = document.querySelector("#seed-vc-settings");
+const seedVcDiffusionStepsInput = document.querySelector("#seed_vc_diffusion_steps");
+const seedVcReferenceMaxSecondsInput = document.querySelector("#seed_vc_reference_max_seconds");
+const seedVcLengthAdjustInput = document.querySelector("#seed_vc_length_adjust");
+const seedVcInferenceCfgRateInput = document.querySelector("#seed_vc_inference_cfg_rate");
 const audioDeviceSelect = document.querySelector("#audio_device");
 const audioDeviceRefreshButton = document.querySelector("#audio-device-refresh");
 const recordButton = document.querySelector("#record-button");
@@ -61,10 +66,16 @@ operationModeSelect.addEventListener("change", () => {
   syncOperationMode();
   clearResultOutputs();
 });
-voiceBackendSelect.addEventListener("change", syncVoiceBackendHint);
+voiceBackendSelect.addEventListener("change", () => {
+  syncVoiceBackendHint();
+  syncSeedVcSettingsVisibility();
+});
 form.source_language.addEventListener("change", syncTargetOptions);
 form.target_language.addEventListener("change", syncVoiceModeHint);
-form.voice_mode.addEventListener("change", syncVoiceModeHint);
+form.voice_mode.addEventListener("change", () => {
+  syncVoiceModeHint();
+  syncSeedVcSettingsVisibility();
+});
 form.addEventListener("submit", submitCurrentOperation);
 syncTargetOptions();
 syncVoiceModeAvailability();
@@ -181,7 +192,11 @@ async function submitTranslation(event) {
     const formData = new FormData();
     formData.append("source_language", form.source_language.value);
     formData.append("target_language", form.target_language.value);
-    formData.append("voice_mode", selectedVoiceMode());
+    const voiceMode = selectedVoiceMode();
+    formData.append("voice_mode", voiceMode);
+    if (voiceMode === "convert") {
+      appendSeedVcSettings(formData, "seed-vc");
+    }
 
     const enableSuffix = document.querySelector("#enable_suffix").checked;
     if (enableSuffix) {
@@ -239,7 +254,9 @@ async function submitVoiceConversion(event) {
     const sourceFile = audioInput.files[0];
     const referenceFile = referenceAudioInput.files[0];
     const formData = new FormData();
-    formData.append("voice_backend", selectedVoiceBackend());
+    const voiceBackend = selectedVoiceBackend();
+    formData.append("voice_backend", voiceBackend);
+    appendSeedVcSettings(formData, voiceBackend);
     if (sourceFile) {
       if (sourceFile.size < 1) {
         throw new Error("変換元音声ファイルが空です");
@@ -454,6 +471,8 @@ function renderRuntime(payload) {
   voiceConversionBackends = payload.voice_conversion_backends || [];
   syncVoiceModeAvailability();
   syncVoiceBackendAvailability();
+  syncSeedVcSettingsDefaults();
+  syncSeedVcSettingsVisibility();
   syncRuntimeNote();
   runtimeProviders.replaceChildren();
   Object.entries(payload.providers || {}).forEach(([key, value]) => {
@@ -670,6 +689,7 @@ function syncOperationMode() {
   textResultSection.hidden = isVoiceConversion;
   syncRuntimeNote();
   syncVoiceBackendAvailability();
+  syncSeedVcSettingsVisibility();
   syncVoiceModeHint();
 }
 
@@ -743,6 +763,7 @@ function syncVoiceBackendAvailability() {
     }
   }
   syncVoiceBackendHint();
+  syncSeedVcSettingsVisibility();
 }
 
 function syncVoiceBackendHint() {
@@ -757,6 +778,60 @@ function syncVoiceBackendHint() {
   const reason = selected.dataset.reason;
   const provider = selected.dataset.provider;
   voiceBackendHint.textContent = reason || provider || "";
+}
+
+function syncSeedVcSettingsDefaults() {
+  const settings = seedVcSettingsForSelectedBackend();
+  if (!settings) {
+    return;
+  }
+  setInputValue(seedVcDiffusionStepsInput, settings.diffusion_steps);
+  setInputValue(seedVcReferenceMaxSecondsInput, settings.reference_max_seconds);
+  setInputValue(seedVcLengthAdjustInput, settings.length_adjust);
+  setInputValue(seedVcInferenceCfgRateInput, settings.inference_cfg_rate);
+}
+
+function syncSeedVcSettingsVisibility() {
+  if (!seedVcSettingsPanel) {
+    return;
+  }
+  const selected = [...voiceBackendSelect.options].find((option) => option.value === voiceBackendSelect.value);
+  const translationUsesSeedVc =
+    operationModeSelect.value === "translation" && selectedVoiceMode() === "convert";
+  const voiceConversionUsesSeedVc =
+    operationModeSelect.value === "voice_conversion" &&
+    voiceBackendSelect.value === "seed-vc" &&
+    !Boolean(selected?.disabled);
+  seedVcSettingsPanel.hidden =
+    !translationUsesSeedVc && !voiceConversionUsesSeedVc;
+}
+
+function seedVcSettingsForSelectedBackend() {
+  const selected = voiceConversionBackends.find((backend) => backend.id === "seed-vc");
+  return selected?.settings?.seed_vc || null;
+}
+
+function appendSeedVcSettings(formData, voiceBackend) {
+  if (voiceBackend !== "seed-vc") {
+    return;
+  }
+  appendNumberSetting(formData, "seed_vc_diffusion_steps", seedVcDiffusionStepsInput.value);
+  appendNumberSetting(formData, "seed_vc_reference_max_seconds", seedVcReferenceMaxSecondsInput.value);
+  appendNumberSetting(formData, "seed_vc_length_adjust", seedVcLengthAdjustInput.value);
+  appendNumberSetting(formData, "seed_vc_inference_cfg_rate", seedVcInferenceCfgRateInput.value);
+}
+
+function appendNumberSetting(formData, name, value) {
+  if (value !== "") {
+    formData.append(name, value);
+  }
+}
+
+function setInputValue(input, value) {
+  if (!input || value === undefined || value === null) {
+    return;
+  }
+  input.value = String(value);
 }
 
 function syncVoiceModeAvailability() {

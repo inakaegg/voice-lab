@@ -142,6 +142,7 @@ legend,
 
 input[type="file"],
 input[type="text"],
+input[type="number"],
 select {
   border: 1px solid #c8d2df;
   border-radius: 6px;

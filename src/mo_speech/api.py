@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline
 from .providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from .providers.voice import (
+    SeedVcRuntimeSettings,
     VoiceConversionRequest,
     VoiceConversionResult,
     VoiceConversionService,
@@ -65,6 +66,10 @@ def create_app(
         text_transform: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
         text_transform_unit: Annotated[str, Form()] = "text",
+        seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
+        seed_vc_length_adjust: Annotated[float | None, Form()] = None,
+        seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
+        seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
     ) -> dict[str, object]:
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
             temp_audio.write(await audio.read())
@@ -78,6 +83,10 @@ def create_app(
                 text_transform,
                 text_transform_suffix,
                 text_transform_unit,
+                seed_vc_diffusion_steps,
+                seed_vc_length_adjust,
+                seed_vc_inference_cfg_rate,
+                seed_vc_reference_max_seconds,
             )
             try:
                 result = active_pipeline.run(request)
@@ -97,6 +106,10 @@ def create_app(
         text_transform: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
         text_transform_unit: Annotated[str, Form()] = "text",
+        seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
+        seed_vc_length_adjust: Annotated[float | None, Form()] = None,
+        seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
+        seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
     ) -> dict[str, object]:
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename), delete=False) as temp_audio:
             temp_audio.write(await audio.read())
@@ -111,6 +124,10 @@ def create_app(
             text_transform,
             text_transform_suffix,
             text_transform_unit,
+            seed_vc_diffusion_steps,
+            seed_vc_length_adjust,
+            seed_vc_inference_cfg_rate,
+            seed_vc_reference_max_seconds,
         )
         return job_store.start(request, audio_path)
 
@@ -126,6 +143,10 @@ def create_app(
         source_audio: Annotated[UploadFile, File()],
         reference_audio: Annotated[UploadFile, File()],
         voice_backend: Annotated[str, Form()] = "seed-vc",
+        seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
+        seed_vc_length_adjust: Annotated[float | None, Form()] = None,
+        seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
+        seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
     ) -> dict[str, object]:
         with NamedTemporaryFile(suffix=_upload_suffix(source_audio.filename), delete=False) as temp_source:
             temp_source.write(await source_audio.read())
@@ -141,6 +162,12 @@ def create_app(
             source_audio_path=source_audio_path,
             reference_audio_path=reference_audio_path,
             backend_id=voice_backend,
+            seed_vc_settings=_create_seed_vc_settings(
+                diffusion_steps=seed_vc_diffusion_steps,
+                length_adjust=seed_vc_length_adjust,
+                inference_cfg_rate=seed_vc_inference_cfg_rate,
+                reference_max_seconds=seed_vc_reference_max_seconds,
+            ),
         )
         return voice_conversion_job_store.start(request, [source_audio_path, reference_audio_path])
 
@@ -373,9 +400,36 @@ def _voice_conversion_backends(service: VoiceConversionService) -> list[dict[str
             "provider": info.provider,
             "available": info.available,
             "reason": info.reason,
+            "settings": info.settings,
         }
         for info in service.backend_infos()
     ]
+
+
+def _create_seed_vc_settings(
+    *,
+    diffusion_steps: int | None,
+    length_adjust: float | None,
+    inference_cfg_rate: float | None,
+    reference_max_seconds: float | None,
+) -> SeedVcRuntimeSettings:
+    _validate_optional_number("seed_vc_diffusion_steps", diffusion_steps, minimum=1, maximum=80)
+    _validate_optional_number("seed_vc_length_adjust", length_adjust, minimum=0.25, maximum=4.0)
+    _validate_optional_number("seed_vc_inference_cfg_rate", inference_cfg_rate, minimum=0.0, maximum=2.0)
+    _validate_optional_number("seed_vc_reference_max_seconds", reference_max_seconds, minimum=0.5, maximum=30.0)
+    return SeedVcRuntimeSettings(
+        diffusion_steps=diffusion_steps,
+        length_adjust=length_adjust,
+        inference_cfg_rate=inference_cfg_rate,
+        reference_max_seconds=reference_max_seconds,
+    )
+
+
+def _validate_optional_number(name: str, value: float | int | None, *, minimum: float, maximum: float) -> None:
+    if value is None:
+        return
+    if value < minimum or value > maximum:
+        raise HTTPException(status_code=400, detail=f"{name} must be between {minimum} and {maximum}")
 
 
 def _create_pipeline_request(
@@ -386,6 +440,10 @@ def _create_pipeline_request(
     text_transform: str | None,
     text_transform_suffix: str | None,
     text_transform_unit: str,
+    seed_vc_diffusion_steps: int | None,
+    seed_vc_length_adjust: float | None,
+    seed_vc_inference_cfg_rate: float | None,
+    seed_vc_reference_max_seconds: float | None,
 ) -> PipelineRequest:
     options: dict[str, str] = {}
     if text_transform_suffix is not None:
@@ -399,6 +457,14 @@ def _create_pipeline_request(
         voice_mode=voice_mode,
         text_transform=text_transform,
         text_transform_options=options,
+        voice_settings={
+            "seed_vc": _create_seed_vc_settings(
+                diffusion_steps=seed_vc_diffusion_steps,
+                length_adjust=seed_vc_length_adjust,
+                inference_cfg_rate=seed_vc_inference_cfg_rate,
+                reference_max_seconds=seed_vc_reference_max_seconds,
+            )
+        },
     )
 
 
