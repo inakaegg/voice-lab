@@ -222,12 +222,12 @@ def create_app(
             seed_vc_inference_cfg_rate,
             seed_vc_reference_max_seconds,
         )
-            try:
-                return job_store.start(request, audio_path, translation_backend, recording_entry=recording_entry)
-            except ValueError as exc:
-                LOGGER.exception("create_translate_speech_job failed: backend=%s", translation_backend)
-                audio_path.unlink(missing_ok=True)
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            return job_store.start(request, audio_path, translation_backend, recording_entry=recording_entry)
+        except ValueError as exc:
+            LOGGER.exception("create_translate_speech_job failed: backend=%s", translation_backend)
+            audio_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/translate-speech-jobs/{job_id}")
     def get_translate_speech_job(job_id: str) -> dict[str, object]:

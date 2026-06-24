@@ -5,7 +5,7 @@ import base64
 import pytest
 
 from mo_speech import runpod_handler
-from mo_speech.pipeline import PipelineProgress, TtsOutput
+from mo_speech.pipeline import PipelineProgress, PipelineResult, TtsOutput
 from mo_speech.providers.voice import VoiceConversionBackendInfo, VoiceConversionService
 
 
@@ -15,6 +15,7 @@ def test_runpod_handler_translates_base64_audio(monkeypatch: pytest.MonkeyPatch)
     event = {
         "input": {
             "audio_base64": base64.b64encode(b"fake audio").decode("ascii"),
+            "translation_backend": "qwen",
             "source_language": "ja-JP",
             "target_language": "zh-CN",
             "voice_mode": "default",
@@ -32,6 +33,50 @@ def test_runpod_handler_translates_base64_audio(monkeypatch: pytest.MonkeyPatch)
     assert payload["serverless"]["worker_cold"] is True
     assert payload["serverless_timings_ms"]["handler_total"] >= 0
     assert payload["serverless_timings_ms"]["pipeline_load"] >= 0
+
+
+def test_runpod_handler_defaults_to_openai_translation_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    class FakePipeline:
+        def run(self, request):
+            captured["translation_backend"] = "openai"
+            return PipelineResult(
+                transcript="こんにちは。",
+                translated_text="Halo.",
+                transformed_text="Halo.",
+                output_audio_bytes=b"openai audio",
+                output_audio_mime_type="audio/wav",
+                timings_ms={"total": 1.0},
+                providers={
+                    "asr": "fake-openai-asr",
+                    "translation": "fake-openai-translation",
+                    "tts": "fake-openai-tts",
+                },
+            )
+
+    def fake_translation_pipeline(translation_backend):
+        captured["translation_backend"] = translation_backend
+        return FakePipeline(), 1.0
+
+    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
+    event = {
+        "input": {
+            "audio_base64": base64.b64encode(b"fake audio").decode("ascii"),
+            "source_language": "ja-JP",
+            "target_language": "zh-CN",
+            "voice_mode": "default",
+        }
+    }
+
+    payload = runpod_handler.handler(event)
+
+    assert captured["translation_backend"] == "openai"
+    assert payload["providers"] == {
+        "asr": "fake-openai-asr",
+        "translation": "fake-openai-translation",
+        "tts": "fake-openai-tts",
+    }
 
 
 def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPatch) -> None:

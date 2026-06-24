@@ -62,7 +62,7 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
     if text_transform_unit:
         text_transform_options["unit"] = text_transform_unit
 
-    translation_backend = str(payload.get("translation_backend", "qwen"))
+    translation_backend = str(payload.get("translation_backend", "openai"))
     pipeline, pipeline_load_ms = _translation_pipeline(translation_backend)
     temp_write_ms = 0.0
     with NamedTemporaryFile(suffix=_audio_suffix(payload.get("audio_mime_type"))) as temp_audio:

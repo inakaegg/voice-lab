@@ -148,7 +148,7 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 UIでは、実行内容を以下の構造にする。
 
 - 音声翻訳: 入力言語、出力言語、翻訳方式、声質変換を表示する。
-  - 翻訳方式は `Qwen/local`、`OpenAI API`、`OpenAI Realtime翻訳`、`OpenAI Realtime streaming` を選択できる。
+  - 翻訳方式は `OpenAI API`、`OpenAI Realtime翻訳`、`OpenAI Realtime streaming`、`Qwen/local` の順で選択できる。
   - `Qwen/local` と `OpenAI API` では、声質変換は `なし` または `Seed-VC` を選択できる。Seed-VC選択時はSeed-VC詳細設定を表示する。
   - `OpenAI Realtime翻訳` と `OpenAI Realtime streaming` では、入力言語は自動判定、声質変換は `なし` とする。
 - テキスト読み上げ: 入力テキスト、読み上げ言語、TTS方式を表示する。
@@ -289,6 +289,12 @@ UIでの読み上げ言語の扱い:
 - テストは実ユーザーの既定履歴 `tmp/audio-history/` を使わず、テストごとの一時保存先に隔離する。
 - Realtime streamingの出力音声は、切断時に録音済みblobとして `outputs` へ保存する。
 - サーバー運用ではFastAPIローカルファイル保存を永続保存先として使わない。必要な場合はオブジェクトストレージなどの外部保存先を使う。
+
+## ローカルログ
+
+- アプリのエラーは既定で `tmp/logs/mo-speech.log` に出力する。
+- 保存先は `MO_LOG_DIR` で変更できる。
+- OpenAI API、TTS、VC、翻訳jobの例外は、UIのエラーメッセージに加えてログへstack traceを残す。
 
 ## 応答速度の目標
 

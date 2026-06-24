@@ -171,6 +171,7 @@ let textTtsBackends = [];
 let voiceConversionBackends = [];
 let runtimeProviderMode = "fake";
 let realtimeStreamingSession = null;
+let userSelectedTranslationBackend = false;
 
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
@@ -201,6 +202,7 @@ operationModeSelect.addEventListener("change", () => {
   clearResultOutputs();
 });
 translationBackendSelect.addEventListener("change", () => {
+  userSelectedTranslationBackend = true;
   stopRealtimeStreaming();
   syncOperationMode();
 });
@@ -1526,7 +1528,9 @@ function syncTranslationBackendAvailability() {
     translationBackendSelect.disabled = true;
   } else {
     translationBackendSelect.disabled = false;
-    if (availableBackends.some((backend) => backend.id === currentValue)) {
+    if (!userSelectedTranslationBackend && translationBackends.length > 0) {
+      translationBackendSelect.value = availableBackends[0].id;
+    } else if (availableBackends.some((backend) => backend.id === currentValue)) {
       translationBackendSelect.value = currentValue;
     } else {
       translationBackendSelect.value = availableBackends[0].id;
