@@ -1,5 +1,7 @@
 const form = document.querySelector("#translation-form");
 const audioInput = document.querySelector("#audio");
+const audioLabel = document.querySelector("#audio-label");
+const sourceAudioHint = document.querySelector("#source-audio-hint");
 const referenceAudioInput = document.querySelector("#reference_audio");
 const operationModeSelect = document.querySelector("#operation_mode");
 const voiceBackendSelect = document.querySelector("#voice_backend");
@@ -24,6 +26,9 @@ const runtimeProviders = document.querySelector("#runtime-providers");
 const processingPanel = document.querySelector("#processing-panel");
 const processingCurrent = document.querySelector("#processing-current");
 const processingSteps = document.querySelector("#processing-steps");
+const textResultSection = document.querySelector("#text-result-section");
+const outputAudioHeading = document.querySelector("#output-audio-heading");
+const translationOnlyElements = [...document.querySelectorAll(".translation-only")];
 
 const supportedRoutes = {
   "id-ID": [{ value: "ja-JP", label: "日本語" }],
@@ -46,12 +51,16 @@ let inputLevelAudioContext = null;
 let inputLevelSource = null;
 let supportedVoiceModes = ["convert", "clone"];
 let voiceConversionBackends = [];
+let runtimeProviderMode = "fake";
 
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
 audioInput.addEventListener("change", handleAudioFileChange);
-operationModeSelect.addEventListener("change", syncOperationMode);
+operationModeSelect.addEventListener("change", () => {
+  syncOperationMode();
+  clearResultOutputs();
+});
 voiceBackendSelect.addEventListener("change", syncVoiceBackendHint);
 form.source_language.addEventListener("change", syncTargetOptions);
 form.target_language.addEventListener("change", syncVoiceModeHint);
@@ -148,7 +157,7 @@ function handleAudioFileChange() {
     return;
   }
   recordingLabel.textContent = "録音なし";
-  recordingDetails.textContent = "入力音声なし";
+  recordingDetails.textContent = sourceAudioEmptyText();
   clearInputAudioPreview();
 }
 
@@ -440,14 +449,12 @@ function renderRuntime(payload) {
   const providerMode = payload.provider_mode || "fake";
   runtimeMode.textContent = providerMode;
   runtimeMode.dataset.mode = providerMode;
+  runtimeProviderMode = providerMode;
   supportedVoiceModes = payload.supported_voice_modes || ["default"];
   voiceConversionBackends = payload.voice_conversion_backends || [];
   syncVoiceModeAvailability();
   syncVoiceBackendAvailability();
-  runtimeNote.textContent =
-    providerMode === "local"
-      ? "録音または選択した音声を実際に処理します。"
-      : "入力音声の内容に関係なく固定のデモ応答を返します。";
+  syncRuntimeNote();
   runtimeProviders.replaceChildren();
   Object.entries(payload.providers || {}).forEach(([key, value]) => {
     const term = document.createElement("dt");
@@ -648,15 +655,33 @@ function syncOperationMode() {
   document.querySelectorAll(".vc-only").forEach((element) => {
     element.hidden = !isVoiceConversion;
   });
-  form.source_language.closest(".field-row").hidden = isVoiceConversion;
-  form.target_language.closest(".field-row").hidden = isVoiceConversion;
-  routeHint.hidden = isVoiceConversion;
-  form.voice_mode.closest(".field-row").hidden = isVoiceConversion;
-  voiceModeHint.hidden = isVoiceConversion;
-  document.querySelector(".suffix-panel").hidden = isVoiceConversion;
+  translationOnlyElements.forEach((element) => {
+    element.hidden = isVoiceConversion;
+  });
+  audioLabel.textContent = isVoiceConversion ? "変換元音声ファイル" : "入力音声ファイル";
+  sourceAudioHint.textContent = isVoiceConversion
+    ? "録音またはファイル選択で変換元音声を指定します。"
+    : "録音またはファイル選択で入力音声を指定します。";
+  outputAudioHeading.textContent = isVoiceConversion ? "VC出力音声" : "出力音声";
   submitButton.textContent = isVoiceConversion ? "VC実行" : "変換";
+  if (!audioInput.files[0] && !recordedBlob) {
+    recordingDetails.textContent = sourceAudioEmptyText();
+  }
+  textResultSection.hidden = isVoiceConversion;
+  syncRuntimeNote();
   syncVoiceBackendAvailability();
   syncVoiceModeHint();
+}
+
+function syncRuntimeNote() {
+  if (operationModeSelect.value === "voice_conversion") {
+    runtimeNote.textContent = "変換元音声と参照音声をVC backendで処理します。";
+    return;
+  }
+  runtimeNote.textContent =
+    runtimeProviderMode === "local"
+      ? "録音または選択した音声を実際に処理します。"
+      : "入力音声の内容に関係なく固定のデモ応答を返します。";
 }
 
 function syncVoiceModeHint() {
@@ -776,6 +801,27 @@ function selectedVoiceBackend() {
     throw new Error("利用可能なVC backendを選択してください");
   }
   return selected.value;
+}
+
+function sourceAudioEmptyText() {
+  return operationModeSelect.value === "voice_conversion" ? "変換元音声なし" : "入力音声なし";
+}
+
+function clearResultOutputs() {
+  renderPartialResult({});
+  processingPanel.hidden = true;
+  processingCurrent.textContent = "待機中";
+  processingSteps.replaceChildren();
+  if (outputAudioObjectUrl) {
+    URL.revokeObjectURL(outputAudioObjectUrl);
+    outputAudioObjectUrl = null;
+  }
+  outputAudio.removeAttribute("src");
+  document.querySelector("#timings").replaceChildren();
+  document.querySelector("#providers").replaceChildren();
+  document.querySelector("#warnings").replaceChildren();
+  clearError();
+  setStatus("待機中");
 }
 
 function base64ToBytes(base64) {

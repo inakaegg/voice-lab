@@ -35,7 +35,7 @@
             </select>
           </div>
 
-          <div class="field-row">
+          <div class="field-row translation-only">
             <label for="source_language">入力言語</label>
             <select id="source_language" name="source_language">
               <option value="id-ID">インドネシア語</option>
@@ -43,23 +43,23 @@
             </select>
           </div>
 
-          <div class="field-row">
+          <div class="field-row translation-only">
             <label for="target_language">出力言語</label>
             <select id="target_language" name="target_language">
               <option value="ja-JP">日本語</option>
               <option value="zh-CN">中国語（普通話）</option>
             </select>
           </div>
-          <p id="route-hint" class="route-hint"></p>
+          <p id="route-hint" class="route-hint translation-only"></p>
 
-          <div class="field-row">
+          <div class="field-row translation-only">
             <label for="voice_mode">声</label>
             <select id="voice_mode" name="voice_mode">
               <option value="convert">Qwen生成後にSeed-VC変換</option>
               <option value="clone">Qwenで直接声寄せ</option>
             </select>
           </div>
-          <p id="voice-mode-hint" class="route-hint"></p>
+          <p id="voice-mode-hint" class="route-hint translation-only"></p>
 
           <div class="field-row vc-only" hidden>
             <label for="voice_backend">VC backend</label>
@@ -70,9 +70,10 @@
           <p id="voice-backend-hint" class="route-hint vc-only" hidden></p>
 
           <div class="field-row">
-            <label for="audio">音声ファイル</label>
+            <label id="audio-label" for="audio">入力音声ファイル</label>
             <input id="audio" name="audio" type="file" accept="audio/*" />
           </div>
+          <p id="source-audio-hint" class="route-hint">録音またはファイル選択で入力音声を指定します。</p>
 
           <div class="field-row vc-only" hidden>
             <label for="reference_audio">参照音声ファイル</label>
@@ -99,7 +100,7 @@
           <p id="recording-details" class="recording-details">入力音声なし</p>
           <audio id="input-audio" class="input-audio" controls hidden></audio>
 
-          <fieldset class="suffix-panel">
+          <fieldset class="suffix-panel translation-only">
             <legend>末尾付加</legend>
             <label class="checkbox-row">
               <input id="enable_suffix" type="checkbox" />
@@ -128,7 +129,7 @@
             <p id="processing-current">待機中</p>
             <ol id="processing-steps"></ol>
           </section>
-          <div class="result-grid">
+          <div id="text-result-section" class="result-grid translation-only">
             <article>
               <h2>文字起こし</h2>
               <p id="transcript" class="result-text empty">未実行</p>
@@ -142,6 +143,7 @@
               <p id="transformed-text" class="result-text empty">未実行</p>
             </article>
           </div>
+          <h2 id="output-audio-heading">出力音声</h2>
           <audio id="output-audio" controls></audio>
           <dl id="timings" class="timings"></dl>
           <dl id="providers" class="timings"></dl>

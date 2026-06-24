@@ -25,6 +25,11 @@ def test_root_serves_browser_ui() -> None:
     assert "voice_mode" in response.text
     assert "voice_backend" in response.text
     assert "reference_audio" in response.text
+    assert "translation-only" in response.text
+    assert "audio-label" in response.text
+    assert "source-audio-hint" in response.text
+    assert "text-result-section" in response.text
+    assert "output-audio-heading" in response.text
     assert "route-hint" in response.text
     assert "runtime-mode" in response.text
     assert "runtime-note" in response.text
@@ -61,6 +66,10 @@ def test_static_assets_are_served() -> None:
     assert "syncOperationMode" in js_response.text
     assert "syncVoiceBackendAvailability" in js_response.text
     assert "selectedVoiceBackend" in js_response.text
+    assert "translationOnlyElements" in js_response.text
+    assert "textResultSection" in js_response.text
+    assert "変換元音声ファイル" in js_response.text
+    assert "VC出力音声" in js_response.text
     assert "renderInputAudioPreview" in js_response.text
     assert "loadAudioDevices" in js_response.text
     assert "selectedAudioConstraint" in js_response.text
