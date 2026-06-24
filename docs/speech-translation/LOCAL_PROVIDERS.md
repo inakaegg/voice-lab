@@ -62,7 +62,7 @@ Qwen3-TTS、Seed-VC、Chatterboxは依存が重く、既存の機械学習環境
 - `voice_mode=default` はlocal providerでは使わない。
 - OpenAI API経路では、ASR、翻訳、TTSをOpenAI APIで実行する。UIの翻訳方式で `音声翻訳（OpenAI API）` を選ぶ。声質変換にSeed-VCを選ぶと、OpenAI TTSの出力をSeed-VCで入力音声の声質へ変換する。
 - OpenAI Realtime翻訳経路では、音声入力から翻訳音声までをRealtime translationでまとめて実行する。UIの翻訳方式で `音声翻訳（OpenAI Realtime）` を選ぶ。録音済み音声をサーバー側WebSocketから送る一括処理で、入力言語は自動判定、声質変換は行わない。
-- OpenAI Realtime streaming経路では、ブラウザのマイクをWebRTCでOpenAI Realtime translationへ接続する。UIの翻訳方式で `音声翻訳（OpenAI Realtime streaming）` を選ぶ。サーバーは短命client secretを発行するだけで、標準APIキーはブラウザに渡さない。
+- OpenAI Realtime streaming経路では、ブラウザのマイクをWebRTCでOpenAI Realtime translationへ接続する。UIの翻訳方式で `音声翻訳（OpenAI Realtime streaming）` を選ぶ。サーバーは短命client secretを発行するだけで、標準APIキーはブラウザに渡さない。出力音声はブラウザ側で録音し、接続停止時にローカル履歴へ保存する。
 - テキスト読み上げでは、Google Translate TTS endpointまたはOpenAI TTS APIを選べる。Google Translate TTS endpointは公式APIではないため、開発中の比較用とし、安定運用の前提にはしない。
 
 翻訳なしのVC比較では、`MO_TTS_PROVIDER` は使わない。UIの「VC比較」は `MO_VC_BACKENDS` で指定したbackendをruntime APIから取得する。

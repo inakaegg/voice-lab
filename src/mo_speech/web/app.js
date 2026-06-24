@@ -46,7 +46,6 @@ const textTtsOnlyElements = [...document.querySelectorAll(".text-tts-only")];
 const audioInputOnlyElements = [...document.querySelectorAll(".audio-input-only")];
 const recordedAudioOnlyElements = [...document.querySelectorAll(".recorded-audio-only")];
 const realtimeStreamingOnlyElements = [...document.querySelectorAll(".realtime-streaming-only")];
-const realtimeStreamingStopButton = document.querySelector("#realtime-streaming-stop");
 const historyRefreshButton = document.querySelector("#history-refresh");
 const historyRecordings = document.querySelector("#history-recordings");
 const historyOutputs = document.querySelector("#history-outputs");
@@ -105,7 +104,6 @@ let realtimeStreamingSession = null;
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
-realtimeStreamingStopButton.addEventListener("click", stopRealtimeStreaming);
 historyRefreshButton.addEventListener("click", loadAudioHistory);
 audioInput.addEventListener("change", handleAudioFileChange);
 operationModeSelect.addEventListener("change", () => {
@@ -244,6 +242,11 @@ async function submitCurrentOperation(event) {
     return;
   }
   if (isRealtimeStreamingTranslationBackend()) {
+    if (realtimeStreamingSession) {
+      event.preventDefault();
+      await stopRealtimeStreaming();
+      return;
+    }
     await startRealtimeStreaming(event);
     return;
   }
@@ -254,10 +257,9 @@ async function startRealtimeStreaming(event) {
   event.preventDefault();
   clearError();
   clearResultOutputs();
-  stopRealtimeStreaming();
+  await stopRealtimeStreaming();
   setStatus("接続中: OpenAI Realtime streaming");
   submitButton.disabled = true;
-  realtimeStreamingStopButton.disabled = true;
   renderProcessingJob({
     status: "running",
     current_stage: {
@@ -327,9 +329,13 @@ async function startRealtimeStreaming(event) {
     });
 
     peerConnection.addEventListener("track", ({ streams }) => {
-      outputAudio.srcObject = streams[0];
+      const remoteStream = streams[0];
+      outputAudio.srcObject = remoteStream;
       outputAudio.autoplay = true;
       outputAudio.play().catch(() => {});
+      if (realtimeStreamingSession) {
+        realtimeStreamingSession.outputRecording = startRealtimeOutputRecording(remoteStream);
+      }
     });
     peerConnection.addEventListener("connectionstatechange", () => {
       if (peerConnection.connectionState === "failed") {
@@ -357,13 +363,14 @@ async function startRealtimeStreaming(event) {
       type: "answer",
       sdp: await sdpResponse.text(),
     });
-    realtimeStreamingStopButton.disabled = false;
     setStatus("接続中: Realtime streaming");
+    syncOperationMode();
   } catch (error) {
-    stopRealtimeStreaming();
+    await stopRealtimeStreaming({ saveOutput: false });
     renderError(error.message || "Realtime streaming接続に失敗しました");
   } finally {
     submitButton.disabled = false;
+    syncOperationMode();
   }
 }
 
@@ -694,21 +701,111 @@ function renderVoiceConversionResult(payload) {
   });
 }
 
-function stopRealtimeStreaming() {
+async function stopRealtimeStreaming({ saveOutput = true } = {}) {
   if (!realtimeStreamingSession) {
-    realtimeStreamingStopButton.disabled = true;
     return;
   }
-  const { peerConnection, sourceStream, dataChannel } = realtimeStreamingSession;
+  const { peerConnection, sourceStream, dataChannel, outputRecording } = realtimeStreamingSession;
+  const outputBlobPromise = stopRealtimeOutputRecording(outputRecording);
   if (dataChannel && dataChannel.readyState === "open") {
     dataChannel.close();
   }
   sourceStream?.getTracks().forEach((track) => track.stop());
   peerConnection?.close();
   realtimeStreamingSession = null;
-  realtimeStreamingStopButton.disabled = true;
   stopInputLevelMeter();
+  submitButton.disabled = false;
+  syncOperationMode();
+  const outputBlob = await outputBlobPromise;
+  if (!saveOutput) {
+    setStatus("切断済み");
+    return;
+  }
+  if (outputBlob && outputBlob.size > 0) {
+    renderStreamingOutputBlob(outputBlob);
+    try {
+      await saveRealtimeStreamingOutput(outputBlob);
+      loadAudioHistory();
+      setStatus("切断済み: 出力音声を保存しました");
+    } catch (error) {
+      setStatus("切断済み: 出力音声の保存に失敗", "error");
+      errorMessage.textContent = error.message || "streaming出力音声の保存に失敗しました";
+      errorMessage.hidden = false;
+    }
+    return;
+  }
   setStatus("切断済み");
+}
+
+function startRealtimeOutputRecording(stream) {
+  if (!window.MediaRecorder) {
+    return null;
+  }
+  const chunks = [];
+  let recorder = null;
+  try {
+    recorder = new MediaRecorder(stream, chooseRecorderOptions());
+  } catch {
+    return null;
+  }
+  recorder.addEventListener("dataavailable", (event) => {
+    if (event.data.size > 0) {
+      chunks.push(event.data);
+    }
+  });
+  recorder.start();
+  return { recorder, chunks };
+}
+
+function stopRealtimeOutputRecording(outputRecording) {
+  if (!outputRecording?.recorder) {
+    return Promise.resolve(null);
+  }
+  const { recorder, chunks } = outputRecording;
+  return new Promise((resolve) => {
+    const finish = () => {
+      if (chunks.length === 0) {
+        resolve(null);
+        return;
+      }
+      const mimeType = recorder.mimeType || chunks[0]?.type || "audio/webm";
+      resolve(new Blob(chunks, { type: mimeType }));
+    };
+    if (recorder.state === "inactive") {
+      finish();
+      return;
+    }
+    recorder.addEventListener("stop", finish, { once: true });
+    recorder.stop();
+  });
+}
+
+function renderStreamingOutputBlob(blob) {
+  if (outputAudioObjectUrl) {
+    URL.revokeObjectURL(outputAudioObjectUrl);
+  }
+  outputAudio.srcObject = null;
+  outputAudioObjectUrl = URL.createObjectURL(blob);
+  outputAudio.src = outputAudioObjectUrl;
+  outputAudio.autoplay = false;
+}
+
+async function saveRealtimeStreamingOutput(blob) {
+  const formData = new FormData();
+  const extension = extensionForMimeType(blob.type || "audio/webm");
+  formData.append("audio", blob, `realtime-streaming-output.${extension}`);
+  formData.append("endpoint", "openai-realtime-streaming");
+  formData.append("translation_backend", "openai_realtime_stream");
+  formData.append("target_language", form.target_language.value);
+  const response = await fetch("/api/audio-history/outputs", {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => ({}));
+    throw new Error(errorPayload.detail || "streaming出力音声を保存できませんでした");
+  }
+  return response.json();
 }
 
 async function loadAudioHistory() {
@@ -1029,7 +1126,15 @@ function syncOperationMode() {
     ? "録音またはファイル選択で変換元音声を指定します。"
     : "録音またはファイル選択で入力音声を指定します。";
   outputAudioHeading.textContent = isVoiceConversion ? "VC出力音声" : isTextTts ? "読み上げ音声" : "出力音声";
-  submitButton.textContent = isVoiceConversion ? "VC実行" : isTextTts ? "読み上げ" : isRealtimeStreaming ? "接続開始" : "変換";
+  submitButton.textContent = isVoiceConversion
+    ? "VC実行"
+    : isTextTts
+      ? "読み上げ"
+      : isRealtimeStreaming
+        ? realtimeStreamingSession
+          ? "接続停止"
+          : "接続開始"
+        : "変換";
   if (!audioInput.files[0] && !recordedBlob) {
     recordingDetails.textContent = sourceAudioEmptyText();
   }

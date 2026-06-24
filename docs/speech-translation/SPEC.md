@@ -163,7 +163,7 @@ OpenAI Realtime翻訳の扱い:
 - 目的: 音声入力から翻訳音声までを1つのRealtime sessionで処理し、3段API方式との品質、遅延、料金を比較する。
 - 初期実装: 既存UIと比較しやすいように、録音済み音声をサーバー側WebSocketからRealtime translationへ流し、出力音声とinput/output transcriptを回収する一括ジョブとして扱う。
 - streaming実装: ブラウザからWebRTCで直接Realtime translation sessionへ接続し、話している途中から翻訳音声を再生する。サーバーは標準APIキーをブラウザへ出さず、短命のclient secretだけを発行する。
-- 現時点の制限: streaming出力はremote audio trackとして再生するため、ローカル音声履歴には保存しない。必要になったら録音同意と保存先を仕様化してから実装する。
+- streaming出力: remote audio trackをブラウザ側で録音し、切断時にローカル音声履歴の `outputs` へ保存する。保存に失敗してもRealtime接続自体は失敗扱いにしない。
 - 課金・依存リスク: Realtime translationは音声時間単位の有料APIで、料金や対応言語は変わるため運用前に公式の最新情報を確認する。
 
 `POST /api/openai-realtime-translation-session`
@@ -176,6 +176,20 @@ OpenAI Realtime翻訳の扱い:
 
 - OpenAI Realtime translation client secret作成APIのレスポンスをそのまま返す。
 - ブラウザは返却された短命client secretで `https://api.openai.com/v1/realtime/translations/calls` へSDP offerを送る。
+
+`POST /api/audio-history/outputs`
+
+リクエスト:
+
+- `audio`: 保存する出力音声ファイル。
+- `endpoint`: 保存元の識別子。例 `openai-realtime-streaming`。
+- `translation_backend`: 任意。例 `openai_realtime_stream`。
+- `target_language`: 任意。例 `ja-JP`。
+
+レスポンス:
+
+- `saved`: 保存できた場合は `true`。履歴保存が無効な場合は `false`。
+- `entry`: 保存できた場合の履歴entry。
 
 `POST /api/text-to-speech-jobs`
 
@@ -253,6 +267,7 @@ OpenAI Realtime翻訳の扱い:
 - 11件目以降は古い音声と対応するmetadataを削除する。
 - 既定の保存先はgit管理外の `tmp/audio-history/` とする。
 - UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
+- Realtime streamingの出力音声は、切断時に録音済みblobとして `outputs` へ保存する。
 - サーバー運用ではFastAPIローカルファイル保存を永続保存先として使わない。必要な場合はオブジェクトストレージなどの外部保存先を使う。
 
 ## 応答速度の目標

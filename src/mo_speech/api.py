@@ -309,6 +309,32 @@ def create_app(
             ],
         }
 
+    @app.post("/api/audio-history/outputs")
+    async def save_audio_history_output(
+        audio: Annotated[UploadFile, File()],
+        endpoint: Annotated[str, Form()] = "manual",
+        translation_backend: Annotated[str | None, Form()] = None,
+        target_language: Annotated[str | None, Form()] = None,
+    ) -> dict[str, object]:
+        audio_bytes = await audio.read()
+        if len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="audio is empty")
+        saved = active_audio_history_store.save_output(
+            audio_bytes,
+            suffix=_upload_suffix(audio.filename),
+            metadata={
+                "endpoint": endpoint,
+                "translation_backend": translation_backend or "",
+                "target_language": target_language or "",
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
+        return {
+            "saved": saved is not None,
+            "entry": _serialize_audio_history_entry("outputs", saved) if saved else None,
+        }
+
     @app.get("/api/audio-history/{kind}/{filename}")
     def get_audio_history_file(kind: str, filename: str) -> FileResponse:
         try:

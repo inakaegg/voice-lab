@@ -57,7 +57,7 @@ def test_root_serves_browser_ui() -> None:
     assert "音声翻訳（OpenAI Realtime）" in response.text
     assert "音声翻訳（OpenAI Realtime streaming）" in response.text
     assert "realtime-streaming-panel" in response.text
-    assert "realtime-streaming-stop" in response.text
+    assert "接続開始後に話す" in response.text
     assert "Google Translate TTS endpoint" in response.text
     assert "OpenAI TTS API" in response.text
     assert "history-recordings" in response.text
@@ -89,6 +89,8 @@ def test_static_assets_are_served() -> None:
     assert "isRealtimeStreamingTranslationBackend" in js_response.text
     assert "startRealtimeStreaming" in js_response.text
     assert "stopRealtimeStreaming" in js_response.text
+    assert "saveRealtimeStreamingOutput" in js_response.text
+    assert "startRealtimeOutputRecording" in js_response.text
     assert "openai-realtime-translation-session" in js_response.text
     assert "syncTtsBackendAvailability" in js_response.text
     assert "voiceProcessingSelect" in js_response.text
@@ -477,6 +479,36 @@ def test_openai_realtime_translation_session_api_uses_target_language(monkeypatc
     assert response.status_code == 200
     assert response.json() == {"value": "ephemeral-test-key"}
     assert captured == {"target_language": "ja-JP"}
+
+
+def test_audio_history_output_api_saves_uploaded_audio(tmp_path) -> None:
+    from mo_speech.audio_history import AudioHistoryStore
+
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    client = TestClient(
+        create_app(
+            voice_conversion_service=_fake_voice_conversion_service(),
+            audio_history_store=history_store,
+        )
+    )
+
+    response = client.post(
+        "/api/audio-history/outputs",
+        data={
+            "endpoint": "openai-realtime-streaming",
+            "translation_backend": "openai_realtime_stream",
+            "target_language": "ja-JP",
+        },
+        files={"audio": ("streaming.webm", b"streaming output", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["saved"] is True
+    assert payload["entry"]["metadata"]["endpoint"] == "openai-realtime-streaming"
+    audio_response = client.get(payload["entry"]["url"])
+    assert audio_response.status_code == 200
+    assert audio_response.content == b"streaming output"
 
 
 def test_translate_speech_job_api_reports_partial_result_while_running() -> None:
