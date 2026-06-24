@@ -391,6 +391,14 @@ audio {
   gap: 6px;
 }
 
+.history-title {
+  color: #17212b;
+  display: block;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .history-actions {
   display: flex;
   flex-wrap: wrap;
@@ -409,7 +417,15 @@ audio {
 .history-meta {
   color: #5f6b7a;
   font-size: 12px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.history-warning {
+  color: #9a5d00;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
 }
 
 @media (max-width: 780px) {

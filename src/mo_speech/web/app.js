@@ -980,12 +980,23 @@ function renderAudioHistoryList(container, entries) {
     item.className = "history-item";
     const audio = document.createElement("audio");
     audio.controls = true;
-    audio.src = entry.url;
+    audio.preload = "metadata";
+    if (entry.media_type) {
+      const source = document.createElement("source");
+      source.src = entry.url;
+      source.type = entry.media_type;
+      audio.append(source);
+    } else {
+      audio.src = entry.url;
+    }
+    const title = document.createElement("strong");
+    title.className = "history-title";
+    title.textContent = entry.label || entry.filename || "音声履歴";
     const meta = document.createElement("div");
     meta.className = "history-meta";
-    const endpoint = entry.metadata?.endpoint || entry.kind;
+    const details = Array.isArray(entry.details) ? entry.details.filter(Boolean).join(" / ") : entry.metadata?.endpoint || entry.kind;
     const createdAt = entry.created_at || "";
-    meta.textContent = `${endpoint} / ${formatBytes(Number(entry.size_bytes || 0))} / ${createdAt}`;
+    meta.textContent = `${details} / ${formatBytes(Number(entry.size_bytes || 0))} / ${createdAt}`;
     const actions = document.createElement("div");
     actions.className = "history-actions";
     const useAsInput = document.createElement("button");
@@ -999,7 +1010,14 @@ function renderAudioHistoryList(container, entries) {
     useAsReference.textContent = "VC参照に使う";
     useAsReference.addEventListener("click", () => useHistoryAudioAsReference(entry));
     actions.append(useAsInput, useAsReference);
-    item.append(audio, meta, actions);
+    item.append(title, audio, meta);
+    if (entry.playable_hint) {
+      const warning = document.createElement("p");
+      warning.className = "history-warning";
+      warning.textContent = entry.playable_hint;
+      item.append(warning);
+    }
+    item.append(actions);
     container.append(item);
   });
 }
@@ -1469,12 +1487,6 @@ function syncTranslationBackendAvailability() {
       ? translationBackends
       : [
           {
-            id: "qwen",
-            label: "音声翻訳（Qwen/local）",
-            available: true,
-            reason: "",
-          },
-          {
             id: "openai",
             label: "音声翻訳（OpenAI API）",
             available: false,
@@ -1491,6 +1503,12 @@ function syncTranslationBackendAvailability() {
             label: "音声翻訳（OpenAI Realtime streaming）",
             available: false,
             reason: "OPENAI_API_KEY が設定されていません。",
+          },
+          {
+            id: "qwen",
+            label: "音声翻訳（Qwen/local）",
+            available: true,
+            reason: "",
           },
         ];
   const currentValue = translationBackendSelect.value;

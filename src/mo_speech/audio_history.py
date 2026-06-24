@@ -81,6 +81,18 @@ class AudioHistoryStore:
             raise FileNotFoundError(filename)
         return audio_path
 
+    def update_metadata(self, entry: AudioHistoryEntry | None, metadata: dict[str, object]) -> AudioHistoryEntry | None:
+        if entry is None or not self.enabled or not entry.metadata_path.is_file():
+            return entry
+        current_metadata = _read_metadata(entry.metadata_path)
+        updated_metadata = {**current_metadata, **metadata}
+        entry.metadata_path.write_text(json.dumps(updated_metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return AudioHistoryEntry(
+            audio_path=entry.audio_path,
+            metadata_path=entry.metadata_path,
+            metadata=updated_metadata,
+        )
+
     def _save(
         self,
         kind: str,

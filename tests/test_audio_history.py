@@ -49,6 +49,19 @@ def test_audio_history_store_lists_and_resolves_entries(tmp_path) -> None:
     assert store.resolve_audio_path("outputs", saved.audio_path.name) == saved.audio_path
 
 
+def test_audio_history_store_updates_existing_metadata(tmp_path) -> None:
+    store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    saved = store.save_recording(b"recording", suffix=".webm", metadata={"filename": "recording.webm"})
+
+    updated = store.update_metadata(saved, {"text_preview": "Selamat pagi."})
+
+    assert updated is not None
+    assert updated.metadata is not None
+    assert updated.metadata["filename"] == "recording.webm"
+    assert updated.metadata["text_preview"] == "Selamat pagi."
+    assert json.loads(updated.metadata_path.read_text(encoding="utf-8"))["text_preview"] == "Selamat pagi."
+
+
 def test_audio_history_store_rejects_invalid_history_filename(tmp_path) -> None:
     store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
 

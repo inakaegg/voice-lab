@@ -131,11 +131,12 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 リクエスト:
 
 - `audio`: アップロードされた音声ファイル
-- `translation_backend`: `qwen`、`openai`、`openai_realtime`、`openai_realtime_stream`
-  - `qwen`: 既存のローカル/Qwen系pipelineを使う。fake modeではデモ応答を返す。
+- `translation_backend`: `openai`、`openai_realtime`、`openai_realtime_stream`、`qwen`
   - `openai`: OpenAI APIでASR、翻訳、TTSを3段に分けて行う。
   - `openai_realtime`: OpenAI Realtime translationで音声入力から翻訳音声を生成する。入力言語はAPI側の自動判定に任せる。
   - `openai_realtime_stream`: ブラウザWebRTCでOpenAI Realtime translationへ接続する。`POST /api/translate-speech-jobs` は使わず、ブラウザ側で直接Realtime translation callを確立する。
+  - `qwen`: 既存のローカル/Qwen系pipelineを使う。fake modeではデモ応答を返す。
+- 音声翻訳のUI既定は `openai` とする。`OPENAI_API_KEY` が未設定の場合はUIで無効表示し、利用可能なbackendへフォールバックする。
 - `source_language`: 例 `id-ID`
 - `target_language`: 例 `ja-JP`
 - `voice_mode`: `default`、`clone`、`convert`
@@ -284,6 +285,8 @@ UIでの読み上げ言語の扱い:
 - 保存先はローカル環境変数 `MO_AUDIO_HISTORY_DIR` で変更する。ブラウザUIからサーバー側の任意パスを書き換える機能は、誤操作とパス露出を避けるため初期実装には含めない。
 - UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
 - UIでは、保存済み音声を次の入力音声またはVC参照音声へ再利用できる。
+- UIでは、保存済み音声の処理種別だけでなく、翻訳結果や読み上げテキストの短いプレビューを表示する。
+- テストは実ユーザーの既定履歴 `tmp/audio-history/` を使わず、テストごとの一時保存先に隔離する。
 - Realtime streamingの出力音声は、切断時に録音済みblobとして `outputs` へ保存する。
 - サーバー運用ではFastAPIローカルファイル保存を永続保存先として使わない。必要な場合はオブジェクトストレージなどの外部保存先を使う。
 

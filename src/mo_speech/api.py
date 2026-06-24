@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import logging
+import mimetypes
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +35,21 @@ from .providers.voice import (
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
+LOGGER = logging.getLogger("mo_speech")
+
+
+def _configure_logging() -> None:
+    if LOGGER.handlers:
+        return
+    LOGGER.setLevel(logging.INFO)
+    log_dir = Path(os.getenv("MO_LOG_DIR", "tmp/logs")).expanduser()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_dir / "mo-speech.log", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    LOGGER.addHandler(handler)
+
+
+_configure_logging()
 
 
 def create_app(
@@ -48,9 +65,9 @@ def create_app(
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
     active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()
     translation_pipelines = {
-        "qwen": active_pipeline,
         "openai": active_openai_pipeline,
         "openai_realtime": active_openai_realtime_pipeline,
+        "qwen": active_pipeline,
     }
     active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
@@ -90,7 +107,7 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         source_language: Annotated[str, Form()],
         target_language: Annotated[str, Form()],
-        translation_backend: Annotated[str, Form()] = "qwen",
+        translation_backend: Annotated[str, Form()] = "openai",
         voice_mode: Annotated[str, Form()] = "default",
         text_transform: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
@@ -102,7 +119,7 @@ def create_app(
     ) -> dict[str, object]:
         audio_bytes = await audio.read()
         input_suffix = _upload_suffix(audio.filename)
-        active_audio_history_store.save_recording(
+        recording_entry = active_audio_history_store.save_recording(
             audio_bytes,
             suffix=input_suffix,
             metadata={
@@ -135,10 +152,13 @@ def create_app(
             try:
                 result = _select_translation_pipeline(translation_pipelines, translation_backend).run(request)
             except (FileNotFoundError, ValueError) as exc:
+                LOGGER.exception("translate_speech failed: backend=%s", translation_backend)
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
+                LOGGER.exception("translate_speech failed: backend=%s", translation_backend)
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+        active_audio_history_store.update_metadata(recording_entry, _history_text_metadata_from_recording_result(result))
         active_audio_history_store.save_output(
             result.output_audio_bytes,
             suffix=_mime_suffix(result.output_audio_mime_type),
@@ -149,6 +169,7 @@ def create_app(
                 "target_language": target_language,
                 "voice_mode": voice_mode,
                 "audio_mime_type": result.output_audio_mime_type,
+                **_history_text_metadata_from_pipeline_result(result),
             },
         )
         return _serialize_pipeline_result(result)
@@ -158,7 +179,7 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         source_language: Annotated[str, Form()],
         target_language: Annotated[str, Form()],
-        translation_backend: Annotated[str, Form()] = "qwen",
+        translation_backend: Annotated[str, Form()] = "openai",
         voice_mode: Annotated[str, Form()] = "default",
         text_transform: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
@@ -170,7 +191,7 @@ def create_app(
     ) -> dict[str, object]:
         audio_bytes = await audio.read()
         input_suffix = _upload_suffix(audio.filename)
-        active_audio_history_store.save_recording(
+        recording_entry = active_audio_history_store.save_recording(
             audio_bytes,
             suffix=input_suffix,
             metadata={
@@ -201,11 +222,12 @@ def create_app(
             seed_vc_inference_cfg_rate,
             seed_vc_reference_max_seconds,
         )
-        try:
-            return job_store.start(request, audio_path, translation_backend)
-        except ValueError as exc:
-            audio_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                return job_store.start(request, audio_path, translation_backend, recording_entry=recording_entry)
+            except ValueError as exc:
+                LOGGER.exception("create_translate_speech_job failed: backend=%s", translation_backend)
+                audio_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/translate-speech-jobs/{job_id}")
     def get_translate_speech_job(job_id: str) -> dict[str, object]:
@@ -344,7 +366,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="audio history file not found") from exc
-        return FileResponse(audio_path)
+        return FileResponse(audio_path, media_type=_audio_media_type(audio_path))
 
     return app
 
@@ -367,7 +389,13 @@ class TranslationJobStore:
     jobs: dict[str, TranslationJob] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
-    def start(self, request: PipelineRequest, audio_path: Path, translation_backend: str) -> dict[str, object]:
+    def start(
+        self,
+        request: PipelineRequest,
+        audio_path: Path,
+        translation_backend: str,
+        recording_entry: AudioHistoryEntry | None = None,
+    ) -> dict[str, object]:
         pipeline = _select_translation_pipeline(self.pipelines, translation_backend)
         job = TranslationJob(
             job_id=uuid4().hex,
@@ -376,7 +404,11 @@ class TranslationJobStore:
         )
         with self.lock:
             self.jobs[job.job_id] = job
-        thread = Thread(target=self._run_job, args=(job.job_id, request, audio_path, translation_backend), daemon=True)
+        thread = Thread(
+            target=self._run_job,
+            args=(job.job_id, request, audio_path, translation_backend, recording_entry),
+            daemon=True,
+        )
         thread.start()
         return self.snapshot(job.job_id)
 
@@ -393,7 +425,14 @@ class TranslationJobStore:
                 "error": job.error,
             }
 
-    def _run_job(self, job_id: str, request: PipelineRequest, audio_path: Path, translation_backend: str) -> None:
+    def _run_job(
+        self,
+        job_id: str,
+        request: PipelineRequest,
+        audio_path: Path,
+        translation_backend: str,
+        recording_entry: AudioHistoryEntry | None,
+    ) -> None:
         try:
             with self.lock:
                 self.jobs[job_id].status = "running"
@@ -404,6 +443,10 @@ class TranslationJobStore:
             result = _select_translation_pipeline(self.pipelines, translation_backend).run(
                 request,
                 progress_callback=report_progress,
+            )
+            self.audio_history_store.update_metadata(
+                recording_entry,
+                _history_text_metadata_from_recording_result(result),
             )
             self.audio_history_store.save_output(
                 result.output_audio_bytes,
@@ -416,6 +459,7 @@ class TranslationJobStore:
                     "target_language": request.target_language,
                     "voice_mode": request.voice_mode,
                     "audio_mime_type": result.output_audio_mime_type,
+                    **_history_text_metadata_from_pipeline_result(result),
                 },
             )
             with self.lock:
@@ -425,6 +469,7 @@ class TranslationJobStore:
                 job.partial_result = _partial_result_from_pipeline_result(result)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
         except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
+            LOGGER.exception("translation job failed: backend=%s job_id=%s", translation_backend, job_id)
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "failed"
@@ -508,6 +553,7 @@ class TextToSpeechJobStore:
                     "tts_backend": tts_backend,
                     "target_language": target_language,
                     "audio_mime_type": output.audio_mime_type,
+                    "text_preview": _text_preview(text),
                 },
             )
             with self.lock:
@@ -516,6 +562,7 @@ class TextToSpeechJobStore:
                 job.result = _serialize_tts_output(output, provider.name)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
         except Exception as exc:
+            LOGGER.exception("text-to-speech job failed: backend=%s job_id=%s", tts_backend, job_id)
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "failed"
@@ -593,6 +640,7 @@ class VoiceConversionJobStore:
                 job.result = _serialize_voice_conversion_result(result)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
         except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
+            LOGGER.exception("voice conversion job failed: backend=%s job_id=%s", request.backend_id, job_id)
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "failed"
@@ -631,6 +679,9 @@ def _translation_backends(
     openai_realtime_pipeline,
 ) -> list[dict[str, object]]:
     return [
+        openai_pipeline_status(openai_pipeline),
+        openai_realtime_pipeline_status(openai_realtime_pipeline),
+        openai_realtime_streaming_status(),
         {
             "id": "qwen",
             "label": "音声翻訳（Qwen/local）",
@@ -647,9 +698,6 @@ def _translation_backends(
                 "text_transform": True,
             },
         },
-        openai_pipeline_status(openai_pipeline),
-        openai_realtime_pipeline_status(openai_realtime_pipeline),
-        openai_realtime_streaming_status(),
     ]
 
 
@@ -808,14 +856,109 @@ def _serialize_audio_history_settings(store: AudioHistoryStore) -> dict[str, obj
 
 def _serialize_audio_history_entry(kind: str, entry: AudioHistoryEntry) -> dict[str, object]:
     metadata = entry.metadata or {}
+    text_preview = _metadata_text_preview(metadata)
+    details = _audio_history_details(kind, metadata)
     return {
         "kind": kind,
         "filename": entry.audio_path.name,
         "url": f"/api/audio-history/{kind}/{entry.audio_path.name}",
+        "label": _audio_history_label(kind, metadata, text_preview),
+        "details": details,
+        "text_preview": text_preview,
+        "media_type": metadata.get("audio_mime_type") or metadata.get("content_type") or _audio_media_type(entry.audio_path),
+        "playable_hint": _audio_history_playable_hint(entry, metadata),
         "metadata": metadata,
         "created_at": metadata.get("created_at", ""),
         "size_bytes": metadata.get("size_bytes", entry.audio_path.stat().st_size),
     }
+
+
+def _history_text_metadata_from_pipeline_result(result: PipelineResult) -> dict[str, str]:
+    transformed = _text_preview(result.transformed_text)
+    translated = _text_preview(result.translated_text)
+    transcript = _text_preview(result.transcript)
+    return {
+        "text_preview": transformed or translated or transcript,
+        "transcript_preview": transcript,
+        "translated_text_preview": translated,
+        "transformed_text_preview": transformed,
+    }
+
+
+def _history_text_metadata_from_recording_result(result: PipelineResult) -> dict[str, str]:
+    transcript = _text_preview(result.transcript)
+    return {
+        "text_preview": transcript,
+        "transcript_preview": transcript,
+    }
+
+
+def _metadata_text_preview(metadata: dict[str, object]) -> str:
+    for key in ("text_preview", "transformed_text_preview", "translated_text_preview", "transcript_preview"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _text_preview(text: str, limit: int = 80) -> str:
+    preview = " ".join(text.split())
+    if len(preview) <= limit:
+        return preview
+    return f"{preview[: limit - 1]}…"
+
+
+def _audio_history_label(kind: str, metadata: dict[str, object], text_preview: str) -> str:
+    if text_preview:
+        return text_preview
+    endpoint = str(metadata.get("endpoint") or "")
+    filename = str(metadata.get("filename") or metadata.get("audio_file") or "")
+    if endpoint == "voice-conversion-jobs":
+        return "VC出力" if kind == "outputs" else filename or "VC入力音声"
+    if endpoint == "text-to-speech-jobs":
+        return "読み上げ音声"
+    if endpoint == "openai-realtime-streaming":
+        return "Realtime streaming出力"
+    if endpoint.startswith("translate-speech"):
+        return "翻訳音声" if kind == "outputs" else filename or "入力音声"
+    return filename or ("出力音声" if kind == "outputs" else "入力音声")
+
+
+def _audio_history_details(kind: str, metadata: dict[str, object]) -> list[str]:
+    details = [str(metadata.get("endpoint") or kind)]
+    route = _audio_history_route(metadata)
+    if route:
+        details.append(route)
+    for key in ("translation_backend", "tts_backend", "voice_backend"):
+        value = str(metadata.get(key) or "")
+        if value:
+            details.append(value)
+    filename = str(metadata.get("filename") or "")
+    if filename:
+        details.append(filename)
+    return details
+
+
+def _audio_history_route(metadata: dict[str, object]) -> str:
+    source_language = str(metadata.get("source_language") or "")
+    target_language = str(metadata.get("target_language") or "")
+    if source_language and target_language:
+        return f"{source_language} -> {target_language}"
+    if target_language:
+        return target_language
+    return ""
+
+
+def _audio_history_playable_hint(entry: AudioHistoryEntry, metadata: dict[str, object]) -> str:
+    size_bytes = int(metadata.get("size_bytes") or entry.audio_path.stat().st_size)
+    if size_bytes < 128:
+        return "音声ファイルが小さすぎます。テスト用または失敗したダミー出力の可能性があります。"
+    return ""
+
+
+def _audio_media_type(audio_path: Path) -> str:
+    guessed, _ = mimetypes.guess_type(str(audio_path))
+    return guessed or "application/octet-stream"
 
 
 def _partial_result_from_pipeline_result(result: PipelineResult) -> dict[str, str]:

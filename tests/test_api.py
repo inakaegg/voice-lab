@@ -3,6 +3,7 @@ from threading import Event
 from time import sleep
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from mo_speech.api import create_app
@@ -12,6 +13,29 @@ from mo_speech.providers.voice import (
     VoiceConversionBackendInfo,
     VoiceConversionService,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
+    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "default-audio-history"))
+    monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+
+
+def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
+    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "isolated-history"))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/translate-speech",
+        data={"source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
+        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    assert (tmp_path / "isolated-history" / "recordings").is_dir()
+    assert Path("tmp/audio-history").resolve() != (tmp_path / "isolated-history").resolve()
 
 
 def test_root_serves_browser_ui() -> None:
@@ -99,6 +123,8 @@ def test_static_assets_are_served() -> None:
     assert "useTextResultForTts" in js_response.text
     assert "ensureTtsLanguage" in js_response.text
     assert "renderAudioHistorySettings" in js_response.text
+    assert "history-title" in js_response.text
+    assert "playable_hint" in js_response.text
     assert "openAiTargetLanguages" in js_response.text
     assert "isRealtimeTranslationBackend" in js_response.text
     assert "isRealtimeStreamingTranslationBackend" in js_response.text
@@ -141,6 +167,8 @@ def test_static_assets_are_served() -> None:
     assert ".runtime-panel" not in css_response.text
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
+    assert ".history-title" in css_response.text
+    assert ".history-warning" in css_response.text
     assert ".history-storage" in css_response.text
     assert ".history-actions" in css_response.text
     assert ".result-actions" in css_response.text
@@ -285,6 +313,12 @@ def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -
     assert response.status_code == 200
     assert len(list((tmp_path / "history" / "recordings").glob("*.webm"))) == 1
     assert len(list((tmp_path / "history" / "outputs").glob("*.wav"))) == 1
+    history = client.get("/api/audio-history").json()
+    assert history["outputs"][0]["text_preview"] == "谢谢。"
+    assert history["outputs"][0]["metadata"]["transcript_preview"] == "ありがとう。"
+    assert history["outputs"][0]["label"] == "谢谢。"
+    assert history["recordings"][0]["text_preview"] == "ありがとう。"
+    assert history["recordings"][0]["label"] == "ありがとう。"
 
 
 def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> None:
@@ -488,6 +522,9 @@ def test_text_to_speech_job_api_generates_audio_and_history(tmp_path) -> None:
     assert status_payload["result"]["providers"] == {"tts": "fake-text-tts"}
     history = client.get("/api/audio-history").json()
     assert len(history["outputs"]) == 1
+    assert history["outputs"][0]["label"] == "こんにちは"
+    assert history["outputs"][0]["text_preview"] == "こんにちは"
+    assert history["outputs"][0]["details"][0] == "text-to-speech-jobs"
     audio_response = client.get(history["outputs"][0]["url"])
     assert audio_response.status_code == 200
     assert audio_response.content == "TTS:ja-JP:こんにちは".encode()
