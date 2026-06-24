@@ -12,6 +12,7 @@ from mo_speech.providers.openai_api import (
     create_openai_realtime_translation_pipeline,
     openai_pipeline_status,
     openai_realtime_pipeline_status,
+    openai_realtime_streaming_status,
 )
 
 
@@ -133,3 +134,14 @@ def test_openai_realtime_pipeline_status_reports_backend(monkeypatch) -> None:
     assert status["available"] is True
     assert status["settings"]["source_language_mode"] == "auto"
     assert "ja-JP" in status["settings"]["supported_target_languages"]
+
+
+def test_openai_realtime_streaming_status_reports_backend(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    status = openai_realtime_streaming_status()
+
+    assert status["id"] == "openai_realtime_stream"
+    assert status["available"] is True
+    assert status["settings"]["streaming"] is True
+    assert status["settings"]["source_language_mode"] == "auto"

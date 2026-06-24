@@ -44,6 +44,9 @@ const translationOnlyElements = [...document.querySelectorAll(".translation-only
 const translationBatchOnlyElements = [...document.querySelectorAll(".translation-batch-only")];
 const textTtsOnlyElements = [...document.querySelectorAll(".text-tts-only")];
 const audioInputOnlyElements = [...document.querySelectorAll(".audio-input-only")];
+const recordedAudioOnlyElements = [...document.querySelectorAll(".recorded-audio-only")];
+const realtimeStreamingOnlyElements = [...document.querySelectorAll(".realtime-streaming-only")];
+const realtimeStreamingStopButton = document.querySelector("#realtime-streaming-stop");
 const historyRefreshButton = document.querySelector("#history-refresh");
 const historyRecordings = document.querySelector("#history-recordings");
 const historyOutputs = document.querySelector("#history-outputs");
@@ -97,17 +100,21 @@ let translationBackends = [];
 let textTtsBackends = [];
 let voiceConversionBackends = [];
 let runtimeProviderMode = "fake";
+let realtimeStreamingSession = null;
 
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
+realtimeStreamingStopButton.addEventListener("click", stopRealtimeStreaming);
 historyRefreshButton.addEventListener("click", loadAudioHistory);
 audioInput.addEventListener("change", handleAudioFileChange);
 operationModeSelect.addEventListener("change", () => {
+  stopRealtimeStreaming();
   syncOperationMode();
   clearResultOutputs();
 });
 translationBackendSelect.addEventListener("change", () => {
+  stopRealtimeStreaming();
   syncOperationMode();
 });
 ttsBackendSelect.addEventListener("change", () => {
@@ -236,7 +243,128 @@ async function submitCurrentOperation(event) {
     await submitTextToSpeech(event);
     return;
   }
+  if (isRealtimeStreamingTranslationBackend()) {
+    await startRealtimeStreaming(event);
+    return;
+  }
   await submitTranslation(event);
+}
+
+async function startRealtimeStreaming(event) {
+  event.preventDefault();
+  clearError();
+  clearResultOutputs();
+  stopRealtimeStreaming();
+  setStatus("接続中: OpenAI Realtime streaming");
+  submitButton.disabled = true;
+  realtimeStreamingStopButton.disabled = true;
+  renderProcessingJob({
+    status: "running",
+    current_stage: {
+      stage: "streaming",
+      label: "Realtime streaming",
+      provider: "OpenAI Realtime WebRTC",
+    },
+    stages: [
+      {
+        stage: "streaming",
+        label: "Realtime streaming",
+        provider: "OpenAI Realtime WebRTC",
+      },
+    ],
+  });
+
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("このブラウザではマイク入力を利用できません");
+    }
+    const tokenResponse = await fetch("/api/openai-realtime-translation-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_language: form.target_language.value }),
+    });
+    if (!tokenResponse.ok) {
+      const errorPayload = await tokenResponse.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "Realtime sessionを作成できませんでした");
+    }
+    const { value: clientSecret } = await tokenResponse.json();
+    if (!clientSecret) {
+      throw new Error("Realtime client secretを取得できませんでした");
+    }
+
+    const sourceStream = await navigator.mediaDevices.getUserMedia({ audio: selectedAudioConstraint() });
+    startInputLevelMeter(sourceStream);
+    const peerConnection = new RTCPeerConnection();
+    const sourceTrack = sourceStream.getAudioTracks()[0];
+    if (!sourceTrack) {
+      throw new Error("マイクの音声trackを取得できませんでした");
+    }
+    peerConnection.addTrack(sourceTrack, sourceStream);
+
+    const dataChannel = peerConnection.createDataChannel("oai-events");
+    realtimeStreamingSession = {
+      peerConnection,
+      sourceStream,
+      dataChannel,
+    };
+    let inputTranscript = "";
+    let outputTranscript = "";
+    dataChannel.addEventListener("message", (message) => {
+      const realtimeEvent = JSON.parse(message.data);
+      if (realtimeEvent.type === "session.input_transcript.delta") {
+        inputTranscript += realtimeEvent.delta || "";
+      }
+      if (realtimeEvent.type === "session.output_transcript.delta") {
+        outputTranscript += realtimeEvent.delta || "";
+      }
+      if (realtimeEvent.type === "session.input_transcript.delta" || realtimeEvent.type === "session.output_transcript.delta") {
+        renderPartialResult({
+          transcript: inputTranscript,
+          translated_text: outputTranscript,
+          transformed_text: outputTranscript,
+        });
+      }
+    });
+
+    peerConnection.addEventListener("track", ({ streams }) => {
+      outputAudio.srcObject = streams[0];
+      outputAudio.autoplay = true;
+      outputAudio.play().catch(() => {});
+    });
+    peerConnection.addEventListener("connectionstatechange", () => {
+      if (peerConnection.connectionState === "failed") {
+        renderError("Realtime streaming接続が失敗しました");
+      }
+      if (peerConnection.connectionState === "disconnected") {
+        setStatus("切断済み");
+      }
+    });
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    const sdpResponse = await fetch("https://api.openai.com/v1/realtime/translations/calls", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${clientSecret}`,
+        "Content-Type": "application/sdp",
+      },
+      body: offer.sdp,
+    });
+    if (!sdpResponse.ok) {
+      throw new Error(await sdpResponse.text());
+    }
+    await peerConnection.setRemoteDescription({
+      type: "answer",
+      sdp: await sdpResponse.text(),
+    });
+    realtimeStreamingStopButton.disabled = false;
+    setStatus("接続中: Realtime streaming");
+  } catch (error) {
+    stopRealtimeStreaming();
+    renderError(error.message || "Realtime streaming接続に失敗しました");
+  } finally {
+    submitButton.disabled = false;
+  }
 }
 
 async function submitTranslation(event) {
@@ -520,6 +648,7 @@ function renderResult(payload) {
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);
   }
+  outputAudio.srcObject = null;
   outputAudioObjectUrl = URL.createObjectURL(audioBlob);
   outputAudio.src = outputAudioObjectUrl;
 
@@ -546,6 +675,7 @@ function renderVoiceConversionResult(payload) {
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);
   }
+  outputAudio.srcObject = null;
   outputAudioObjectUrl = URL.createObjectURL(audioBlob);
   outputAudio.src = outputAudioObjectUrl;
 
@@ -562,6 +692,23 @@ function renderVoiceConversionResult(payload) {
     item.textContent = warning;
     warnings.append(item);
   });
+}
+
+function stopRealtimeStreaming() {
+  if (!realtimeStreamingSession) {
+    realtimeStreamingStopButton.disabled = true;
+    return;
+  }
+  const { peerConnection, sourceStream, dataChannel } = realtimeStreamingSession;
+  if (dataChannel && dataChannel.readyState === "open") {
+    dataChannel.close();
+  }
+  sourceStream?.getTracks().forEach((track) => track.stop());
+  peerConnection?.close();
+  realtimeStreamingSession = null;
+  realtimeStreamingStopButton.disabled = true;
+  stopInputLevelMeter();
+  setStatus("切断済み");
 }
 
 async function loadAudioHistory() {
@@ -855,6 +1002,7 @@ function syncOperationMode() {
   const isVoiceConversion = operationModeSelect.value === "voice_conversion";
   const isTextTts = operationModeSelect.value === "text_tts";
   const isRealtime = isTranslation && isRealtimeTranslationBackend();
+  const isRealtimeStreaming = isTranslation && isRealtimeStreamingTranslationBackend();
   document.querySelectorAll(".vc-only").forEach((element) => {
     element.hidden = !isVoiceConversion;
   });
@@ -870,12 +1018,18 @@ function syncOperationMode() {
   audioInputOnlyElements.forEach((element) => {
     element.hidden = isTextTts;
   });
+  recordedAudioOnlyElements.forEach((element) => {
+    element.hidden = isTextTts || isRealtimeStreaming;
+  });
+  realtimeStreamingOnlyElements.forEach((element) => {
+    element.hidden = !isRealtimeStreaming;
+  });
   audioLabel.textContent = isVoiceConversion ? "変換元音声ファイル" : "入力音声ファイル";
   sourceAudioHint.textContent = isVoiceConversion
     ? "録音またはファイル選択で変換元音声を指定します。"
     : "録音またはファイル選択で入力音声を指定します。";
   outputAudioHeading.textContent = isVoiceConversion ? "VC出力音声" : isTextTts ? "読み上げ音声" : "出力音声";
-  submitButton.textContent = isVoiceConversion ? "VC実行" : isTextTts ? "読み上げ" : "変換";
+  submitButton.textContent = isVoiceConversion ? "VC実行" : isTextTts ? "読み上げ" : isRealtimeStreaming ? "接続開始" : "変換";
   if (!audioInput.files[0] && !recordedBlob) {
     recordingDetails.textContent = sourceAudioEmptyText();
   }
@@ -911,6 +1065,10 @@ function syncRuntimeNote() {
   }
   if (translationBackendSelect.value === "openai_realtime") {
     runtimeNote.textContent = "OpenAI Realtime translationで入力言語を自動判定し、翻訳音声を生成します。";
+    return;
+  }
+  if (translationBackendSelect.value === "openai_realtime_stream") {
+    runtimeNote.textContent = "OpenAI Realtime translationへWebRTCで接続し、翻訳音声を逐次再生します。";
     return;
   }
   runtimeNote.textContent =
@@ -962,6 +1120,12 @@ function syncTranslationBackendAvailability() {
           {
             id: "openai_realtime",
             label: "音声翻訳（OpenAI Realtime）",
+            available: false,
+            reason: "OPENAI_API_KEY が設定されていません。",
+          },
+          {
+            id: "openai_realtime_stream",
+            label: "音声翻訳（OpenAI Realtime streaming）",
             available: false,
             reason: "OPENAI_API_KEY が設定されていません。",
           },
@@ -1252,6 +1416,9 @@ function voiceModesForSelectedTranslationBackend() {
   if (translationBackendSelect.value === "openai_realtime") {
     return ["default"];
   }
+  if (translationBackendSelect.value === "openai_realtime_stream") {
+    return ["default"];
+  }
   return supportedVoiceModes;
 }
 
@@ -1283,7 +1450,15 @@ function supportedTargetLanguagesForBackend(backend, sourceLanguage) {
 }
 
 function isRealtimeTranslationBackend() {
-  return operationModeSelect.value === "translation" && translationBackendSelect.value === "openai_realtime";
+  return (
+    operationModeSelect.value === "translation" &&
+    (translationBackendSelect.value === "openai_realtime" ||
+      translationBackendSelect.value === "openai_realtime_stream")
+  );
+}
+
+function isRealtimeStreamingTranslationBackend() {
+  return operationModeSelect.value === "translation" && translationBackendSelect.value === "openai_realtime_stream";
 }
 
 function shouldUseBatchTranslationControls() {
@@ -1331,6 +1506,7 @@ function clearResultOutputs() {
     outputAudioObjectUrl = null;
   }
   outputAudio.removeAttribute("src");
+  outputAudio.srcObject = null;
   document.querySelector("#timings").replaceChildren();
   document.querySelector("#providers").replaceChildren();
   document.querySelector("#warnings").replaceChildren();

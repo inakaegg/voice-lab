@@ -9,14 +9,19 @@ from threading import Lock, Thread
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .audio_history import AudioHistoryEntry, AudioHistoryStore
 from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
 from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline, TtsOutput
-from .providers.openai_api import openai_pipeline_status, openai_realtime_pipeline_status
+from .providers.openai_api import (
+    create_openai_realtime_translation_client_secret,
+    openai_pipeline_status,
+    openai_realtime_pipeline_status,
+    openai_realtime_streaming_status,
+)
 from .providers.text_tts import create_text_tts_providers, text_tts_backend_statuses
 from .providers.voice import (
     SeedVcRuntimeSettings,
@@ -226,6 +231,17 @@ def create_app(
             return text_tts_job_store.snapshot(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.post("/api/openai-realtime-translation-session")
+    def create_openai_realtime_translation_session(
+        payload: dict[str, str] = Body(...),
+    ) -> dict[str, object]:
+        try:
+            return create_openai_realtime_translation_client_secret(payload.get("target_language", "ja-JP"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/api/voice-conversion-jobs")
     async def create_voice_conversion_job(
@@ -606,6 +622,7 @@ def _translation_backends(
         },
         openai_pipeline_status(openai_pipeline),
         openai_realtime_pipeline_status(openai_realtime_pipeline),
+        openai_realtime_streaming_status(),
     ]
 
 

@@ -37,6 +37,7 @@
 - 音声翻訳は、処理方式に応じて必要な入力だけを表示する。
   - `Qwen/local` と `OpenAI API` の3段方式では、入力言語、出力言語、声質変換、テキスト加工を表示する。
   - `OpenAI Realtime翻訳` では、入力言語を自動判定として扱い、出力言語だけを表示する。初期実装ではテキスト加工とSeed-VC後段変換は表示しない。
+  - `OpenAI Realtime streaming` では、録音ファイルではなく選択したマイクをWebRTCでRealtime translationへ接続する。出力音声はremote audio trackとして受け取り、UI上で逐次再生する。
 - テキスト読み上げでは、入力テキスト、読み上げ言語、TTS方式だけを表示する。録音、音声入力、ASR、翻訳、VC設定は表示しない。
 - VC比較では、変換元音声と参照音声を別々に指定し、選択したvoice conversion backendで変換元音声の内容を参照音声の声質へ寄せる。
 - VC比較ではASR、翻訳、TTSは実行しない。
@@ -124,10 +125,11 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 リクエスト:
 
 - `audio`: アップロードされた音声ファイル
-- `translation_backend`: `qwen`、`openai`、`openai_realtime`
+- `translation_backend`: `qwen`、`openai`、`openai_realtime`、`openai_realtime_stream`
   - `qwen`: 既存のローカル/Qwen系pipelineを使う。fake modeではデモ応答を返す。
   - `openai`: OpenAI APIでASR、翻訳、TTSを3段に分けて行う。
   - `openai_realtime`: OpenAI Realtime translationで音声入力から翻訳音声を生成する。入力言語はAPI側の自動判定に任せる。
+  - `openai_realtime_stream`: ブラウザWebRTCでOpenAI Realtime translationへ接続する。`POST /api/translate-speech-jobs` は使わず、ブラウザ側で直接Realtime translation callを確立する。
 - `source_language`: 例 `id-ID`
 - `target_language`: 例 `ja-JP`
 - `voice_mode`: `default`、`clone`、`convert`
@@ -139,9 +141,9 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 UIでは、実行内容を以下の構造にする。
 
 - 音声翻訳: 入力言語、出力言語、翻訳方式、声質変換を表示する。
-  - 翻訳方式は `Qwen/local`、`OpenAI API`、`OpenAI Realtime翻訳` を選択できる。
+  - 翻訳方式は `Qwen/local`、`OpenAI API`、`OpenAI Realtime翻訳`、`OpenAI Realtime streaming` を選択できる。
   - `Qwen/local` と `OpenAI API` では、声質変換は `なし` または `Seed-VC` を選択できる。Seed-VC選択時はSeed-VC詳細設定を表示する。
-  - `OpenAI Realtime翻訳` では、入力言語は自動判定、声質変換は `なし` とする。
+  - `OpenAI Realtime翻訳` と `OpenAI Realtime streaming` では、入力言語は自動判定、声質変換は `なし` とする。
 - テキスト読み上げ: 入力テキスト、読み上げ言語、TTS方式を表示する。
   - TTS方式は `Google Translate TTS endpoint` と `OpenAI TTS API` を選択できる。
   - Google Translate TTS endpointは公式APIではないため、開発中の比較用に限定する。安定運用の既定にはしない。
@@ -160,8 +162,20 @@ OpenAI Realtime翻訳の扱い:
 
 - 目的: 音声入力から翻訳音声までを1つのRealtime sessionで処理し、3段API方式との品質、遅延、料金を比較する。
 - 初期実装: 既存UIと比較しやすいように、録音済み音声をサーバー側WebSocketからRealtime translationへ流し、出力音声とinput/output transcriptを回収する一括ジョブとして扱う。
-- 将来実装: ブラウザからWebRTCで直接Realtime sessionへ接続し、話している途中から翻訳音声を再生する。
+- streaming実装: ブラウザからWebRTCで直接Realtime translation sessionへ接続し、話している途中から翻訳音声を再生する。サーバーは標準APIキーをブラウザへ出さず、短命のclient secretだけを発行する。
+- 現時点の制限: streaming出力はremote audio trackとして再生するため、ローカル音声履歴には保存しない。必要になったら録音同意と保存先を仕様化してから実装する。
 - 課金・依存リスク: Realtime translationは音声時間単位の有料APIで、料金や対応言語は変わるため運用前に公式の最新情報を確認する。
+
+`POST /api/openai-realtime-translation-session`
+
+リクエスト:
+
+- `target_language`: 例 `id-ID`、`ja-JP`、`zh-CN`、`en-US`。
+
+レスポンス:
+
+- OpenAI Realtime translation client secret作成APIのレスポンスをそのまま返す。
+- ブラウザは返却された短命client secretで `https://api.openai.com/v1/realtime/translations/calls` へSDP offerを送る。
 
 `POST /api/text-to-speech-jobs`
 

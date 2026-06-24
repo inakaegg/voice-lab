@@ -55,6 +55,9 @@ def test_root_serves_browser_ui() -> None:
     assert "音声翻訳（Qwen/local）" in response.text
     assert "音声翻訳（OpenAI API）" in response.text
     assert "音声翻訳（OpenAI Realtime）" in response.text
+    assert "音声翻訳（OpenAI Realtime streaming）" in response.text
+    assert "realtime-streaming-panel" in response.text
+    assert "realtime-streaming-stop" in response.text
     assert "Google Translate TTS endpoint" in response.text
     assert "OpenAI TTS API" in response.text
     assert "history-recordings" in response.text
@@ -83,6 +86,10 @@ def test_static_assets_are_served() -> None:
     assert "submitTextToSpeech" in js_response.text
     assert "loadAudioHistory" in js_response.text
     assert "isRealtimeTranslationBackend" in js_response.text
+    assert "isRealtimeStreamingTranslationBackend" in js_response.text
+    assert "startRealtimeStreaming" in js_response.text
+    assert "stopRealtimeStreaming" in js_response.text
+    assert "openai-realtime-translation-session" in js_response.text
     assert "syncTtsBackendAvailability" in js_response.text
     assert "voiceProcessingSelect" in js_response.text
     assert "submitCurrentOperation" in js_response.text
@@ -131,13 +138,19 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
     assert payload["provider_mode"] == "fake"
     assert payload["providers"] == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
     assert payload["supported_voice_modes"] == ["default"]
-    assert [backend["id"] for backend in payload["translation_backends"]] == ["qwen", "openai", "openai_realtime"]
+    assert [backend["id"] for backend in payload["translation_backends"]] == [
+        "qwen",
+        "openai",
+        "openai_realtime",
+        "openai_realtime_stream",
+    ]
     assert payload["translation_backends"][0]["settings"]["supported_routes"] == [
         {"source_language": "id-ID", "target_language": "ja-JP"},
         {"source_language": "ja-JP", "target_language": "zh-CN"},
     ]
     assert payload["translation_backends"][1]["available"] is False
     assert payload["translation_backends"][2]["available"] is False
+    assert payload["translation_backends"][3]["available"] is False
     assert [backend["id"] for backend in payload["text_tts_backends"]] == ["google_translate", "openai"]
     assert payload["voice_conversion_backends"] == [
         {
@@ -447,6 +460,23 @@ def test_text_to_speech_job_api_generates_audio_and_history(tmp_path) -> None:
     audio_response = client.get(history["outputs"][0]["url"])
     assert audio_response.status_code == 200
     assert audio_response.content == "TTS:ja-JP:こんにちは".encode()
+
+
+def test_openai_realtime_translation_session_api_uses_target_language(monkeypatch) -> None:
+    captured = {}
+
+    def fake_client_secret(target_language):
+        captured["target_language"] = target_language
+        return {"value": "ephemeral-test-key"}
+
+    monkeypatch.setattr("mo_speech.api.create_openai_realtime_translation_client_secret", fake_client_secret)
+    client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
+
+    response = client.post("/api/openai-realtime-translation-session", json={"target_language": "ja-JP"})
+
+    assert response.status_code == 200
+    assert response.json() == {"value": "ephemeral-test-key"}
+    assert captured == {"target_language": "ja-JP"}
 
 
 def test_translate_speech_job_api_reports_partial_result_while_running() -> None:

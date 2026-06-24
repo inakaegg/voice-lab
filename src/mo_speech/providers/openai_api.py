@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -11,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from ..pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from .voice import SeedVcVoiceConversionTtsProvider
@@ -410,6 +413,69 @@ def openai_realtime_pipeline_status(pipeline: OpenAiRealtimeTranslationPipeline)
             "text_transform": False,
         },
     }
+
+
+def openai_realtime_streaming_status() -> dict[str, object]:
+    available = True
+    reason = ""
+    if not os.getenv("OPENAI_API_KEY"):
+        available = False
+        reason = "OPENAI_API_KEY が設定されていません。"
+    model = os.getenv("OPENAI_REALTIME_TRANSLATION_MODEL", "gpt-realtime-translate")
+    return {
+        "id": "openai_realtime_stream",
+        "label": "音声翻訳（OpenAI Realtime streaming）",
+        "available": available,
+        "reason": reason,
+        "providers": {
+            "asr": f"openai-realtime-webrtc-input-{model}",
+            "translation": f"openai-realtime-webrtc-transcript-{model}",
+            "tts": f"openai-realtime-webrtc-audio-{model}",
+        },
+        "settings": {
+            "source_language_mode": "auto",
+            "supported_target_languages": list(OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES.keys()),
+            "supported_voice_modes": ["default"],
+            "streaming": True,
+            "text_transform": False,
+        },
+    }
+
+
+def create_openai_realtime_translation_client_secret(target_language: str) -> dict[str, object]:
+    if target_language not in OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES:
+        raise ValueError(f"OpenAI Realtime output language is not configured for {target_language}")
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY is required for OpenAI Realtime translation streaming.")
+    model = os.getenv("OPENAI_REALTIME_TRANSLATION_MODEL", "gpt-realtime-translate")
+    payload = {
+        "session": {
+            "model": model,
+            "audio": {
+                "output": {
+                    "language": OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES[target_language],
+                }
+            },
+        }
+    }
+    request = Request(
+        "https://api.openai.com/v1/realtime/translations/client_secrets",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+            "Content-Type": "application/json",
+            "OpenAI-Safety-Identifier": os.getenv("OPENAI_SAFETY_IDENTIFIER", "local-dev-user"),
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=float(os.getenv("OPENAI_REALTIME_TRANSLATION_TIMEOUT_SECONDS", "90"))) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI Realtime client secret request failed: {body}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"OpenAI Realtime client secret request failed: {exc}") from exc
 
 
 def _create_openai_client() -> Any:

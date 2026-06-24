@@ -241,6 +241,13 @@ button:disabled {
   padding: 12px;
 }
 
+.streaming-note {
+  color: #5f6b7a;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+
 .checkbox-row {
   align-items: center;
   display: flex;

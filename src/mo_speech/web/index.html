@@ -42,6 +42,7 @@
               <option value="qwen">音声翻訳（Qwen/local）</option>
               <option value="openai">音声翻訳（OpenAI API）</option>
               <option value="openai_realtime">音声翻訳（OpenAI Realtime）</option>
+              <option value="openai_realtime_stream">音声翻訳（OpenAI Realtime streaming）</option>
             </select>
           </div>
 
@@ -108,11 +109,13 @@
           </div>
           <p id="voice-backend-hint" class="route-hint vc-only" hidden></p>
 
-          <div class="field-row audio-input-only">
+          <div class="field-row audio-input-only recorded-audio-only">
             <label id="audio-label" for="audio">入力音声ファイル</label>
             <input id="audio" name="audio" type="file" accept="audio/*" />
           </div>
-          <p id="source-audio-hint" class="route-hint audio-input-only">録音またはファイル選択で入力音声を指定します。</p>
+          <p id="source-audio-hint" class="route-hint audio-input-only recorded-audio-only">
+            録音またはファイル選択で入力音声を指定します。
+          </p>
 
           <div class="field-row vc-only" hidden>
             <label for="reference_audio">参照音声ファイル</label>
@@ -127,7 +130,7 @@
             <button type="button" id="audio-device-refresh" class="secondary-button">マイク一覧を更新</button>
           </div>
 
-          <div class="recording-controls audio-input-only">
+          <div class="recording-controls audio-input-only recorded-audio-only">
             <button type="button" id="record-button">録音</button>
             <button type="button" id="stop-button" disabled>停止</button>
             <span id="recording-label">録音なし</span>
@@ -136,8 +139,16 @@
             <label for="input-level">入力レベル</label>
             <meter id="input-level" min="0" max="1" low="0.05" high="0.5" optimum="0.75" value="0"></meter>
           </div>
-          <p id="recording-details" class="recording-details audio-input-only">入力音声なし</p>
-          <audio id="input-audio" class="input-audio audio-input-only" controls hidden></audio>
+          <p id="recording-details" class="recording-details audio-input-only recorded-audio-only">入力音声なし</p>
+          <audio id="input-audio" class="input-audio audio-input-only recorded-audio-only" controls hidden></audio>
+
+          <fieldset id="realtime-streaming-panel" class="suffix-panel realtime-streaming-only" hidden>
+            <legend>Realtime streaming</legend>
+            <p class="streaming-note">
+              選択したマイクをOpenAI Realtime translationへ接続し、翻訳音声を逐次再生します。
+            </p>
+            <button type="button" id="realtime-streaming-stop" class="secondary-button" disabled>切断</button>
+          </fieldset>
 
           <fieldset class="suffix-panel translation-only translation-batch-only">
             <legend>末尾付加</legend>
