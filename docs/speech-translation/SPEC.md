@@ -120,6 +120,9 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 リクエスト:
 
 - `audio`: アップロードされた音声ファイル
+- `translation_backend`: `qwen` または `openai`
+  - `qwen`: 既存のローカル/Qwen系pipelineを使う。fake modeではデモ応答を返す。
+  - `openai`: OpenAI APIでASR、翻訳、TTSを行う。
 - `source_language`: 例 `id-ID`
 - `target_language`: 例 `ja-JP`
 - `voice_mode`: `default`、`clone`、`convert`
@@ -127,6 +130,22 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - `text_transform_options`: 任意の加工設定。例 `{"suffix":"モー"}`
 - multipart formでは、初期実装として `text_transform_suffix` と `text_transform_unit` を受け取る。
 - `voice_mode=convert` でSeed-VCを使う場合は、`seed_vc_diffusion_steps`、`seed_vc_reference_max_seconds`、`seed_vc_length_adjust`、`seed_vc_inference_cfg_rate` を任意指定できる。
+
+UIでは、実行内容を以下の構造にする。
+
+- 音声翻訳: 入力言語、出力言語、翻訳方式、声質変換を表示する。
+  - 翻訳方式は `Qwen/local` と `OpenAI API` を選択できる。
+  - 声質変換は `なし` または `Seed-VC` を選択できる。Seed-VC選択時はSeed-VC詳細設定を表示する。
+- VC単体: 変換元音声、参照音声、VC backend、Seed-VC詳細設定だけを表示する。入力言語、出力言語、末尾付加、翻訳結果欄は表示しない。
+
+OpenAI API経路では、`OPENAI_API_KEY` を環境変数で渡す。APIキーはリポジトリに保存しない。既定モデルは環境変数で差し替え可能にする。
+
+OpenAI API経路の扱い:
+
+- 目的: ASR、翻訳、TTSを外部APIで高速・高品質に行い、その後段に必要ならSeed-VCを接続する。
+- 代替案: 既存の `Qwen/local` 経路で、faster-whisper、Qwen3翻訳、Qwen3-TTS、Seed-VCをローカルまたはGPUサーバーで動かす。
+- 課金・依存リスク: OpenAI APIは有料APIで、モデル、音声長、テキスト量に応じて費用が変わる。価格や利用条件は変わるため、運用前に公式の最新情報を確認する。
+- 秘密情報: `OPENAI_API_KEY` は環境変数またはデプロイ先のsecretとして渡し、`.env`、`.runpod.env`、ソースコード、docsには実値を書かない。
 
 レスポンス:
 

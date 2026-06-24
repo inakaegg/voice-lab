@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--operation-mode", choices=("translation", "voice_conversion"), default="translation")
     parser.add_argument("--audio", required=True)
     parser.add_argument("--reference-audio")
+    parser.add_argument("--translation-backend", default=os.getenv("RUNPOD_SMOKE_TRANSLATION_BACKEND", "qwen"))
     parser.add_argument("--source-language", default=os.getenv("RUNPOD_SMOKE_SOURCE_LANGUAGE", "id-ID"))
     parser.add_argument("--target-language", default=os.getenv("RUNPOD_SMOKE_TARGET_LANGUAGE", "ja-JP"))
     parser.add_argument("--voice-mode", default=os.getenv("RUNPOD_SMOKE_VOICE_MODE", "convert"))
@@ -57,6 +58,7 @@ def main() -> int:
         input_payload = {
             "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
             "audio_mime_type": mime_type,
+            "translation_backend": args.translation_backend,
             "source_language": args.source_language,
             "target_language": args.target_language,
             "voice_mode": args.voice_mode,

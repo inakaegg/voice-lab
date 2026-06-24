@@ -4,11 +4,14 @@ import os
 
 from .pipeline import SpeechTranslationPipeline
 from .providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
+from .providers.openai_api import create_openai_pipeline
 
 
 def create_pipeline_from_env() -> SpeechTranslationPipeline:
     if os.getenv("MO_PROVIDER_MODE") == "local":
         return create_local_pipeline()
+    if os.getenv("MO_PROVIDER_MODE") == "openai":
+        return create_openai_pipeline()
     return create_demo_pipeline()
 
 

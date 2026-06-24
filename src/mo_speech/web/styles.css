@@ -15,6 +15,10 @@ select {
   font: inherit;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .app-shell {
   box-sizing: border-box;
   min-height: 100vh;

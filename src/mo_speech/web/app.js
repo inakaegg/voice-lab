@@ -4,6 +4,8 @@ const audioLabel = document.querySelector("#audio-label");
 const sourceAudioHint = document.querySelector("#source-audio-hint");
 const referenceAudioInput = document.querySelector("#reference_audio");
 const operationModeSelect = document.querySelector("#operation_mode");
+const translationBackendSelect = document.querySelector("#translation_backend");
+const voiceProcessingSelect = document.querySelector("#voice_processing");
 const voiceBackendSelect = document.querySelector("#voice_backend");
 const voiceBackendHint = document.querySelector("#voice-backend-hint");
 const seedVcSettingsPanel = document.querySelector("#seed-vc-settings");
@@ -39,11 +41,6 @@ const translationOnlyElements = [...document.querySelectorAll(".translation-only
 const supportedRoutes = {
   "id-ID": [{ value: "ja-JP", label: "日本語" }],
   "ja-JP": [{ value: "zh-CN", label: "中国語（普通話）" }],
-};
-
-const voiceModeLabels = {
-  clone: "Qwenで直接声寄せ",
-  convert: "Qwen生成後にSeed-VC変換",
 };
 
 const seedVcPresets = {
@@ -83,6 +80,7 @@ let inputLevelAnimation = null;
 let inputLevelAudioContext = null;
 let inputLevelSource = null;
 let supportedVoiceModes = ["convert", "clone"];
+let translationBackends = [];
 let voiceConversionBackends = [];
 let runtimeProviderMode = "fake";
 
@@ -94,23 +92,30 @@ operationModeSelect.addEventListener("change", () => {
   syncOperationMode();
   clearResultOutputs();
 });
+translationBackendSelect.addEventListener("change", () => {
+  syncRuntimeNote();
+  syncVoiceProcessingAvailability();
+  syncVoiceModeHint();
+  syncSeedVcSettingsVisibility();
+});
+voiceProcessingSelect.addEventListener("change", () => {
+  syncVoiceModeHint();
+  syncSeedVcSettingsVisibility();
+});
 voiceBackendSelect.addEventListener("change", () => {
   syncVoiceBackendHint();
   syncSeedVcSettingsVisibility();
 });
 form.source_language.addEventListener("change", syncTargetOptions);
 form.target_language.addEventListener("change", syncVoiceModeHint);
-form.voice_mode.addEventListener("change", () => {
-  syncVoiceModeHint();
-  syncSeedVcSettingsVisibility();
-});
 seedVcPresetSelect.addEventListener("change", applySeedVcPreset);
 [seedVcDiffusionStepsInput, seedVcReferenceMaxSecondsInput, seedVcLengthAdjustInput, seedVcInferenceCfgRateInput].forEach(
   (input) => input.addEventListener("input", syncSeedVcPresetSelection),
 );
 form.addEventListener("submit", submitCurrentOperation);
 syncTargetOptions();
-syncVoiceModeAvailability();
+syncTranslationBackendAvailability();
+syncVoiceProcessingAvailability();
 syncOperationMode();
 loadRuntime();
 loadAudioDevices();
@@ -222,6 +227,7 @@ async function submitTranslation(event) {
 
   try {
     const formData = new FormData();
+    formData.append("translation_backend", selectedTranslationBackend());
     formData.append("source_language", form.source_language.value);
     formData.append("target_language", form.target_language.value);
     const voiceMode = selectedVoiceMode();
@@ -490,7 +496,9 @@ async function loadRuntime() {
     runtimeNote.textContent = "実行モードを取得できませんでした。";
     runtimeProviders.replaceChildren();
     supportedVoiceModes = ["default"];
-    syncVoiceModeAvailability();
+    translationBackends = [];
+    syncTranslationBackendAvailability();
+    syncVoiceProcessingAvailability();
   }
 }
 
@@ -500,8 +508,10 @@ function renderRuntime(payload) {
   runtimeMode.dataset.mode = providerMode;
   runtimeProviderMode = providerMode;
   supportedVoiceModes = payload.supported_voice_modes || ["default"];
+  translationBackends = payload.translation_backends || [];
   voiceConversionBackends = payload.voice_conversion_backends || [];
-  syncVoiceModeAvailability();
+  syncTranslationBackendAvailability();
+  syncVoiceProcessingAvailability();
   syncVoiceBackendAvailability();
   syncSeedVcSettingsDefaults();
   syncSeedVcSettingsVisibility();
@@ -698,7 +708,7 @@ function syncTargetOptions() {
     form.target_language.selectedOptions[0]?.textContent || "未対応"
   }`;
   routeHint.textContent = routeText;
-  syncVoiceModeAvailability();
+  syncVoiceProcessingAvailability();
 }
 
 function syncOperationMode() {
@@ -730,10 +740,19 @@ function syncRuntimeNote() {
     runtimeNote.textContent = "変換元音声と参照音声をVC backendで処理します。";
     return;
   }
+  const selected = selectedTranslationBackendOption();
+  if (selected?.disabled) {
+    runtimeNote.textContent = selected.dataset.reason || "選択した翻訳方式は利用できません。";
+    return;
+  }
+  if (translationBackendSelect.value === "openai") {
+    runtimeNote.textContent = "OpenAI APIで文字起こし、翻訳、音声生成を行います。";
+    return;
+  }
   runtimeNote.textContent =
     runtimeProviderMode === "local"
-      ? "録音または選択した音声を実際に処理します。"
-      : "入力音声の内容に関係なく固定のデモ応答を返します。";
+      ? "Qwen/local系providerで録音または選択した音声を処理します。"
+      : "Qwen/local枠は現在fake providerのデモ応答です。";
 }
 
 function syncVoiceModeHint() {
@@ -741,27 +760,61 @@ function syncVoiceModeHint() {
     voiceModeHint.textContent = "";
     return;
   }
-  const route = `${form.source_language.value}->${form.target_language.value}`;
-  const voiceMode = form.voice_mode.value;
-  if (!supportedVoiceModes.some((mode) => mode !== "default")) {
-    voiceModeHint.textContent = "現在のTTS providerでは声寄せは使えません。";
+  const voiceMode = selectedVoiceMode();
+  const selected = selectedTranslationBackendOption();
+  if (selected?.disabled) {
+    voiceModeHint.textContent = selected.dataset.reason || "";
     return;
   }
-  if (route === "id-ID->ja-JP") {
-    voiceModeHint.textContent =
-      voiceMode === "convert"
-        ? "Qwenで音声生成後、Seed-VCで入力音声の声質へ変換します。"
-        : "Qwenが参照音声を使い、出力音声を直接生成します。";
+  if (voiceMode === "convert") {
+    const backendLabel = translationBackendSelect.selectedOptions[0]?.textContent || "選択した翻訳方式";
+    voiceModeHint.textContent = `${backendLabel}で音声生成後、Seed-VCで入力音声の声質へ変換します。`;
     return;
   }
-  if (route === "ja-JP->zh-CN") {
-    voiceModeHint.textContent =
-      voiceMode === "convert"
-        ? "Qwen生成後にSeed-VC変換します。"
-        : "Qwenで直接声を寄せて生成します。";
-    return;
+  voiceModeHint.textContent = "声質変換なしで翻訳音声を出力します。";
+}
+
+function syncTranslationBackendAvailability() {
+  const fallbackBackends =
+    translationBackends.length > 0
+      ? translationBackends
+      : [
+          {
+            id: "qwen",
+            label: "音声翻訳（Qwen/local）",
+            available: true,
+            reason: "",
+          },
+          {
+            id: "openai",
+            label: "音声翻訳（OpenAI API）",
+            available: false,
+            reason: "OPENAI_API_KEY が設定されていません。",
+          },
+        ];
+  const currentValue = translationBackendSelect.value;
+  translationBackendSelect.replaceChildren(
+    ...fallbackBackends.map((backend) => {
+      const label = backend.available ? backend.label : `${backend.label}（未設定）`;
+      const option = new Option(label, backend.id);
+      option.disabled = !backend.available;
+      option.dataset.reason = backend.reason || "";
+      return option;
+    }),
+  );
+  const availableBackends = fallbackBackends.filter((backend) => backend.available);
+  if (availableBackends.length === 0) {
+    translationBackendSelect.disabled = true;
+  } else {
+    translationBackendSelect.disabled = false;
+    if (availableBackends.some((backend) => backend.id === currentValue)) {
+      translationBackendSelect.value = currentValue;
+    } else {
+      translationBackendSelect.value = availableBackends[0].id;
+    }
   }
-  voiceModeHint.textContent = "";
+  syncRuntimeNote();
+  syncVoiceProcessingAvailability();
 }
 
 function syncVoiceBackendAvailability() {
@@ -906,40 +959,53 @@ function setInputValue(input, value) {
   input.value = String(value);
 }
 
-function syncVoiceModeAvailability() {
-  const selectableModes = supportedVoiceModes.filter((mode) => mode !== "default");
-  if (selectableModes.length === 0) {
-    form.voice_mode.replaceChildren(new Option("声寄せなし", "default"));
-    form.voice_mode.disabled = true;
-    syncVoiceModeHint();
-    return;
+function syncVoiceProcessingAvailability() {
+  const currentValue = voiceProcessingSelect.value;
+  const modes = voiceModesForSelectedTranslationBackend();
+  const options = [];
+  if (modes.includes("convert")) {
+    options.push(new Option("Seed-VCで入力音声に寄せる", "seed-vc"));
   }
-
-  form.voice_mode.disabled = false;
-  form.voice_mode.replaceChildren(
-    ...selectableModes.map((mode) => new Option(voiceModeLabels[mode] || mode, mode)),
-  );
-  const preferred = preferredVoiceMode(selectableModes);
-  form.voice_mode.value = preferred;
+  if (modes.includes("default")) {
+    options.push(new Option("なし", "none"));
+  }
+  if (options.length === 0) {
+    options.push(new Option("利用できる声質変換がありません", "none"));
+    voiceProcessingSelect.disabled = true;
+  } else {
+    voiceProcessingSelect.disabled = false;
+  }
+  voiceProcessingSelect.replaceChildren(...options);
+  if ([...voiceProcessingSelect.options].some((option) => option.value === currentValue)) {
+    voiceProcessingSelect.value = currentValue;
+  } else {
+    voiceProcessingSelect.value = modes.includes("convert") ? "seed-vc" : "none";
+  }
   syncVoiceModeHint();
-}
-
-function preferredVoiceMode(selectableModes) {
-  if (selectableModes.includes("convert")) {
-    return "convert";
-  }
-  if (selectableModes.includes(form.voice_mode.value)) {
-    return form.voice_mode.value;
-  }
-  return selectableModes[0];
+  syncSeedVcSettingsVisibility();
 }
 
 function selectedVoiceMode() {
-  const selectableModes = supportedVoiceModes.filter((mode) => mode !== "default");
-  if (selectableModes.length === 0) {
-    return "default";
+  return voiceProcessingSelect.value === "seed-vc" ? "convert" : "default";
+}
+
+function selectedTranslationBackend() {
+  const selected = selectedTranslationBackendOption();
+  if (!selected || selected.disabled) {
+    throw new Error("利用可能な翻訳方式を選択してください");
   }
-  return form.voice_mode.value || preferredVoiceMode(selectableModes);
+  return selected.value;
+}
+
+function selectedTranslationBackendOption() {
+  return [...translationBackendSelect.options].find((option) => option.value === translationBackendSelect.value);
+}
+
+function voiceModesForSelectedTranslationBackend() {
+  if (translationBackendSelect.value === "openai") {
+    return ["default", "convert"];
+  }
+  return supportedVoiceModes;
 }
 
 function selectedVoiceBackend() {

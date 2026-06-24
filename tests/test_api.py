@@ -23,7 +23,8 @@ def test_root_serves_browser_ui() -> None:
     assert "音声翻訳" in response.text
     assert "source_language" in response.text
     assert "operation_mode" in response.text
-    assert "voice_mode" in response.text
+    assert "translation_backend" in response.text
+    assert "voice_processing" in response.text
     assert "voice_backend" in response.text
     assert "reference_audio" in response.text
     assert "seed-vc-settings" in response.text
@@ -48,8 +49,9 @@ def test_root_serves_browser_ui() -> None:
     assert "input-level" in response.text
     assert "recording-details" in response.text
     assert "voice-mode-hint" in response.text
-    assert "Qwen生成後にSeed-VC変換" in response.text
-    assert "Qwenで直接声寄せ" in response.text
+    assert "音声翻訳（Qwen/local）" in response.text
+    assert "音声翻訳（OpenAI API）" in response.text
+    assert "Seed-VCで入力音声に寄せる" in response.text
     assert "既定音声" not in response.text
     assert "processing-panel" in response.text
     assert "processing-steps" in response.text
@@ -69,6 +71,8 @@ def test_static_assets_are_served() -> None:
     assert "submitTranslation" in js_response.text
     assert "append_suffix" in js_response.text
     assert "loadRuntime" in js_response.text
+    assert "translationBackendSelect" in js_response.text
+    assert "voiceProcessingSelect" in js_response.text
     assert "submitCurrentOperation" in js_response.text
     assert "submitVoiceConversion" in js_response.text
     assert "pollVoiceConversionJob" in js_response.text
@@ -89,9 +93,8 @@ def test_static_assets_are_served() -> None:
     assert "selectedAudioConstraint" in js_response.text
     assert "chooseRecorderOptions" in js_response.text
     assert "startInputLevelMeter" in js_response.text
-    assert "syncVoiceModeAvailability" in js_response.text
-    assert "syncVoiceModeHint" in js_response.text
-    assert "preferredVoiceMode" in js_response.text
+    assert "syncTranslationBackendAvailability" in js_response.text
+    assert "syncVoiceProcessingAvailability" in js_response.text
     assert "pollTranslationJob" in js_response.text
     assert "renderProcessingJob" in js_response.text
     assert "renderPartialResult" in js_response.text
@@ -114,6 +117,26 @@ def test_runtime_api_returns_active_mode_and_provider_names() -> None:
         "provider_mode": "fake",
         "providers": {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"},
         "supported_voice_modes": ["default"],
+        "translation_backends": [
+            {
+                "id": "qwen",
+                "label": "音声翻訳（Qwen/local）",
+                "available": True,
+                "reason": "",
+                "providers": {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"},
+            },
+            {
+                "id": "openai",
+                "label": "音声翻訳（OpenAI API）",
+                "available": False,
+                "reason": "OPENAI_API_KEY が設定されていません。",
+                "providers": {
+                    "asr": "openai-asr-gpt-4o-transcribe",
+                    "translation": "openai-translation-gpt-5.5",
+                    "tts": "openai-tts-seed-vc-gpt-4o-mini-tts",
+                },
+            },
+        ],
         "voice_conversion_backends": [
             {
                 "id": "fake-vc",
@@ -182,6 +205,7 @@ def test_translate_speech_api_accepts_audio_upload() -> None:
     response = client.post(
         "/api/translate-speech",
         data={
+            "translation_backend": "qwen",
             "source_language": "id-ID",
             "target_language": "ja-JP",
             "text_transform": "append_suffix",
@@ -266,6 +290,7 @@ def test_translate_speech_job_api_reports_progress_and_result() -> None:
     response = client.post(
         "/api/translate-speech-jobs",
         data={
+            "translation_backend": "qwen",
             "source_language": "id-ID",
             "target_language": "ja-JP",
             "text_transform": "append_suffix",
@@ -304,6 +329,76 @@ def test_translate_speech_job_api_reports_progress_and_result() -> None:
         "translated_text": "おはようございます。ありがとうございます。",
         "transformed_text": "おはようございますモー。ありがとうございますモー。",
     }
+
+
+def test_translate_speech_job_api_runs_openai_backend() -> None:
+    class FakeOpenAiPipeline:
+        asr = SimpleNamespace(name="fake-openai-asr")
+        translator = SimpleNamespace(name="fake-openai-translation")
+        tts = SimpleNamespace(name="fake-openai-tts", supported_voice_modes=("default", "convert"))
+
+        def run(self, request, progress_callback=None) -> PipelineResult:
+            if progress_callback is not None:
+                progress_callback(PipelineProgress("asr", "文字起こし", self.asr.name))
+            return PipelineResult(
+                transcript="こんにちは。",
+                translated_text="Halo.",
+                transformed_text="Halo.",
+                output_audio_bytes=b"openai-wav",
+                output_audio_mime_type="audio/wav",
+                timings_ms={"total": 1.0},
+                providers={
+                    "asr": "fake-openai-asr",
+                    "translation": "fake-openai-translation",
+                    "tts": "fake-openai-tts",
+                },
+            )
+
+    client = TestClient(
+        create_app(openai_pipeline=FakeOpenAiPipeline(), voice_conversion_service=_fake_voice_conversion_service())
+    )  # type: ignore[arg-type]
+
+    response = client.post(
+        "/api/translate-speech-jobs",
+        data={"translation_backend": "openai", "source_language": "ja-JP", "target_language": "zh-CN"},
+        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stages"] == [
+        {"stage": "asr", "label": "文字起こし", "provider": "fake-openai-asr"},
+        {"stage": "translation", "label": "翻訳", "provider": "fake-openai-translation"},
+        {"stage": "text_transform", "label": "テキスト加工", "provider": "なし"},
+        {"stage": "tts", "label": "音声生成", "provider": "fake-openai-tts"},
+    ]
+
+    for _ in range(20):
+        status_payload = client.get(f"/api/translate-speech-jobs/{payload['job_id']}").json()
+        if status_payload["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("openai translation job did not finish")
+
+    assert status_payload["result"]["translated_text"] == "Halo."
+
+
+def test_translate_speech_api_rejects_unknown_translation_backend() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/translate-speech",
+        data={
+            "translation_backend": "unknown",
+            "source_language": "id-ID",
+            "target_language": "ja-JP",
+        },
+        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert "unsupported translation backend" in response.json()["detail"]
 
 
 def test_translate_speech_job_api_reports_partial_result_while_running() -> None:

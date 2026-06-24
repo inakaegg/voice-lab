@@ -36,6 +36,14 @@
           </div>
 
           <div class="field-row translation-only">
+            <label for="translation_backend">翻訳方式</label>
+            <select id="translation_backend" name="translation_backend">
+              <option value="qwen">音声翻訳（Qwen/local）</option>
+              <option value="openai">音声翻訳（OpenAI API）</option>
+            </select>
+          </div>
+
+          <div class="field-row translation-only">
             <label for="source_language">入力言語</label>
             <select id="source_language" name="source_language">
               <option value="id-ID">インドネシア語</option>
@@ -53,10 +61,10 @@
           <p id="route-hint" class="route-hint translation-only"></p>
 
           <div class="field-row translation-only">
-            <label for="voice_mode">声</label>
-            <select id="voice_mode" name="voice_mode">
-              <option value="convert">Qwen生成後にSeed-VC変換</option>
-              <option value="clone">Qwenで直接声寄せ</option>
+            <label for="voice_processing">声質変換</label>
+            <select id="voice_processing" name="voice_processing">
+              <option value="seed-vc">Seed-VCで入力音声に寄せる</option>
+              <option value="none">なし</option>
             </select>
           </div>
           <p id="voice-mode-hint" class="route-hint translation-only"></p>

@@ -17,7 +17,7 @@ COPY src /app/src
 COPY scripts /app/scripts
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install ".[local,voice,deploy]"
+    && python -m pip install ".[local,voice,deploy,openai]"
 
 ENV MO_PROVIDER_MODE=local
 ENV MO_ASR_PROVIDER=faster-whisper
@@ -27,6 +27,11 @@ ENV MO_PRELOAD_MODELS=0
 ENV MO_RUNPOD_PRELOAD_ON_START=1
 ENV MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1
 ENV MO_AUDIO_HISTORY_ENABLED=0
+ENV OPENAI_ASR_MODEL=gpt-4o-transcribe
+ENV OPENAI_TRANSLATION_MODEL=gpt-5.5
+ENV OPENAI_TTS_MODEL=gpt-4o-mini-tts
+ENV OPENAI_TTS_VOICE=coral
+ENV OPENAI_TTS_RESPONSE_FORMAT=wav
 
 ENV MODEL_CACHE_DIR=/runpod-volume/models
 ENV HF_HOME=/runpod-volume/huggingface

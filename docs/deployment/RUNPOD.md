@@ -230,9 +230,23 @@ RUNPOD_ENDPOINT_ID=<endpoint-id> \
 RUNPOD_API_KEY=<api-key> \
 python scripts/runpod_smoke_serverless.py \
   --audio /path/to/audio.mp3 \
+  --translation-backend qwen \
   --source-language id-ID \
   --target-language ja-JP \
   --voice-mode convert
+```
+
+OpenAI API経路を測る場合は、RunPod endpointの環境変数に `OPENAI_API_KEY` を渡した上で `--translation-backend openai` を指定する。
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+python scripts/runpod_smoke_serverless.py \
+  --audio /path/to/audio.mp3 \
+  --translation-backend openai \
+  --source-language id-ID \
+  --target-language ja-JP \
+  --voice-mode default
 ```
 
 VC単体を測る場合は、翻訳パイプラインを通さず `operation_mode=voice_conversion` を使う。

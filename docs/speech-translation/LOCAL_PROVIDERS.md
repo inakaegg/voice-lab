@@ -40,6 +40,12 @@ VC比較でChatterboxも試す場合:
 python3 -m pip install -e ".[vc-compare]"
 ```
 
+OpenAI APIの音声翻訳経路も試す場合:
+
+```sh
+python3 -m pip install -e ".[openai]"
+```
+
 Qwen3-TTS、Seed-VC、Chatterboxは依存が重く、既存の機械学習環境とバージョンが衝突する場合がある。開発時は専用venvを作り、`QWEN_TTS_PYTHON`、`SEED_VC_PYTHON`、`CHATTERBOX_PYTHON` でそのPythonを指定できる。
 
 ## プロバイダ構成
@@ -51,6 +57,7 @@ Qwen3-TTS、Seed-VC、Chatterboxは依存が重く、既存の機械学習環境
 - `MO_TTS_PROVIDER=seed-vc` では、`voice_mode=convert` にSeed-VCを使う。前段の出力言語音声はQwen3-TTSで生成する。
 - `MO_TTS_PROVIDER=qwen-seed-vc` では、`voice_mode=clone` と `voice_mode=convert` の両方を選択できる。
 - `voice_mode=default` はlocal providerでは使わない。
+- OpenAI API経路では、ASR、翻訳、TTSをOpenAI APIで実行する。UIの翻訳方式で `音声翻訳（OpenAI API）` を選ぶ。声質変換にSeed-VCを選ぶと、OpenAI TTSの出力をSeed-VCで入力音声の声質へ変換する。
 
 翻訳なしのVC比較では、`MO_TTS_PROVIDER` は使わない。UIの「VC比較」は `MO_VC_BACKENDS` で指定したbackendをruntime APIから取得する。
 
@@ -124,6 +131,12 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 | `CHATTERBOX_PYTHON` | 現在のPython | Chatterbox VCを実行するPython。 |
 | `CHATTERBOX_DEVICE` | `auto` | Chatterboxのdevice。Mac M1では `auto` でMPSを優先する。 |
 | `CHATTERBOX_REFERENCE_MAX_SECONDS` | `10` | Chatterboxに渡す参照音声の上限秒数。 |
+| `OPENAI_API_KEY` | なし | OpenAI API backendを使う場合に必要。git管理外の環境変数として渡す。 |
+| `OPENAI_ASR_MODEL` | `gpt-4o-transcribe` | OpenAI文字起こしモデル。 |
+| `OPENAI_TRANSLATION_MODEL` | `gpt-5.5` | OpenAI翻訳用Responses APIモデル。 |
+| `OPENAI_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI TTSモデル。 |
+| `OPENAI_TTS_VOICE` | `coral` | OpenAI TTS voice。 |
+| `OPENAI_TTS_RESPONSE_FORMAT` | `wav` | OpenAI TTSの出力形式。Seed-VC後段を考慮し既定はwav。 |
 | `MO_AUDIO_HISTORY_ENABLED` | `1` | ローカル音声履歴を保存する。RunPodなどのサーバー環境では `0` を既定にする。 |
 | `MO_AUDIO_HISTORY_DIR` | `tmp/audio-history` | 録音と生成音声の保存先。git管理外に置く。 |
 | `MO_AUDIO_HISTORY_LIMIT` | `10` | `recordings` と `outputs` それぞれに残す件数。 |
@@ -157,6 +170,8 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 `/api/runtime` の `voice_conversion_backends` で `seed-vc` が `available=true` になっていれば、UIの「VC比較」から実行できる。
 
 UIでは、VC比較モードでSeed-VCを選択した場合と、音声翻訳モードで `Qwen生成後にSeed-VC変換` を選択した場合に、`diffusion steps`、参照音声の上限秒数、`length adjust`、`inference cfg rate` をjob単位で変更できる。未変更時は起動時の環境変数から決まる既定値を使う。
+
+OpenAI API経路を使う場合も、UIの声質変換でSeed-VCを選ぶと同じSeed-VC設定を使う。
 
 Seed-VCプリセット:
 

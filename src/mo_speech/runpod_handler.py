@@ -7,7 +7,7 @@ from tempfile import NamedTemporaryFile
 from time import perf_counter
 from typing import Any
 
-from .factory import create_pipeline_from_env
+from .factory import create_openai_pipeline, create_pipeline_from_env
 from .pipeline import PipelineRequest, SpeechTranslationPipeline
 from .providers.voice import (
     SeedVcRuntimeSettings,
@@ -19,6 +19,8 @@ from .providers.voice import (
 _WORKER_STARTED_AT = perf_counter()
 _PIPELINE: SpeechTranslationPipeline | None = None
 _PIPELINE_LOAD_MS: float | None = None
+_OPENAI_PIPELINE: SpeechTranslationPipeline | None = None
+_OPENAI_PIPELINE_LOAD_MS: float | None = None
 _VOICE_CONVERSION_SERVICE: VoiceConversionService | None = None
 _VOICE_CONVERSION_SERVICE_LOAD_MS: float | None = None
 
@@ -53,7 +55,8 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
     if text_transform_unit:
         text_transform_options["unit"] = text_transform_unit
 
-    pipeline, pipeline_load_ms = _pipeline()
+    translation_backend = str(payload.get("translation_backend", "qwen"))
+    pipeline, pipeline_load_ms = _translation_pipeline(translation_backend)
     temp_write_ms = 0.0
     with NamedTemporaryFile(suffix=_audio_suffix(payload.get("audio_mime_type"))) as temp_audio:
         temp_write_started = perf_counter()
@@ -155,6 +158,25 @@ def _pipeline() -> tuple[SpeechTranslationPipeline, float | None]:
         _PIPELINE_LOAD_MS = _elapsed_ms(started)
         return _PIPELINE, _PIPELINE_LOAD_MS
     return _PIPELINE, None
+
+
+def _openai_pipeline() -> tuple[SpeechTranslationPipeline, float | None]:
+    global _OPENAI_PIPELINE, _OPENAI_PIPELINE_LOAD_MS
+    if _OPENAI_PIPELINE is None:
+        started = perf_counter()
+        _OPENAI_PIPELINE = create_openai_pipeline()
+        _OPENAI_PIPELINE.preload()
+        _OPENAI_PIPELINE_LOAD_MS = _elapsed_ms(started)
+        return _OPENAI_PIPELINE, _OPENAI_PIPELINE_LOAD_MS
+    return _OPENAI_PIPELINE, None
+
+
+def _translation_pipeline(translation_backend: str) -> tuple[SpeechTranslationPipeline, float | None]:
+    if translation_backend == "qwen":
+        return _pipeline()
+    if translation_backend == "openai":
+        return _openai_pipeline()
+    raise ValueError(f"unsupported translation backend: {translation_backend}")
 
 
 def _voice_conversion_service() -> tuple[VoiceConversionService, float | None]:

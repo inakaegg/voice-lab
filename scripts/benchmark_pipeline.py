@@ -10,14 +10,14 @@ from tempfile import NamedTemporaryFile
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from mo_speech.factory import create_demo_pipeline, create_local_pipeline
+from mo_speech.factory import create_demo_pipeline, create_local_pipeline, create_openai_pipeline
 from mo_speech.benchmark import run_benchmark
 from mo_speech.pipeline import PipelineRequest, SpeechTranslationPipeline
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark the speech translation pipeline.")
-    parser.add_argument("--provider-mode", choices=["fake", "local"], default=os.getenv("MO_PROVIDER_MODE", "fake"))
+    parser.add_argument("--provider-mode", choices=["fake", "local", "openai"], default=os.getenv("MO_PROVIDER_MODE", "fake"))
     parser.add_argument("--audio", type=Path)
     parser.add_argument("--source-language", default="ja-JP")
     parser.add_argument("--target-language", default="zh-CN")
@@ -65,6 +65,8 @@ def _pipeline_factory(provider_mode: str):
     def create_pipeline() -> SpeechTranslationPipeline:
         if provider_mode == "local":
             return create_local_pipeline()
+        if provider_mode == "openai":
+            return create_openai_pipeline()
         return create_demo_pipeline()
 
     return create_pipeline

@@ -14,8 +14,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .audio_history import AudioHistoryStore
-from .factory import create_pipeline_from_env
+from .factory import create_openai_pipeline, create_pipeline_from_env
 from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline
+from .providers.openai_api import openai_pipeline_status
 from .providers.voice import (
     SeedVcRuntimeSettings,
     VoiceConversionRequest,
@@ -30,14 +31,20 @@ WEB_DIR = PACKAGE_DIR / "web"
 
 def create_app(
     pipeline: SpeechTranslationPipeline | None = None,
+    openai_pipeline: SpeechTranslationPipeline | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     audio_history_store: AudioHistoryStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="mo speech translation")
     active_pipeline = pipeline or create_pipeline_from_env()
+    active_openai_pipeline = openai_pipeline or create_openai_pipeline()
+    translation_pipelines = {
+        "qwen": active_pipeline,
+        "openai": active_openai_pipeline,
+    }
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
-    job_store = TranslationJobStore(active_pipeline, active_audio_history_store)
+    job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
@@ -57,6 +64,7 @@ def create_app(
             "provider_mode": os.getenv("MO_PROVIDER_MODE", "fake") or "fake",
             "providers": _provider_names(active_pipeline),
             "supported_voice_modes": _supported_voice_modes(active_pipeline),
+            "translation_backends": _translation_backends(active_pipeline, active_openai_pipeline),
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
         }
 
@@ -65,6 +73,7 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         source_language: Annotated[str, Form()],
         target_language: Annotated[str, Form()],
+        translation_backend: Annotated[str, Form()] = "qwen",
         voice_mode: Annotated[str, Form()] = "default",
         text_transform: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
@@ -81,6 +90,7 @@ def create_app(
             suffix=input_suffix,
             metadata={
                 "endpoint": "translate-speech",
+                "translation_backend": translation_backend,
                 "source_language": source_language,
                 "target_language": target_language,
                 "voice_mode": voice_mode,
@@ -106,7 +116,7 @@ def create_app(
                 seed_vc_reference_max_seconds,
             )
             try:
-                result = active_pipeline.run(request)
+                result = _select_translation_pipeline(translation_pipelines, translation_backend).run(request)
             except (FileNotFoundError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
@@ -117,6 +127,7 @@ def create_app(
             suffix=_mime_suffix(result.output_audio_mime_type),
             metadata={
                 "endpoint": "translate-speech",
+                "translation_backend": translation_backend,
                 "source_language": source_language,
                 "target_language": target_language,
                 "voice_mode": voice_mode,
@@ -130,6 +141,7 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         source_language: Annotated[str, Form()],
         target_language: Annotated[str, Form()],
+        translation_backend: Annotated[str, Form()] = "qwen",
         voice_mode: Annotated[str, Form()] = "default",
         text_transform: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
@@ -146,6 +158,7 @@ def create_app(
             suffix=input_suffix,
             metadata={
                 "endpoint": "translate-speech-jobs",
+                "translation_backend": translation_backend,
                 "source_language": source_language,
                 "target_language": target_language,
                 "voice_mode": voice_mode,
@@ -171,7 +184,11 @@ def create_app(
             seed_vc_inference_cfg_rate,
             seed_vc_reference_max_seconds,
         )
-        return job_store.start(request, audio_path)
+        try:
+            return job_store.start(request, audio_path, translation_backend)
+        except ValueError as exc:
+            audio_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/translate-speech-jobs/{job_id}")
     def get_translate_speech_job(job_id: str) -> dict[str, object]:
@@ -249,20 +266,21 @@ class TranslationJob:
 
 @dataclass
 class TranslationJobStore:
-    pipeline: SpeechTranslationPipeline
+    pipelines: dict[str, SpeechTranslationPipeline]
     audio_history_store: AudioHistoryStore
     jobs: dict[str, TranslationJob] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
-    def start(self, request: PipelineRequest, audio_path: Path) -> dict[str, object]:
+    def start(self, request: PipelineRequest, audio_path: Path, translation_backend: str) -> dict[str, object]:
+        pipeline = _select_translation_pipeline(self.pipelines, translation_backend)
         job = TranslationJob(
             job_id=uuid4().hex,
             status="queued",
-            stages=_planned_stages(self.pipeline, request),
+            stages=_planned_stages(pipeline, request),
         )
         with self.lock:
             self.jobs[job.job_id] = job
-        thread = Thread(target=self._run_job, args=(job.job_id, request, audio_path), daemon=True)
+        thread = Thread(target=self._run_job, args=(job.job_id, request, audio_path, translation_backend), daemon=True)
         thread.start()
         return self.snapshot(job.job_id)
 
@@ -279,7 +297,7 @@ class TranslationJobStore:
                 "error": job.error,
             }
 
-    def _run_job(self, job_id: str, request: PipelineRequest, audio_path: Path) -> None:
+    def _run_job(self, job_id: str, request: PipelineRequest, audio_path: Path, translation_backend: str) -> None:
         try:
             with self.lock:
                 self.jobs[job_id].status = "running"
@@ -287,13 +305,17 @@ class TranslationJobStore:
             def report_progress(progress: PipelineProgress) -> None:
                 self._update_progress(job_id, progress)
 
-            result = self.pipeline.run(request, progress_callback=report_progress)
+            result = _select_translation_pipeline(self.pipelines, translation_backend).run(
+                request,
+                progress_callback=report_progress,
+            )
             self.audio_history_store.save_output(
                 result.output_audio_bytes,
                 suffix=_mime_suffix(result.output_audio_mime_type),
                 metadata={
                     "endpoint": "translate-speech-jobs",
                     "job_id": job_id,
+                    "translation_backend": translation_backend,
                     "source_language": request.source_language,
                     "target_language": request.target_language,
                     "voice_mode": request.voice_mode,
@@ -425,6 +447,31 @@ def _provider_names(pipeline: SpeechTranslationPipeline) -> dict[str, str]:
         "translation": pipeline.translator.name,
         "tts": pipeline.tts.name,
     }
+
+
+def _translation_backends(
+    qwen_pipeline: SpeechTranslationPipeline,
+    openai_pipeline: SpeechTranslationPipeline,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "id": "qwen",
+            "label": "音声翻訳（Qwen/local）",
+            "available": True,
+            "reason": "",
+            "providers": _provider_names(qwen_pipeline),
+        },
+        openai_pipeline_status(openai_pipeline),
+    ]
+
+
+def _select_translation_pipeline(
+    pipelines: dict[str, SpeechTranslationPipeline],
+    translation_backend: str,
+) -> SpeechTranslationPipeline:
+    if translation_backend not in pipelines:
+        raise ValueError(f"unsupported translation backend: {translation_backend}")
+    return pipelines[translation_backend]
 
 
 def _supported_voice_modes(pipeline: SpeechTranslationPipeline) -> list[str]:
