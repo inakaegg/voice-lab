@@ -102,7 +102,8 @@ class SpeechTranslationPipeline:
     def run(self, request: PipelineRequest, progress_callback: ProgressCallback | None = None) -> PipelineResult:
         total_started = perf_counter()
         route = (request.source_language, request.target_language)
-        if route not in SUPPORTED_ROUTES:
+        supported_routes = getattr(self, "supported_routes", SUPPORTED_ROUTES)
+        if route not in supported_routes:
             raise ValueError(f"unsupported route: {request.source_language} -> {request.target_language}")
         if request.voice_mode not in SUPPORTED_VOICE_MODES:
             raise ValueError(f"unsupported voice mode: {request.voice_mode}")

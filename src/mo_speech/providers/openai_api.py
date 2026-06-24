@@ -2,25 +2,50 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
+import wave
+from base64 import b64decode, b64encode
+from io import BytesIO
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
-from ..pipeline import SpeechTranslationPipeline, TtsOutput
+from ..pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from .voice import SeedVcVoiceConversionTtsProvider
 
 
 OPENAI_LANGUAGE_CODES = {
+    "auto": "",
     "id-ID": "id",
     "ja-JP": "ja",
     "zh-CN": "zh",
+    "en-US": "en",
 }
 
 OPENAI_LANGUAGE_NAMES = {
+    "auto": "Auto-detected language",
     "id-ID": "Indonesian",
     "ja-JP": "Japanese",
     "zh-CN": "Simplified Chinese",
+    "en-US": "English",
+}
+
+OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES = {
+    "id-ID": "id",
+    "ja-JP": "ja",
+    "zh-CN": "zh",
+    "en-US": "en",
+}
+
+OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES = ("auto", "id-ID", "ja-JP", "zh-CN", "en-US")
+OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES = ("id-ID", "ja-JP", "zh-CN", "en-US")
+OPENAI_SPEECH_TRANSLATION_ROUTES = {
+    (source_language, target_language)
+    for source_language in OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES
+    for target_language in OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES
+    if source_language == "auto" or source_language != target_language
 }
 
 OPENAI_TTS_MIME_TYPES = {
@@ -47,13 +72,16 @@ class OpenAiAsrProvider:
         if source_language not in OPENAI_LANGUAGE_CODES:
             raise ValueError(f"OpenAI ASR language is not configured for {source_language}")
         client = self._load_client()
+        kwargs = {
+            "model": self.model,
+            "file": None,
+            "response_format": self.response_format,
+        }
+        if OPENAI_LANGUAGE_CODES[source_language]:
+            kwargs["language"] = OPENAI_LANGUAGE_CODES[source_language]
         with audio_path.open("rb") as audio_file:
-            response = client.audio.transcriptions.create(
-                model=self.model,
-                file=audio_file,
-                language=OPENAI_LANGUAGE_CODES[source_language],
-                response_format=self.response_format,
-            )
+            kwargs["file"] = audio_file
+            response = client.audio.transcriptions.create(**kwargs)
         return _text_from_response(response)
 
     def _load_client(self) -> Any:
@@ -174,11 +202,157 @@ class OpenAiSeedVcTtsProvider:
 
 
 def create_openai_pipeline() -> SpeechTranslationPipeline:
-    return SpeechTranslationPipeline(
+    pipeline = SpeechTranslationPipeline(
         asr=OpenAiAsrProvider(),
         translator=OpenAiTranslationProvider(),
         tts=OpenAiSeedVcTtsProvider(),
     )
+    pipeline.supported_routes = OPENAI_SPEECH_TRANSLATION_ROUTES
+    return pipeline
+
+
+@dataclass(frozen=True)
+class _NamedProvider:
+    name: str
+
+
+@dataclass
+class OpenAiRealtimeTranslationPipeline:
+    model: str = field(default_factory=lambda: os.getenv("OPENAI_REALTIME_TRANSLATION_MODEL", "gpt-realtime-translate"))
+    sample_rate: int = field(default_factory=lambda: int(os.getenv("OPENAI_REALTIME_TRANSLATION_SAMPLE_RATE", "24000")))
+    timeout_seconds: float = field(default_factory=lambda: float(os.getenv("OPENAI_REALTIME_TRANSLATION_TIMEOUT_SECONDS", "90")))
+
+    supported_voice_modes = ("default",)
+
+    def __post_init__(self) -> None:
+        self.asr = _NamedProvider(f"openai-realtime-input-transcript-{self.model}")
+        self.translator = _NamedProvider(f"openai-realtime-output-transcript-{self.model}")
+        self.tts = _NamedProvider(f"openai-realtime-audio-{self.model}")
+
+    def preload(self) -> None:
+        return
+
+    def run(self, request: PipelineRequest, progress_callback=None) -> PipelineResult:
+        if request.target_language not in OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES:
+            raise ValueError(f"OpenAI Realtime output language is not configured for {request.target_language}")
+        if request.voice_mode != "default":
+            raise RuntimeError(f"voice_mode={request.voice_mode} is not supported by {self.tts.name}")
+        if not request.audio_path.exists():
+            raise FileNotFoundError(f"audio file does not exist: {request.audio_path}")
+        if not os.getenv("OPENAI_API_KEY"):
+            raise RuntimeError("OPENAI_API_KEY is required for OpenAI Realtime translation backend.")
+        if not _websocket_module_available():
+            raise RuntimeError("websocket-client package is required for OpenAI Realtime translation backend.")
+
+        total_started = perf_counter()
+        timings_ms: dict[str, float] = {}
+
+        _notify(progress_callback, "asr", "入力音声送信", self.asr.name)
+        convert_started = perf_counter()
+        pcm16 = _audio_file_to_pcm16(request.audio_path, sample_rate=self.sample_rate, timeout_seconds=self.timeout_seconds)
+        timings_ms["audio_prepare"] = _elapsed_ms(convert_started)
+
+        realtime_started = perf_counter()
+        input_transcript, output_transcript, output_pcm16 = self._run_realtime_translation(
+            pcm16,
+            target_language=request.target_language,
+        )
+        timings_ms["realtime_translation"] = _elapsed_ms(realtime_started)
+        timings_ms["asr"] = timings_ms["realtime_translation"]
+        timings_ms["translation"] = 0.0
+        timings_ms["text_transform"] = 0.0
+        timings_ms["tts"] = 0.0
+        timings_ms["total"] = _elapsed_ms(total_started)
+
+        _notify(progress_callback, "translation", "翻訳", self.translator.name, transcript=input_transcript)
+        _notify(
+            progress_callback,
+            "tts",
+            "翻訳音声受信",
+            self.tts.name,
+            transcript=input_transcript,
+            translated_text=output_transcript,
+            transformed_text=output_transcript,
+        )
+        return PipelineResult(
+            transcript=input_transcript,
+            translated_text=output_transcript,
+            transformed_text=output_transcript,
+            output_audio_bytes=_pcm16_to_wav(output_pcm16, sample_rate=self.sample_rate),
+            output_audio_mime_type="audio/wav",
+            timings_ms=timings_ms,
+            providers={
+                "asr": self.asr.name,
+                "translation": self.translator.name,
+                "tts": self.tts.name,
+            },
+            warnings=[],
+        )
+
+    def _run_realtime_translation(self, pcm16: bytes, *, target_language: str) -> tuple[str, str, bytes]:
+        import websocket
+
+        ws = websocket.WebSocket()
+        ws.connect(
+            f"wss://api.openai.com/v1/realtime/translations?model={self.model}",
+            header=[
+                f"Authorization: Bearer {os.environ['OPENAI_API_KEY']}",
+                "OpenAI-Safety-Identifier: local-dev-user",
+            ],
+            timeout=self.timeout_seconds,
+        )
+        ws.settimeout(self.timeout_seconds)
+        try:
+            _send_json(
+                ws,
+                {
+                    "type": "session.update",
+                    "session": {
+                        "audio": {
+                            "output": {
+                                "language": OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES[target_language],
+                            }
+                        }
+                    },
+                },
+            )
+            for offset in range(0, len(pcm16), 64_000):
+                _send_json(
+                    ws,
+                    {
+                        "type": "session.input_audio_buffer.append",
+                        "audio": b64encode(pcm16[offset : offset + 64_000]).decode("ascii"),
+                    },
+                )
+            _send_json(ws, {"type": "session.close"})
+
+            input_transcript_parts: list[str] = []
+            output_transcript_parts: list[str] = []
+            output_audio_parts: list[bytes] = []
+            while True:
+                event = _recv_json(ws)
+                event_type = str(event.get("type", ""))
+                if event_type == "session.output_audio.delta":
+                    output_audio_parts.append(b64decode(str(event.get("delta", ""))))
+                elif event_type == "session.output_transcript.delta":
+                    output_transcript_parts.append(str(event.get("delta", "")))
+                elif event_type == "session.input_transcript.delta":
+                    input_transcript_parts.append(str(event.get("delta", "")))
+                elif event_type == "error":
+                    raise RuntimeError(str(event.get("error", event)))
+                elif event_type == "session.closed":
+                    break
+            return (
+                "".join(input_transcript_parts).strip(),
+                "".join(output_transcript_parts).strip(),
+                b"".join(output_audio_parts),
+            )
+        finally:
+            ws.close()
+
+
+def create_openai_realtime_translation_pipeline() -> OpenAiRealtimeTranslationPipeline:
+    return OpenAiRealtimeTranslationPipeline()
 
 
 def openai_pipeline_status(pipeline: SpeechTranslationPipeline) -> dict[str, object]:
@@ -199,6 +373,41 @@ def openai_pipeline_status(pipeline: SpeechTranslationPipeline) -> dict[str, obj
             "asr": pipeline.asr.name,
             "translation": pipeline.translator.name,
             "tts": pipeline.tts.name,
+        },
+        "settings": {
+            "supported_source_languages": list(OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES),
+            "supported_target_languages": list(OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES),
+            "supported_voice_modes": list(getattr(pipeline.tts, "supported_voice_modes", ("default",))),
+            "source_language_mode": "specified_or_auto",
+            "text_transform": True,
+        },
+    }
+
+
+def openai_realtime_pipeline_status(pipeline: OpenAiRealtimeTranslationPipeline) -> dict[str, object]:
+    available = True
+    reason = ""
+    if not os.getenv("OPENAI_API_KEY"):
+        available = False
+        reason = "OPENAI_API_KEY が設定されていません。"
+    elif not _websocket_module_available():
+        available = False
+        reason = "websocket-client packageがインストールされていません。"
+    return {
+        "id": "openai_realtime",
+        "label": "音声翻訳（OpenAI Realtime）",
+        "available": available,
+        "reason": reason,
+        "providers": {
+            "asr": pipeline.asr.name,
+            "translation": pipeline.translator.name,
+            "tts": pipeline.tts.name,
+        },
+        "settings": {
+            "source_language_mode": "auto",
+            "supported_target_languages": list(OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES.keys()),
+            "supported_voice_modes": list(pipeline.supported_voice_modes),
+            "text_transform": False,
         },
     }
 
@@ -243,3 +452,90 @@ def _openai_module_available() -> bool:
     if "openai" in sys.modules:
         return True
     return importlib.util.find_spec("openai") is not None
+
+
+def _websocket_module_available() -> bool:
+    if "websocket" in sys.modules:
+        return True
+    return importlib.util.find_spec("websocket") is not None
+
+
+def _audio_file_to_pcm16(audio_path: Path, *, sample_rate: int, timeout_seconds: float) -> bytes:
+    try:
+        completed = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(audio_path),
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-ac",
+                "1",
+                "-ar",
+                str(sample_rate),
+                "pipe:1",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg is required for OpenAI Realtime translation backend.") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"ffmpeg failed to prepare audio: {stderr}") from exc
+    return completed.stdout
+
+
+def _pcm16_to_wav(pcm16: bytes, *, sample_rate: int) -> bytes:
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm16)
+    return buffer.getvalue()
+
+
+def _send_json(ws: Any, payload: dict[str, object]) -> None:
+    import json
+
+    ws.send(json.dumps(payload))
+
+
+def _recv_json(ws: Any) -> dict[str, object]:
+    import json
+
+    return json.loads(ws.recv())
+
+
+def _elapsed_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000
+
+
+def _notify(
+    progress_callback,
+    stage: str,
+    label: str,
+    provider: str,
+    *,
+    transcript: str | None = None,
+    translated_text: str | None = None,
+    transformed_text: str | None = None,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(
+            PipelineProgress(
+                stage=stage,
+                label=label,
+                provider=provider,
+                transcript=transcript,
+                translated_text=translated_text,
+                transformed_text=transformed_text,
+            )
+        )

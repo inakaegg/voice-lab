@@ -13,12 +13,14 @@ from typing import Any
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech or voice-conversion smoke request.")
+    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, text-TTS, or voice-conversion smoke request.")
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
-    parser.add_argument("--operation-mode", choices=("translation", "voice_conversion"), default="translation")
-    parser.add_argument("--audio", required=True)
+    parser.add_argument("--operation-mode", choices=("translation", "text_tts", "voice_conversion"), default="translation")
+    parser.add_argument("--audio")
     parser.add_argument("--reference-audio")
+    parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
+    parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "google_translate"))
     parser.add_argument("--translation-backend", default=os.getenv("RUNPOD_SMOKE_TRANSLATION_BACKEND", "qwen"))
     parser.add_argument("--source-language", default=os.getenv("RUNPOD_SMOKE_SOURCE_LANGUAGE", "id-ID"))
     parser.add_argument("--target-language", default=os.getenv("RUNPOD_SMOKE_TARGET_LANGUAGE", "ja-JP"))
@@ -39,8 +41,21 @@ def main() -> int:
     if not args.api_key:
         raise SystemExit("RUNPOD_API_KEY or --api-key is required")
 
-    audio_path = Path(args.audio)
-    mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+    if args.operation_mode == "text_tts":
+        if not args.text:
+            raise SystemExit("--text is required for text_tts")
+        input_payload = {
+            "operation_mode": "text_tts",
+            "text": args.text,
+            "target_language": args.target_language,
+            "tts_backend": args.tts_backend,
+        }
+    else:
+        if not args.audio:
+            raise SystemExit("--audio is required for translation and voice_conversion")
+        audio_path = Path(args.audio)
+        mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+
     if args.operation_mode == "voice_conversion":
         if not args.reference_audio:
             raise SystemExit("--reference-audio is required for voice_conversion")
@@ -54,7 +69,7 @@ def main() -> int:
             "reference_audio_mime_type": reference_mime_type,
             "voice_backend": args.voice_backend,
         }
-    else:
+    elif args.operation_mode == "translation":
         input_payload = {
             "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
             "audio_mime_type": mime_type,

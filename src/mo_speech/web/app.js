@@ -6,6 +6,10 @@ const referenceAudioInput = document.querySelector("#reference_audio");
 const operationModeSelect = document.querySelector("#operation_mode");
 const translationBackendSelect = document.querySelector("#translation_backend");
 const voiceProcessingSelect = document.querySelector("#voice_processing");
+const ttsTextInput = document.querySelector("#tts_text");
+const ttsTargetLanguageSelect = document.querySelector("#tts_target_language");
+const ttsBackendSelect = document.querySelector("#tts_backend");
+const ttsBackendHint = document.querySelector("#tts-backend-hint");
 const voiceBackendSelect = document.querySelector("#voice_backend");
 const voiceBackendHint = document.querySelector("#voice-backend-hint");
 const seedVcSettingsPanel = document.querySelector("#seed-vc-settings");
@@ -37,10 +41,19 @@ const processingSteps = document.querySelector("#processing-steps");
 const textResultSection = document.querySelector("#text-result-section");
 const outputAudioHeading = document.querySelector("#output-audio-heading");
 const translationOnlyElements = [...document.querySelectorAll(".translation-only")];
+const translationBatchOnlyElements = [...document.querySelectorAll(".translation-batch-only")];
+const textTtsOnlyElements = [...document.querySelectorAll(".text-tts-only")];
+const audioInputOnlyElements = [...document.querySelectorAll(".audio-input-only")];
+const historyRefreshButton = document.querySelector("#history-refresh");
+const historyRecordings = document.querySelector("#history-recordings");
+const historyOutputs = document.querySelector("#history-outputs");
 
-const supportedRoutes = {
-  "id-ID": [{ value: "ja-JP", label: "日本語" }],
-  "ja-JP": [{ value: "zh-CN", label: "中国語（普通話）" }],
+const languageLabels = {
+  auto: "自動判定",
+  "id-ID": "インドネシア語",
+  "ja-JP": "日本語",
+  "zh-CN": "中国語（普通話）",
+  "en-US": "英語",
 };
 
 const seedVcPresets = {
@@ -81,22 +94,25 @@ let inputLevelAudioContext = null;
 let inputLevelSource = null;
 let supportedVoiceModes = ["convert", "clone"];
 let translationBackends = [];
+let textTtsBackends = [];
 let voiceConversionBackends = [];
 let runtimeProviderMode = "fake";
 
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
+historyRefreshButton.addEventListener("click", loadAudioHistory);
 audioInput.addEventListener("change", handleAudioFileChange);
 operationModeSelect.addEventListener("change", () => {
   syncOperationMode();
   clearResultOutputs();
 });
 translationBackendSelect.addEventListener("change", () => {
+  syncOperationMode();
+});
+ttsBackendSelect.addEventListener("change", () => {
+  syncTtsBackendAvailability();
   syncRuntimeNote();
-  syncVoiceProcessingAvailability();
-  syncVoiceModeHint();
-  syncSeedVcSettingsVisibility();
 });
 voiceProcessingSelect.addEventListener("change", () => {
   syncVoiceModeHint();
@@ -108,6 +124,7 @@ voiceBackendSelect.addEventListener("change", () => {
 });
 form.source_language.addEventListener("change", syncTargetOptions);
 form.target_language.addEventListener("change", syncVoiceModeHint);
+ttsTargetLanguageSelect.addEventListener("change", syncTtsBackendAvailability);
 seedVcPresetSelect.addEventListener("change", applySeedVcPreset);
 [seedVcDiffusionStepsInput, seedVcReferenceMaxSecondsInput, seedVcLengthAdjustInput, seedVcInferenceCfgRateInput].forEach(
   (input) => input.addEventListener("input", syncSeedVcPresetSelection),
@@ -119,6 +136,7 @@ syncVoiceProcessingAvailability();
 syncOperationMode();
 loadRuntime();
 loadAudioDevices();
+loadAudioHistory();
 
 async function startRecording() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -214,6 +232,10 @@ async function submitCurrentOperation(event) {
     await submitVoiceConversion(event);
     return;
   }
+  if (operationModeSelect.value === "text_tts") {
+    await submitTextToSpeech(event);
+    return;
+  }
   await submitTranslation(event);
 }
 
@@ -228,7 +250,7 @@ async function submitTranslation(event) {
   try {
     const formData = new FormData();
     formData.append("translation_backend", selectedTranslationBackend());
-    formData.append("source_language", form.source_language.value);
+    formData.append("source_language", selectedSourceLanguage());
     formData.append("target_language", form.target_language.value);
     const voiceMode = selectedVoiceMode();
     formData.append("voice_mode", voiceMode);
@@ -236,7 +258,7 @@ async function submitTranslation(event) {
       appendSeedVcSettings(formData, "seed-vc");
     }
 
-    const enableSuffix = document.querySelector("#enable_suffix").checked;
+    const enableSuffix = shouldUseBatchTranslationControls() && document.querySelector("#enable_suffix").checked;
     if (enableSuffix) {
       formData.append("text_transform", "append_suffix");
       formData.append("text_transform_suffix", form.suffix.value);
@@ -272,6 +294,50 @@ async function submitTranslation(event) {
       throw new Error("変換結果を取得できませんでした");
     }
     renderResult(completedJob.result);
+    loadAudioHistory();
+    setStatus("完了");
+  } catch (error) {
+    renderError(error.message || "エラー");
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+async function submitTextToSpeech(event) {
+  event.preventDefault();
+  setStatus("処理中");
+  renderPartialResult({});
+  renderProcessingJob({ status: "queued", stages: [] });
+  clearError();
+  submitButton.disabled = true;
+
+  try {
+    const text = ttsTextInput.value.trim();
+    if (!text) {
+      throw new Error("読み上げテキストを入力してください");
+    }
+    const formData = new FormData();
+    formData.append("text", text);
+    formData.append("target_language", ttsTargetLanguageSelect.value);
+    formData.append("tts_backend", selectedTtsBackend());
+
+    const response = await fetch("/api/text-to-speech-jobs", {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "読み上げに失敗しました");
+    }
+
+    const job = await response.json();
+    renderProcessingJob(job);
+    const completedJob = await pollTextToSpeechJob(job.job_id);
+    if (!completedJob.result) {
+      throw new Error("読み上げ結果を取得できませんでした");
+    }
+    renderVoiceConversionResult(completedJob.result);
+    loadAudioHistory();
     setStatus("完了");
   } catch (error) {
     renderError(error.message || "エラー");
@@ -327,11 +393,31 @@ async function submitVoiceConversion(event) {
       throw new Error("VC結果を取得できませんでした");
     }
     renderVoiceConversionResult(completedJob.result);
+    loadAudioHistory();
     setStatus("完了");
   } catch (error) {
     renderError(error.message || "エラー");
   } finally {
     submitButton.disabled = false;
+  }
+}
+
+async function pollTextToSpeechJob(jobId) {
+  while (true) {
+    await delay(800);
+    const response = await fetch(`/api/text-to-speech-jobs/${jobId}`);
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "処理状況を取得できませんでした");
+    }
+    const job = await response.json();
+    renderProcessingJob(job);
+    if (job.status === "succeeded") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "読み上げに失敗しました");
+    }
   }
 }
 
@@ -478,6 +564,46 @@ function renderVoiceConversionResult(payload) {
   });
 }
 
+async function loadAudioHistory() {
+  try {
+    const response = await fetch("/api/audio-history");
+    if (!response.ok) {
+      throw new Error("audio history request failed");
+    }
+    const payload = await response.json();
+    renderAudioHistoryList(historyRecordings, payload.recordings || []);
+    renderAudioHistoryList(historyOutputs, payload.outputs || []);
+  } catch {
+    historyRecordings.textContent = "履歴を取得できませんでした。";
+    historyOutputs.textContent = "履歴を取得できませんでした。";
+  }
+}
+
+function renderAudioHistoryList(container, entries) {
+  container.replaceChildren();
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "history-meta";
+    empty.textContent = "まだありません";
+    container.append(empty);
+    return;
+  }
+  entries.forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "history-item";
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.src = entry.url;
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
+    const endpoint = entry.metadata?.endpoint || entry.kind;
+    const createdAt = entry.created_at || "";
+    meta.textContent = `${endpoint} / ${formatBytes(Number(entry.size_bytes || 0))} / ${createdAt}`;
+    item.append(audio, meta);
+    container.append(item);
+  });
+}
+
 function renderPartialResult(payload) {
   setText("#transcript", payload.transcript);
   setText("#translated-text", payload.translated_text);
@@ -497,8 +623,10 @@ async function loadRuntime() {
     runtimeProviders.replaceChildren();
     supportedVoiceModes = ["default"];
     translationBackends = [];
+    textTtsBackends = [];
     syncTranslationBackendAvailability();
     syncVoiceProcessingAvailability();
+    syncTtsBackendAvailability();
   }
 }
 
@@ -509,9 +637,11 @@ function renderRuntime(payload) {
   runtimeProviderMode = providerMode;
   supportedVoiceModes = payload.supported_voice_modes || ["default"];
   translationBackends = payload.translation_backends || [];
+  textTtsBackends = payload.text_tts_backends || [];
   voiceConversionBackends = payload.voice_conversion_backends || [];
   syncTranslationBackendAvailability();
   syncVoiceProcessingAvailability();
+  syncTtsBackendAvailability();
   syncVoiceBackendAvailability();
   syncSeedVcSettingsDefaults();
   syncSeedVcSettingsVisibility();
@@ -695,47 +825,77 @@ function clearError() {
 }
 
 function syncTargetOptions() {
-  const targets = supportedRoutes[form.source_language.value] || [];
+  const backend = selectedTranslationBackendInfo();
+  const sourceLanguages = supportedSourceLanguagesForBackend(backend);
+  const previousSource = form.source_language.value;
+  form.source_language.replaceChildren(...sourceLanguages.map((language) => new Option(languageLabels[language] || language, language)));
+  if (sourceLanguages.includes(previousSource)) {
+    form.source_language.value = previousSource;
+  } else {
+    form.source_language.value = sourceLanguages[0] || "auto";
+  }
+
+  const targets = supportedTargetLanguagesForBackend(backend, form.source_language.value);
+  const previousTarget = form.target_language.value;
   form.target_language.replaceChildren(
-    ...targets.map((target) => {
-      const option = document.createElement("option");
-      option.value = target.value;
-      option.textContent = target.label;
-      return option;
-    }),
+    ...targets.map((language) => new Option(languageLabels[language] || language, language)),
   );
-  const routeText = `${form.source_language.selectedOptions[0].textContent} -> ${
-    form.target_language.selectedOptions[0]?.textContent || "未対応"
-  }`;
-  routeHint.textContent = routeText;
+  if (targets.includes(previousTarget)) {
+    form.target_language.value = previousTarget;
+  }
+  const sourceLabel = isRealtimeTranslationBackend() ? "自動判定" : form.source_language.selectedOptions[0]?.textContent || "未対応";
+  const targetLabel = form.target_language.selectedOptions[0]?.textContent || "未対応";
+  routeHint.textContent = `${sourceLabel} -> ${targetLabel}`;
   syncVoiceProcessingAvailability();
+  syncTtsBackendAvailability();
 }
 
 function syncOperationMode() {
+  const isTranslation = operationModeSelect.value === "translation";
   const isVoiceConversion = operationModeSelect.value === "voice_conversion";
+  const isTextTts = operationModeSelect.value === "text_tts";
+  const isRealtime = isTranslation && isRealtimeTranslationBackend();
   document.querySelectorAll(".vc-only").forEach((element) => {
     element.hidden = !isVoiceConversion;
   });
   translationOnlyElements.forEach((element) => {
-    element.hidden = isVoiceConversion;
+    element.hidden = !isTranslation;
+  });
+  translationBatchOnlyElements.forEach((element) => {
+    element.hidden = !isTranslation || isRealtime;
+  });
+  textTtsOnlyElements.forEach((element) => {
+    element.hidden = !isTextTts;
+  });
+  audioInputOnlyElements.forEach((element) => {
+    element.hidden = isTextTts;
   });
   audioLabel.textContent = isVoiceConversion ? "変換元音声ファイル" : "入力音声ファイル";
   sourceAudioHint.textContent = isVoiceConversion
     ? "録音またはファイル選択で変換元音声を指定します。"
     : "録音またはファイル選択で入力音声を指定します。";
-  outputAudioHeading.textContent = isVoiceConversion ? "VC出力音声" : "出力音声";
-  submitButton.textContent = isVoiceConversion ? "VC実行" : "変換";
+  outputAudioHeading.textContent = isVoiceConversion ? "VC出力音声" : isTextTts ? "読み上げ音声" : "出力音声";
+  submitButton.textContent = isVoiceConversion ? "VC実行" : isTextTts ? "読み上げ" : "変換";
   if (!audioInput.files[0] && !recordedBlob) {
     recordingDetails.textContent = sourceAudioEmptyText();
   }
-  textResultSection.hidden = isVoiceConversion;
+  textResultSection.hidden = !isTranslation;
+  syncTargetOptions();
   syncRuntimeNote();
   syncVoiceBackendAvailability();
   syncSeedVcSettingsVisibility();
   syncVoiceModeHint();
+  syncTtsBackendAvailability();
 }
 
 function syncRuntimeNote() {
+  if (operationModeSelect.value === "text_tts") {
+    const selected = selectedTtsBackendOption();
+    runtimeNote.textContent = selected?.disabled
+      ? selected.dataset.reason || "選択したTTS方式は利用できません。"
+      : "入力テキストを選択したTTS方式で音声化します。";
+    return;
+  }
   if (operationModeSelect.value === "voice_conversion") {
     runtimeNote.textContent = "変換元音声と参照音声をVC backendで処理します。";
     return;
@@ -749,6 +909,10 @@ function syncRuntimeNote() {
     runtimeNote.textContent = "OpenAI APIで文字起こし、翻訳、音声生成を行います。";
     return;
   }
+  if (translationBackendSelect.value === "openai_realtime") {
+    runtimeNote.textContent = "OpenAI Realtime translationで入力言語を自動判定し、翻訳音声を生成します。";
+    return;
+  }
   runtimeNote.textContent =
     runtimeProviderMode === "local"
       ? "Qwen/local系providerで録音または選択した音声を処理します。"
@@ -757,6 +921,10 @@ function syncRuntimeNote() {
 
 function syncVoiceModeHint() {
   if (operationModeSelect.value === "voice_conversion") {
+    voiceModeHint.textContent = "";
+    return;
+  }
+  if (isRealtimeTranslationBackend()) {
     voiceModeHint.textContent = "";
     return;
   }
@@ -791,6 +959,12 @@ function syncTranslationBackendAvailability() {
             available: false,
             reason: "OPENAI_API_KEY が設定されていません。",
           },
+          {
+            id: "openai_realtime",
+            label: "音声翻訳（OpenAI Realtime）",
+            available: false,
+            reason: "OPENAI_API_KEY が設定されていません。",
+          },
         ];
   const currentValue = translationBackendSelect.value;
   translationBackendSelect.replaceChildren(
@@ -814,6 +988,7 @@ function syncTranslationBackendAvailability() {
     }
   }
   syncRuntimeNote();
+  syncTargetOptions();
   syncVoiceProcessingAvailability();
 }
 
@@ -849,6 +1024,60 @@ function syncVoiceBackendAvailability() {
   }
   syncVoiceBackendHint();
   syncSeedVcSettingsVisibility();
+}
+
+function syncTtsBackendAvailability() {
+  const fallbackBackends =
+    textTtsBackends.length > 0
+      ? textTtsBackends
+      : [
+          {
+            id: "google_translate",
+            label: "Google Translate TTS endpoint",
+            available: true,
+            reason: "",
+            settings: { supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"] },
+          },
+          {
+            id: "openai",
+            label: "OpenAI TTS API",
+            available: false,
+            reason: "OPENAI_API_KEY が設定されていません。",
+            settings: { supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"] },
+          },
+        ];
+  const currentValue = ttsBackendSelect.value;
+  ttsBackendSelect.replaceChildren(
+    ...fallbackBackends.map((backend) => {
+      const option = new Option(backend.available ? backend.label : `${backend.label}（未設定）`, backend.id);
+      option.disabled = !backend.available;
+      option.dataset.reason = backend.reason || "";
+      return option;
+    }),
+  );
+  const availableBackends = fallbackBackends.filter((backend) => backend.available);
+  ttsBackendSelect.disabled = availableBackends.length === 0;
+  if (availableBackends.some((backend) => backend.id === currentValue)) {
+    ttsBackendSelect.value = currentValue;
+  } else if (availableBackends.length > 0) {
+    ttsBackendSelect.value = availableBackends[0].id;
+  }
+
+  const backend = selectedTtsBackendInfo();
+  const supportedLanguages = backend?.settings?.supported_target_languages || ["id-ID", "ja-JP", "zh-CN", "en-US"];
+  const previousLanguage = ttsTargetLanguageSelect.value;
+  ttsTargetLanguageSelect.replaceChildren(
+    ...supportedLanguages.map((language) => new Option(languageLabels[language] || language, language)),
+  );
+  if (supportedLanguages.includes(previousLanguage)) {
+    ttsTargetLanguageSelect.value = previousLanguage;
+  }
+  const selected = selectedTtsBackendOption();
+  ttsBackendHint.textContent = selected?.disabled
+    ? selected.dataset.reason || ""
+    : ttsBackendSelect.value === "google_translate"
+      ? "比較用の無料endpointです。安定運用の既定にはしません。"
+      : "OpenAI TTS APIで読み上げ音声を生成します。";
 }
 
 function syncVoiceBackendHint() {
@@ -986,7 +1215,14 @@ function syncVoiceProcessingAvailability() {
 }
 
 function selectedVoiceMode() {
+  if (isRealtimeTranslationBackend()) {
+    return "default";
+  }
   return voiceProcessingSelect.value === "seed-vc" ? "convert" : "default";
+}
+
+function selectedSourceLanguage() {
+  return isRealtimeTranslationBackend() ? "auto" : form.source_language.value;
 }
 
 function selectedTranslationBackend() {
@@ -1001,11 +1237,73 @@ function selectedTranslationBackendOption() {
   return [...translationBackendSelect.options].find((option) => option.value === translationBackendSelect.value);
 }
 
+function selectedTranslationBackendInfo() {
+  return translationBackends.find((backend) => backend.id === translationBackendSelect.value) || null;
+}
+
 function voiceModesForSelectedTranslationBackend() {
+  const backend = selectedTranslationBackendInfo();
+  if (backend?.settings?.supported_voice_modes) {
+    return backend.settings.supported_voice_modes;
+  }
   if (translationBackendSelect.value === "openai") {
     return ["default", "convert"];
   }
+  if (translationBackendSelect.value === "openai_realtime") {
+    return ["default"];
+  }
   return supportedVoiceModes;
+}
+
+function supportedSourceLanguagesForBackend(backend) {
+  const settings = backend?.settings || {};
+  if (settings.source_language_mode === "auto") {
+    return ["auto"];
+  }
+  if (settings.supported_source_languages) {
+    return settings.supported_source_languages;
+  }
+  if (settings.supported_routes) {
+    return [...new Set(settings.supported_routes.map((route) => route.source_language))];
+  }
+  return ["id-ID", "ja-JP"];
+}
+
+function supportedTargetLanguagesForBackend(backend, sourceLanguage) {
+  const settings = backend?.settings || {};
+  if (settings.supported_target_languages) {
+    return settings.supported_target_languages.filter((language) => sourceLanguage === "auto" || language !== sourceLanguage);
+  }
+  if (settings.supported_routes) {
+    return settings.supported_routes
+      .filter((route) => route.source_language === sourceLanguage)
+      .map((route) => route.target_language);
+  }
+  return sourceLanguage === "id-ID" ? ["ja-JP"] : ["zh-CN"];
+}
+
+function isRealtimeTranslationBackend() {
+  return operationModeSelect.value === "translation" && translationBackendSelect.value === "openai_realtime";
+}
+
+function shouldUseBatchTranslationControls() {
+  return operationModeSelect.value === "translation" && !isRealtimeTranslationBackend();
+}
+
+function selectedTtsBackend() {
+  const selected = selectedTtsBackendOption();
+  if (!selected || selected.disabled) {
+    throw new Error("利用可能なTTS方式を選択してください");
+  }
+  return selected.value;
+}
+
+function selectedTtsBackendOption() {
+  return [...ttsBackendSelect.options].find((option) => option.value === ttsBackendSelect.value);
+}
+
+function selectedTtsBackendInfo() {
+  return textTtsBackends.find((backend) => backend.id === ttsBackendSelect.value) || null;
 }
 
 function selectedVoiceBackend() {
@@ -1017,6 +1315,9 @@ function selectedVoiceBackend() {
 }
 
 function sourceAudioEmptyText() {
+  if (operationModeSelect.value === "text_tts") {
+    return "";
+  }
   return operationModeSelect.value === "voice_conversion" ? "変換元音声なし" : "入力音声なし";
 }
 

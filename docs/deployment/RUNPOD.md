@@ -252,6 +252,31 @@ python scripts/runpod_smoke_serverless.py \
   --voice-mode default
 ```
 
+OpenAI Realtime翻訳を測る場合は、同じく `OPENAI_API_KEY` を渡した上で `--translation-backend openai_realtime` を指定する。Realtime経路は入力言語をAPI側で自動判定するため、`--source-language` は互換用の値として扱う。
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+python scripts/runpod_smoke_serverless.py \
+  --audio /path/to/audio.mp3 \
+  --translation-backend openai_realtime \
+  --source-language auto \
+  --target-language ja-JP \
+  --voice-mode default
+```
+
+テキスト読み上げだけを測る場合は `operation_mode=text_tts` を使う。Google Translate TTS endpointは公式APIではないため、安定運用の既定にはしない。OpenAI TTSを測る場合は `--tts-backend openai` を指定し、endpoint側に `OPENAI_API_KEY` を渡す。
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+python scripts/runpod_smoke_serverless.py \
+  --operation-mode text_tts \
+  --text "こんにちは" \
+  --target-language ja-JP \
+  --tts-backend google_translate
+```
+
 VC単体を測る場合は、翻訳パイプラインを通さず `operation_mode=voice_conversion` を使う。
 
 ```sh

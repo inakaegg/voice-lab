@@ -7,8 +7,9 @@ from tempfile import NamedTemporaryFile
 from time import perf_counter
 from typing import Any
 
-from .factory import create_openai_pipeline, create_pipeline_from_env
-from .pipeline import PipelineRequest, SpeechTranslationPipeline
+from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
+from .pipeline import PipelineRequest, SpeechTranslationPipeline, TtsOutput
+from .providers.text_tts import create_text_tts_providers
 from .providers.voice import (
     SeedVcRuntimeSettings,
     VoiceConversionRequest,
@@ -21,6 +22,10 @@ _PIPELINE: SpeechTranslationPipeline | None = None
 _PIPELINE_LOAD_MS: float | None = None
 _OPENAI_PIPELINE: SpeechTranslationPipeline | None = None
 _OPENAI_PIPELINE_LOAD_MS: float | None = None
+_OPENAI_REALTIME_PIPELINE = None
+_OPENAI_REALTIME_PIPELINE_LOAD_MS: float | None = None
+_TEXT_TTS_PROVIDERS: dict[str, object] | None = None
+_TEXT_TTS_PROVIDERS_LOAD_MS: float | None = None
 _VOICE_CONVERSION_SERVICE: VoiceConversionService | None = None
 _VOICE_CONVERSION_SERVICE_LOAD_MS: float | None = None
 
@@ -34,6 +39,8 @@ def handler(event: dict[str, Any]) -> dict[str, object]:
     operation_mode = str(payload.get("operation_mode", "translation"))
     if operation_mode in {"translation", "translate"}:
         return _handle_translation(payload, handler_started)
+    if operation_mode in {"text_tts", "text_to_speech"}:
+        return _handle_text_tts(payload, handler_started)
     if operation_mode == "voice_conversion":
         return _handle_voice_conversion(payload, handler_started)
     raise ValueError(f"unsupported operation_mode: {operation_mode}")
@@ -93,6 +100,36 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
         temp_write_ms=temp_write_ms,
         load_metric_name="pipeline_load",
         load_ms=pipeline_load_ms,
+    )
+    return response
+
+
+def _handle_text_tts(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    text = str(payload.get("text", ""))
+    if text.strip() == "":
+        raise ValueError("text is required")
+    target_language = str(payload.get("target_language", "ja-JP"))
+    tts_backend = str(payload.get("tts_backend", "google_translate"))
+
+    provider, providers_load_ms = _text_tts_provider(tts_backend)
+    started = perf_counter()
+    output = _normalize_tts_output(provider.synthesize(text, target_language), provider.audio_mime_type)
+    response: dict[str, object] = {
+        "audio_mime_type": output.audio_mime_type,
+        "audio_base64": base64.b64encode(output.audio_bytes).decode("ascii"),
+        "timings_ms": output.timings_ms or {"tts": _elapsed_ms(started), "total": _elapsed_ms(started)},
+        "providers": {"tts": provider.name},
+        "warnings": output.warnings,
+    }
+    _attach_serverless_metrics(
+        response,
+        operation_mode="text_tts",
+        handler_started=handler_started,
+        worker_cold=providers_load_ms is not None,
+        audio_decode_ms=0.0,
+        temp_write_ms=0.0,
+        load_metric_name="text_tts_provider_load",
+        load_ms=providers_load_ms,
     )
     return response
 
@@ -171,12 +208,42 @@ def _openai_pipeline() -> tuple[SpeechTranslationPipeline, float | None]:
     return _OPENAI_PIPELINE, None
 
 
+def _openai_realtime_pipeline():
+    global _OPENAI_REALTIME_PIPELINE, _OPENAI_REALTIME_PIPELINE_LOAD_MS
+    if _OPENAI_REALTIME_PIPELINE is None:
+        started = perf_counter()
+        _OPENAI_REALTIME_PIPELINE = create_realtime_translation_pipeline()
+        _OPENAI_REALTIME_PIPELINE.preload()
+        _OPENAI_REALTIME_PIPELINE_LOAD_MS = _elapsed_ms(started)
+        return _OPENAI_REALTIME_PIPELINE, _OPENAI_REALTIME_PIPELINE_LOAD_MS
+    return _OPENAI_REALTIME_PIPELINE, None
+
+
 def _translation_pipeline(translation_backend: str) -> tuple[SpeechTranslationPipeline, float | None]:
     if translation_backend == "qwen":
         return _pipeline()
     if translation_backend == "openai":
         return _openai_pipeline()
+    if translation_backend == "openai_realtime":
+        return _openai_realtime_pipeline()
     raise ValueError(f"unsupported translation backend: {translation_backend}")
+
+
+def _text_tts_provider(tts_backend: str):
+    providers, providers_load_ms = _text_tts_providers()
+    if tts_backend not in providers:
+        raise ValueError(f"unsupported TTS backend: {tts_backend}")
+    return providers[tts_backend], providers_load_ms
+
+
+def _text_tts_providers() -> tuple[dict[str, object], float | None]:
+    global _TEXT_TTS_PROVIDERS, _TEXT_TTS_PROVIDERS_LOAD_MS
+    if _TEXT_TTS_PROVIDERS is None:
+        started = perf_counter()
+        _TEXT_TTS_PROVIDERS = create_text_tts_providers()
+        _TEXT_TTS_PROVIDERS_LOAD_MS = _elapsed_ms(started)
+        return _TEXT_TTS_PROVIDERS, _TEXT_TTS_PROVIDERS_LOAD_MS
+    return _TEXT_TTS_PROVIDERS, None
 
 
 def _voice_conversion_service() -> tuple[VoiceConversionService, float | None]:
@@ -238,6 +305,17 @@ def _optional_str(value: object) -> str | None:
     if value is None or value == "":
         return None
     return str(value)
+
+
+def _normalize_tts_output(output: bytes | TtsOutput, audio_mime_type: str) -> TtsOutput:
+    if isinstance(output, TtsOutput):
+        return TtsOutput(
+            audio_bytes=output.audio_bytes,
+            audio_mime_type=output.audio_mime_type or audio_mime_type,
+            timings_ms=output.timings_ms,
+            warnings=output.warnings,
+        )
+    return TtsOutput(audio_bytes=output, audio_mime_type=audio_mime_type)
 
 
 def _audio_suffix(audio_mime_type: object) -> str:

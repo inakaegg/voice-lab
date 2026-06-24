@@ -5,7 +5,7 @@ import base64
 import pytest
 
 from mo_speech import runpod_handler
-from mo_speech.pipeline import PipelineProgress
+from mo_speech.pipeline import PipelineProgress, TtsOutput
 from mo_speech.providers.voice import VoiceConversionBackendInfo, VoiceConversionService
 
 
@@ -58,6 +58,26 @@ def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPa
     assert payload["serverless_timings_ms"]["handler_total"] >= 0
 
 
+def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runpod_handler, "_TEXT_TTS_PROVIDERS", {"fake": FakeTextTtsProvider()})
+    event = {
+        "input": {
+            "operation_mode": "text_tts",
+            "text": "こんにちは",
+            "target_language": "ja-JP",
+            "tts_backend": "fake",
+        }
+    }
+
+    payload = runpod_handler.handler(event)
+
+    assert payload["audio_mime_type"] == "audio/wav"
+    assert base64.b64decode(payload["audio_base64"]) == "TTS:ja-JP:こんにちは".encode()
+    assert payload["providers"] == {"tts": "fake-text-tts"}
+    assert payload["serverless"]["operation_mode"] == "text_tts"
+    assert payload["serverless_timings_ms"]["text_tts_provider_load"] >= 0
+
+
 def test_runpod_handler_requires_audio_base64(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
 
@@ -87,3 +107,16 @@ class FakeVcProvider:
                 "warnings": [],
             },
         )()
+
+
+class FakeTextTtsProvider:
+    name = "fake-text-tts"
+    audio_mime_type = "audio/wav"
+
+    def synthesize(self, text, target_language):
+        return TtsOutput(
+            audio_bytes=f"TTS:{target_language}:{text}".encode(),
+            audio_mime_type="audio/wav",
+            timings_ms={"tts": 1.0, "total": 1.0},
+            warnings=[],
+        )

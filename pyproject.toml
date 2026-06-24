@@ -31,6 +31,7 @@ deploy = [
 ]
 openai = [
   "openai>=2.0",
+  "websocket-client>=1.8",
 ]
 
 [build-system]

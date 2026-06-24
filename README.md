@@ -11,6 +11,9 @@
 
 - FastAPI backendとブラウザUIで、録音または音声アップロードから結果表示まで動きます。
 - `MO_PROVIDER_MODE=local` では、faster-whisper、Qwen3翻訳、Qwen3-TTS/Seed-VCを使ったローカル縦切りを動かします。
+- OpenAI API経路では、3段方式の音声翻訳とRealtime翻訳をUIから選べます。
+- テキスト読み上げでは、Google Translate TTS endpointとOpenAI TTS APIをUIから選べます。
+- ローカル開発では、直近10件の録音と生成音声をUIから再生できます。
 - `voice_mode=default` はfake provider専用です。
 - `MO_TTS_PROVIDER=qwen-seed-vc` では、`voice_mode=clone` をQwen3-TTS、`voice_mode=convert` をSeed-VCで比較できます。
 - RunPod向けにはDockerfileとServerless handlerを用意済みです。実デプロイはRunPod認証とモデルvolume設定が必要です。

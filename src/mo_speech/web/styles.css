@@ -11,7 +11,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -147,13 +148,20 @@ legend,
 input[type="file"],
 input[type="text"],
 input[type="number"],
-select {
+select,
+textarea {
   border: 1px solid #c8d2df;
   border-radius: 6px;
   box-sizing: border-box;
   min-height: 40px;
   padding: 8px 10px;
   width: 100%;
+}
+
+textarea {
+  line-height: 1.5;
+  min-height: 8rem;
+  resize: vertical;
 }
 
 button {
@@ -358,6 +366,57 @@ audio {
   padding-left: 20px;
 }
 
+.history-panel {
+  border-top: 1px solid #dde3ea;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+
+.history-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.history-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.history-grid article {
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.history-grid h3 {
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-item {
+  display: grid;
+  gap: 6px;
+}
+
+.history-item audio {
+  margin-top: 0;
+}
+
+.history-meta {
+  color: #5f6b7a;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 780px) {
   .app-shell {
     padding: 16px;
@@ -374,6 +433,10 @@ audio {
   }
 
   .result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-grid {
     grid-template-columns: 1fr;
   }
 }

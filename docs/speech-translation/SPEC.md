@@ -33,7 +33,11 @@
 
 ## UI状態
 
-- UIは、音声翻訳とVC比較を切り替えられる。
+- UIは、音声翻訳、テキスト読み上げ、VC比較を切り替えられる。
+- 音声翻訳は、処理方式に応じて必要な入力だけを表示する。
+  - `Qwen/local` と `OpenAI API` の3段方式では、入力言語、出力言語、声質変換、テキスト加工を表示する。
+  - `OpenAI Realtime翻訳` では、入力言語を自動判定として扱い、出力言語だけを表示する。初期実装ではテキスト加工とSeed-VC後段変換は表示しない。
+- テキスト読み上げでは、入力テキスト、読み上げ言語、TTS方式だけを表示する。録音、音声入力、ASR、翻訳、VC設定は表示しない。
 - VC比較では、変換元音声と参照音声を別々に指定し、選択したvoice conversion backendで変換元音声の内容を参照音声の声質へ寄せる。
 - VC比較ではASR、翻訳、TTSは実行しない。
 - VC比較では入力言語、出力言語、翻訳用の声設定、テキスト加工、文字起こし、翻訳、加工後の結果欄を表示しない。
@@ -120,9 +124,10 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 リクエスト:
 
 - `audio`: アップロードされた音声ファイル
-- `translation_backend`: `qwen` または `openai`
+- `translation_backend`: `qwen`、`openai`、`openai_realtime`
   - `qwen`: 既存のローカル/Qwen系pipelineを使う。fake modeではデモ応答を返す。
-  - `openai`: OpenAI APIでASR、翻訳、TTSを行う。
+  - `openai`: OpenAI APIでASR、翻訳、TTSを3段に分けて行う。
+  - `openai_realtime`: OpenAI Realtime translationで音声入力から翻訳音声を生成する。入力言語はAPI側の自動判定に任せる。
 - `source_language`: 例 `id-ID`
 - `target_language`: 例 `ja-JP`
 - `voice_mode`: `default`、`clone`、`convert`
@@ -134,8 +139,12 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 UIでは、実行内容を以下の構造にする。
 
 - 音声翻訳: 入力言語、出力言語、翻訳方式、声質変換を表示する。
-  - 翻訳方式は `Qwen/local` と `OpenAI API` を選択できる。
-  - 声質変換は `なし` または `Seed-VC` を選択できる。Seed-VC選択時はSeed-VC詳細設定を表示する。
+  - 翻訳方式は `Qwen/local`、`OpenAI API`、`OpenAI Realtime翻訳` を選択できる。
+  - `Qwen/local` と `OpenAI API` では、声質変換は `なし` または `Seed-VC` を選択できる。Seed-VC選択時はSeed-VC詳細設定を表示する。
+  - `OpenAI Realtime翻訳` では、入力言語は自動判定、声質変換は `なし` とする。
+- テキスト読み上げ: 入力テキスト、読み上げ言語、TTS方式を表示する。
+  - TTS方式は `Google Translate TTS endpoint` と `OpenAI TTS API` を選択できる。
+  - Google Translate TTS endpointは公式APIではないため、開発中の比較用に限定する。安定運用の既定にはしない。
 - VC単体: 変換元音声、参照音声、VC backend、Seed-VC詳細設定だけを表示する。入力言語、出力言語、末尾付加、翻訳結果欄は表示しない。
 
 OpenAI API経路では、`OPENAI_API_KEY` を環境変数で渡す。APIキーはリポジトリに保存しない。既定モデルは環境変数で差し替え可能にする。
@@ -146,6 +155,38 @@ OpenAI API経路の扱い:
 - 代替案: 既存の `Qwen/local` 経路で、faster-whisper、Qwen3翻訳、Qwen3-TTS、Seed-VCをローカルまたはGPUサーバーで動かす。
 - 課金・依存リスク: OpenAI APIは有料APIで、モデル、音声長、テキスト量に応じて費用が変わる。価格や利用条件は変わるため、運用前に公式の最新情報を確認する。
 - 秘密情報: `OPENAI_API_KEY` は環境変数またはデプロイ先のsecretとして渡し、`.env`、`.runpod.env`、ソースコード、docsには実値を書かない。
+
+OpenAI Realtime翻訳の扱い:
+
+- 目的: 音声入力から翻訳音声までを1つのRealtime sessionで処理し、3段API方式との品質、遅延、料金を比較する。
+- 初期実装: 既存UIと比較しやすいように、録音済み音声をサーバー側WebSocketからRealtime translationへ流し、出力音声とinput/output transcriptを回収する一括ジョブとして扱う。
+- 将来実装: ブラウザからWebRTCで直接Realtime sessionへ接続し、話している途中から翻訳音声を再生する。
+- 課金・依存リスク: Realtime translationは音声時間単位の有料APIで、料金や対応言語は変わるため運用前に公式の最新情報を確認する。
+
+`POST /api/text-to-speech-jobs`
+
+リクエスト:
+
+- `text`: 読み上げるテキスト。
+- `target_language`: 例 `id-ID`、`ja-JP`、`zh-CN`、`en-US`。
+- `tts_backend`: `google_translate` または `openai`。
+
+レスポンス:
+
+- `job_id`
+- `status`
+- `stages`
+- `current_stage`
+- `result`
+- `error`
+
+完了時の `result`:
+
+- `audio_mime_type`
+- `audio_base64`
+- `timings_ms`
+- `providers`
+- `warnings`
 
 レスポンス:
 
@@ -197,6 +238,7 @@ OpenAI API経路の扱い:
 - 出力音声は `outputs` として直近10件を保存する。
 - 11件目以降は古い音声と対応するmetadataを削除する。
 - 既定の保存先はgit管理外の `tmp/audio-history/` とする。
+- UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
 - サーバー運用ではFastAPIローカルファイル保存を永続保存先として使わない。必要な場合はオブジェクトストレージなどの外部保存先を使う。
 
 ## 応答速度の目標

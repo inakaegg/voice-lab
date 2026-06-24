@@ -13,10 +13,11 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .audio_history import AudioHistoryStore
-from .factory import create_openai_pipeline, create_pipeline_from_env
-from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline
-from .providers.openai_api import openai_pipeline_status
+from .audio_history import AudioHistoryEntry, AudioHistoryStore
+from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
+from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline, TtsOutput
+from .providers.openai_api import openai_pipeline_status, openai_realtime_pipeline_status
+from .providers.text_tts import create_text_tts_providers, text_tts_backend_statuses
 from .providers.voice import (
     SeedVcRuntimeSettings,
     VoiceConversionRequest,
@@ -32,19 +33,25 @@ WEB_DIR = PACKAGE_DIR / "web"
 def create_app(
     pipeline: SpeechTranslationPipeline | None = None,
     openai_pipeline: SpeechTranslationPipeline | None = None,
+    openai_realtime_pipeline=None,
+    text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     audio_history_store: AudioHistoryStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="mo speech translation")
     active_pipeline = pipeline or create_pipeline_from_env()
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
+    active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()
     translation_pipelines = {
         "qwen": active_pipeline,
         "openai": active_openai_pipeline,
+        "openai_realtime": active_openai_realtime_pipeline,
     }
+    active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
+    text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
@@ -64,7 +71,12 @@ def create_app(
             "provider_mode": os.getenv("MO_PROVIDER_MODE", "fake") or "fake",
             "providers": _provider_names(active_pipeline),
             "supported_voice_modes": _supported_voice_modes(active_pipeline),
-            "translation_backends": _translation_backends(active_pipeline, active_openai_pipeline),
+            "translation_backends": _translation_backends(
+                active_pipeline,
+                active_openai_pipeline,
+                active_openai_realtime_pipeline,
+            ),
+            "text_tts_backends": text_tts_backend_statuses(active_text_tts_providers),
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
         }
 
@@ -197,6 +209,24 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
 
+    @app.post("/api/text-to-speech-jobs")
+    async def create_text_to_speech_job(
+        text: Annotated[str, Form()],
+        target_language: Annotated[str, Form()],
+        tts_backend: Annotated[str, Form()] = "google_translate",
+    ) -> dict[str, object]:
+        try:
+            return text_tts_job_store.start(text=text, target_language=target_language, tts_backend=tts_backend)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/text-to-speech-jobs/{job_id}")
+    def get_text_to_speech_job(job_id: str) -> dict[str, object]:
+        try:
+            return text_tts_job_store.snapshot(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+
     @app.post("/api/voice-conversion-jobs")
     async def create_voice_conversion_job(
         source_audio: Annotated[UploadFile, File()],
@@ -249,6 +279,29 @@ def create_app(
             return voice_conversion_job_store.snapshot(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.get("/api/audio-history")
+    def get_audio_history() -> dict[str, object]:
+        return {
+            "recordings": [
+                _serialize_audio_history_entry("recordings", entry)
+                for entry in active_audio_history_store.list_entries("recordings")
+            ],
+            "outputs": [
+                _serialize_audio_history_entry("outputs", entry)
+                for entry in active_audio_history_store.list_entries("outputs")
+            ],
+        }
+
+    @app.get("/api/audio-history/{kind}/{filename}")
+    def get_audio_history_file(kind: str, filename: str) -> FileResponse:
+        try:
+            audio_path = active_audio_history_store.resolve_audio_path(kind, filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="audio history file not found") from exc
+        return FileResponse(audio_path)
 
     return app
 
@@ -328,7 +381,7 @@ class TranslationJobStore:
                 job.result = _serialize_pipeline_result(result)
                 job.partial_result = _partial_result_from_pipeline_result(result)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
-        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "failed"
@@ -349,6 +402,86 @@ class TranslationJobStore:
                     break
             else:
                 job.stages.append(item)
+
+
+@dataclass
+class TextToSpeechJob:
+    job_id: str
+    status: str
+    stages: list[dict[str, str]]
+    current_stage: dict[str, str] | None = None
+    result: dict[str, object] | None = None
+    error: str | None = None
+
+
+@dataclass
+class TextToSpeechJobStore:
+    providers: dict[str, object]
+    audio_history_store: AudioHistoryStore
+    jobs: dict[str, TextToSpeechJob] = field(default_factory=dict)
+    lock: Lock = field(default_factory=Lock)
+
+    def start(self, *, text: str, target_language: str, tts_backend: str) -> dict[str, object]:
+        provider = self._provider(tts_backend)
+        job = TextToSpeechJob(
+            job_id=uuid4().hex,
+            status="queued",
+            stages=[{"stage": "tts", "label": "音声生成", "provider": provider.name}],
+        )
+        with self.lock:
+            self.jobs[job.job_id] = job
+        thread = Thread(target=self._run_job, args=(job.job_id, text, target_language, tts_backend), daemon=True)
+        thread.start()
+        return self.snapshot(job.job_id)
+
+    def snapshot(self, job_id: str) -> dict[str, object]:
+        with self.lock:
+            job = self.jobs[job_id]
+            return {
+                "job_id": job.job_id,
+                "status": job.status,
+                "current_stage": job.current_stage,
+                "stages": list(job.stages),
+                "result": job.result,
+                "error": job.error,
+            }
+
+    def _run_job(self, job_id: str, text: str, target_language: str, tts_backend: str) -> None:
+        try:
+            provider = self._provider(tts_backend)
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "running"
+                job.current_stage = {"stage": "tts", "label": "音声生成", "provider": provider.name}
+                job.stages = [job.current_stage]
+
+            output = _normalize_tts_provider_output(provider.synthesize(text, target_language), provider.audio_mime_type)
+            self.audio_history_store.save_output(
+                output.audio_bytes,
+                suffix=_mime_suffix(output.audio_mime_type),
+                metadata={
+                    "endpoint": "text-to-speech-jobs",
+                    "job_id": job_id,
+                    "tts_backend": tts_backend,
+                    "target_language": target_language,
+                    "audio_mime_type": output.audio_mime_type,
+                },
+            )
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "succeeded"
+                job.result = _serialize_tts_output(output, provider.name)
+                job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
+        except Exception as exc:
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "failed"
+                job.error = str(exc)
+
+    def _provider(self, tts_backend: str):
+        if tts_backend not in self.providers:
+            raise ValueError(f"unsupported TTS backend: {tts_backend}")
+        return self.providers[tts_backend]
 
 
 @dataclass
@@ -416,7 +549,7 @@ class VoiceConversionJobStore:
                 job.status = "succeeded"
                 job.result = _serialize_voice_conversion_result(result)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
-        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "failed"
@@ -452,6 +585,7 @@ def _provider_names(pipeline: SpeechTranslationPipeline) -> dict[str, str]:
 def _translation_backends(
     qwen_pipeline: SpeechTranslationPipeline,
     openai_pipeline: SpeechTranslationPipeline,
+    openai_realtime_pipeline,
 ) -> list[dict[str, object]]:
     return [
         {
@@ -460,15 +594,25 @@ def _translation_backends(
             "available": True,
             "reason": "",
             "providers": _provider_names(qwen_pipeline),
+            "settings": {
+                "supported_routes": [
+                    {"source_language": "id-ID", "target_language": "ja-JP"},
+                    {"source_language": "ja-JP", "target_language": "zh-CN"},
+                ],
+                "supported_voice_modes": _supported_voice_modes(qwen_pipeline),
+                "source_language_mode": "specified",
+                "text_transform": True,
+            },
         },
         openai_pipeline_status(openai_pipeline),
+        openai_realtime_pipeline_status(openai_realtime_pipeline),
     ]
 
 
 def _select_translation_pipeline(
-    pipelines: dict[str, SpeechTranslationPipeline],
+    pipelines: dict[str, object],
     translation_backend: str,
-) -> SpeechTranslationPipeline:
+):
     if translation_backend not in pipelines:
         raise ValueError(f"unsupported translation backend: {translation_backend}")
     return pipelines[translation_backend]
@@ -583,6 +727,39 @@ def _serialize_voice_conversion_result(result: VoiceConversionResult) -> dict[st
     }
 
 
+def _normalize_tts_provider_output(output: bytes | TtsOutput, audio_mime_type: str) -> TtsOutput:
+    if isinstance(output, TtsOutput):
+        return TtsOutput(
+            audio_bytes=output.audio_bytes,
+            audio_mime_type=output.audio_mime_type or audio_mime_type,
+            timings_ms=output.timings_ms,
+            warnings=output.warnings,
+        )
+    return TtsOutput(audio_bytes=output, audio_mime_type=audio_mime_type)
+
+
+def _serialize_tts_output(output: TtsOutput, provider_name: str) -> dict[str, object]:
+    return {
+        "audio_mime_type": output.audio_mime_type or "audio/wav",
+        "audio_base64": base64.b64encode(output.audio_bytes).decode("ascii"),
+        "timings_ms": output.timings_ms,
+        "providers": {"tts": provider_name},
+        "warnings": output.warnings,
+    }
+
+
+def _serialize_audio_history_entry(kind: str, entry: AudioHistoryEntry) -> dict[str, object]:
+    metadata = entry.metadata or {}
+    return {
+        "kind": kind,
+        "filename": entry.audio_path.name,
+        "url": f"/api/audio-history/{kind}/{entry.audio_path.name}",
+        "metadata": metadata,
+        "created_at": metadata.get("created_at", ""),
+        "size_bytes": metadata.get("size_bytes", entry.audio_path.stat().st_size),
+    }
+
+
 def _partial_result_from_pipeline_result(result: PipelineResult) -> dict[str, str]:
     return {
         "transcript": result.transcript,
@@ -592,15 +769,28 @@ def _partial_result_from_pipeline_result(result: PipelineResult) -> dict[str, st
 
 
 def _planned_stages(pipeline: SpeechTranslationPipeline, request: PipelineRequest) -> list[dict[str, str]]:
+    if pipeline.tts.name.startswith("openai-realtime-audio-"):
+        return [
+            {"stage": "asr", "label": "入力音声送信", "provider": pipeline.asr.name},
+            {"stage": "translation", "label": "翻訳", "provider": pipeline.translator.name},
+            {"stage": "tts", "label": "翻訳音声受信", "provider": pipeline.tts.name},
+        ]
     stages = [
         {"stage": "asr", "label": "文字起こし", "provider": pipeline.asr.name},
         {"stage": "translation", "label": "翻訳", "provider": pipeline.translator.name},
         {"stage": "text_transform", "label": "テキスト加工", "provider": request.text_transform or "なし"},
     ]
-    if request.voice_mode == "convert" and pipeline.tts.name == "qwen3-tts-seed-vc":
+    if request.voice_mode == "convert" and pipeline.tts.name in {"qwen3-tts-seed-vc"}:
         stages.extend(
             [
                 {"stage": "tts", "label": "音声生成", "provider": "Qwen3-TTS"},
+                {"stage": "voice_conversion", "label": "声質変換", "provider": "Seed-VC"},
+            ]
+        )
+    elif request.voice_mode == "convert" and pipeline.tts.name.startswith("openai-tts-seed-vc-"):
+        stages.extend(
+            [
+                {"stage": "tts", "label": "音声生成", "provider": "OpenAI TTS"},
                 {"stage": "voice_conversion", "label": "声質変換", "provider": "Seed-VC"},
             ]
         )

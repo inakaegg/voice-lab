@@ -17,6 +17,7 @@ DEFAULT_AUDIO_HISTORY_LIMIT = 10
 class AudioHistoryEntry:
     audio_path: Path
     metadata_path: Path
+    metadata: dict[str, object] | None = None
 
 
 @dataclass
@@ -50,6 +51,36 @@ class AudioHistoryStore:
     ) -> AudioHistoryEntry | None:
         return self._save("outputs", audio_bytes, suffix=suffix, metadata=metadata)
 
+    def list_entries(self, kind: str) -> list[AudioHistoryEntry]:
+        if kind not in {"recordings", "outputs"}:
+            raise ValueError(f"unsupported audio history kind: {kind}")
+        target_dir = self.root / kind
+        if not self.enabled or not target_dir.exists():
+            return []
+        audio_paths = sorted(
+            [path for path in target_dir.iterdir() if path.is_file() and not path.name.endswith(".json")],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )[: self.limit]
+        return [
+            AudioHistoryEntry(
+                audio_path=audio_path,
+                metadata_path=audio_path.with_suffix(audio_path.suffix + ".json"),
+                metadata=_read_metadata(audio_path.with_suffix(audio_path.suffix + ".json")),
+            )
+            for audio_path in audio_paths
+        ]
+
+    def resolve_audio_path(self, kind: str, filename: str) -> Path:
+        if kind not in {"recordings", "outputs"}:
+            raise ValueError(f"unsupported audio history kind: {kind}")
+        if Path(filename).name != filename:
+            raise ValueError("invalid audio history filename")
+        audio_path = self.root / kind / filename
+        if not audio_path.is_file() or audio_path.name.endswith(".json"):
+            raise FileNotFoundError(filename)
+        return audio_path
+
     def _save(
         self,
         kind: str,
@@ -78,7 +109,7 @@ class AudioHistoryStore:
         }
         metadata_path.write_text(json.dumps(metadata_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         self._prune(target_dir)
-        return AudioHistoryEntry(audio_path=audio_path, metadata_path=metadata_path)
+        return AudioHistoryEntry(audio_path=audio_path, metadata_path=metadata_path, metadata=metadata_payload)
 
     def _prune(self, target_dir: Path) -> None:
         audio_paths = sorted(
@@ -101,3 +132,12 @@ def _safe_suffix(suffix: str) -> str:
 
 def _str_to_bool(value: str) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _read_metadata(metadata_path: Path) -> dict[str, object]:
+    if not metadata_path.is_file():
+        return {}
+    try:
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}

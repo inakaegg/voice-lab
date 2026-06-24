@@ -34,3 +34,27 @@ def test_audio_history_store_keeps_outputs_separate(tmp_path) -> None:
     assert recording.audio_path.parent.name == "recordings"
     assert output.audio_path.parent.name == "outputs"
     assert output.audio_path.read_bytes() == b"output"
+
+
+def test_audio_history_store_lists_and_resolves_entries(tmp_path) -> None:
+    store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    saved = store.save_output(b"output", suffix=".wav", metadata={"route": "ja-JP->id-ID"})
+
+    assert saved is not None
+    entries = store.list_entries("outputs")
+
+    assert len(entries) == 1
+    assert entries[0].metadata is not None
+    assert entries[0].metadata["route"] == "ja-JP->id-ID"
+    assert store.resolve_audio_path("outputs", saved.audio_path.name) == saved.audio_path
+
+
+def test_audio_history_store_rejects_invalid_history_filename(tmp_path) -> None:
+    store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+
+    try:
+        store.resolve_audio_path("outputs", "../secret.wav")
+    except ValueError as exc:
+        assert "invalid audio history filename" in str(exc)
+    else:
+        raise AssertionError("invalid filename was accepted")

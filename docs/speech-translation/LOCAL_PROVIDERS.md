@@ -61,6 +61,8 @@ Qwen3-TTS、Seed-VC、Chatterboxは依存が重く、既存の機械学習環境
 - `MO_TTS_PROVIDER=qwen-seed-vc` では、`voice_mode=clone` と `voice_mode=convert` の両方を選択できる。
 - `voice_mode=default` はlocal providerでは使わない。
 - OpenAI API経路では、ASR、翻訳、TTSをOpenAI APIで実行する。UIの翻訳方式で `音声翻訳（OpenAI API）` を選ぶ。声質変換にSeed-VCを選ぶと、OpenAI TTSの出力をSeed-VCで入力音声の声質へ変換する。
+- OpenAI Realtime翻訳経路では、音声入力から翻訳音声までをRealtime translationでまとめて実行する。UIの翻訳方式で `音声翻訳（OpenAI Realtime）` を選ぶ。初期実装では録音済み音声をサーバー側WebSocketから送る一括処理で、入力言語は自動判定、声質変換は行わない。
+- テキスト読み上げでは、Google Translate TTS endpointまたはOpenAI TTS APIを選べる。Google Translate TTS endpointは公式APIではないため、開発中の比較用とし、安定運用の前提にはしない。
 
 翻訳なしのVC比較では、`MO_TTS_PROVIDER` は使わない。UIの「VC比較」は `MO_VC_BACKENDS` で指定したbackendをruntime APIから取得する。
 
@@ -140,6 +142,10 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 | `OPENAI_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI TTSモデル。 |
 | `OPENAI_TTS_VOICE` | `coral` | OpenAI TTS voice。 |
 | `OPENAI_TTS_RESPONSE_FORMAT` | `wav` | OpenAI TTSの出力形式。Seed-VC後段を考慮し既定はwav。 |
+| `OPENAI_REALTIME_TRANSLATION_MODEL` | `gpt-realtime-translate` | OpenAI Realtime翻訳モデル。 |
+| `OPENAI_REALTIME_TRANSLATION_SAMPLE_RATE` | `24000` | Realtimeへ送るPCM16音声のsample rate。 |
+| `OPENAI_REALTIME_TRANSLATION_TIMEOUT_SECONDS` | `90` | Realtime WebSocketと音声変換のタイムアウト秒数。 |
+| `GOOGLE_TTS_TIMEOUT_SECONDS` | `30` | Google Translate TTS endpointのHTTP timeout。 |
 | `MO_AUDIO_HISTORY_ENABLED` | `1` | ローカル音声履歴を保存する。RunPodなどのサーバー環境では `0` を既定にする。 |
 | `MO_AUDIO_HISTORY_DIR` | `tmp/audio-history` | 録音と生成音声の保存先。git管理外に置く。 |
 | `MO_AUDIO_HISTORY_LIMIT` | `10` | `recordings` と `outputs` それぞれに残す件数。 |

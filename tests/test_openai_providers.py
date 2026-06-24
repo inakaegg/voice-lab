@@ -9,7 +9,9 @@ from mo_speech.providers.openai_api import (
     OpenAiTranslationProvider,
     OpenAiTtsProvider,
     create_openai_pipeline,
+    create_openai_realtime_translation_pipeline,
     openai_pipeline_status,
+    openai_realtime_pipeline_status,
 )
 
 
@@ -34,6 +36,27 @@ def test_openai_asr_uses_transcription_api(tmp_path: Path, monkeypatch) -> None:
     assert captured["model"] == "gpt-4o-transcribe"
     assert captured["language"] == "id"
     assert captured["response_format"] == "text"
+
+
+def test_openai_asr_omits_language_for_auto_detection(tmp_path: Path, monkeypatch) -> None:
+    audio_path = tmp_path / "speech.webm"
+    audio_path.write_bytes(b"audio")
+    captured: dict[str, object] = {}
+
+    class Transcriptions:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return "こんにちは。"
+
+    client = SimpleNamespace(audio=SimpleNamespace(transcriptions=Transcriptions()))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: client))
+
+    provider = OpenAiAsrProvider(model="gpt-4o-transcribe")
+
+    assert provider.transcribe(audio_path, "auto") == "こんにちは。"
+    assert "language" not in captured
 
 
 def test_openai_translation_uses_responses_api(monkeypatch) -> None:
@@ -98,3 +121,15 @@ def test_openai_pipeline_status_requires_api_key(monkeypatch) -> None:
 
     assert status["available"] is False
     assert status["reason"] == "OPENAI_API_KEY が設定されていません。"
+
+
+def test_openai_realtime_pipeline_status_reports_backend(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "websocket", SimpleNamespace(WebSocket=object))
+
+    status = openai_realtime_pipeline_status(create_openai_realtime_translation_pipeline())
+
+    assert status["id"] == "openai_realtime"
+    assert status["available"] is True
+    assert status["settings"]["source_language_mode"] == "auto"
+    assert "ja-JP" in status["settings"]["supported_target_languages"]
