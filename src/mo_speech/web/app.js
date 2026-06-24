@@ -1,5 +1,9 @@
 const form = document.querySelector("#translation-form");
 const audioInput = document.querySelector("#audio");
+const referenceAudioInput = document.querySelector("#reference_audio");
+const operationModeSelect = document.querySelector("#operation_mode");
+const voiceBackendSelect = document.querySelector("#voice_backend");
+const voiceBackendHint = document.querySelector("#voice-backend-hint");
 const audioDeviceSelect = document.querySelector("#audio_device");
 const audioDeviceRefreshButton = document.querySelector("#audio-device-refresh");
 const recordButton = document.querySelector("#record-button");
@@ -41,17 +45,21 @@ let inputLevelAnimation = null;
 let inputLevelAudioContext = null;
 let inputLevelSource = null;
 let supportedVoiceModes = ["convert", "clone"];
+let voiceConversionBackends = [];
 
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
 audioInput.addEventListener("change", handleAudioFileChange);
+operationModeSelect.addEventListener("change", syncOperationMode);
+voiceBackendSelect.addEventListener("change", syncVoiceBackendHint);
 form.source_language.addEventListener("change", syncTargetOptions);
 form.target_language.addEventListener("change", syncVoiceModeHint);
 form.voice_mode.addEventListener("change", syncVoiceModeHint);
-form.addEventListener("submit", submitTranslation);
+form.addEventListener("submit", submitCurrentOperation);
 syncTargetOptions();
 syncVoiceModeAvailability();
+syncOperationMode();
 loadRuntime();
 loadAudioDevices();
 
@@ -144,6 +152,14 @@ function handleAudioFileChange() {
   clearInputAudioPreview();
 }
 
+async function submitCurrentOperation(event) {
+  if (operationModeSelect.value === "voice_conversion") {
+    await submitVoiceConversion(event);
+    return;
+  }
+  await submitTranslation(event);
+}
+
 async function submitTranslation(event) {
   event.preventDefault();
   setStatus("処理中");
@@ -202,6 +218,59 @@ async function submitTranslation(event) {
   }
 }
 
+async function submitVoiceConversion(event) {
+  event.preventDefault();
+  setStatus("処理中");
+  renderPartialResult({});
+  renderProcessingJob({ status: "queued", stages: [] });
+  clearError();
+  submitButton.disabled = true;
+
+  try {
+    const sourceFile = audioInput.files[0];
+    const referenceFile = referenceAudioInput.files[0];
+    const formData = new FormData();
+    formData.append("voice_backend", selectedVoiceBackend());
+    if (sourceFile) {
+      if (sourceFile.size < 1) {
+        throw new Error("変換元音声ファイルが空です");
+      }
+      formData.append("source_audio", sourceFile);
+    } else if (recordedBlob) {
+      formData.append("source_audio", recordedBlob, recordedFileName);
+    } else {
+      throw new Error("変換元音声ファイルを選択するか録音してください");
+    }
+    if (!referenceFile || referenceFile.size < 1) {
+      throw new Error("参照音声ファイルを選択してください");
+    }
+    formData.append("reference_audio", referenceFile);
+
+    const response = await fetch("/api/voice-conversion-jobs", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "VCに失敗しました");
+    }
+
+    const job = await response.json();
+    renderProcessingJob(job);
+    const completedJob = await pollVoiceConversionJob(job.job_id);
+    if (!completedJob.result) {
+      throw new Error("VC結果を取得できませんでした");
+    }
+    renderVoiceConversionResult(completedJob.result);
+    setStatus("完了");
+  } catch (error) {
+    renderError(error.message || "エラー");
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
 async function pollTranslationJob(jobId) {
   while (true) {
     await delay(800);
@@ -217,6 +286,25 @@ async function pollTranslationJob(jobId) {
     }
     if (job.status === "failed") {
       throw new Error(job.error || "変換に失敗しました");
+    }
+  }
+}
+
+async function pollVoiceConversionJob(jobId) {
+  while (true) {
+    await delay(800);
+    const response = await fetch(`/api/voice-conversion-jobs/${jobId}`);
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "処理状況を取得できませんでした");
+    }
+    const job = await response.json();
+    renderProcessingJob(job);
+    if (job.status === "succeeded") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "VCに失敗しました");
     }
   }
 }
@@ -300,6 +388,32 @@ function renderResult(payload) {
   });
 }
 
+function renderVoiceConversionResult(payload) {
+  renderPartialResult({});
+
+  const audioBytes = base64ToBytes(payload.audio_base64);
+  const audioBlob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
+  if (outputAudioObjectUrl) {
+    URL.revokeObjectURL(outputAudioObjectUrl);
+  }
+  outputAudioObjectUrl = URL.createObjectURL(audioBlob);
+  outputAudio.src = outputAudioObjectUrl;
+
+  const timings = document.querySelector("#timings");
+  renderKeyValueList(timings, payload.timings_ms || {}, (value) => `${Number(value).toFixed(1)} ms`);
+
+  const providers = document.querySelector("#providers");
+  renderKeyValueList(providers, payload.providers || {}, (value) => String(value));
+
+  const warnings = document.querySelector("#warnings");
+  warnings.replaceChildren();
+  (payload.warnings || []).forEach((warning) => {
+    const item = document.createElement("li");
+    item.textContent = warning;
+    warnings.append(item);
+  });
+}
+
 function renderPartialResult(payload) {
   setText("#transcript", payload.transcript);
   setText("#translated-text", payload.translated_text);
@@ -327,7 +441,9 @@ function renderRuntime(payload) {
   runtimeMode.textContent = providerMode;
   runtimeMode.dataset.mode = providerMode;
   supportedVoiceModes = payload.supported_voice_modes || ["default"];
+  voiceConversionBackends = payload.voice_conversion_backends || [];
   syncVoiceModeAvailability();
+  syncVoiceBackendAvailability();
   runtimeNote.textContent =
     providerMode === "local"
       ? "録音または選択した音声を実際に処理します。"
@@ -527,7 +643,27 @@ function syncTargetOptions() {
   syncVoiceModeAvailability();
 }
 
+function syncOperationMode() {
+  const isVoiceConversion = operationModeSelect.value === "voice_conversion";
+  document.querySelectorAll(".vc-only").forEach((element) => {
+    element.hidden = !isVoiceConversion;
+  });
+  form.source_language.closest(".field-row").hidden = isVoiceConversion;
+  form.target_language.closest(".field-row").hidden = isVoiceConversion;
+  routeHint.hidden = isVoiceConversion;
+  form.voice_mode.closest(".field-row").hidden = isVoiceConversion;
+  voiceModeHint.hidden = isVoiceConversion;
+  document.querySelector(".suffix-panel").hidden = isVoiceConversion;
+  submitButton.textContent = isVoiceConversion ? "VC実行" : "変換";
+  syncVoiceBackendAvailability();
+  syncVoiceModeHint();
+}
+
 function syncVoiceModeHint() {
+  if (operationModeSelect.value === "voice_conversion") {
+    voiceModeHint.textContent = "";
+    return;
+  }
   const route = `${form.source_language.value}->${form.target_language.value}`;
   const voiceMode = form.voice_mode.value;
   if (!supportedVoiceModes.some((mode) => mode !== "default")) {
@@ -549,6 +685,53 @@ function syncVoiceModeHint() {
     return;
   }
   voiceModeHint.textContent = "";
+}
+
+function syncVoiceBackendAvailability() {
+  if (!voiceBackendSelect) {
+    return;
+  }
+  const fallbackBackends =
+    voiceConversionBackends.length > 0
+      ? voiceConversionBackends
+      : [{ id: "seed-vc", label: "Seed-VC", provider: "Plachta/Seed-VC", available: true, reason: "" }];
+  const currentValue = voiceBackendSelect.value;
+  voiceBackendSelect.replaceChildren(
+    ...fallbackBackends.map((backend) => {
+      const label = backend.available ? backend.label : `${backend.label}（未導入）`;
+      const option = new Option(label, backend.id);
+      option.disabled = !backend.available;
+      option.dataset.reason = backend.reason || "";
+      option.dataset.provider = backend.provider || "";
+      return option;
+    }),
+  );
+  const availableBackends = fallbackBackends.filter((backend) => backend.available);
+  if (availableBackends.length === 0) {
+    voiceBackendSelect.disabled = true;
+  } else {
+    voiceBackendSelect.disabled = false;
+    if (availableBackends.some((backend) => backend.id === currentValue)) {
+      voiceBackendSelect.value = currentValue;
+    } else {
+      voiceBackendSelect.value = availableBackends[0].id;
+    }
+  }
+  syncVoiceBackendHint();
+}
+
+function syncVoiceBackendHint() {
+  if (!voiceBackendHint) {
+    return;
+  }
+  const selected = [...voiceBackendSelect.options].find((option) => option.value === voiceBackendSelect.value);
+  if (!selected) {
+    voiceBackendHint.textContent = "利用できるVC backendがありません。";
+    return;
+  }
+  const reason = selected.dataset.reason;
+  const provider = selected.dataset.provider;
+  voiceBackendHint.textContent = reason || provider || "";
 }
 
 function syncVoiceModeAvailability() {
@@ -585,6 +768,14 @@ function selectedVoiceMode() {
     return "default";
   }
   return form.voice_mode.value || preferredVoiceMode(selectableModes);
+}
+
+function selectedVoiceBackend() {
+  const selected = [...voiceBackendSelect.options].find((option) => option.value === voiceBackendSelect.value);
+  if (!selected || selected.disabled) {
+    throw new Error("利用可能なVC backendを選択してください");
+  }
+  return selected.value;
 }
 
 function base64ToBytes(base64) {

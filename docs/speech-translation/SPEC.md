@@ -33,6 +33,10 @@
 
 ## UI状態
 
+- UIは、音声翻訳とVC比較を切り替えられる。
+- VC比較では、変換元音声と参照音声を別々に指定し、選択したvoice conversion backendで変換元音声の内容を参照音声の声質へ寄せる。
+- VC比較ではASR、翻訳、TTSは実行しない。
+- VC比較のbackend候補はruntime APIから取得し、ローカル環境に未導入のbackendは選択できない状態にする。
 - 録音またはファイル選択後、ユーザーは入力音声を変換前に再生確認できる。
 - 録音開始時は既存のファイル選択をクリアし、ファイル選択時は既存の録音をクリアする。
 - ブラウザが入力デバイス一覧を返せる場合は、録音に使うマイクをUIで選択できる。
@@ -64,6 +68,14 @@
 ## 声の扱い
 
 最終的には、入力した人の声を出力音声にも反映する。これはアプリの主要な価値として扱う。
+
+翻訳なしのVC比較では、以下を正とする。
+
+- 入力: 変換元音声と参照音声。
+- 出力: 変換元音声の発話内容を保ち、参照音声の話者らしさへ寄せた音声。
+- 参照音声は数秒から試せることを重視する。
+- 初期比較backendはSeed-VCを基準にし、Chatterbox VCを追加比較候補にする。
+- OpenVoiceV2は軽量なtone color変換候補だが、初期の直接VC backendとしては未実装扱いにする。
 
 段階は以下のように分ける。
 
@@ -121,6 +133,31 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - `audio_url` またはinline音声bytes
 - `audio_mime_type`
 - `timings`
+- `providers`
+- `warnings`
+
+`POST /api/voice-conversion-jobs`
+
+リクエスト:
+
+- `source_audio`: 変換元音声ファイル
+- `reference_audio`: 声質参照音声ファイル
+- `voice_backend`: 例 `seed-vc`、`chatterbox`
+
+レスポンス:
+
+- `job_id`
+- `status`
+- `stages`
+- `current_stage`
+- `result`
+- `error`
+
+完了時の `result`:
+
+- `audio_mime_type`
+- `audio_base64`
+- `timings_ms`
 - `providers`
 - `warnings`
 

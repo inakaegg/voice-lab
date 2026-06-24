@@ -8,7 +8,14 @@ import pytest
 
 from mo_speech.providers.fake import FakeTtsProvider
 from mo_speech.pipeline import PipelineProgress, TtsOutput
-from mo_speech.providers.voice import QwenSeedVcTtsProvider, QwenVoiceCloneTtsProvider, SeedVcVoiceConversionTtsProvider
+from mo_speech.providers.voice import (
+    ChatterboxDirectVoiceConversionProvider,
+    QwenSeedVcTtsProvider,
+    QwenVoiceCloneTtsProvider,
+    SeedVcDirectVoiceConversionProvider,
+    SeedVcVoiceConversionTtsProvider,
+    create_voice_conversion_service_from_env,
+)
 
 
 def test_qwen_voice_clone_provider_invokes_helper_with_reference_text(
@@ -325,6 +332,107 @@ def test_seed_vc_provider_reports_conversion_progress(
     assert progress == [
         PipelineProgress(stage="tts", label="音声生成", provider="source-model"),
         PipelineProgress(stage="voice_conversion", label="声質変換", provider="Plachta/Seed-VC"),
+    ]
+
+
+def test_seed_vc_direct_provider_converts_source_to_reference_voice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_audio = tmp_path / "source.webm"
+    reference_audio = tmp_path / "reference.wav"
+    source_audio.write_bytes(b"source audio")
+    reference_audio.write_bytes(b"reference audio")
+    captured: dict[str, object] = {}
+    prepared_files: list[Path] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffmpeg":
+            output_path = Path(command[-1])
+            prepared_files.append(output_path)
+            output_path.write_bytes(f"prepared:{output_path.name}".encode())
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        output_dir = Path(command[command.index("--output") + 1])
+        captured["command"] = command
+        captured["source_bytes"] = Path(command[command.index("--source") + 1]).read_bytes()
+        captured["target_bytes"] = Path(command[command.index("--target") + 1]).read_bytes()
+        (output_dir / "converted.wav").write_bytes(b"direct seed vc wav")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("mo_speech.providers.voice.subprocess.run", fake_run)
+
+    provider = SeedVcDirectVoiceConversionProvider(
+        python_executable="voice-python",
+        work_dir=tmp_path / "seed-work",
+        diffusion_steps=6,
+        fp16=False,
+    )
+
+    result = provider.convert(source_audio_path=source_audio, reference_audio_path=reference_audio)
+
+    assert result.audio_bytes == b"direct seed vc wav"
+    assert result.audio_mime_type == "audio/wav"
+    assert result.timings_ms["source_audio_prepare"] >= 0
+    assert result.timings_ms["reference_audio_prepare"] >= 0
+    assert result.timings_ms["voice_conversion"] >= 0
+    assert len(prepared_files) == 2
+    assert captured["command"][:3] == ["voice-python", "-m", "seed_vc.inference"]
+    assert captured["source_bytes"] == b"prepared:source.wav"
+    assert captured["target_bytes"] == b"prepared:reference.wav"
+    assert "--diffusion-steps" in captured["command"]
+
+
+def test_chatterbox_direct_provider_invokes_helper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_audio = tmp_path / "source.wav"
+    reference_audio = tmp_path / "reference.wav"
+    source_audio.write_bytes(b"source audio")
+    reference_audio.write_bytes(b"reference audio")
+    captured: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffmpeg":
+            Path(command[-1]).write_bytes(b"prepared wav")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        output_path = Path(command[command.index("--output") + 1])
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        output_path.write_bytes(b"chatterbox wav")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("mo_speech.providers.voice.subprocess.run", fake_run)
+
+    provider = ChatterboxDirectVoiceConversionProvider(
+        python_executable="voice-python",
+        work_dir=tmp_path / "chatterbox-work",
+        device="mps",
+        model_dir="/models/chatterbox",
+    )
+
+    result = provider.convert(source_audio_path=source_audio, reference_audio_path=reference_audio)
+
+    assert result.audio_bytes == b"chatterbox wav"
+    assert result.audio_mime_type == "audio/wav"
+    command = captured["command"]
+    assert command[:3] == ["voice-python", "-m", "mo_speech.chatterbox_vc_convert"]
+    assert command[command.index("--device") + 1] == "mps"
+    assert command[command.index("--model-dir") + 1] == "/models/chatterbox"
+
+
+def test_voice_conversion_service_from_env_lists_configured_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MO_VC_BACKENDS", "seed-vc,chatterbox,openvoice-v2,unknown")
+
+    service = create_voice_conversion_service_from_env()
+
+    assert [info.backend_id for info in service.backend_infos()] == [
+        "seed-vc",
+        "chatterbox",
+        "openvoice-v2",
+        "unknown",
     ]
 
 

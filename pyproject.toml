@@ -23,6 +23,9 @@ voice = [
   "qwen-tts==0.1.1",
   "seed-vc==0.4.3",
 ]
+vc-compare = [
+  "chatterbox-tts>=0.1.7",
+]
 deploy = [
   "runpod>=1.7",
 ]

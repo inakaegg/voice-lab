@@ -28,6 +28,14 @@
           </section>
 
           <div class="field-row">
+            <label for="operation_mode">実行内容</label>
+            <select id="operation_mode" name="operation_mode">
+              <option value="translation">音声翻訳</option>
+              <option value="voice_conversion">VC比較</option>
+            </select>
+          </div>
+
+          <div class="field-row">
             <label for="source_language">入力言語</label>
             <select id="source_language" name="source_language">
               <option value="id-ID">インドネシア語</option>
@@ -53,9 +61,22 @@
           </div>
           <p id="voice-mode-hint" class="route-hint"></p>
 
+          <div class="field-row vc-only" hidden>
+            <label for="voice_backend">VC backend</label>
+            <select id="voice_backend" name="voice_backend">
+              <option value="seed-vc">Seed-VC</option>
+            </select>
+          </div>
+          <p id="voice-backend-hint" class="route-hint vc-only" hidden></p>
+
           <div class="field-row">
             <label for="audio">音声ファイル</label>
             <input id="audio" name="audio" type="file" accept="audio/*" />
+          </div>
+
+          <div class="field-row vc-only" hidden>
+            <label for="reference_audio">参照音声ファイル</label>
+            <input id="reference_audio" name="reference_audio" type="file" accept="audio/*" />
           </div>
 
           <div class="field-row">

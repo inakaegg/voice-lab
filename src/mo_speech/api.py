@@ -15,15 +15,26 @@ from fastapi.staticfiles import StaticFiles
 
 from .pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline
 from .providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
+from .providers.voice import (
+    VoiceConversionRequest,
+    VoiceConversionResult,
+    VoiceConversionService,
+    create_voice_conversion_service_from_env,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
 
 
-def create_app(pipeline: SpeechTranslationPipeline | None = None) -> FastAPI:
+def create_app(
+    pipeline: SpeechTranslationPipeline | None = None,
+    voice_conversion_service: VoiceConversionService | None = None,
+) -> FastAPI:
     app = FastAPI(title="mo speech translation")
     active_pipeline = pipeline or create_pipeline_from_env()
+    active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     job_store = TranslationJobStore(active_pipeline)
+    voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service)
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -42,6 +53,7 @@ def create_app(pipeline: SpeechTranslationPipeline | None = None) -> FastAPI:
             "provider_mode": os.getenv("MO_PROVIDER_MODE", "fake") or "fake",
             "providers": _provider_names(active_pipeline),
             "supported_voice_modes": _supported_voice_modes(active_pipeline),
+            "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
         }
 
     @app.post("/api/translate-speech")
@@ -106,6 +118,36 @@ def create_app(pipeline: SpeechTranslationPipeline | None = None) -> FastAPI:
     def get_translate_speech_job(job_id: str) -> dict[str, object]:
         try:
             return job_store.snapshot(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.post("/api/voice-conversion-jobs")
+    async def create_voice_conversion_job(
+        source_audio: Annotated[UploadFile, File()],
+        reference_audio: Annotated[UploadFile, File()],
+        voice_backend: Annotated[str, Form()] = "seed-vc",
+    ) -> dict[str, object]:
+        with NamedTemporaryFile(suffix=_upload_suffix(source_audio.filename), delete=False) as temp_source:
+            temp_source.write(await source_audio.read())
+            temp_source.flush()
+            source_audio_path = Path(temp_source.name)
+
+        with NamedTemporaryFile(suffix=_upload_suffix(reference_audio.filename), delete=False) as temp_reference:
+            temp_reference.write(await reference_audio.read())
+            temp_reference.flush()
+            reference_audio_path = Path(temp_reference.name)
+
+        request = VoiceConversionRequest(
+            source_audio_path=source_audio_path,
+            reference_audio_path=reference_audio_path,
+            backend_id=voice_backend,
+        )
+        return voice_conversion_job_store.start(request, [source_audio_path, reference_audio_path])
+
+    @app.get("/api/voice-conversion-jobs/{job_id}")
+    def get_voice_conversion_job(job_id: str) -> dict[str, object]:
+        try:
+            return voice_conversion_job_store.snapshot(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
 
@@ -192,6 +234,82 @@ class TranslationJobStore:
                 job.stages.append(item)
 
 
+@dataclass
+class VoiceConversionJob:
+    job_id: str
+    status: str
+    stages: list[dict[str, str]]
+    current_stage: dict[str, str] | None = None
+    result: dict[str, object] | None = None
+    error: str | None = None
+
+
+@dataclass
+class VoiceConversionJobStore:
+    service: VoiceConversionService
+    jobs: dict[str, VoiceConversionJob] = field(default_factory=dict)
+    lock: Lock = field(default_factory=Lock)
+
+    def start(self, request: VoiceConversionRequest, audio_paths: list[Path]) -> dict[str, object]:
+        job = VoiceConversionJob(
+            job_id=uuid4().hex,
+            status="queued",
+            stages=_planned_voice_conversion_stages(self.service, request),
+        )
+        with self.lock:
+            self.jobs[job.job_id] = job
+        thread = Thread(target=self._run_job, args=(job.job_id, request, audio_paths), daemon=True)
+        thread.start()
+        return self.snapshot(job.job_id)
+
+    def snapshot(self, job_id: str) -> dict[str, object]:
+        with self.lock:
+            job = self.jobs[job_id]
+            return {
+                "job_id": job.job_id,
+                "status": job.status,
+                "current_stage": job.current_stage,
+                "stages": list(job.stages),
+                "result": job.result,
+                "error": job.error,
+            }
+
+    def _run_job(self, job_id: str, request: VoiceConversionRequest, audio_paths: list[Path]) -> None:
+        try:
+            with self.lock:
+                self.jobs[job_id].status = "running"
+
+            def report_progress(progress: PipelineProgress) -> None:
+                self._update_progress(job_id, progress)
+
+            result = self.service.convert(request, progress_callback=report_progress)
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "succeeded"
+                job.result = _serialize_voice_conversion_result(result)
+                job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "failed"
+                job.error = str(exc)
+        finally:
+            for audio_path in audio_paths:
+                audio_path.unlink(missing_ok=True)
+
+    def _update_progress(self, job_id: str, progress: PipelineProgress) -> None:
+        item = _serialize_progress(progress)
+        with self.lock:
+            job = self.jobs[job_id]
+            job.current_stage = item
+            for index, stage in enumerate(job.stages):
+                if stage["stage"] == item["stage"]:
+                    job.stages[index] = item
+                    break
+            else:
+                job.stages.append(item)
+
+
 def create_pipeline_from_env() -> SpeechTranslationPipeline:
     if os.getenv("MO_PROVIDER_MODE") == "local":
         return create_local_pipeline()
@@ -247,6 +365,19 @@ def _supported_voice_modes(pipeline: SpeechTranslationPipeline) -> list[str]:
     return modes
 
 
+def _voice_conversion_backends(service: VoiceConversionService) -> list[dict[str, object]]:
+    return [
+        {
+            "id": info.backend_id,
+            "label": info.label,
+            "provider": info.provider,
+            "available": info.available,
+            "reason": info.reason,
+        }
+        for info in service.backend_infos()
+    ]
+
+
 def _create_pipeline_request(
     audio_path: Path,
     source_language: str,
@@ -284,6 +415,16 @@ def _serialize_pipeline_result(result: PipelineResult) -> dict[str, object]:
     }
 
 
+def _serialize_voice_conversion_result(result: VoiceConversionResult) -> dict[str, object]:
+    return {
+        "audio_mime_type": result.output_audio_mime_type,
+        "audio_base64": base64.b64encode(result.output_audio_bytes).decode("ascii"),
+        "timings_ms": result.timings_ms,
+        "providers": result.providers,
+        "warnings": result.warnings,
+    }
+
+
 def _partial_result_from_pipeline_result(result: PipelineResult) -> dict[str, str]:
     return {
         "transcript": result.transcript,
@@ -308,6 +449,22 @@ def _planned_stages(pipeline: SpeechTranslationPipeline, request: PipelineReques
     else:
         stages.append({"stage": "tts", "label": "音声生成", "provider": pipeline.tts.name})
     return stages
+
+
+def _planned_voice_conversion_stages(
+    service: VoiceConversionService,
+    request: VoiceConversionRequest,
+) -> list[dict[str, str]]:
+    provider = request.backend_id
+    for info in service.backend_infos():
+        if info.backend_id == request.backend_id:
+            provider = info.provider
+            break
+    return [
+        {"stage": "source_audio_prepare", "label": "変換元音声準備", "provider": "ffmpeg"},
+        {"stage": "reference_audio_prepare", "label": "参照音声準備", "provider": "ffmpeg"},
+        {"stage": "voice_conversion", "label": "声質変換", "provider": provider},
+    ]
 
 
 def _serialize_progress(progress: PipelineProgress) -> dict[str, str]:

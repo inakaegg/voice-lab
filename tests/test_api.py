@@ -7,6 +7,10 @@ from fastapi.testclient import TestClient
 
 from mo_speech.api import create_app
 from mo_speech.pipeline import PipelineProgress, PipelineResult
+from mo_speech.providers.voice import (
+    VoiceConversionBackendInfo,
+    VoiceConversionService,
+)
 
 
 def test_root_serves_browser_ui() -> None:
@@ -17,7 +21,10 @@ def test_root_serves_browser_ui() -> None:
     assert response.status_code == 200
     assert "音声翻訳" in response.text
     assert "source_language" in response.text
+    assert "operation_mode" in response.text
     assert "voice_mode" in response.text
+    assert "voice_backend" in response.text
+    assert "reference_audio" in response.text
     assert "route-hint" in response.text
     assert "runtime-mode" in response.text
     assert "runtime-note" in response.text
@@ -34,6 +41,7 @@ def test_root_serves_browser_ui() -> None:
     assert "processing-steps" in response.text
     assert "error-message" in response.text
     assert "末尾付加" in response.text
+    assert "VC比較" in response.text
     assert "/static/app.js" in response.text
 
 
@@ -47,6 +55,12 @@ def test_static_assets_are_served() -> None:
     assert "submitTranslation" in js_response.text
     assert "append_suffix" in js_response.text
     assert "loadRuntime" in js_response.text
+    assert "submitCurrentOperation" in js_response.text
+    assert "submitVoiceConversion" in js_response.text
+    assert "pollVoiceConversionJob" in js_response.text
+    assert "syncOperationMode" in js_response.text
+    assert "syncVoiceBackendAvailability" in js_response.text
+    assert "selectedVoiceBackend" in js_response.text
     assert "renderInputAudioPreview" in js_response.text
     assert "loadAudioDevices" in js_response.text
     assert "selectedAudioConstraint" in js_response.text
@@ -68,7 +82,7 @@ def test_static_assets_are_served() -> None:
 
 
 def test_runtime_api_returns_active_mode_and_provider_names() -> None:
-    client = TestClient(create_app())
+    client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
 
     response = client.get("/api/runtime")
 
@@ -77,6 +91,15 @@ def test_runtime_api_returns_active_mode_and_provider_names() -> None:
         "provider_mode": "fake",
         "providers": {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"},
         "supported_voice_modes": ["default"],
+        "voice_conversion_backends": [
+            {
+                "id": "fake-vc",
+                "label": "Fake VC",
+                "provider": "fake-vc-provider",
+                "available": True,
+                "reason": "",
+            }
+        ],
     }
 
 
@@ -86,12 +109,31 @@ def test_runtime_api_returns_supported_voice_modes_from_tts_provider() -> None:
         translator = SimpleNamespace(name="custom-translation")
         tts = SimpleNamespace(name="custom-tts", supported_voice_modes=("convert", "clone", "convert"))
 
-    client = TestClient(create_app(pipeline=CustomPipeline()))  # type: ignore[arg-type]
+    client = TestClient(
+        create_app(pipeline=CustomPipeline(), voice_conversion_service=_fake_voice_conversion_service())
+    )  # type: ignore[arg-type]
 
     response = client.get("/api/runtime")
 
     assert response.status_code == 200
     assert response.json()["supported_voice_modes"] == ["convert", "clone"]
+
+
+def test_runtime_api_marks_unavailable_voice_conversion_backend() -> None:
+    client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service(available=False)))
+
+    response = client.get("/api/runtime")
+
+    assert response.status_code == 200
+    assert response.json()["voice_conversion_backends"] == [
+        {
+            "id": "fake-vc",
+            "label": "Fake VC",
+            "provider": "fake-vc-provider",
+            "available": False,
+            "reason": "not installed",
+        }
+    ]
 
 
 def test_create_app_preloads_pipeline_when_enabled(monkeypatch) -> None:
@@ -243,6 +285,42 @@ def test_translate_speech_job_api_reports_partial_result_while_running() -> None
         raise AssertionError("translation job did not finish")
 
 
+def test_voice_conversion_job_api_runs_selected_backend() -> None:
+    client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
+
+    response = client.post(
+        "/api/voice-conversion-jobs",
+        data={"voice_backend": "fake-vc"},
+        files={
+            "source_audio": ("source.wav", b"source audio", "audio/wav"),
+            "reference_audio": ("reference.wav", b"reference audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] in {"queued", "running", "succeeded"}
+    assert payload["stages"] == [
+        {"stage": "source_audio_prepare", "label": "変換元音声準備", "provider": "ffmpeg"},
+        {"stage": "reference_audio_prepare", "label": "参照音声準備", "provider": "ffmpeg"},
+        {"stage": "voice_conversion", "label": "声質変換", "provider": "fake-vc-provider"},
+    ]
+
+    job_id = payload["job_id"]
+    for _ in range(20):
+        status_payload = client.get(f"/api/voice-conversion-jobs/{job_id}").json()
+        if status_payload["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("voice conversion job did not finish")
+
+    assert status_payload["result"]["audio_base64"] != ""
+    assert status_payload["result"]["audio_mime_type"] == "audio/wav"
+    assert status_payload["result"]["providers"] == {"voice_conversion": "fake-vc-provider"}
+    assert status_payload["result"]["timings_ms"]["voice_conversion"] == 1.0
+
+
 def test_translate_speech_api_rejects_unsupported_route() -> None:
     client = TestClient(create_app())
 
@@ -286,3 +364,46 @@ def test_translate_speech_api_preserves_uploaded_audio_suffix() -> None:
 
     assert response.status_code == 200
     assert captured["audio_path"].suffix == ".webm"
+
+
+class FakeVoiceConversionProvider:
+    backend_id = "fake-vc"
+    label = "Fake VC"
+    name = "fake-vc-provider"
+    audio_mime_type = "audio/wav"
+
+    def __init__(self, *, available: bool = True) -> None:
+        self.available = available
+
+    def backend_info(self) -> VoiceConversionBackendInfo:
+        return VoiceConversionBackendInfo(
+            self.backend_id,
+            self.label,
+            self.name,
+            self.available,
+            "" if self.available else "not installed",
+        )
+
+    def convert(
+        self,
+        *,
+        source_audio_path: Path,
+        reference_audio_path: Path,
+        progress_callback=None,
+    ):
+        if progress_callback is not None:
+            progress_callback(PipelineProgress("voice_conversion", "声質変換", self.name))
+        return type(
+            "FakeTtsOutput",
+            (),
+            {
+                "audio_bytes": b"fake converted wav",
+                "audio_mime_type": "audio/wav",
+                "timings_ms": {"voice_conversion": 1.0},
+                "warnings": [],
+            },
+        )()
+
+
+def _fake_voice_conversion_service(*, available: bool = True) -> VoiceConversionService:
+    return VoiceConversionService(providers=[FakeVoiceConversionProvider(available=available)])
