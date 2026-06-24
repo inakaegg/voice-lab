@@ -44,7 +44,10 @@ OpenAI APIの音声翻訳経路も試す場合:
 
 ```sh
 python3 -m pip install -e ".[openai]"
+cp .env.example .env
 ```
+
+`.env` はローカル起動時に自動で読み込まれる。既にシェルで設定済みの環境変数は `.env` では上書きしない。OpenAI API経路を使う場合だけ、git管理外の `.env` に `OPENAI_API_KEY` を設定する。
 
 Qwen3-TTS、Seed-VC、Chatterboxは依存が重く、既存の機械学習環境とバージョンが衝突する場合がある。開発時は専用venvを作り、`QWEN_TTS_PYTHON`、`SEED_VC_PYTHON`、`CHATTERBOX_PYTHON` でそのPythonを指定できる。
 

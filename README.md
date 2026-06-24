@@ -35,6 +35,15 @@ python3 -m pip install -e ".[dev,local]"
 python3 -m pip install -e ".[dev,local,voice]"
 ```
 
+OpenAI API経路も使う場合:
+
+```sh
+python3 -m pip install -e ".[dev,openai]"
+cp .env.example .env
+```
+
+`.env` はgit管理しません。OpenAI API経路を使う場合だけ、`.env` に `OPENAI_API_KEY` を設定します。
+
 ## 起動
 
 fake provider:

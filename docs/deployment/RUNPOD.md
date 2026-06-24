@@ -66,12 +66,15 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_NETWORK_VOLUME_ID` | 作成済みNetwork Volume ID |
 | `RUNPOD_SERVERLESS_TEMPLATE_ID` | Serverless endpoint作成時のtemplate ID |
 | `RUNPOD_ENDPOINT_ID` | Serverlessスモーク確認先 |
+| `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー |
 
 課金リソースを作らずにコマンドだけ確認する場合は、各CLIスクリプトに `RUNPOD_DRY_RUN=1` を付ける。
 
 ```sh
 RUNPOD_DRY_RUN=1 scripts/runpod_create_gpu_pod.sh
 ```
+
+`.runpod.env` はコンテナ内へファイルとしてアップロードしない。作成スクリプトがローカルで `.runpod.env` を読み、RunPodのPod/Serverless templateへ `--env '{...}'` として環境変数を登録する。既存のtemplateを作った後に `.runpod.env` だけを変更しても、RunPod側の環境変数は自動更新されない。OpenAI APIキーを追加・変更した場合は、templateまたはPodを作り直すか、RunPod管理画面で環境変数を更新する。
 
 ## Docker image
 

@@ -107,7 +107,8 @@ def test_static_assets_are_served() -> None:
     assert ".error-message" in css_response.text
 
 
-def test_runtime_api_returns_active_mode_and_provider_names() -> None:
+def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
 
     response = client.get("/api/runtime")

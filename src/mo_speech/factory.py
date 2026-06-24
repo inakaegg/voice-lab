@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import os
 
+from .env import load_project_env
 from .pipeline import SpeechTranslationPipeline
 from .providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from .providers.openai_api import create_openai_pipeline
+
+
+load_project_env()
 
 
 def create_pipeline_from_env() -> SpeechTranslationPipeline:
