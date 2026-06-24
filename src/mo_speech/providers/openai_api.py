@@ -19,31 +19,84 @@ from ..pipeline import PipelineProgress, PipelineRequest, PipelineResult, Speech
 from .voice import SeedVcVoiceConversionTtsProvider
 
 
+OPENAI_SUPPORTED_LANGUAGES = (
+    ("id-ID", "id", "Indonesian"),
+    ("ja-JP", "ja", "Japanese"),
+    ("zh-CN", "zh", "Chinese"),
+    ("en-US", "en", "English"),
+    ("af", "af", "Afrikaans"),
+    ("ar", "ar", "Arabic"),
+    ("hy", "hy", "Armenian"),
+    ("az", "az", "Azerbaijani"),
+    ("be", "be", "Belarusian"),
+    ("bs", "bs", "Bosnian"),
+    ("bg", "bg", "Bulgarian"),
+    ("ca", "ca", "Catalan"),
+    ("hr", "hr", "Croatian"),
+    ("cs", "cs", "Czech"),
+    ("da", "da", "Danish"),
+    ("nl", "nl", "Dutch"),
+    ("et", "et", "Estonian"),
+    ("fi", "fi", "Finnish"),
+    ("fr", "fr", "French"),
+    ("gl", "gl", "Galician"),
+    ("de", "de", "German"),
+    ("el", "el", "Greek"),
+    ("he", "he", "Hebrew"),
+    ("hi", "hi", "Hindi"),
+    ("hu", "hu", "Hungarian"),
+    ("is", "is", "Icelandic"),
+    ("it", "it", "Italian"),
+    ("kn", "kn", "Kannada"),
+    ("kk", "kk", "Kazakh"),
+    ("ko", "ko", "Korean"),
+    ("lv", "lv", "Latvian"),
+    ("lt", "lt", "Lithuanian"),
+    ("mk", "mk", "Macedonian"),
+    ("ms", "ms", "Malay"),
+    ("mr", "mr", "Marathi"),
+    ("mi", "mi", "Maori"),
+    ("ne", "ne", "Nepali"),
+    ("no", "no", "Norwegian"),
+    ("fa", "fa", "Persian"),
+    ("pl", "pl", "Polish"),
+    ("pt", "pt", "Portuguese"),
+    ("ro", "ro", "Romanian"),
+    ("ru", "ru", "Russian"),
+    ("sr", "sr", "Serbian"),
+    ("sk", "sk", "Slovak"),
+    ("sl", "sl", "Slovenian"),
+    ("es", "es", "Spanish"),
+    ("sw", "sw", "Swahili"),
+    ("sv", "sv", "Swedish"),
+    ("tl", "tl", "Tagalog"),
+    ("ta", "ta", "Tamil"),
+    ("th", "th", "Thai"),
+    ("tr", "tr", "Turkish"),
+    ("uk", "uk", "Ukrainian"),
+    ("ur", "ur", "Urdu"),
+    ("vi", "vi", "Vietnamese"),
+    ("cy", "cy", "Welsh"),
+)
+
 OPENAI_LANGUAGE_CODES = {
     "auto": "",
-    "id-ID": "id",
-    "ja-JP": "ja",
-    "zh-CN": "zh",
-    "en-US": "en",
+    **{app_code: api_code for app_code, api_code, _ in OPENAI_SUPPORTED_LANGUAGES},
 }
 
 OPENAI_LANGUAGE_NAMES = {
     "auto": "Auto-detected language",
-    "id-ID": "Indonesian",
-    "ja-JP": "Japanese",
-    "zh-CN": "Simplified Chinese",
-    "en-US": "English",
+    **{app_code: name for app_code, _, name in OPENAI_SUPPORTED_LANGUAGES},
 }
 
 OPENAI_REALTIME_OUTPUT_LANGUAGE_CODES = {
-    "id-ID": "id",
-    "ja-JP": "ja",
-    "zh-CN": "zh",
-    "en-US": "en",
+    app_code: api_code for app_code, api_code, _ in OPENAI_SUPPORTED_LANGUAGES
 }
 
-OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES = ("auto", "id-ID", "ja-JP", "zh-CN", "en-US")
-OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES = ("id-ID", "ja-JP", "zh-CN", "en-US")
+OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES = ("auto",) + tuple(
+    app_code for app_code, _, _ in OPENAI_SUPPORTED_LANGUAGES
+)
+OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES = tuple(app_code for app_code, _, _ in OPENAI_SUPPORTED_LANGUAGES)
 OPENAI_SPEECH_TRANSLATION_ROUTES = {
     (source_language, target_language)
     for source_language in OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES

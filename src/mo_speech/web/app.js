@@ -49,14 +49,79 @@ const realtimeStreamingOnlyElements = [...document.querySelectorAll(".realtime-s
 const historyRefreshButton = document.querySelector("#history-refresh");
 const historyRecordings = document.querySelector("#history-recordings");
 const historyOutputs = document.querySelector("#history-outputs");
+const historyStorage = document.querySelector("#history-storage");
+const useOutputAsInputButton = document.querySelector("#use-output-as-input");
+const useOutputAsReferenceButton = document.querySelector("#use-output-as-reference");
+const textResultActionButtons = [...document.querySelectorAll(".text-result-action")];
 
 const languageLabels = {
   auto: "自動判定",
+  af: "アフリカーンス語",
+  ar: "アラビア語",
+  hy: "アルメニア語",
+  az: "アゼルバイジャン語",
+  be: "ベラルーシ語",
+  bs: "ボスニア語",
+  bg: "ブルガリア語",
+  ca: "カタルーニャ語",
+  cs: "チェコ語",
+  da: "デンマーク語",
+  de: "ドイツ語",
+  el: "ギリシャ語",
+  es: "スペイン語",
+  et: "エストニア語",
+  fa: "ペルシア語",
+  fi: "フィンランド語",
+  fr: "フランス語",
+  gl: "ガリシア語",
+  he: "ヘブライ語",
+  hi: "ヒンディー語",
+  hr: "クロアチア語",
+  hu: "ハンガリー語",
+  is: "アイスランド語",
   "id-ID": "インドネシア語",
+  it: "イタリア語",
   "ja-JP": "日本語",
+  kk: "カザフ語",
+  kn: "カンナダ語",
+  ko: "韓国語",
+  lt: "リトアニア語",
+  lv: "ラトビア語",
+  mi: "マオリ語",
+  mk: "マケドニア語",
+  mr: "マラーティー語",
+  ms: "マレー語",
+  ne: "ネパール語",
+  nl: "オランダ語",
+  no: "ノルウェー語",
+  pl: "ポーランド語",
+  pt: "ポルトガル語",
+  ro: "ルーマニア語",
+  ru: "ロシア語",
+  sk: "スロバキア語",
+  sl: "スロベニア語",
+  sr: "セルビア語",
+  sv: "スウェーデン語",
+  sw: "スワヒリ語",
+  ta: "タミル語",
+  th: "タイ語",
+  tl: "タガログ語",
+  tr: "トルコ語",
+  uk: "ウクライナ語",
+  ur: "ウルドゥー語",
+  vi: "ベトナム語",
+  cy: "ウェールズ語",
   "zh-CN": "中国語（普通話）",
   "en-US": "英語",
 };
+
+const openAiTargetLanguages = [
+  "id-ID",
+  "ja-JP",
+  "zh-CN",
+  "en-US",
+  ...Object.keys(languageLabels).filter((language) => !["auto", "id-ID", "ja-JP", "zh-CN", "en-US"].includes(language)),
+];
 
 const seedVcPresets = {
   fast: {
@@ -89,6 +154,10 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let recordedBlob = null;
 let recordedFileName = "recording.audio";
+let referenceAudioBlob = null;
+let referenceAudioFileName = "reference.audio";
+let currentOutputBlob = null;
+let currentOutputFileName = "output.audio";
 let inputAudioObjectUrl = null;
 let outputAudioObjectUrl = null;
 let inputLevelAnimation = null;
@@ -105,7 +174,24 @@ recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
 historyRefreshButton.addEventListener("click", loadAudioHistory);
+useOutputAsInputButton.addEventListener("click", () => {
+  if (currentOutputBlob) {
+    useAudioBlobAsInput(currentOutputBlob, currentOutputFileName, "出力音声を入力に設定しました");
+  }
+});
+useOutputAsReferenceButton.addEventListener("click", () => {
+  if (currentOutputBlob) {
+    useAudioBlobAsReference(currentOutputBlob, currentOutputFileName, "出力音声をVC参照に設定しました");
+  }
+});
+textResultActionButtons.forEach((button) => {
+  button.addEventListener("click", () => useTextResultForTts(button.dataset.resultSource || ""));
+});
 audioInput.addEventListener("change", handleAudioFileChange);
+referenceAudioInput.addEventListener("change", () => {
+  referenceAudioBlob = null;
+  referenceAudioFileName = "reference.audio";
+});
 operationModeSelect.addEventListener("change", () => {
   stopRealtimeStreaming();
   syncOperationMode();
@@ -506,10 +592,16 @@ async function submitVoiceConversion(event) {
     } else {
       throw new Error("変換元音声ファイルを選択するか録音してください");
     }
-    if (!referenceFile || referenceFile.size < 1) {
+    if (referenceFile) {
+      if (referenceFile.size < 1) {
+        throw new Error("参照音声ファイルが空です");
+      }
+      formData.append("reference_audio", referenceFile);
+    } else if (referenceAudioBlob) {
+      formData.append("reference_audio", referenceAudioBlob, referenceAudioFileName);
+    } else {
       throw new Error("参照音声ファイルを選択してください");
     }
-    formData.append("reference_audio", referenceFile);
 
     const response = await fetch("/api/voice-conversion-jobs", {
       method: "POST",
@@ -652,6 +744,7 @@ function renderResult(payload) {
 
   const audioBytes = base64ToBytes(payload.audio_base64);
   const audioBlob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
+  setCurrentOutputBlob(audioBlob, `translation-output.${extensionForMimeType(audioBlob.type || "audio/wav")}`);
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);
   }
@@ -679,6 +772,7 @@ function renderVoiceConversionResult(payload) {
 
   const audioBytes = base64ToBytes(payload.audio_base64);
   const audioBlob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
+  setCurrentOutputBlob(audioBlob, `output.${extensionForMimeType(audioBlob.type || "audio/wav")}`);
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);
   }
@@ -781,6 +875,7 @@ function stopRealtimeOutputRecording(outputRecording) {
 }
 
 function renderStreamingOutputBlob(blob) {
+  setCurrentOutputBlob(blob, `realtime-streaming-output.${extensionForMimeType(blob.type || "audio/webm")}`);
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);
   }
@@ -788,6 +883,20 @@ function renderStreamingOutputBlob(blob) {
   outputAudioObjectUrl = URL.createObjectURL(blob);
   outputAudio.src = outputAudioObjectUrl;
   outputAudio.autoplay = false;
+}
+
+function setCurrentOutputBlob(blob, filename) {
+  currentOutputBlob = blob;
+  currentOutputFileName = filename || `output.${extensionForMimeType(blob.type || "audio/wav")}`;
+  useOutputAsInputButton.disabled = false;
+  useOutputAsReferenceButton.disabled = false;
+}
+
+function clearCurrentOutputBlob() {
+  currentOutputBlob = null;
+  currentOutputFileName = "output.audio";
+  useOutputAsInputButton.disabled = true;
+  useOutputAsReferenceButton.disabled = true;
 }
 
 async function saveRealtimeStreamingOutput(blob) {
@@ -815,12 +924,25 @@ async function loadAudioHistory() {
       throw new Error("audio history request failed");
     }
     const payload = await response.json();
+    renderAudioHistorySettings(payload.settings || {});
     renderAudioHistoryList(historyRecordings, payload.recordings || []);
     renderAudioHistoryList(historyOutputs, payload.outputs || []);
   } catch {
+    historyStorage.textContent = "保存先を取得できませんでした。";
     historyRecordings.textContent = "履歴を取得できませんでした。";
     historyOutputs.textContent = "履歴を取得できませんでした。";
   }
+}
+
+function renderAudioHistorySettings(settings) {
+  if (!settings.enabled) {
+    historyStorage.textContent = "音声履歴は無効です。MO_AUDIO_HISTORY_ENABLED=1 で有効化できます。";
+    return;
+  }
+  const root = settings.resolved_root || settings.root || "tmp/audio-history";
+  const recordingsDir = settings.recordings_dir || `${root}/recordings`;
+  const outputsDir = settings.outputs_dir || `${root}/outputs`;
+  historyStorage.textContent = `保存先: ${root} / 入力: ${recordingsDir} / 出力: ${outputsDir} / 上限: 各${settings.limit || 10}件 / 変更: ${settings.env_var || "MO_AUDIO_HISTORY_DIR"}`;
 }
 
 function renderAudioHistoryList(container, entries) {
@@ -843,9 +965,120 @@ function renderAudioHistoryList(container, entries) {
     const endpoint = entry.metadata?.endpoint || entry.kind;
     const createdAt = entry.created_at || "";
     meta.textContent = `${endpoint} / ${formatBytes(Number(entry.size_bytes || 0))} / ${createdAt}`;
-    item.append(audio, meta);
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+    const useAsInput = document.createElement("button");
+    useAsInput.type = "button";
+    useAsInput.className = "secondary-button";
+    useAsInput.textContent = "入力に使う";
+    useAsInput.addEventListener("click", () => useHistoryAudioAsInput(entry));
+    const useAsReference = document.createElement("button");
+    useAsReference.type = "button";
+    useAsReference.className = "secondary-button";
+    useAsReference.textContent = "VC参照に使う";
+    useAsReference.addEventListener("click", () => useHistoryAudioAsReference(entry));
+    actions.append(useAsInput, useAsReference);
+    item.append(audio, meta, actions);
     container.append(item);
   });
+}
+
+async function useHistoryAudioAsInput(entry) {
+  try {
+    const { blob, filename } = await fetchHistoryAudioBlob(entry);
+    useAudioBlobAsInput(blob, filename, "履歴音声を入力に設定しました");
+  } catch (error) {
+    renderError(error.message || "履歴音声を入力に設定できませんでした");
+  }
+}
+
+async function useHistoryAudioAsReference(entry) {
+  try {
+    const { blob, filename } = await fetchHistoryAudioBlob(entry);
+    useAudioBlobAsReference(blob, filename, "履歴音声をVC参照に設定しました");
+  } catch (error) {
+    renderError(error.message || "履歴音声をVC参照に設定できませんでした");
+  }
+}
+
+async function fetchHistoryAudioBlob(entry) {
+  const response = await fetch(entry.url);
+  if (!response.ok) {
+    throw new Error("履歴音声を取得できませんでした");
+  }
+  const blob = await response.blob();
+  const filename = entry.metadata?.filename || entry.filename || `history.${extensionForMimeType(blob.type || "audio/wav")}`;
+  return { blob, filename };
+}
+
+function useAudioBlobAsInput(blob, filename, message) {
+  audioInput.value = "";
+  recordedBlob = blob;
+  recordedChunks = [];
+  recordedFileName = filename || `input.${extensionForMimeType(blob.type || "audio/wav")}`;
+  renderInputAudioPreview(blob);
+  recordingLabel.textContent = "入力に設定済み";
+  setStatus(message || "入力音声を設定しました");
+}
+
+function useAudioBlobAsReference(blob, filename, message) {
+  referenceAudioInput.value = "";
+  referenceAudioBlob = blob;
+  referenceAudioFileName = filename || `reference.${extensionForMimeType(blob.type || "audio/wav")}`;
+  if (operationModeSelect.value !== "voice_conversion") {
+    operationModeSelect.value = "voice_conversion";
+    syncOperationMode();
+  }
+  setStatus(message || "VC参照音声を設定しました");
+}
+
+function useTextResultForTts(source) {
+  const mapping = {
+    transcript: {
+      selector: "#transcript",
+      language: selectedSourceLanguage(),
+    },
+    translated: {
+      selector: "#translated-text",
+      language: form.target_language.value,
+    },
+    transformed: {
+      selector: "#transformed-text",
+      language: form.target_language.value,
+    },
+  };
+  const item = mapping[source];
+  if (!item) {
+    return;
+  }
+  const text = document.querySelector(item.selector)?.textContent?.trim() || "";
+  if (!text || text === "未実行") {
+    renderError("再利用できるテキストがありません");
+    return;
+  }
+  operationModeSelect.value = "text_tts";
+  ttsTextInput.value = text;
+  syncOperationMode();
+  if (item.language && item.language !== "auto") {
+    ensureTtsLanguage(item.language);
+  }
+  setStatus("テキストを読み上げ入力に設定しました");
+}
+
+function ensureTtsLanguage(language) {
+  if ([...ttsTargetLanguageSelect.options].some((option) => option.value === language)) {
+    ttsTargetLanguageSelect.value = language;
+    return;
+  }
+  const openaiOption = [...ttsBackendSelect.options].find((option) => option.value === "openai" && !option.disabled);
+  if (!openaiOption) {
+    return;
+  }
+  ttsBackendSelect.value = "openai";
+  syncTtsBackendAvailability();
+  if ([...ttsTargetLanguageSelect.options].some((option) => option.value === language)) {
+    ttsTargetLanguageSelect.value = language;
+  }
 }
 
 function renderPartialResult(payload) {
@@ -1312,7 +1545,7 @@ function syncTtsBackendAvailability() {
             label: "OpenAI TTS API",
             available: false,
             reason: "OPENAI_API_KEY が設定されていません。",
-            settings: { supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"] },
+            settings: { supported_target_languages: openAiTargetLanguages },
           },
         ];
   const currentValue = ttsBackendSelect.value;
@@ -1606,6 +1839,7 @@ function clearResultOutputs() {
   processingPanel.hidden = true;
   processingCurrent.textContent = "待機中";
   processingSteps.replaceChildren();
+  clearCurrentOutputBlob();
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);
     outputAudioObjectUrl = null;

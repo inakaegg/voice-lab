@@ -342,6 +342,22 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.result-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.output-actions {
+  margin-top: 8px;
+}
+
 .empty {
   color: #7b8794;
 }
@@ -387,6 +403,18 @@ audio {
   margin-bottom: 12px;
 }
 
+.history-storage {
+  background: #f7f9fb;
+  border: 1px solid #dde3ea;
+  border-radius: 6px;
+  color: #5f6b7a;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
 .history-grid {
   display: grid;
   gap: 12px;
@@ -412,6 +440,17 @@ audio {
 .history-item {
   display: grid;
   gap: 6px;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-actions button {
+  min-height: 32px;
+  padding: 5px 8px;
 }
 
 .history-item audio {

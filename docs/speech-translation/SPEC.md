@@ -55,6 +55,12 @@
 - 変換中は、現在の処理段階とモデル名を表示する。最小段階はASR、翻訳、テキスト加工、音声生成、声質変換とする。
 - 変換中も、完了した段階から順に文字起こし、翻訳、加工後の表示を更新する。
 - fake providerで動いている場合、録音内容ではなく固定のデモ応答になることが分かる表示にする。
+- OpenAI API、OpenAI Realtime、OpenAI Realtime streaming、OpenAI TTS APIで使う出力言語候補は、OpenAI TTS docsの対応言語リストに合わせて表示する。TTS docsはWhisperの対応言語に概ね従うとしているため、UIとOpenAI providerの許可リストは同じ言語集合にする。
+- `Qwen/local` とGoogle Translate TTS endpointは、各providerで設定済みの対応言語だけを表示する。
+- 変換結果のテキストは、次のテキスト読み上げ入力へ直接入れられる。
+- 変換結果のテキストを読み上げ入力へ回す際、現在のTTS方式が対象言語を持っていなければ、利用可能な場合はOpenAI TTS APIへ切り替える。
+- 変換結果の音声と履歴音声は、次の入力音声またはVC参照音声へ直接入れられる。
+- 音声履歴欄には現在の保存先を表示する。
 
 ## 初期プロバイダ候補
 
@@ -266,7 +272,11 @@ OpenAI Realtime翻訳の扱い:
 - 出力音声は `outputs` として直近10件を保存する。
 - 11件目以降は古い音声と対応するmetadataを削除する。
 - 既定の保存先はgit管理外の `tmp/audio-history/` とする。
+- リポジトリ直下から起動した場合、既定の実保存先は `<repo>/tmp/audio-history/` になる。プロセスの作業ディレクトリが変わると相対パスの解決先も変わるため、固定したい場合は `MO_AUDIO_HISTORY_DIR` に絶対パスを指定する。
+- `recordings` の実保存先は `MO_AUDIO_HISTORY_DIR/recordings`、`outputs` の実保存先は `MO_AUDIO_HISTORY_DIR/outputs` とする。
+- 保存先はローカル環境変数 `MO_AUDIO_HISTORY_DIR` で変更する。ブラウザUIからサーバー側の任意パスを書き換える機能は、誤操作とパス露出を避けるため初期実装には含めない。
 - UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
+- UIでは、保存済み音声を次の入力音声またはVC参照音声へ再利用できる。
 - Realtime streamingの出力音声は、切断時に録音済みblobとして `outputs` へ保存する。
 - サーバー運用ではFastAPIローカルファイル保存を永続保存先として使わない。必要な場合はオブジェクトストレージなどの外部保存先を使う。
 

@@ -245,18 +245,37 @@
             <article>
               <h2>文字起こし</h2>
               <p id="transcript" class="result-text empty">未実行</p>
+              <div class="result-actions">
+                <button type="button" class="secondary-button text-result-action" data-result-source="transcript">
+                  読み上げに使う
+                </button>
+              </div>
             </article>
             <article>
               <h2>翻訳</h2>
               <p id="translated-text" class="result-text empty">未実行</p>
+              <div class="result-actions">
+                <button type="button" class="secondary-button text-result-action" data-result-source="translated">
+                  読み上げに使う
+                </button>
+              </div>
             </article>
             <article>
               <h2>加工後</h2>
               <p id="transformed-text" class="result-text empty">未実行</p>
+              <div class="result-actions">
+                <button type="button" class="secondary-button text-result-action" data-result-source="transformed">
+                  読み上げに使う
+                </button>
+              </div>
             </article>
           </div>
           <h2 id="output-audio-heading">出力音声</h2>
           <audio id="output-audio" controls></audio>
+          <div class="result-actions output-actions">
+            <button type="button" id="use-output-as-input" class="secondary-button" disabled>入力に使う</button>
+            <button type="button" id="use-output-as-reference" class="secondary-button" disabled>VC参照に使う</button>
+          </div>
           <dl id="timings" class="timings"></dl>
           <dl id="providers" class="timings"></dl>
           <ul id="warnings" class="warnings"></ul>
@@ -266,6 +285,7 @@
               <h2>音声履歴</h2>
               <button type="button" id="history-refresh" class="secondary-button">更新</button>
             </div>
+            <p id="history-storage" class="history-storage">保存先を確認中</p>
             <div class="history-grid">
               <article>
                 <h3>入力</h3>

@@ -62,6 +62,10 @@ def test_root_serves_browser_ui() -> None:
     assert "OpenAI TTS API" in response.text
     assert "history-recordings" in response.text
     assert "history-outputs" in response.text
+    assert "history-storage" in response.text
+    assert "use-output-as-input" in response.text
+    assert "use-output-as-reference" in response.text
+    assert "text-result-action" in response.text
     assert "Seed-VCで入力音声に寄せる" in response.text
     assert "既定音声" not in response.text
     assert "processing-panel" in response.text
@@ -85,6 +89,12 @@ def test_static_assets_are_served() -> None:
     assert "translationBackendSelect" in js_response.text
     assert "submitTextToSpeech" in js_response.text
     assert "loadAudioHistory" in js_response.text
+    assert "useHistoryAudioAsInput" in js_response.text
+    assert "useHistoryAudioAsReference" in js_response.text
+    assert "useTextResultForTts" in js_response.text
+    assert "ensureTtsLanguage" in js_response.text
+    assert "renderAudioHistorySettings" in js_response.text
+    assert "openAiTargetLanguages" in js_response.text
     assert "isRealtimeTranslationBackend" in js_response.text
     assert "isRealtimeStreamingTranslationBackend" in js_response.text
     assert "startRealtimeStreaming" in js_response.text
@@ -126,6 +136,9 @@ def test_static_assets_are_served() -> None:
     assert ".runtime-panel" in css_response.text
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
+    assert ".history-storage" in css_response.text
+    assert ".history-actions" in css_response.text
+    assert ".result-actions" in css_response.text
     assert ".error-message" in css_response.text
 
 
@@ -151,9 +164,19 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
         {"source_language": "ja-JP", "target_language": "zh-CN"},
     ]
     assert payload["translation_backends"][1]["available"] is False
+    assert payload["translation_backends"][1]["settings"]["supported_target_languages"][:4] == [
+        "id-ID",
+        "ja-JP",
+        "zh-CN",
+        "en-US",
+    ]
+    assert "fr" in payload["translation_backends"][1]["settings"]["supported_target_languages"]
+    assert "uk" in payload["translation_backends"][2]["settings"]["supported_target_languages"]
+    assert "vi" in payload["translation_backends"][3]["settings"]["supported_target_languages"]
     assert payload["translation_backends"][2]["available"] is False
     assert payload["translation_backends"][3]["available"] is False
     assert [backend["id"] for backend in payload["text_tts_backends"]] == ["google_translate", "openai"]
+    assert "fr" in payload["text_tts_backends"][1]["settings"]["supported_target_languages"]
     assert payload["voice_conversion_backends"] == [
         {
             "id": "fake-vc",
@@ -509,6 +532,30 @@ def test_audio_history_output_api_saves_uploaded_audio(tmp_path) -> None:
     audio_response = client.get(payload["entry"]["url"])
     assert audio_response.status_code == 200
     assert audio_response.content == b"streaming output"
+
+
+def test_audio_history_api_reports_storage_settings(tmp_path) -> None:
+    from mo_speech.audio_history import AudioHistoryStore
+
+    history_root = tmp_path / "history"
+    client = TestClient(
+        create_app(
+            voice_conversion_service=_fake_voice_conversion_service(),
+            audio_history_store=AudioHistoryStore(root=history_root, limit=7, enabled=True),
+        )
+    )
+
+    response = client.get("/api/audio-history")
+
+    assert response.status_code == 200
+    settings = response.json()["settings"]
+    assert settings["enabled"] is True
+    assert settings["root"] == str(history_root)
+    assert settings["resolved_root"] == str(history_root.resolve())
+    assert settings["recordings_dir"] == str(history_root.resolve() / "recordings")
+    assert settings["outputs_dir"] == str(history_root.resolve() / "outputs")
+    assert settings["limit"] == 7
+    assert settings["env_var"] == "MO_AUDIO_HISTORY_DIR"
 
 
 def test_translate_speech_job_api_reports_partial_result_while_running() -> None:

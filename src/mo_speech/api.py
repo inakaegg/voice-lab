@@ -299,6 +299,7 @@ def create_app(
     @app.get("/api/audio-history")
     def get_audio_history() -> dict[str, object]:
         return {
+            "settings": _serialize_audio_history_settings(active_audio_history_store),
             "recordings": [
                 _serialize_audio_history_entry("recordings", entry)
                 for entry in active_audio_history_store.list_entries("recordings")
@@ -788,6 +789,20 @@ def _serialize_tts_output(output: TtsOutput, provider_name: str) -> dict[str, ob
         "timings_ms": output.timings_ms,
         "providers": {"tts": provider_name},
         "warnings": output.warnings,
+    }
+
+
+def _serialize_audio_history_settings(store: AudioHistoryStore) -> dict[str, object]:
+    root = store.root.expanduser()
+    resolved_root = root.resolve()
+    return {
+        "enabled": store.enabled,
+        "root": str(store.root),
+        "resolved_root": str(resolved_root),
+        "recordings_dir": str(resolved_root / "recordings"),
+        "outputs_dir": str(resolved_root / "outputs"),
+        "limit": store.limit,
+        "env_var": "MO_AUDIO_HISTORY_DIR",
     }
 
 
