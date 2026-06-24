@@ -201,9 +201,16 @@ OpenAI Realtime翻訳の扱い:
 
 リクエスト:
 
-- `text`: 読み上げるテキスト。
-- `target_language`: 例 `id-ID`、`ja-JP`、`zh-CN`、`en-US`。
+- `text`: 読み上げるテキスト。UIでは直接入力、またはテキストファイルを読み込んで指定できる。
+- `target_language`: 例 `id-ID`、`ja-JP`、`zh-CN`、`en-US`。OpenAI TTSでは `auto` を指定できる。
 - `tts_backend`: `google_translate` または `openai`。
+
+UIでの読み上げ言語の扱い:
+
+- OpenAI TTS APIは読み上げテキストから発話言語を決めるため、既定は `auto` とする。API呼び出しでは言語パラメータを渡さない。
+- Google Translate TTS endpointは `tl` パラメータが必要なため、読み上げ言語を明示指定する。
+- テキストファイル指定時も、ブラウザで内容を読み込んでテキスト欄へ反映し、必要なら編集してから読み上げる。
+- `/api/runtime` はプロバイダの有効/無効をUI制御に使う内部APIとして残すが、`mode fake` のような内部実行モードは通常UIには表示しない。
 
 レスポンス:
 

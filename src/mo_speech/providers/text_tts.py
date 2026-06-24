@@ -88,7 +88,7 @@ def text_tts_backend_statuses(providers: dict[str, object]) -> list[dict[str, ob
                 "reason": "" if os.getenv("OPENAI_API_KEY") else "OPENAI_API_KEY が設定されていません。",
                 "provider": openai_provider.name,
                 "settings": {
-                    "supported_target_languages": [language for language in OPENAI_LANGUAGE_NAMES if language != "auto"],
+                    "supported_target_languages": list(OPENAI_LANGUAGE_NAMES.keys()),
                     "official_api": True,
                 },
             }

@@ -44,8 +44,9 @@ def test_root_serves_browser_ui() -> None:
     assert "text-result-section" in response.text
     assert "output-audio-heading" in response.text
     assert "route-hint" in response.text
-    assert "runtime-mode" in response.text
-    assert "runtime-note" in response.text
+    assert "runtime-mode" not in response.text
+    assert "runtime-note" not in response.text
+    assert "mode</span>" not in response.text
     assert "input-audio" in response.text
     assert "audio_device" in response.text
     assert "audio-device-refresh" in response.text
@@ -60,6 +61,8 @@ def test_root_serves_browser_ui() -> None:
     assert "接続開始後に話す" in response.text
     assert "Google Translate TTS endpoint" in response.text
     assert "OpenAI TTS API" in response.text
+    assert "tts_text_file" in response.text
+    assert "テキストファイル" in response.text
     assert "history-recordings" in response.text
     assert "history-outputs" in response.text
     assert "history-storage" in response.text
@@ -88,6 +91,8 @@ def test_static_assets_are_served() -> None:
     assert "loadRuntime" in js_response.text
     assert "translationBackendSelect" in js_response.text
     assert "submitTextToSpeech" in js_response.text
+    assert "handleTtsTextFileChange" in js_response.text
+    assert "ttsTextFileInput" in js_response.text
     assert "loadAudioHistory" in js_response.text
     assert "useHistoryAudioAsInput" in js_response.text
     assert "useHistoryAudioAsReference" in js_response.text
@@ -133,7 +138,7 @@ def test_static_assets_are_served() -> None:
     assert "renderError" in js_response.text
     assert css_response.status_code == 200
     assert ".status" in css_response.text
-    assert ".runtime-panel" in css_response.text
+    assert ".runtime-panel" not in css_response.text
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
     assert ".history-storage" in css_response.text
@@ -176,6 +181,7 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
     assert payload["translation_backends"][2]["available"] is False
     assert payload["translation_backends"][3]["available"] is False
     assert [backend["id"] for backend in payload["text_tts_backends"]] == ["google_translate", "openai"]
+    assert payload["text_tts_backends"][1]["settings"]["supported_target_languages"][0] == "auto"
     assert "fr" in payload["text_tts_backends"][1]["settings"]["supported_target_languages"]
     assert payload["voice_conversion_backends"] == [
         {

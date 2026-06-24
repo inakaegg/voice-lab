@@ -18,15 +18,6 @@
 
       <section class="workspace" aria-label="音声翻訳フォーム">
         <form id="translation-form" class="control-panel">
-          <section class="runtime-panel" aria-label="実行モード">
-            <div>
-              <span>mode</span>
-              <strong id="runtime-mode">確認中</strong>
-            </div>
-            <p id="runtime-note">実行モードを確認しています。</p>
-            <dl id="runtime-providers"></dl>
-          </section>
-
           <div class="field-row">
             <label for="operation_mode">実行内容</label>
             <select id="operation_mode" name="operation_mode">
@@ -83,20 +74,29 @@
           </div>
 
           <div class="field-row text-tts-only" hidden>
-            <label for="tts_target_language">読み上げ言語</label>
-            <select id="tts_target_language" name="tts_target_language">
-              <option value="id-ID">インドネシア語</option>
-              <option value="ja-JP">日本語</option>
-              <option value="zh-CN">中国語（普通話）</option>
-              <option value="en-US">英語</option>
-            </select>
+            <label for="tts_text_file">テキストファイル</label>
+            <input id="tts_text_file" name="tts_text_file" type="file" accept=".txt,.md,.csv,.json,.srt,.vtt,text/*" />
           </div>
+          <p id="tts-text-file-hint" class="route-hint text-tts-only" hidden>
+            ファイル内容を読み上げテキスト欄へ読み込みます。
+          </p>
 
           <div class="field-row text-tts-only" hidden>
             <label for="tts_backend">TTS方式</label>
             <select id="tts_backend" name="tts_backend">
               <option value="google_translate">Google Translate TTS endpoint</option>
               <option value="openai">OpenAI TTS API</option>
+            </select>
+          </div>
+
+          <div class="field-row text-tts-only" hidden>
+            <label for="tts_target_language">読み上げ言語</label>
+            <select id="tts_target_language" name="tts_target_language">
+              <option value="auto">自動判定</option>
+              <option value="id-ID">インドネシア語</option>
+              <option value="ja-JP">日本語</option>
+              <option value="zh-CN">中国語（普通話）</option>
+              <option value="en-US">英語</option>
             </select>
           </div>
           <p id="tts-backend-hint" class="route-hint text-tts-only" hidden></p>

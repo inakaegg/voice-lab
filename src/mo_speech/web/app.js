@@ -7,6 +7,8 @@ const operationModeSelect = document.querySelector("#operation_mode");
 const translationBackendSelect = document.querySelector("#translation_backend");
 const voiceProcessingSelect = document.querySelector("#voice_processing");
 const ttsTextInput = document.querySelector("#tts_text");
+const ttsTextFileInput = document.querySelector("#tts_text_file");
+const ttsTextFileHint = document.querySelector("#tts-text-file-hint");
 const ttsTargetLanguageSelect = document.querySelector("#tts_target_language");
 const ttsBackendSelect = document.querySelector("#tts_backend");
 const ttsBackendHint = document.querySelector("#tts-backend-hint");
@@ -192,6 +194,7 @@ referenceAudioInput.addEventListener("change", () => {
   referenceAudioBlob = null;
   referenceAudioFileName = "reference.audio";
 });
+ttsTextFileInput.addEventListener("change", handleTtsTextFileChange);
 operationModeSelect.addEventListener("change", () => {
   stopRealtimeStreaming();
   syncOperationMode();
@@ -316,6 +319,24 @@ function handleAudioFileChange() {
   recordingLabel.textContent = "録音なし";
   recordingDetails.textContent = sourceAudioEmptyText();
   clearInputAudioPreview();
+}
+
+async function handleTtsTextFileChange() {
+  const file = ttsTextFileInput.files[0];
+  if (!file) {
+    ttsTextFileHint.textContent = "ファイル内容を読み上げテキスト欄へ読み込みます。";
+    return;
+  }
+  try {
+    clearError();
+    const text = await file.text();
+    ttsTextInput.value = text;
+    ttsTextFileHint.textContent = `${file.name} を読み込みました（${formatBytes(file.size)}）。必要なら編集してから読み上げます。`;
+    setStatus("テキストファイルを読み込みました");
+  } catch (error) {
+    ttsTextFileInput.value = "";
+    renderError(error.message || "テキストファイルを読み込めませんでした");
+  }
 }
 
 async function submitCurrentOperation(event) {
@@ -1095,9 +1116,6 @@ async function loadRuntime() {
     }
     renderRuntime(await response.json());
   } catch {
-    runtimeMode.textContent = "不明";
-    runtimeNote.textContent = "実行モードを取得できませんでした。";
-    runtimeProviders.replaceChildren();
     supportedVoiceModes = ["default"];
     translationBackends = [];
     textTtsBackends = [];
@@ -1109,8 +1127,10 @@ async function loadRuntime() {
 
 function renderRuntime(payload) {
   const providerMode = payload.provider_mode || "fake";
-  runtimeMode.textContent = providerMode;
-  runtimeMode.dataset.mode = providerMode;
+  if (runtimeMode) {
+    runtimeMode.textContent = providerMode;
+    runtimeMode.dataset.mode = providerMode;
+  }
   runtimeProviderMode = providerMode;
   supportedVoiceModes = payload.supported_voice_modes || ["default"];
   translationBackends = payload.translation_backends || [];
@@ -1123,14 +1143,16 @@ function renderRuntime(payload) {
   syncSeedVcSettingsDefaults();
   syncSeedVcSettingsVisibility();
   syncRuntimeNote();
-  runtimeProviders.replaceChildren();
-  Object.entries(payload.providers || {}).forEach(([key, value]) => {
-    const term = document.createElement("dt");
-    term.textContent = key;
-    const description = document.createElement("dd");
-    description.textContent = String(value);
-    runtimeProviders.append(term, description);
-  });
+  if (runtimeProviders) {
+    runtimeProviders.replaceChildren();
+    Object.entries(payload.providers || {}).forEach(([key, value]) => {
+      const term = document.createElement("dt");
+      term.textContent = key;
+      const description = document.createElement("dd");
+      description.textContent = String(value);
+      runtimeProviders.append(term, description);
+    });
+  }
 }
 
 async function loadAudioDevices() {
@@ -1381,6 +1403,9 @@ function syncOperationMode() {
 }
 
 function syncRuntimeNote() {
+  if (!runtimeNote) {
+    return;
+  }
   if (operationModeSelect.value === "text_tts") {
     const selected = selectedTtsBackendOption();
     runtimeNote.textContent = selected?.disabled
@@ -1545,7 +1570,7 @@ function syncTtsBackendAvailability() {
             label: "OpenAI TTS API",
             available: false,
             reason: "OPENAI_API_KEY が設定されていません。",
-            settings: { supported_target_languages: openAiTargetLanguages },
+            settings: { supported_target_languages: ["auto", ...openAiTargetLanguages] },
           },
         ];
   const currentValue = ttsBackendSelect.value;
@@ -1565,21 +1590,29 @@ function syncTtsBackendAvailability() {
     ttsBackendSelect.value = availableBackends[0].id;
   }
 
-  const backend = selectedTtsBackendInfo();
+  const previousBackend = ttsTargetLanguageSelect.dataset.backend || "";
+  const backend = fallbackBackends.find((item) => item.id === ttsBackendSelect.value) || selectedTtsBackendInfo();
   const supportedLanguages = backend?.settings?.supported_target_languages || ["id-ID", "ja-JP", "zh-CN", "en-US"];
   const previousLanguage = ttsTargetLanguageSelect.value;
   ttsTargetLanguageSelect.replaceChildren(
     ...supportedLanguages.map((language) => new Option(languageLabels[language] || language, language)),
   );
-  if (supportedLanguages.includes(previousLanguage)) {
+  if (ttsBackendSelect.value === "openai" && previousBackend !== "openai" && supportedLanguages.includes("auto")) {
+    ttsTargetLanguageSelect.value = "auto";
+  } else if (supportedLanguages.includes(previousLanguage)) {
     ttsTargetLanguageSelect.value = previousLanguage;
+  } else if (supportedLanguages.includes("auto")) {
+    ttsTargetLanguageSelect.value = "auto";
+  } else if (supportedLanguages.length > 0) {
+    ttsTargetLanguageSelect.value = supportedLanguages[0];
   }
+  ttsTargetLanguageSelect.dataset.backend = ttsBackendSelect.value;
   const selected = selectedTtsBackendOption();
   ttsBackendHint.textContent = selected?.disabled
     ? selected.dataset.reason || ""
     : ttsBackendSelect.value === "google_translate"
-      ? "比較用の無料endpointです。安定運用の既定にはしません。"
-      : "OpenAI TTS APIで読み上げ音声を生成します。";
+      ? "Google側のtl指定が必要なため、読み上げ言語を明示します。"
+      : "OpenAI TTS APIで読み上げ音声を生成します。通常はテキストから言語を自動判定します。";
 }
 
 function syncVoiceBackendHint() {

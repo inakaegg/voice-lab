@@ -75,57 +75,6 @@ h1 {
   padding: 18px;
 }
 
-.runtime-panel {
-  background: #eef5f0;
-  border: 1px solid #cbdcd1;
-  border-radius: 8px;
-  display: grid;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 12px;
-}
-
-.runtime-panel span {
-  color: #4d6154;
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.runtime-panel strong {
-  display: block;
-  font-size: 15px;
-}
-
-.runtime-panel strong[data-mode="fake"] {
-  color: #8a5a00;
-}
-
-.runtime-panel p {
-  color: #4d6154;
-  font-size: 13px;
-  line-height: 1.45;
-  margin: 0;
-}
-
-.runtime-panel dl {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: auto 1fr;
-  margin: 0;
-}
-
-.runtime-panel dt {
-  color: #4d6154;
-  font-weight: 600;
-}
-
-.runtime-panel dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .field-row {
   display: grid;
   gap: 6px;
