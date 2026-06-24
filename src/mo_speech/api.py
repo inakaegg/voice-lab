@@ -468,7 +468,7 @@ class TranslationJobStore:
                 job.result = _serialize_pipeline_result(result)
                 job.partial_result = _partial_result_from_pipeline_result(result)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
-        except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
+        except Exception as exc:
             LOGGER.exception("translation job failed: backend=%s job_id=%s", translation_backend, job_id)
             with self.lock:
                 job = self.jobs[job_id]
@@ -554,6 +554,7 @@ class TextToSpeechJobStore:
                     "target_language": target_language,
                     "audio_mime_type": output.audio_mime_type,
                     "text_preview": _text_preview(text),
+                    "tts_text": text,
                 },
             )
             with self.lock:
@@ -865,6 +866,7 @@ def _serialize_audio_history_entry(kind: str, entry: AudioHistoryEntry) -> dict[
         "label": _audio_history_label(kind, metadata, text_preview),
         "details": details,
         "text_preview": text_preview,
+        "tts_text": str(metadata.get("tts_text") or ""),
         "media_type": metadata.get("audio_mime_type") or metadata.get("content_type") or _audio_media_type(entry.audio_path),
         "playable_hint": _audio_history_playable_hint(entry, metadata),
         "metadata": metadata,
@@ -877,8 +879,10 @@ def _history_text_metadata_from_pipeline_result(result: PipelineResult) -> dict[
     transformed = _text_preview(result.transformed_text)
     translated = _text_preview(result.translated_text)
     transcript = _text_preview(result.transcript)
+    tts_text = result.transformed_text or result.translated_text
     return {
         "text_preview": transformed or translated or transcript,
+        "tts_text": tts_text,
         "transcript_preview": transcript,
         "translated_text_preview": translated,
         "transformed_text_preview": transformed,

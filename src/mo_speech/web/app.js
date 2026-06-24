@@ -283,7 +283,7 @@ async function startRecording() {
       setStatus("エラー", "error");
       return;
     }
-    renderInputAudioPreview(recordedBlob);
+    renderInputAudioPreview(recordedBlob, recordedFileName);
     stream.getTracks().forEach((track) => track.stop());
     recordingLabel.textContent = "録音済み";
     recordButton.disabled = false;
@@ -300,9 +300,6 @@ async function startRecording() {
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    if (mediaRecorder.state === "recording" && typeof mediaRecorder.requestData === "function") {
-      mediaRecorder.requestData();
-    }
     mediaRecorder.stop();
   }
 }
@@ -315,7 +312,7 @@ function handleAudioFileChange() {
   stopInputLevelMeter();
   if (file) {
     recordingLabel.textContent = "ファイル選択済み";
-    renderInputAudioPreview(file);
+    renderInputAudioPreview(file, file.name);
     return;
   }
   recordingLabel.textContent = "録音なし";
@@ -1012,7 +1009,20 @@ function renderAudioHistoryList(container, entries) {
     useAsReference.textContent = "VC参照に使う";
     useAsReference.addEventListener("click", () => useHistoryAudioAsReference(entry));
     actions.append(useAsInput, useAsReference);
-    item.append(title, audio, meta);
+    item.append(title, audio);
+    if (entry.tts_text) {
+      const text = document.createElement("p");
+      text.className = "history-text";
+      text.textContent = entry.tts_text;
+      item.append(text);
+      const useTextForTts = document.createElement("button");
+      useTextForTts.type = "button";
+      useTextForTts.className = "secondary-button";
+      useTextForTts.textContent = "テキストを読み上げに使う";
+      useTextForTts.addEventListener("click", () => useHistoryTextForTts(entry));
+      actions.append(useTextForTts);
+    }
+    item.append(meta);
     if (entry.playable_hint) {
       const warning = document.createElement("p");
       warning.className = "history-warning";
@@ -1057,7 +1067,7 @@ function useAudioBlobAsInput(blob, filename, message) {
   recordedBlob = blob;
   recordedChunks = [];
   recordedFileName = filename || `input.${extensionForMimeType(blob.type || "audio/wav")}`;
-  renderInputAudioPreview(blob);
+  renderInputAudioPreview(blob, recordedFileName);
   recordingLabel.textContent = "入力に設定済み";
   setStatus(message || "入力音声を設定しました");
 }
@@ -1071,6 +1081,22 @@ function useAudioBlobAsReference(blob, filename, message) {
     syncOperationMode();
   }
   setStatus(message || "VC参照音声を設定しました");
+}
+
+function useHistoryTextForTts(entry) {
+  const text = entry.tts_text || entry.text_preview || "";
+  if (!text) {
+    renderError("再利用できるTTSテキストがありません");
+    return;
+  }
+  operationModeSelect.value = "text_tts";
+  ttsTextInput.value = text;
+  syncOperationMode();
+  const targetLanguage = entry.metadata?.target_language || "";
+  if (targetLanguage && targetLanguage !== "auto") {
+    ensureTtsLanguage(targetLanguage);
+  }
+  setStatus("履歴テキストを読み上げ入力に設定しました");
 }
 
 function useTextResultForTts(source) {
@@ -1210,14 +1236,15 @@ function selectedAudioConstraint() {
   return { deviceId: { exact: audioDeviceSelect.value } };
 }
 
-function renderInputAudioPreview(blob) {
+function renderInputAudioPreview(blob, filename = "") {
   if (inputAudioObjectUrl) {
     URL.revokeObjectURL(inputAudioObjectUrl);
   }
   inputAudioObjectUrl = URL.createObjectURL(blob);
   inputAudio.src = inputAudioObjectUrl;
   inputAudio.hidden = false;
-  recordingDetails.textContent = `${blob.type || "unknown"} / ${formatBytes(blob.size)}`;
+  const name = filename || "選択済み音声";
+  recordingDetails.textContent = `${name} / ${blob.type || "unknown"} / ${formatBytes(blob.size)}`;
 }
 
 function clearInputAudioPreview() {

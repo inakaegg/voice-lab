@@ -421,6 +421,21 @@ audio {
   overflow-wrap: anywhere;
 }
 
+.history-text {
+  background: #f6f8fa;
+  border: 1px solid #e1e7ee;
+  border-radius: 6px;
+  color: #28323d;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
 .history-warning {
   color: #9a5d00;
   font-size: 12px;

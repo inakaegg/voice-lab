@@ -121,11 +121,14 @@ def test_static_assets_are_served() -> None:
     assert "loadAudioHistory" in js_response.text
     assert "useHistoryAudioAsInput" in js_response.text
     assert "useHistoryAudioAsReference" in js_response.text
+    assert "useHistoryTextForTts" in js_response.text
     assert "useTextResultForTts" in js_response.text
     assert "ensureTtsLanguage" in js_response.text
     assert "renderAudioHistorySettings" in js_response.text
     assert "history-title" in js_response.text
+    assert "history-text" in js_response.text
     assert "playable_hint" in js_response.text
+    assert "requestData()" not in js_response.text
     assert "openAiTargetLanguages" in js_response.text
     assert "isRealtimeTranslationBackend" in js_response.text
     assert "isRealtimeStreamingTranslationBackend" in js_response.text
@@ -169,6 +172,7 @@ def test_static_assets_are_served() -> None:
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
     assert ".history-title" in css_response.text
+    assert ".history-text" in css_response.text
     assert ".history-warning" in css_response.text
     assert ".history-storage" in css_response.text
     assert ".history-actions" in css_response.text
@@ -316,6 +320,8 @@ def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -
     assert len(list((tmp_path / "history" / "outputs").glob("*.wav"))) == 1
     history = client.get("/api/audio-history").json()
     assert history["outputs"][0]["text_preview"] == "谢谢。"
+    assert history["outputs"][0]["tts_text"] == "谢谢。"
+    assert history["outputs"][0]["metadata"]["tts_text"] == "谢谢。"
     assert history["outputs"][0]["metadata"]["transcript_preview"] == "ありがとう。"
     assert history["outputs"][0]["label"] == "谢谢。"
     assert history["recordings"][0]["text_preview"] == "ありがとう。"
@@ -465,6 +471,36 @@ def test_translate_speech_job_api_runs_openai_backend() -> None:
     assert status_payload["result"]["translated_text"] == "Halo."
 
 
+def test_translate_speech_job_api_marks_unexpected_provider_error_failed() -> None:
+    class FailingPipeline:
+        asr = SimpleNamespace(name="failing-asr")
+        translator = SimpleNamespace(name="failing-translation")
+        tts = SimpleNamespace(name="failing-tts")
+
+        def run(self, request, progress_callback=None) -> PipelineResult:
+            raise Exception("Audio file might be corrupted or unsupported")
+
+    client = TestClient(create_app(pipeline=FailingPipeline()))  # type: ignore[arg-type]
+
+    response = client.post(
+        "/api/translate-speech-jobs",
+        data={"translation_backend": "qwen", "source_language": "id-ID", "target_language": "ja-JP"},
+        files={"audio": ("recording.webm", b"broken audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    for _ in range(20):
+        status_payload = client.get(f"/api/translate-speech-jobs/{job_id}").json()
+        if status_payload["status"] == "failed":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("translation job did not fail")
+
+    assert status_payload["error"] == "Audio file might be corrupted or unsupported"
+
+
 def test_translate_speech_job_api_defaults_to_openai_backend() -> None:
     class FakeOpenAiPipeline:
         asr = SimpleNamespace(name="fake-openai-asr")
@@ -574,6 +610,7 @@ def test_text_to_speech_job_api_generates_audio_and_history(tmp_path) -> None:
     assert len(history["outputs"]) == 1
     assert history["outputs"][0]["label"] == "こんにちは"
     assert history["outputs"][0]["text_preview"] == "こんにちは"
+    assert history["outputs"][0]["tts_text"] == "こんにちは"
     assert history["outputs"][0]["details"][0] == "text-to-speech-jobs"
     audio_response = client.get(history["outputs"][0]["url"])
     assert audio_response.status_code == 200
