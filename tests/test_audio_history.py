@@ -49,6 +49,25 @@ def test_audio_history_store_lists_and_resolves_entries(tmp_path) -> None:
     assert store.resolve_audio_path("outputs", saved.audio_path.name) == saved.audio_path
 
 
+def test_audio_history_store_ignores_non_audio_files(tmp_path) -> None:
+    store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    saved = store.save_recording(b"recording", suffix=".webm", metadata={"filename": "recording.webm"})
+    recordings_dir = tmp_path / "history" / "recordings"
+    (recordings_dir / ".DS_Store").write_bytes(b"mac metadata")
+    (recordings_dir / "notes.txt").write_text("not audio", encoding="utf-8")
+
+    entries = store.list_entries("recordings")
+
+    assert saved is not None
+    assert [entry.audio_path.name for entry in entries] == [saved.audio_path.name]
+    try:
+        store.resolve_audio_path("recordings", ".DS_Store")
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("non-audio history file was accepted")
+
+
 def test_audio_history_store_updates_existing_metadata(tmp_path) -> None:
     store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
     saved = store.save_recording(b"recording", suffix=".webm", metadata={"filename": "recording.webm"})

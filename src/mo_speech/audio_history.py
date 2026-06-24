@@ -11,6 +11,23 @@ from uuid import uuid4
 
 DEFAULT_AUDIO_HISTORY_DIR = "tmp/audio-history"
 DEFAULT_AUDIO_HISTORY_LIMIT = 10
+_AUDIO_HISTORY_SUFFIXES = {
+    ".3gp",
+    ".aac",
+    ".aif",
+    ".aiff",
+    ".amr",
+    ".audio",
+    ".caf",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".webm",
+}
 
 
 @dataclass(frozen=True)
@@ -57,11 +74,7 @@ class AudioHistoryStore:
         target_dir = self.root / kind
         if not self.enabled or not target_dir.exists():
             return []
-        audio_paths = sorted(
-            [path for path in target_dir.iterdir() if path.is_file() and not path.name.endswith(".json")],
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )[: self.limit]
+        audio_paths = sorted(_iter_audio_files(target_dir), key=lambda path: path.stat().st_mtime, reverse=True)[: self.limit]
         return [
             AudioHistoryEntry(
                 audio_path=audio_path,
@@ -77,7 +90,7 @@ class AudioHistoryStore:
         if Path(filename).name != filename:
             raise ValueError("invalid audio history filename")
         audio_path = self.root / kind / filename
-        if not audio_path.is_file() or audio_path.name.endswith(".json"):
+        if not _is_audio_file(audio_path):
             raise FileNotFoundError(filename)
         return audio_path
 
@@ -124,11 +137,7 @@ class AudioHistoryStore:
         return AudioHistoryEntry(audio_path=audio_path, metadata_path=metadata_path, metadata=metadata_payload)
 
     def _prune(self, target_dir: Path) -> None:
-        audio_paths = sorted(
-            [path for path in target_dir.iterdir() if path.is_file() and not path.name.endswith(".json")],
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
+        audio_paths = sorted(_iter_audio_files(target_dir), key=lambda path: path.stat().st_mtime, reverse=True)
         for audio_path in audio_paths[self.limit :]:
             audio_path.unlink(missing_ok=True)
             audio_path.with_suffix(audio_path.suffix + ".json").unlink(missing_ok=True)
@@ -140,6 +149,14 @@ def _safe_suffix(suffix: str) -> str:
     if not re.fullmatch(r"\.[a-z0-9][a-z0-9._-]{0,15}", candidate):
         return ".audio"
     return candidate
+
+
+def _iter_audio_files(target_dir: Path) -> list[Path]:
+    return [path for path in target_dir.iterdir() if _is_audio_file(path)]
+
+
+def _is_audio_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _AUDIO_HISTORY_SUFFIXES
 
 
 def _str_to_bool(value: str) -> bool:
