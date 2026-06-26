@@ -833,8 +833,19 @@ audio {
   border-radius: inherit;
   display: block;
   height: 100%;
+  overflow: hidden;
+  position: relative;
   transition: width 0.22s ease;
   width: 0%;
+}
+
+.user-processing-fill::after {
+  animation: progress-sheen 1.1s linear infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+  content: "";
+  inset: 0;
+  position: absolute;
+  transform: translateX(-100%);
 }
 
 .user-output-texts {
@@ -1004,6 +1015,12 @@ audio {
 @keyframes processing-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes progress-sheen {
+  to {
+    transform: translateX(100%);
   }
 }
 

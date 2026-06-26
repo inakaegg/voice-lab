@@ -60,6 +60,7 @@ def test_root_serves_simple_user_ui() -> None:
     assert "target_language" in response.text
     assert 'value="ja-JP"' in response.text
     assert "user-processing-panel" in response.text
+    assert "user-processing-label" in response.text
     assert "user-processing-bar" in response.text
     assert "user-output-text" in response.text
     assert "user-replay-button" in response.text
@@ -234,6 +235,12 @@ def test_static_assets_are_served() -> None:
     assert "runUserTextOutput" in js_text
     assert "runUserVoiceConversion" in js_text
     assert "applyUserVoiceModeToBase" in js_text
+    assert "translationResultCache" in js_text
+    assert "baseResultCache" in js_text
+    assert "voiceResultCache" in js_text
+    assert "displayTextCache" in js_text
+    assert "startProcessingLabelAnimation" in js_text
+    assert "しょりちゅう${" in js_text
     assert "user-text-output" in js_text
     assert "voice-conversion-jobs" in js_text
     assert "cycleUserTextMode" in js_text
@@ -267,6 +274,7 @@ def test_static_assets_are_served() -> None:
     assert ".record-progress" in css_response.text
     assert ".user-processing-panel" in css_response.text
     assert ".user-processing-fill" in css_response.text
+    assert "progress-sheen" in css_response.text
     assert ".replay-button" in css_response.text
     assert ".user-output-texts" in css_response.text
     assert ".user-output-text" in css_response.text

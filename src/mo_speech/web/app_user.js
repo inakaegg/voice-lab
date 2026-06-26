@@ -7,6 +7,7 @@ const userOutputAudio = document.querySelector("#user-output-audio");
 const userReplayButton = document.querySelector("#user-replay-button");
 const userReplayLabel = document.querySelector("#user-replay-label");
 const userProcessingPanel = document.querySelector("#user-processing-panel");
+const userProcessingLabel = document.querySelector("#user-processing-label");
 const userProcessingFill = document.querySelector("#user-processing-fill");
 const userOutputTexts = document.querySelector("#user-output-texts");
 const userOutputTextCard = document.querySelector("#user-output-text-card");
@@ -25,6 +26,7 @@ let userRecordingStream = null;
 let userRecordingChunks = [];
 let userRecordingStartedAt = 0;
 let recordTimerId = null;
+let processingTimerId = null;
 let currentUserOutputUrl = "";
 let lastUserInputBlob = null;
 let lastUserInputFileName = "";
@@ -35,6 +37,10 @@ let lastBaseResult = null;
 let lastBaseAudioBlob = null;
 let lastVoiceSignature = "";
 let lastVoiceResult = null;
+const translationResultCache = new Map();
+const baseResultCache = new Map();
+const voiceResultCache = new Map();
+const displayTextCache = new Map();
 let lastAppliedUserRequestSignature = "";
 let hasUserOutput = false;
 let isUserProcessing = false;
@@ -175,12 +181,8 @@ async function runUserTranslation(audioBlob, fileName) {
   if (!completedJob.result) {
     throw new Error("できたこえが ありません");
   }
-  lastTranslationSignature = translationSignature;
-  lastTranslationResult = completedJob.result;
-  lastBaseTextSignature = baseTextSignature;
-  lastBaseResult = completedJob.result;
-  lastBaseAudioBlob = audioBlobFromResult(completedJob.result);
-  clearUserVoiceCache();
+  setCachedTranslationResult(translationSignature, completedJob.result);
+  setCachedBaseResult(baseTextSignature, completedJob.result);
   await applyUserVoiceModeToBase();
   setUserProcessingProgress(100);
   hideUserProcessing();
@@ -226,10 +228,7 @@ async function runUserTextOutput() {
     throw new Error(payload.detail || "こえを つくれませんでした");
   }
   const result = await response.json();
-  lastBaseTextSignature = baseTextSignature;
-  lastBaseResult = result;
-  lastBaseAudioBlob = audioBlobFromResult(result);
-  clearUserVoiceCache();
+  setCachedBaseResult(baseTextSignature, result);
   await applyUserVoiceModeToBase();
   setUserProcessingProgress(100);
   hideUserProcessing();
@@ -246,15 +245,16 @@ async function applyUserVoiceModeToBase() {
     hasUserOutput = true;
     return;
   }
-  if (lastVoiceResult && lastVoiceSignature === requestSignature) {
-    await renderUserResult(lastVoiceResult);
+  const cachedVoiceResult = voiceResultCache.get(requestSignature);
+  if (cachedVoiceResult) {
+    setCachedVoiceResult(requestSignature, cachedVoiceResult);
+    await renderUserResult(cachedVoiceResult);
     lastAppliedUserRequestSignature = requestSignature;
     hasUserOutput = true;
     return;
   }
   const voiceResult = await runUserVoiceConversion(lastBaseAudioBlob);
-  lastVoiceSignature = requestSignature;
-  lastVoiceResult = {
+  const mergedVoiceResult = {
     ...lastBaseResult,
     audio_mime_type: voiceResult.audio_mime_type,
     audio_base64: voiceResult.audio_base64,
@@ -268,6 +268,7 @@ async function applyUserVoiceModeToBase() {
     },
     warnings: [...(lastBaseResult.warnings || []), ...(voiceResult.warnings || [])],
   };
+  setCachedVoiceResult(requestSignature, mergedVoiceResult);
   await renderUserResult(lastVoiceResult);
   lastAppliedUserRequestSignature = requestSignature;
   hasUserOutput = true;
@@ -337,6 +338,13 @@ function currentUserBaseTextSignature() {
   return JSON.stringify({
     translation: currentUserTranslationSignature(),
     text_transform_options: userTextTransformOptions(),
+  });
+}
+
+function currentUserDisplayTextSignature(text) {
+  return JSON.stringify({
+    target_language: userTargetLanguage.value || "ja-JP",
+    text,
   });
 }
 
@@ -425,18 +433,27 @@ async function renderUserTexts(result) {
   };
   userTextMode = "hiragana";
   renderUserTextMode();
+  const displayTextSignature = currentUserDisplayTextSignature(text);
+  const cachedDisplayText = displayTextCache.get(displayTextSignature);
+  if (cachedDisplayText) {
+    userDisplayText = cachedDisplayText;
+    renderUserTextMode();
+    return;
+  }
   try {
     const displayText = await loadUserDisplayText(text, userTargetLanguage.value || "ja-JP");
     userDisplayText = {
       kanji_text: displayText.kanji_text || text,
       hiragana_text: displayText.hiragana_text || text,
     };
+    displayTextCache.set(displayTextSignature, userDisplayText);
     renderUserTextMode();
   } catch (_error) {
     userDisplayText = {
       kanji_text: text,
       hiragana_text: text,
     };
+    displayTextCache.set(displayTextSignature, userDisplayText);
     renderUserTextMode();
   }
 }
@@ -592,7 +609,17 @@ async function reprocessLatestUserOutput() {
   try {
     const translationSignature = currentUserTranslationSignature();
     const baseTextSignature = currentUserBaseTextSignature();
-    if (!lastTranslationResult || translationSignature !== lastTranslationSignature) {
+    const cachedTranslationResult = translationResultCache.get(translationSignature);
+    const cachedBaseResult = baseResultCache.get(baseTextSignature);
+    if (cachedTranslationResult && (!lastTranslationResult || translationSignature !== lastTranslationSignature)) {
+      setCachedTranslationResult(translationSignature, cachedTranslationResult);
+    }
+    if (cachedBaseResult) {
+      setCachedBaseResult(baseTextSignature, cachedBaseResult.result);
+      await applyUserVoiceModeToBase();
+      setUserProcessingProgress(100);
+      hideUserProcessing();
+    } else if (!lastTranslationResult || translationSignature !== lastTranslationSignature) {
       await runUserTranslation(lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
     } else if (!lastBaseResult || baseTextSignature !== lastBaseTextSignature) {
       await runUserTextOutput();
@@ -632,6 +659,28 @@ function markUserOutputStale() {
   }
 }
 
+function setCachedTranslationResult(signature, result) {
+  lastTranslationSignature = signature;
+  lastTranslationResult = result;
+  translationResultCache.set(signature, result);
+}
+
+function setCachedBaseResult(signature, result) {
+  lastBaseTextSignature = signature;
+  lastBaseResult = result;
+  lastBaseAudioBlob = audioBlobFromResult(result);
+  baseResultCache.set(signature, {
+    result,
+    audioBlob: lastBaseAudioBlob,
+  });
+}
+
+function setCachedVoiceResult(signature, result) {
+  lastVoiceSignature = signature;
+  lastVoiceResult = result;
+  voiceResultCache.set(signature, result);
+}
+
 function resetUserOutputCache() {
   lastTranslationSignature = "";
   lastTranslationResult = null;
@@ -639,6 +688,10 @@ function resetUserOutputCache() {
   lastBaseResult = null;
   lastBaseAudioBlob = null;
   clearUserVoiceCache();
+  translationResultCache.clear();
+  baseResultCache.clear();
+  voiceResultCache.clear();
+  displayTextCache.clear();
   lastAppliedUserRequestSignature = "";
   hasUserOutput = false;
 }
@@ -676,13 +729,36 @@ function renderUserTextMode() {
 
 function setUserProcessingProgress(percent) {
   userProcessingPanel.hidden = false;
+  startProcessingLabelAnimation();
   userProcessingFill.style.width = `${Math.max(0, Math.min(percent, 100))}%`;
 }
 
 function hideUserProcessing() {
   userProcessingPanel.hidden = true;
   userProcessingFill.style.width = "0%";
+  stopProcessingLabelAnimation();
   isUserProcessing = false;
+}
+
+function startProcessingLabelAnimation() {
+  if (processingTimerId !== null) {
+    return;
+  }
+  let dotCount = 0;
+  const updateLabel = () => {
+    dotCount = (dotCount % 4) + 1;
+    userProcessingLabel.textContent = `しょりちゅう${".".repeat(dotCount)}`;
+  };
+  updateLabel();
+  processingTimerId = window.setInterval(updateLabel, 450);
+}
+
+function stopProcessingLabelAnimation() {
+  if (processingTimerId !== null) {
+    window.clearInterval(processingTimerId);
+  }
+  processingTimerId = null;
+  userProcessingLabel.textContent = "しょりちゅう";
 }
 
 function renderUserLanguageLabel() {
