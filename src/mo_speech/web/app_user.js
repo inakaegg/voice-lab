@@ -62,10 +62,12 @@ let userSeedVcAvailable = true;
 let userSeedVcUnavailableReason = "";
 let userInputCacheVersion = 0;
 let processingDotCount = 0;
+let userTextEffectsAvailable = false;
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
   joke_position: "after",
+  theme: "blue",
 };
 const userAutoTargetLanguage = "user-auto";
 const userJokeTargetLanguage = "id-ID";
@@ -172,6 +174,7 @@ userOutputAudio.addEventListener("play", syncReplayButton);
 refreshUserSettings();
 loadUserRuntime();
 renderStaticUserTexts();
+syncJapaneseTextEffectAvailability("");
 
 async function handleUserRecordButton() {
   clearUserError();
@@ -423,6 +426,9 @@ async function runUserVoiceConversion(baseAudioBlob, sourceStem = "user-base-out
 
 function userTextTransformOptions() {
   const options = {};
+  if (!userTextEffectsAvailable) {
+    return options;
+  }
   if (osakaDialectToggle.checked) {
     options.osaka_dialect = true;
   }
@@ -736,10 +742,12 @@ async function refreshUserSettings() {
     }
     userSettings = await response.json();
     userTargetLanguage.value = userAutoTargetLanguage;
+    applyUserTheme(userSettings.theme || "blue");
     renderUserLanguageLabel();
     syncReplayButton();
   } catch (_error) {
     userTargetLanguage.value = userAutoTargetLanguage;
+    applyUserTheme("blue");
   }
   return userSettings;
 }
@@ -789,6 +797,29 @@ function syncSimilarVoiceAvailability(seedVcBackend) {
     similarVoiceToggle.checked = false;
   }
   syncReplayButton();
+}
+
+function syncJapaneseTextEffectAvailability(targetLanguage) {
+  userTextEffectsAvailable = targetLanguage === "ja-JP";
+  [osakaDialectToggle, variationModeToggle].forEach((toggle) => {
+    const tile = toggle.closest(".toggle-tile");
+    toggle.disabled = !userTextEffectsAvailable;
+    tile?.classList.toggle("is-disabled", !userTextEffectsAvailable);
+    if (userTextEffectsAvailable) {
+      tile?.removeAttribute("title");
+    } else {
+      tile?.setAttribute("title", "日本語出力のときだけ使えます");
+      toggle.checked = false;
+    }
+  });
+  if (hasUserOutput) {
+    syncReplayButton();
+  }
+}
+
+function applyUserTheme(theme) {
+  const supportedThemes = new Set(["blue", "pop", "mint"]);
+  document.body.dataset.theme = supportedThemes.has(theme) ? theme : "blue";
 }
 
 function isVoiceBackendUnavailableError(error) {
@@ -977,6 +1008,7 @@ function setCachedBaseResult(signature, result) {
   lastBaseTextSignature = signature;
   lastBaseResult = result;
   lastBaseAudioBlob = audioBlobFromResult(result);
+  syncJapaneseTextEffectAvailability(result.target_language || resolvedUserTargetLanguage());
   baseResultCache.set(signature, {
     result,
     audioBlob: lastBaseAudioBlob,
@@ -1001,6 +1033,7 @@ function resetUserOutputCache() {
   voiceResultCache.clear();
   displayTextCache.clear();
   clearUserJokeMemoryCache();
+  syncJapaneseTextEffectAvailability("");
   lastAppliedUserRequestSignature = "";
   hasUserOutput = false;
 }

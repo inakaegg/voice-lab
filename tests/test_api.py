@@ -135,6 +135,10 @@ def test_admin_serves_browser_ui() -> None:
     assert "history-storage" in response.text
     assert "user-settings-panel" in response.text
     assert "user_joke_text" in response.text
+    assert "user_theme" in response.text
+    assert "青" in response.text
+    assert "ポップ" in response.text
+    assert "ミント" in response.text
     assert "user-settings-save" in response.text
     assert "use-output-as-input" in response.text
     assert "use-output-as-reference" in response.text
@@ -237,6 +241,8 @@ def test_static_assets_are_served() -> None:
     assert "toggleUserReplay" in js_text
     assert "reprocessLatestUserOutput" in js_text
     assert "markUserOutputStale" in js_text
+    assert "syncJapaneseTextEffectAvailability" in js_text
+    assert "applyUserTheme" in js_text
     assert "runUserTextOutput" in js_text
     assert "runUserVoiceConversion" in js_text
     assert "applyUserVoiceModeToBase" in js_text
@@ -264,6 +270,7 @@ def test_static_assets_are_served() -> None:
     assert "しょりちゅう" in js_text
     assert "seed_vc_reference_auto_select" in js_text
     assert "user-settings" in js_text
+    assert "user_theme" in js_text
     assert "renderInputAudioPreview" in js_text
     assert "setInputAudioSelectionStatus" in js_text
     assert "setReferenceAudioSelectionStatus" in js_text
@@ -286,6 +293,9 @@ def test_static_assets_are_served() -> None:
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
     assert ".user-stage" in css_response.text
+    assert '[data-theme="blue"]' in css_response.text
+    assert '[data-theme="pop"]' in css_response.text
+    assert '[data-theme="mint"]' in css_response.text
     assert ".display-mode-button" in css_response.text
     assert ".record-orb" in css_response.text
     assert ".record-progress" in css_response.text
@@ -369,6 +379,7 @@ def test_user_settings_api_defaults_to_japanese(tmp_path, monkeypatch) -> None:
         "target_language": "ja-JP",
         "joke_text": "",
         "joke_position": "after",
+        "theme": "blue",
     }
 
 
@@ -382,12 +393,28 @@ def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> Non
             "target_language": "ja-JP",
             "joke_text": "きょうも がんばってください。",
             "joke_position": "before",
+            "theme": "pop",
         },
     )
 
     assert response.status_code == 200
     assert response.json()["joke_position"] == "before"
+    assert response.json()["theme"] == "pop"
     assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。"
+    assert client.get("/api/user-settings").json()["theme"] == "pop"
+
+
+def test_user_settings_api_rejects_unknown_theme(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
+    client = TestClient(create_app())
+
+    response = client.put(
+        "/api/user-settings",
+        json={"target_language": "ja-JP", "joke_position": "after", "theme": "sepia"},
+    )
+
+    assert response.status_code == 400
+    assert "unsupported theme" in response.json()["detail"]
 
 
 def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None:

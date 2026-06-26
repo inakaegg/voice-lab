@@ -526,8 +526,63 @@ audio {
 }
 
 .user-body {
-  background: linear-gradient(180deg, #f7fbf8 0%, #eef4f6 52%, #f8f7f2 100%);
-  color: #17212b;
+  --user-page-bg: linear-gradient(180deg, #f5f9ff 0%, #eef5ff 52%, #fbfcff 100%);
+  --user-text: #142033;
+  --user-muted: #596879;
+  --user-panel-bg: rgba(255, 255, 255, 0.78);
+  --user-panel-border: rgba(79, 105, 138, 0.22);
+  --user-accent: #0a84ff;
+  --user-accent-strong: #075fc4;
+  --user-accent-soft: #e7f2ff;
+  --user-toggle-off: #aeb9c8;
+  --user-progress-bg: rgba(38, 72, 118, 0.15);
+  --user-progress-start: #0a84ff;
+  --user-progress-end: #49c7ff;
+  --user-recording: #e68a2e;
+  --user-ready: #0a84ff;
+  --user-processing: #5b7cfa;
+  --user-replay-bg: #1f4f8c;
+  background: var(--user-page-bg);
+  color: var(--user-text);
+}
+
+.user-body[data-theme="blue"] {
+  --user-page-bg: linear-gradient(180deg, #f5f9ff 0%, #eef5ff 52%, #fbfcff 100%);
+  --user-accent: #0a84ff;
+  --user-accent-strong: #075fc4;
+  --user-accent-soft: #e7f2ff;
+  --user-toggle-off: #aeb9c8;
+  --user-progress-start: #0a84ff;
+  --user-progress-end: #49c7ff;
+  --user-ready: #0a84ff;
+  --user-processing: #5b7cfa;
+  --user-replay-bg: #1f4f8c;
+}
+
+.user-body[data-theme="pop"] {
+  --user-page-bg: linear-gradient(180deg, #fff7fb 0%, #eef8ff 52%, #fffbea 100%);
+  --user-accent: #007aff;
+  --user-accent-strong: #2746b8;
+  --user-accent-soft: #eaf3ff;
+  --user-toggle-off: #bec3d3;
+  --user-progress-start: #007aff;
+  --user-progress-end: #ffb84d;
+  --user-ready: #18a999;
+  --user-processing: #7c5cff;
+  --user-replay-bg: #2847a8;
+}
+
+.user-body[data-theme="mint"] {
+  --user-page-bg: linear-gradient(180deg, #f5fbfa 0%, #edf7f5 55%, #fbfaf4 100%);
+  --user-accent: #12a4b7;
+  --user-accent-strong: #0a6f85;
+  --user-accent-soft: #e5f7f7;
+  --user-toggle-off: #b4c2c4;
+  --user-progress-start: #12a4b7;
+  --user-progress-end: #83c35a;
+  --user-ready: #168e7b;
+  --user-processing: #3d8de3;
+  --user-replay-bg: #155f78;
 }
 
 .user-stage {
@@ -542,10 +597,10 @@ audio {
 
 .display-mode-button {
   background: #ffffff;
-  border: 1px solid rgba(55, 99, 85, 0.24);
+  border: 1px solid var(--user-panel-border);
   border-radius: 999px;
   box-shadow: 0 10px 26px rgba(40, 52, 62, 0.12);
-  color: #1d3f36;
+  color: var(--user-accent-strong);
   font-size: 14px;
   font-weight: 900;
   min-width: 82px;
@@ -564,7 +619,7 @@ audio {
 }
 
 .user-kicker {
-  color: #376355;
+  color: var(--user-accent-strong);
   font-size: 14px;
   font-weight: 700;
   margin: 0 0 8px;
@@ -612,7 +667,7 @@ audio {
 }
 
 .record-progress {
-  background: conic-gradient(#1d6f59 var(--record-progress, 0deg), rgba(255, 255, 255, 0.28) 0deg);
+  background: conic-gradient(var(--user-ready) var(--record-progress, 0deg), rgba(255, 255, 255, 0.28) 0deg);
   border-radius: 50%;
   inset: -16px;
   opacity: 0;
@@ -667,7 +722,7 @@ audio {
 }
 
 .record-orb.is-recording {
-  background: #c96f25;
+  background: var(--user-recording);
   transform: scale(1.02);
 }
 
@@ -689,11 +744,11 @@ audio {
 }
 
 .record-orb.is-ready-to-stop {
-  background: #28765d;
+  background: var(--user-ready);
 }
 
 .record-orb.is-ready-to-stop .record-progress {
-  background: conic-gradient(#58c59e 360deg, rgba(255, 255, 255, 0.28) 0deg);
+  background: conic-gradient(var(--user-progress-end) 360deg, rgba(255, 255, 255, 0.28) 0deg);
 }
 
 .record-orb.is-locked .record-timer {
@@ -701,7 +756,7 @@ audio {
 }
 
 .record-orb.is-processing {
-  background: #536879;
+  background: var(--user-processing);
 }
 
 .record-orb.is-processing .record-icon {
@@ -724,7 +779,7 @@ audio {
 }
 
 .user-status {
-  color: #1d3f36;
+  color: var(--user-accent-strong);
   font-size: 24px;
   font-weight: 800;
   line-height: 1.35;
@@ -733,7 +788,7 @@ audio {
 }
 
 .user-minimum-hint {
-  color: #5d6a64;
+  color: var(--user-muted);
   font-size: 16px;
   font-weight: 700;
   margin: 0;
@@ -751,11 +806,11 @@ audio {
 
 .toggle-tile {
   align-items: center;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(86, 106, 113, 0.22);
+  background: var(--user-panel-bg);
+  border: 1px solid var(--user-panel-border);
   border-radius: 8px;
   box-sizing: border-box;
-  color: #35454c;
+  color: var(--user-muted);
   cursor: pointer;
   display: grid;
   font-size: 15px;
@@ -778,7 +833,7 @@ audio {
 }
 
 .toggle-art {
-  background: #b8c5c2;
+  background: var(--user-toggle-off);
   border-radius: 999px;
   box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.64);
   height: 30px;
@@ -800,13 +855,13 @@ audio {
 }
 
 .toggle-tile:has(input:checked) {
-  background: #e9f5ef;
-  border-color: #68a88d;
-  color: #1d5a46;
+  background: var(--user-accent-soft);
+  border-color: var(--user-accent);
+  color: var(--user-accent-strong);
 }
 
 .toggle-tile:has(input:checked) .toggle-art {
-  background: #2f8064;
+  background: var(--user-accent);
 }
 
 .toggle-tile:has(input:checked) .toggle-art::after {
@@ -854,7 +909,7 @@ audio {
 }
 
 .user-processing-bar {
-  background: rgba(38, 61, 77, 0.14);
+  background: var(--user-progress-bg);
   border-radius: 999px;
   height: 12px;
   overflow: hidden;
@@ -862,7 +917,7 @@ audio {
 }
 
 .user-processing-fill {
-  background: linear-gradient(90deg, #2f8064, #d2a13a);
+  background: linear-gradient(90deg, var(--user-progress-start), var(--user-progress-end));
   border-radius: inherit;
   display: block;
   height: 100%;
@@ -887,14 +942,14 @@ audio {
 }
 
 .user-output-text-card {
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(86, 106, 113, 0.2);
+  background: var(--user-panel-bg);
+  border: 1px solid var(--user-panel-border);
   border-radius: 8px;
   padding: 12px;
 }
 
 .user-output-text-card h2 {
-  color: #44605b;
+  color: var(--user-accent-strong);
   font-size: 13px;
   margin: 0 0 6px;
 }
@@ -913,14 +968,14 @@ audio {
 }
 
 .ruby-line rt {
-  color: #45615b;
+  color: var(--user-accent-strong);
   font-size: 0.62em;
   font-weight: 800;
 }
 
 .replay-button {
   align-items: center;
-  background: #263d4d;
+  background: var(--user-replay-bg);
   border: 0;
   border-radius: 999px;
   box-shadow: 0 10px 24px rgba(40, 52, 62, 0.16);
@@ -967,7 +1022,7 @@ audio {
 }
 
 .replay-button[data-state="stale"] {
-  background: #2f8064;
+  background: var(--user-accent);
 }
 
 .replay-button[data-state="stale"] .replay-icon {

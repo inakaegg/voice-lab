@@ -9,6 +9,7 @@ from pathlib import Path
 DEFAULT_USER_SETTINGS_PATH = "tmp/user-settings.json"
 SUPPORTED_USER_TARGET_LANGUAGES = {"id-ID", "ja-JP", "zh-CN", "en-US"}
 SUPPORTED_JOKE_POSITIONS = {"before", "after"}
+SUPPORTED_USER_THEMES = {"blue", "pop", "mint"}
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class UserExperienceSettings:
     target_language: str = "ja-JP"
     joke_text: str = ""
     joke_position: str = "after"
+    theme: str = "blue"
 
 
 @dataclass
@@ -57,8 +59,13 @@ def _coerce_settings(payload: dict[str, object]) -> UserExperienceSettings:
     if joke_position not in SUPPORTED_JOKE_POSITIONS:
         raise ValueError(f"unsupported joke_position: {joke_position}")
 
+    theme = str(payload.get("theme", "blue"))
+    if theme not in SUPPORTED_USER_THEMES:
+        raise ValueError(f"unsupported theme: {theme}")
+
     return UserExperienceSettings(
         target_language=target_language,
         joke_text=str(payload.get("joke_text", "")).strip(),
         joke_position=joke_position,
+        theme=theme,
     )
