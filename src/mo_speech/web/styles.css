@@ -209,6 +209,32 @@ button:disabled {
   padding: 12px;
 }
 
+.joke-preview-title {
+  color: #394556;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.joke-preview-list {
+  background: #f7f9fb;
+  border: 1px solid #dde3ea;
+  border-radius: 6px;
+  color: #394556;
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px 10px 30px;
+}
+
+.joke-preview-list li {
+  overflow-wrap: anywhere;
+}
+
 .streaming-note {
   color: #5f6b7a;
   font-size: 13px;

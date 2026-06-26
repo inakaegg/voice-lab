@@ -212,6 +212,16 @@
               <p class="route-hint">保存時に元ジョークごとに生成します。ユーザーの変換中には生成しません。</p>
             </div>
             <div class="field-row">
+              <p class="joke-preview-title">生成済みバリエーション</p>
+              <ol id="user_joke_variants_preview" class="joke-preview-list"></ol>
+              <p id="user_joke_variants_empty" class="route-hint">まだ生成されていません。</p>
+            </div>
+            <div class="field-row">
+              <p class="joke-preview-title">実際に使うジョーク候補</p>
+              <ol id="user_joke_pool_preview" class="joke-preview-list"></ol>
+              <p id="user_joke_pool_empty" class="route-hint">候補がありません。</p>
+            </div>
+            <div class="field-row">
               <label for="user_theme">ユーザー画面テーマ</label>
               <select id="user_theme" name="user_theme">
                 <option value="blue">青</option>

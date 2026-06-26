@@ -141,6 +141,10 @@ def test_admin_serves_browser_ui() -> None:
     assert "user_joke_text" in response.text
     assert "user_joke_selection" in response.text
     assert "user_joke_variation_count" in response.text
+    assert "user_joke_variants_preview" in response.text
+    assert "user_joke_pool_preview" in response.text
+    assert "生成済みバリエーション" in response.text
+    assert "実際に使うジョーク候補" in response.text
     assert "user_theme" in response.text
     assert "ローテーション" in response.text
     assert "ランダム" in response.text
@@ -293,6 +297,9 @@ def test_static_assets_are_served() -> None:
     assert "user_joke_selection" in js_text
     assert "user_joke_variation_count" in js_text
     assert "splitAdminJokeTexts" in js_text
+    assert "renderAdminJokePreview" in js_text
+    assert "settings.joke_variants" in js_text
+    assert "settings.joke_pool" in js_text
     assert "renderInputAudioPreview" in js_text
     assert "setInputAudioSelectionStatus" in js_text
     assert "setReferenceAudioSelectionStatus" in js_text
@@ -338,6 +345,8 @@ def test_static_assets_are_served() -> None:
     assert ".toggle-tile:has(input:checked)::after" in css_response.text
     assert "inset 0 5px 12px" in css_response.text
     assert "translateY(2px) scale(0.96)" in css_response.text
+    assert ".joke-preview-title" in css_response.text
+    assert ".joke-preview-list" in css_response.text
     assert ".history-title" in css_response.text
     assert ".history-text" in css_response.text
     assert ".history-warning" in css_response.text
