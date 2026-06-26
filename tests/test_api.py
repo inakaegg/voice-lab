@@ -231,6 +231,11 @@ def test_static_assets_are_served() -> None:
     assert "toggleUserReplay" in js_text
     assert "reprocessLatestUserOutput" in js_text
     assert "markUserOutputStale" in js_text
+    assert "runUserTextOutput" in js_text
+    assert "runUserVoiceConversion" in js_text
+    assert "applyUserVoiceModeToBase" in js_text
+    assert "user-text-output" in js_text
+    assert "voice-conversion-jobs" in js_text
     assert "cycleUserTextMode" in js_text
     assert "setUserProcessingProgress" in js_text
     assert "しょりちゅう" in js_text
@@ -381,6 +386,44 @@ def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None
         "hiragana_text": "きゅうりょうを あげてください。",
     }
     assert "hiragana only" in captured["instructions"]
+
+
+def test_user_text_output_api_reuses_translated_text_for_tts(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Speech:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(content=b"wav")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(OpenAI=lambda: SimpleNamespace(audio=SimpleNamespace(speech=Speech()))),
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/user-text-output",
+        json={
+            "transcript": "I want a raise.",
+            "translated_text": "給料を上げてください。",
+            "target_language": "ja-JP",
+            "text_transform_options": {"joke_text": "お願いします。", "joke_position": "after"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["transcript"] == "I want a raise."
+    assert payload["translated_text"] == "給料を上げてください。"
+    assert payload["transformed_text"] == "給料を上げてください。 お願いします。"
+    assert payload["audio_base64"] != ""
+    assert payload["providers"]["asr"] == "cached"
+    assert payload["providers"]["translation"] == "cached"
+    assert captured["input"] == "給料を上げてください。 お願いします。"
 
 
 def test_runtime_api_returns_supported_voice_modes_from_tts_provider() -> None:

@@ -35,10 +35,12 @@ from .api_runtime import (
     translation_backends as _translation_backends,
     voice_conversion_backends as _voice_conversion_backends,
 )
+from .api_serializers import normalize_tts_provider_output as _normalize_tts_provider_output
 from .api_serializers import serialize_pipeline_result as _serialize_pipeline_result
 from .audio_history import AudioHistoryStore
 from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
 from .pipeline import SpeechTranslationPipeline
+from .pipeline import PipelineResult
 from .providers.openai_api import (
     create_openai_realtime_translation_client_secret,
 )
@@ -50,6 +52,7 @@ from .providers.voice import (
     prepare_seed_vc_reference_preview as _prepare_seed_vc_reference_preview,
 )
 from .text_display import create_user_display_text
+from .transforms import apply_text_transform
 from .user_settings import (
     UserSettingsStore,
     serialize_user_settings,
@@ -153,6 +156,60 @@ def create_app(
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/user-text-output")
+    def user_text_output(payload: dict[str, object] = Body(...)) -> dict[str, object]:
+        translated_text = str(payload.get("translated_text", "")).strip()
+        target_language = str(payload.get("target_language", "ja-JP"))
+        if translated_text == "":
+            raise HTTPException(status_code=400, detail="translated_text is required")
+
+        text_transform_options = payload.get("text_transform_options") or {}
+        if not isinstance(text_transform_options, dict):
+            raise HTTPException(status_code=400, detail="text_transform_options must be an object")
+
+        try:
+            transformed_text = apply_text_transform(
+                translated_text,
+                "user_effects" if text_transform_options else None,
+                text_transform_options,
+            )
+            tts_output = _normalize_tts_provider_output(
+                active_openai_pipeline.tts.synthesize(transformed_text, target_language),
+                active_openai_pipeline.tts.audio_mime_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        result = PipelineResult(
+            transcript=str(payload.get("transcript", "")),
+            translated_text=translated_text,
+            transformed_text=transformed_text,
+            output_audio_bytes=tts_output.audio_bytes,
+            output_audio_mime_type=tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
+            timings_ms=tts_output.timings_ms,
+            providers={
+                "asr": "cached",
+                "translation": "cached",
+                "tts": active_openai_pipeline.tts.name,
+            },
+            warnings=tts_output.warnings,
+        )
+        active_audio_history_store.save_output(
+            result.output_audio_bytes,
+            suffix=_mime_suffix(result.output_audio_mime_type),
+            metadata={
+                "endpoint": "user-text-output",
+                "translation_backend": "openai",
+                "target_language": target_language,
+                "voice_mode": "default",
+                "audio_mime_type": result.output_audio_mime_type,
+                **_history_text_metadata_from_pipeline_result(result),
+            },
+        )
+        return _serialize_pipeline_result(result)
 
     @app.post("/api/translate-speech")
     async def translate_speech(

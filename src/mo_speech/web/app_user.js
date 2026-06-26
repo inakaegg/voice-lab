@@ -28,6 +28,13 @@ let recordTimerId = null;
 let currentUserOutputUrl = "";
 let lastUserInputBlob = null;
 let lastUserInputFileName = "";
+let lastTranslationSignature = "";
+let lastTranslationResult = null;
+let lastBaseTextSignature = "";
+let lastBaseResult = null;
+let lastBaseAudioBlob = null;
+let lastVoiceSignature = "";
+let lastVoiceResult = null;
 let lastAppliedUserRequestSignature = "";
 let hasUserOutput = false;
 let isUserProcessing = false;
@@ -85,7 +92,7 @@ async function startUserRecording() {
   userReplayButton.hidden = true;
   userOutputTexts.hidden = true;
   hideUserProcessing();
-  hasUserOutput = false;
+  resetUserOutputCache();
   userOutputAudio.removeAttribute("src");
   if (currentUserOutputUrl) {
     URL.revokeObjectURL(currentUserOutputUrl);
@@ -149,7 +156,8 @@ async function runUserTranslation(audioBlob, fileName) {
   hasUserOutput = false;
   userReplayButton.hidden = true;
   setUserProcessingProgress(4);
-  const requestSignature = currentUserRequestSignature();
+  const translationSignature = currentUserTranslationSignature();
+  const baseTextSignature = currentUserBaseTextSignature();
   const formData = buildUserTranslationFormData(audioBlob, fileName);
 
   const response = await fetch("/api/translate-speech-jobs", {
@@ -167,9 +175,13 @@ async function runUserTranslation(audioBlob, fileName) {
   if (!completedJob.result) {
     throw new Error("できたこえが ありません");
   }
-  await renderUserResult(completedJob.result);
-  lastAppliedUserRequestSignature = requestSignature;
-  hasUserOutput = true;
+  lastTranslationSignature = translationSignature;
+  lastTranslationResult = completedJob.result;
+  lastBaseTextSignature = baseTextSignature;
+  lastBaseResult = completedJob.result;
+  lastBaseAudioBlob = audioBlobFromResult(completedJob.result);
+  clearUserVoiceCache();
+  await applyUserVoiceModeToBase();
   setUserProcessingProgress(100);
   hideUserProcessing();
 }
@@ -179,14 +191,7 @@ function buildUserTranslationFormData(audioBlob, fileName) {
   formData.append("translation_backend", "openai");
   formData.append("source_language", "auto");
   formData.append("target_language", userTargetLanguage.value || "ja-JP");
-  formData.append("voice_mode", similarVoiceToggle.checked ? "convert" : "default");
-  if (similarVoiceToggle.checked) {
-    formData.append("seed_vc_diffusion_steps", "30");
-    formData.append("seed_vc_reference_max_seconds", "10");
-    formData.append("seed_vc_reference_auto_select", "true");
-    formData.append("seed_vc_length_adjust", "1.0");
-    formData.append("seed_vc_inference_cfg_rate", "0.7");
-  }
+  formData.append("voice_mode", "default");
 
   const textTransformOptions = userTextTransformOptions();
   if (Object.keys(textTransformOptions).length > 0) {
@@ -195,6 +200,109 @@ function buildUserTranslationFormData(audioBlob, fileName) {
   }
   formData.append("audio", audioBlob, fileName);
   return formData;
+}
+
+async function runUserTextOutput() {
+  if (!lastTranslationResult) {
+    throw new Error("もとの ほんやくが ありません");
+  }
+  isUserProcessing = true;
+  hasUserOutput = false;
+  userReplayButton.hidden = true;
+  setUserProcessingProgress(54);
+  const baseTextSignature = currentUserBaseTextSignature();
+  const response = await fetch("/api/user-text-output", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transcript: lastTranslationResult.transcript || "",
+      translated_text: lastTranslationResult.translated_text || "",
+      target_language: userTargetLanguage.value || "ja-JP",
+      text_transform_options: userTextTransformOptions(),
+    }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || "こえを つくれませんでした");
+  }
+  const result = await response.json();
+  lastBaseTextSignature = baseTextSignature;
+  lastBaseResult = result;
+  lastBaseAudioBlob = audioBlobFromResult(result);
+  clearUserVoiceCache();
+  await applyUserVoiceModeToBase();
+  setUserProcessingProgress(100);
+  hideUserProcessing();
+}
+
+async function applyUserVoiceModeToBase() {
+  if (!lastBaseResult || !lastBaseAudioBlob) {
+    throw new Error("もとの こえが ありません");
+  }
+  const requestSignature = currentUserRequestSignature();
+  if (!similarVoiceToggle.checked) {
+    await renderUserResult(lastBaseResult);
+    lastAppliedUserRequestSignature = requestSignature;
+    hasUserOutput = true;
+    return;
+  }
+  if (lastVoiceResult && lastVoiceSignature === requestSignature) {
+    await renderUserResult(lastVoiceResult);
+    lastAppliedUserRequestSignature = requestSignature;
+    hasUserOutput = true;
+    return;
+  }
+  const voiceResult = await runUserVoiceConversion(lastBaseAudioBlob);
+  lastVoiceSignature = requestSignature;
+  lastVoiceResult = {
+    ...lastBaseResult,
+    audio_mime_type: voiceResult.audio_mime_type,
+    audio_base64: voiceResult.audio_base64,
+    timings_ms: {
+      ...(lastBaseResult.timings_ms || {}),
+      ...(voiceResult.timings_ms || {}),
+    },
+    providers: {
+      ...(lastBaseResult.providers || {}),
+      ...(voiceResult.providers || {}),
+    },
+    warnings: [...(lastBaseResult.warnings || []), ...(voiceResult.warnings || [])],
+  };
+  await renderUserResult(lastVoiceResult);
+  lastAppliedUserRequestSignature = requestSignature;
+  hasUserOutput = true;
+}
+
+async function runUserVoiceConversion(baseAudioBlob) {
+  if (!lastUserInputBlob) {
+    throw new Error("もとの ろくおんが ありません");
+  }
+  setUserProcessingProgress(84);
+  const formData = new FormData();
+  formData.append("voice_backend", "seed-vc");
+  formData.append("seed_vc_diffusion_steps", "30");
+  formData.append("seed_vc_reference_max_seconds", "10");
+  formData.append("seed_vc_reference_auto_select", "true");
+  formData.append("seed_vc_length_adjust", "1.0");
+  formData.append("seed_vc_inference_cfg_rate", "0.7");
+  formData.append("source_audio", baseAudioBlob, userAudioFileNameForMime(baseAudioBlob.type, "user-base-output"));
+  formData.append("reference_audio", lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
+
+  const response = await fetch("/api/voice-conversion-jobs", {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || "にてるこえを つくれませんでした");
+  }
+  const job = await response.json();
+  renderUserVoiceJob(job);
+  const completedJob = await pollUserVoiceConversionJob(job.job_id);
+  if (!completedJob.result) {
+    throw new Error("にてるこえが ありません");
+  }
+  return completedJob.result;
 }
 
 function userTextTransformOptions() {
@@ -214,8 +322,20 @@ function userTextTransformOptions() {
 
 function currentUserRequestSignature() {
   return JSON.stringify({
-    target_language: userTargetLanguage.value || "ja-JP",
+    base_text: currentUserBaseTextSignature(),
     similar_voice: similarVoiceToggle.checked,
+  });
+}
+
+function currentUserTranslationSignature() {
+  return JSON.stringify({
+    target_language: userTargetLanguage.value || "ja-JP",
+  });
+}
+
+function currentUserBaseTextSignature() {
+  return JSON.stringify({
+    translation: currentUserTranslationSignature(),
     text_transform_options: userTextTransformOptions(),
   });
 }
@@ -238,6 +358,24 @@ async function pollUserTranslationJob(jobId) {
   }
 }
 
+async function pollUserVoiceConversionJob(jobId) {
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const response = await fetch(`/api/voice-conversion-jobs/${encodeURIComponent(jobId)}`);
+    if (!response.ok) {
+      throw new Error("じょうたいを よめませんでした");
+    }
+    const job = await response.json();
+    renderUserVoiceJob(job);
+    if (job.status === "succeeded") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "にてるこえを つくれませんでした");
+    }
+  }
+}
+
 function renderUserJob(job) {
   const stage = job.current_stage?.stage || "";
   setUserStatus("しょりちゅう");
@@ -255,6 +393,17 @@ function renderUserJob(job) {
     setUserProcessingProgress(100);
   } else if (job.status === "running") {
     setUserProcessingProgress(16);
+  }
+}
+
+function renderUserVoiceJob(job) {
+  setUserStatus("しょりちゅう");
+  if (job.status === "queued") {
+    setUserProcessingProgress(84);
+  } else if (job.current_stage?.stage === "voice_conversion" || job.status === "running") {
+    setUserProcessingProgress(92);
+  } else if (job.current_stage?.stage === "complete") {
+    setUserProcessingProgress(100);
   }
 }
 
@@ -293,13 +442,7 @@ async function renderUserTexts(result) {
 }
 
 function renderUserOutput(result) {
-  const mimeType = result.audio_mime_type || "audio/wav";
-  const binary = atob(result.audio_base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  const audioBlob = new Blob([bytes], { type: mimeType });
+  const audioBlob = audioBlobFromResult(result);
   if (currentUserOutputUrl) {
     URL.revokeObjectURL(currentUserOutputUrl);
   }
@@ -309,6 +452,16 @@ function renderUserOutput(result) {
   userReplayButton.hidden = false;
   userOutputAudio.play().catch(() => {});
   syncReplayButton();
+}
+
+function audioBlobFromResult(result) {
+  const mimeType = result.audio_mime_type || "audio/wav";
+  const binary = atob(result.audio_base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType });
 }
 
 async function refreshUserSettings() {
@@ -437,7 +590,19 @@ async function reprocessLatestUserOutput() {
   userRecordButton.classList.add("is-processing");
   setUserStatus("しょりちゅう");
   try {
-    await runUserTranslation(lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
+    const translationSignature = currentUserTranslationSignature();
+    const baseTextSignature = currentUserBaseTextSignature();
+    if (!lastTranslationResult || translationSignature !== lastTranslationSignature) {
+      await runUserTranslation(lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
+    } else if (!lastBaseResult || baseTextSignature !== lastBaseTextSignature) {
+      await runUserTextOutput();
+    } else {
+      isUserProcessing = true;
+      setUserProcessingProgress(similarVoiceToggle.checked ? 84 : 100);
+      await applyUserVoiceModeToBase();
+      setUserProcessingProgress(100);
+      hideUserProcessing();
+    }
     setUserStatus("できました");
   } catch (error) {
     renderUserError(error.message || "エラー");
@@ -465,6 +630,22 @@ function markUserOutputStale() {
   if (hasUserOutput) {
     syncReplayButton();
   }
+}
+
+function resetUserOutputCache() {
+  lastTranslationSignature = "";
+  lastTranslationResult = null;
+  lastBaseTextSignature = "";
+  lastBaseResult = null;
+  lastBaseAudioBlob = null;
+  clearUserVoiceCache();
+  lastAppliedUserRequestSignature = "";
+  hasUserOutput = false;
+}
+
+function clearUserVoiceCache() {
+  lastVoiceSignature = "";
+  lastVoiceResult = null;
 }
 
 function cycleUserTextMode() {
@@ -543,4 +724,16 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function userAudioFileNameForMime(mimeType, stem) {
+  const suffixes = {
+    "audio/wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+    "audio/ogg": ".ogg",
+    "audio/webm": ".webm",
+  };
+  return `${stem}${suffixes[mimeType] || ".wav"}`;
 }
