@@ -26,7 +26,7 @@ def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "isolated-history"))
     monkeypatch.setattr(
-        "mo_speech.api._prepare_audio_history_wav",
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
         lambda audio_bytes, suffix: (b"normalized wav", ".wav", {"audio_mime_type": "audio/wav"}),
     )
     client = TestClient(create_app())
@@ -105,73 +105,91 @@ def test_root_serves_browser_ui() -> None:
     assert "error-message" in response.text
     assert "末尾付加" in response.text
     assert "VC比較" in response.text
+    assert response.text.index("/static/app_dom.js") < response.text.index("/static/app_config.js")
+    assert response.text.index("/static/app_config.js") < response.text.index("/static/app_state.js")
+    assert response.text.index("/static/app_state.js") < response.text.index("/static/app_audio.js")
+    assert response.text.index("/static/app_audio.js") < response.text.index("/static/app_realtime.js")
+    assert response.text.index("/static/app_realtime.js") < response.text.index("/static/app_history.js")
+    assert response.text.index("/static/app_history.js") < response.text.index("/static/app_seed_vc.js")
+    assert response.text.index("/static/app_seed_vc.js") < response.text.index("/static/app.js")
     assert "/static/app.js" in response.text
 
 
 def test_static_assets_are_served() -> None:
     client = TestClient(create_app())
 
-    js_response = client.get("/static/app.js")
+    js_asset_names = [
+        "app_dom.js",
+        "app_config.js",
+        "app_state.js",
+        "app_audio.js",
+        "app_realtime.js",
+        "app_history.js",
+        "app_seed_vc.js",
+        "app.js",
+    ]
+    js_responses = [client.get(f"/static/{name}") for name in js_asset_names]
+    js_text = "\n".join(response.text for response in js_responses)
     css_response = client.get("/static/styles.css")
 
-    assert js_response.status_code == 200
-    assert "submitTranslation" in js_response.text
-    assert "append_suffix" in js_response.text
-    assert "loadRuntime" in js_response.text
-    assert "translationBackendSelect" in js_response.text
-    assert "submitTextToSpeech" in js_response.text
-    assert "handleTtsTextFileChange" in js_response.text
-    assert "ttsTextFileInput" in js_response.text
-    assert "deleteHistoryAudio" in js_response.text
-    assert "history-delete-button" in js_response.text
-    assert "loadAudioHistory" in js_response.text
-    assert "useHistoryAudioAsInput" in js_response.text
-    assert "useHistoryAudioAsReference" in js_response.text
-    assert "useHistoryTextForTts" in js_response.text
-    assert "useTextResultForTts" in js_response.text
-    assert "ensureTtsLanguage" in js_response.text
-    assert "renderAudioHistorySettings" in js_response.text
-    assert "history-title" in js_response.text
-    assert "history-text" in js_response.text
-    assert "playable_hint" in js_response.text
-    assert "requestData()" not in js_response.text
-    assert "openAiTargetLanguages" in js_response.text
-    assert "isRealtimeTranslationBackend" in js_response.text
-    assert "isRealtimeStreamingTranslationBackend" in js_response.text
-    assert "startRealtimeStreaming" in js_response.text
-    assert "stopRealtimeStreaming" in js_response.text
-    assert "saveRealtimeStreamingOutput" in js_response.text
-    assert "startRealtimeOutputRecording" in js_response.text
-    assert "openai-realtime-translation-session" in js_response.text
-    assert "syncTtsBackendAvailability" in js_response.text
-    assert "voiceProcessingSelect" in js_response.text
-    assert "submitCurrentOperation" in js_response.text
-    assert "submitVoiceConversion" in js_response.text
-    assert "pollVoiceConversionJob" in js_response.text
-    assert "syncOperationMode" in js_response.text
-    assert "syncVoiceBackendAvailability" in js_response.text
-    assert "syncSeedVcSettingsVisibility" in js_response.text
-    assert "appendSeedVcSettings" in js_response.text
-    assert "seedVcPresets" in js_response.text
-    assert "applySeedVcPreset" in js_response.text
-    assert "syncSeedVcPresetSelection" in js_response.text
-    assert "selectedVoiceBackend" in js_response.text
-    assert "translationOnlyElements" in js_response.text
-    assert "textResultSection" in js_response.text
-    assert "変換元音声ファイル" in js_response.text
-    assert "VC出力音声" in js_response.text
-    assert "renderInputAudioPreview" in js_response.text
-    assert "loadAudioDevices" in js_response.text
-    assert "selectedAudioConstraint" in js_response.text
-    assert "chooseRecorderOptions" in js_response.text
-    assert "startInputLevelMeter" in js_response.text
-    assert "syncTranslationBackendAvailability" in js_response.text
-    assert "syncVoiceProcessingAvailability" in js_response.text
-    assert "pollTranslationJob" in js_response.text
-    assert "renderProcessingJob" in js_response.text
-    assert "renderPartialResult" in js_response.text
-    assert "syncTargetOptions" in js_response.text
-    assert "renderError" in js_response.text
+    assert all(response.status_code == 200 for response in js_responses)
+    assert "submitTranslation" in js_text
+    assert "append_suffix" in js_text
+    assert "loadRuntime" in js_text
+    assert "translationBackendSelect" in js_text
+    assert "submitTextToSpeech" in js_text
+    assert "handleTtsTextFileChange" in js_text
+    assert "ttsTextFileInput" in js_text
+    assert "deleteHistoryAudio" in js_text
+    assert "history-delete-button" in js_text
+    assert "loadAudioHistory" in js_text
+    assert "useHistoryAudioAsInput" in js_text
+    assert "useHistoryAudioAsReference" in js_text
+    assert "useHistoryTextForTts" in js_text
+    assert "useTextResultForTts" in js_text
+    assert "ensureTtsLanguage" in js_text
+    assert "renderAudioHistorySettings" in js_text
+    assert "history-title" in js_text
+    assert "history-text" in js_text
+    assert "playable_hint" in js_text
+    assert "requestData()" not in js_text
+    assert "openAiTargetLanguages" in js_text
+    assert "isRealtimeTranslationBackend" in js_text
+    assert "isRealtimeStreamingTranslationBackend" in js_text
+    assert "startRealtimeStreaming" in js_text
+    assert "stopRealtimeStreaming" in js_text
+    assert "saveRealtimeStreamingOutput" in js_text
+    assert "startRealtimeOutputRecording" in js_text
+    assert "openai-realtime-translation-session" in js_text
+    assert "syncTtsBackendAvailability" in js_text
+    assert "voiceProcessingSelect" in js_text
+    assert "submitCurrentOperation" in js_text
+    assert "submitVoiceConversion" in js_text
+    assert "pollVoiceConversionJob" in js_text
+    assert "syncOperationMode" in js_text
+    assert "syncVoiceBackendAvailability" in js_text
+    assert "syncSeedVcSettingsVisibility" in js_text
+    assert "appendSeedVcSettings" in js_text
+    assert "seedVcPresets" in js_text
+    assert "applySeedVcPreset" in js_text
+    assert "syncSeedVcPresetSelection" in js_text
+    assert "selectedVoiceBackend" in js_text
+    assert "translationOnlyElements" in js_text
+    assert "textResultSection" in js_text
+    assert "変換元音声ファイル" in js_text
+    assert "VC出力音声" in js_text
+    assert "renderInputAudioPreview" in js_text
+    assert "loadAudioDevices" in js_text
+    assert "selectedAudioConstraint" in js_text
+    assert "chooseRecorderOptions" in js_text
+    assert "startInputLevelMeter" in js_text
+    assert "syncTranslationBackendAvailability" in js_text
+    assert "syncVoiceProcessingAvailability" in js_text
+    assert "pollTranslationJob" in js_text
+    assert "renderProcessingJob" in js_text
+    assert "renderPartialResult" in js_text
+    assert "syncTargetOptions" in js_text
+    assert "renderError" in js_text
     assert css_response.status_code == 200
     assert ".status" in css_response.text
     assert ".runtime-panel" not in css_response.text
@@ -315,7 +333,7 @@ def test_translate_speech_api_saves_local_audio_history_as_wav(tmp_path, monkeyp
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
     monkeypatch.setattr(
-        "mo_speech.api._prepare_audio_history_wav",
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
         lambda audio_bytes, suffix: (
             b"normalized recording wav",
             ".wav",
@@ -360,7 +378,7 @@ def test_translate_speech_job_reusing_history_input_does_not_duplicate_recording
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
     monkeypatch.setattr(
-        "mo_speech.api._prepare_audio_history_wav",
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
         lambda audio_bytes, suffix: (b"normalized wav", ".wav", {"audio_mime_type": "audio/wav"}),
     )
     client = TestClient(create_app())
@@ -719,7 +737,7 @@ def test_audio_history_output_api_saves_uploaded_audio_as_wav(tmp_path, monkeypa
     from mo_speech.audio_history import AudioHistoryStore
 
     monkeypatch.setattr(
-        "mo_speech.api._prepare_audio_history_wav",
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
         lambda audio_bytes, suffix: (
             b"normalized streaming wav",
             ".wav",
