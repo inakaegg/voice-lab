@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import mimetypes
 import os
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from base64 import b64decode, b64encode
 from io import BytesIO
 from dataclasses import dataclass, field
 from pathlib import Path
+from secrets import token_hex
 from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -137,7 +139,17 @@ class OpenAiAsrProvider:
             kwargs["language"] = OPENAI_LANGUAGE_CODES[source_language]
         with audio_path.open("rb") as audio_file:
             kwargs["file"] = audio_file
-            response = client.audio.transcriptions.create(**kwargs)
+            try:
+                response = client.audio.transcriptions.create(**kwargs)
+            except Exception as exc:
+                if not _should_retry_asr_with_http(exc):
+                    raise
+                return _transcribe_audio_with_http(
+                    audio_path,
+                    model=self.model,
+                    response_format=self.response_format,
+                    language=OPENAI_LANGUAGE_CODES[source_language],
+                )
         return _text_from_response(response)
 
     def _load_client(self) -> Any:
@@ -559,6 +571,73 @@ def _create_openai_client() -> Any:
     except ImportError as exc:
         raise RuntimeError("openai package is required for OpenAI API backend.") from exc
     return OpenAI()
+
+
+def _should_retry_asr_with_http(exc: Exception) -> bool:
+    return "unsupported_format" in str(exc)
+
+
+def _transcribe_audio_with_http(
+    audio_path: Path,
+    *,
+    model: str,
+    response_format: str,
+    language: str,
+) -> str:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is required for OpenAI ASR backend.")
+
+    fields = {
+        "model": model,
+        "response_format": response_format,
+    }
+    if language:
+        fields["language"] = language
+
+    body, content_type = _multipart_form_body(fields, audio_path)
+    request = Request(
+        "https://api.openai.com/v1/audio/transcriptions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": content_type,
+        },
+        method="POST",
+    )
+    timeout = float(os.getenv("OPENAI_API_TIMEOUT_SECONDS", "90"))
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI ASR HTTP request failed: {detail}") from exc
+    if response_format == "text":
+        return raw.decode("utf-8").strip()
+    return _text_from_response(json.loads(raw.decode("utf-8")))
+
+
+def _multipart_form_body(fields: dict[str, str], audio_path: Path) -> tuple[bytes, str]:
+    boundary = f"mo-speech-{token_hex(16)}"
+    content_type = f"multipart/form-data; boundary={boundary}"
+    chunks: list[bytes] = []
+
+    def add(value: str) -> None:
+        chunks.append(value.encode("utf-8"))
+
+    for name, value in fields.items():
+        add(f"--{boundary}\r\n")
+        add(f'Content-Disposition: form-data; name="{name}"\r\n\r\n')
+        add(f"{value}\r\n")
+
+    mime_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
+    add(f"--{boundary}\r\n")
+    add(f'Content-Disposition: form-data; name="file"; filename="{audio_path.name}"\r\n')
+    add(f"Content-Type: {mime_type}\r\n\r\n")
+    chunks.append(audio_path.read_bytes())
+    add("\r\n")
+    add(f"--{boundary}--\r\n")
+    return b"".join(chunks), content_type
 
 
 def _text_from_response(response: Any) -> str:

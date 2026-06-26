@@ -68,6 +68,7 @@ load_runpod_env() {
 }
 
 set_default_runpod_app_env() {
+  local model_volume_path="${RUNPOD_VOLUME_MOUNT_PATH:-/runpod-volume}"
   export MO_PROVIDER_MODE="${MO_PROVIDER_MODE:-local}"
   export MO_ASR_PROVIDER="${MO_ASR_PROVIDER:-faster-whisper}"
   export MO_TRANSLATION_PROVIDER="${MO_TRANSLATION_PROVIDER:-qwen3}"
@@ -85,11 +86,11 @@ set_default_runpod_app_env() {
   export OPENAI_REALTIME_TRANSLATION_SAMPLE_RATE="${OPENAI_REALTIME_TRANSLATION_SAMPLE_RATE:-24000}"
   export OPENAI_REALTIME_TRANSLATION_TIMEOUT_SECONDS="${OPENAI_REALTIME_TRANSLATION_TIMEOUT_SECONDS:-90}"
   export GOOGLE_TTS_TIMEOUT_SECONDS="${GOOGLE_TTS_TIMEOUT_SECONDS:-30}"
-  export MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/runpod-volume/models}"
-  export HF_HOME="${HF_HOME:-/runpod-volume/huggingface}"
-  export HF_HUB_CACHE="${HF_HUB_CACHE:-/runpod-volume/huggingface/hub}"
-  export FASTER_WHISPER_CACHE_DIR="${FASTER_WHISPER_CACHE_DIR:-/runpod-volume/models/faster-whisper}"
-  export SEED_VC_WORK_DIR="${SEED_VC_WORK_DIR:-/runpod-volume/work/seed-vc}"
+  export MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-${model_volume_path}/models}"
+  export HF_HOME="${HF_HOME:-${model_volume_path}/huggingface}"
+  export HF_HUB_CACHE="${HF_HUB_CACHE:-${model_volume_path}/huggingface/hub}"
+  export FASTER_WHISPER_CACHE_DIR="${FASTER_WHISPER_CACHE_DIR:-${model_volume_path}/models/faster-whisper}"
+  export SEED_VC_WORK_DIR="${SEED_VC_WORK_DIR:-${model_volume_path}/work/seed-vc}"
   export FASTER_WHISPER_MODEL="${FASTER_WHISPER_MODEL:-mobiuslabsgmbh/faster-whisper-large-v3-turbo}"
   export FASTER_WHISPER_DEVICE="${FASTER_WHISPER_DEVICE:-cuda}"
   export FASTER_WHISPER_COMPUTE_TYPE="${FASTER_WHISPER_COMPUTE_TYPE:-float16}"

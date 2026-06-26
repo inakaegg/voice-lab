@@ -60,6 +60,51 @@ def test_openai_asr_omits_language_for_auto_detection(tmp_path: Path, monkeypatc
     assert "language" not in captured
 
 
+def test_openai_asr_retries_unsupported_format_with_http(tmp_path: Path, monkeypatch) -> None:
+    audio_path = tmp_path / "speech.m4a"
+    audio_path.write_bytes(b"audio")
+    captured: dict[str, object] = {}
+
+    class Transcriptions:
+        @staticmethod
+        def create(**kwargs):
+            captured["sdk_kwargs"] = kwargs
+            raise RuntimeError("unsupported_format")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        @staticmethod
+        def read():
+            return b"Selamat pagi."
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["data"] = request.data
+        captured["timeout"] = timeout
+        return Response()
+
+    client = SimpleNamespace(audio=SimpleNamespace(transcriptions=Transcriptions()))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: client))
+    monkeypatch.setattr("mo_speech.providers.openai_api.urlopen", fake_urlopen)
+
+    provider = OpenAiAsrProvider(model="gpt-4o-transcribe")
+
+    assert provider.transcribe(audio_path, "id-ID") == "Selamat pagi."
+    assert captured["url"] == "https://api.openai.com/v1/audio/transcriptions"
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["timeout"] == 90.0
+    assert b'name="model"\r\n\r\ngpt-4o-transcribe' in captured["data"]
+    assert b'name="language"\r\n\r\nid' in captured["data"]
+    assert b'filename="speech.m4a"' in captured["data"]
+
+
 def test_openai_translation_uses_responses_api(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

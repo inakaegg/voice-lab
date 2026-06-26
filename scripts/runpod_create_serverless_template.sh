@@ -18,6 +18,7 @@ cmd=(
   --image "${RUNPOD_IMAGE}"
   --serverless
   --container-disk-in-gb "${RUNPOD_CONTAINER_DISK_GB:-60}"
+  --volume-mount-path "${RUNPOD_VOLUME_MOUNT_PATH:-/runpod-volume}"
   --env "${ENV_JSON}"
   --docker-start-cmd "python,-m,mo_speech.runpod_handler"
 )
