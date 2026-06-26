@@ -4,9 +4,10 @@ import base64
 import logging
 import mimetypes
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from threading import Lock, Thread
 from typing import Annotated
 from uuid import uuid4
@@ -36,6 +37,8 @@ from .providers.voice import (
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
 LOGGER = logging.getLogger("mo_speech")
+AUDIO_HISTORY_WAV_SAMPLE_RATE = 24000
+AUDIO_HISTORY_WAV_TIMEOUT_SECONDS = 30
 
 
 def _configure_logging() -> None:
@@ -123,7 +126,8 @@ def create_app(
         input_suffix = _upload_suffix(audio.filename)
         recording_entry = None
         if not _is_reused_history_input(active_audio_history_store, input_history_kind, input_history_filename):
-            recording_entry = active_audio_history_store.save_recording(
+            recording_entry = _save_audio_history_recording(
+                active_audio_history_store,
                 audio_bytes,
                 suffix=input_suffix,
                 metadata={
@@ -199,7 +203,8 @@ def create_app(
         input_suffix = _upload_suffix(audio.filename)
         recording_entry = None
         if not _is_reused_history_input(active_audio_history_store, input_history_kind, input_history_filename):
-            recording_entry = active_audio_history_store.save_recording(
+            recording_entry = _save_audio_history_recording(
+                active_audio_history_store,
                 audio_bytes,
                 suffix=input_suffix,
                 metadata={
@@ -285,7 +290,8 @@ def create_app(
     ) -> dict[str, object]:
         source_audio_bytes = await source_audio.read()
         source_suffix = _upload_suffix(source_audio.filename)
-        active_audio_history_store.save_recording(
+        _save_audio_history_recording(
+            active_audio_history_store,
             source_audio_bytes,
             suffix=source_suffix,
             metadata={
@@ -350,7 +356,8 @@ def create_app(
         audio_bytes = await audio.read()
         if len(audio_bytes) == 0:
             raise HTTPException(status_code=400, detail="audio is empty")
-        saved = active_audio_history_store.save_output(
+        saved = _save_audio_history_uploaded_output(
+            active_audio_history_store,
             audio_bytes,
             suffix=_upload_suffix(audio.filename),
             metadata={
@@ -904,6 +911,120 @@ def _is_reused_history_input(
     except (FileNotFoundError, ValueError):
         return False
     return True
+
+
+def _save_audio_history_recording(
+    store: AudioHistoryStore,
+    audio_bytes: bytes,
+    *,
+    suffix: str,
+    metadata: dict[str, object],
+) -> AudioHistoryEntry | None:
+    if not store.enabled or store.limit <= 0 or len(audio_bytes) == 0:
+        return None
+    prepared = _prepare_audio_history_wav(audio_bytes, suffix)
+    if prepared is None:
+        return None
+    prepared_bytes, prepared_suffix, prepared_metadata = prepared
+    return store.save_recording(
+        prepared_bytes,
+        suffix=prepared_suffix,
+        metadata=_audio_history_normalized_metadata(metadata, prepared_metadata),
+    )
+
+
+def _save_audio_history_uploaded_output(
+    store: AudioHistoryStore,
+    audio_bytes: bytes,
+    *,
+    suffix: str,
+    metadata: dict[str, object],
+) -> AudioHistoryEntry | None:
+    if not store.enabled or store.limit <= 0 or len(audio_bytes) == 0:
+        return None
+    prepared = _prepare_audio_history_wav(audio_bytes, suffix)
+    if prepared is None:
+        return None
+    prepared_bytes, prepared_suffix, prepared_metadata = prepared
+    return store.save_output(
+        prepared_bytes,
+        suffix=prepared_suffix,
+        metadata=_audio_history_normalized_metadata(metadata, prepared_metadata),
+    )
+
+
+def _audio_history_normalized_metadata(
+    metadata: dict[str, object],
+    prepared_metadata: dict[str, object],
+) -> dict[str, object]:
+    normalized_metadata = dict(metadata)
+    filename = str(metadata.get("filename") or "")
+    content_type = str(metadata.get("content_type") or "")
+    if filename:
+        normalized_metadata.setdefault("original_filename", filename)
+    if content_type:
+        normalized_metadata.setdefault("original_content_type", content_type)
+    normalized_metadata.update(prepared_metadata)
+    return normalized_metadata
+
+
+def _prepare_audio_history_wav(
+    audio_bytes: bytes,
+    suffix: str,
+) -> tuple[bytes, str, dict[str, object]] | None:
+    if len(audio_bytes) == 0:
+        return None
+    input_suffix = suffix if suffix.startswith(".") else f".{suffix}"
+    try:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / f"input{input_suffix}"
+            output_path = temp_path / "history.wav"
+            input_path.write_bytes(audio_bytes)
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(input_path),
+                    "-acodec",
+                    "pcm_s16le",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    str(AUDIO_HISTORY_WAV_SAMPLE_RATE),
+                    str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=AUDIO_HISTORY_WAV_TIMEOUT_SECONDS,
+            )
+            prepared_bytes = output_path.read_bytes()
+    except FileNotFoundError:
+        LOGGER.warning("ffmpeg is not available; audio history was not saved as wav")
+        return None
+    except subprocess.TimeoutExpired:
+        LOGGER.warning("audio history wav normalization timed out")
+        return None
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace").strip()
+        LOGGER.warning("audio history wav normalization failed: %s", stderr)
+        return None
+    if len(prepared_bytes) == 0:
+        LOGGER.warning("audio history wav normalization produced empty output")
+        return None
+    return (
+        prepared_bytes,
+        ".wav",
+        {
+            "audio_mime_type": "audio/wav",
+            "history_audio_format": f"wav_{AUDIO_HISTORY_WAV_SAMPLE_RATE}_mono_pcm16",
+            "original_audio_suffix": input_suffix,
+        },
+    )
 
 
 def _history_text_metadata_from_pipeline_result(result: PipelineResult) -> dict[str, str]:

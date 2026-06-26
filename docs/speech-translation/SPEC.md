@@ -285,6 +285,8 @@ UIでの読み上げ言語の扱い:
 - `recordings` の実保存先は `MO_AUDIO_HISTORY_DIR/recordings`、`outputs` の実保存先は `MO_AUDIO_HISTORY_DIR/outputs` とする。
 - 保存先はローカル環境変数 `MO_AUDIO_HISTORY_DIR` で変更する。ブラウザUIからサーバー側の任意パスを書き換える機能は、誤操作とパス露出を避けるため初期実装には含めない。
 - UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
+- ブラウザ録音やアップロード由来の履歴音声は、保存前に可能な限り `24kHz / mono / PCM wav` へ正規化する。正規化できない場合はwebmなどの元形式では保存せず、処理本体を優先して履歴保存をスキップする。
+- 正規化した履歴metadataには、元ファイル名、元content type、保存用audio mime typeを残す。
 - 履歴一覧と再利用対象は保存済み音声ファイルだけとし、`.json` metadata、`.DS_Store`、その他の非音声ファイルは表示しない。
 - UIでは、保存済み音声を次の入力音声またはVC参照音声へ再利用できる。
 - UIでは、保存済み音声を履歴ごとに個別削除できる。削除時は音声ファイル本体と対応するmetadataを同時に削除する。

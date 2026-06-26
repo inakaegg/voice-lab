@@ -25,6 +25,10 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
 def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "isolated-history"))
+    monkeypatch.setattr(
+        "mo_speech.api._prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (b"normalized wav", ".wav", {"audio_mime_type": "audio/wav"}),
+    )
     client = TestClient(create_app())
 
     response = client.post(
@@ -306,10 +310,22 @@ def test_translate_speech_api_accepts_audio_upload() -> None:
     assert payload["audio_base64"] != ""
 
 
-def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -> None:
+def test_translate_speech_api_saves_local_audio_history_as_wav(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+    monkeypatch.setattr(
+        "mo_speech.api._prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (
+            b"normalized recording wav",
+            ".wav",
+            {
+                "audio_mime_type": "audio/wav",
+                "history_audio_format": "wav_24000_mono_pcm16",
+                "original_audio_suffix": suffix,
+            },
+        ),
+    )
     client = TestClient(create_app())
 
     response = client.post(
@@ -319,7 +335,10 @@ def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -
     )
 
     assert response.status_code == 200
-    assert len(list((tmp_path / "history" / "recordings").glob("*.webm"))) == 1
+    recordings = list((tmp_path / "history" / "recordings").glob("*.wav"))
+    assert len(recordings) == 1
+    assert recordings[0].read_bytes() == b"normalized recording wav"
+    assert len(list((tmp_path / "history" / "recordings").glob("*.webm"))) == 0
     assert len(list((tmp_path / "history" / "outputs").glob("*.wav"))) == 1
     history = client.get("/api/audio-history").json()
     assert history["outputs"][0]["text_preview"] == "谢谢。"
@@ -329,12 +348,21 @@ def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -
     assert history["outputs"][0]["label"] == "谢谢。"
     assert history["recordings"][0]["text_preview"] == "ありがとう。"
     assert history["recordings"][0]["label"] == "ありがとう。"
+    assert history["recordings"][0]["filename"].endswith(".wav")
+    assert history["recordings"][0]["media_type"] == "audio/wav"
+    assert history["recordings"][0]["metadata"]["filename"] == "recording.webm"
+    assert history["recordings"][0]["metadata"]["original_content_type"] == "audio/webm"
+    assert history["recordings"][0]["metadata"]["original_audio_suffix"] == ".webm"
 
 
 def test_translate_speech_job_reusing_history_input_does_not_duplicate_recording(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+    monkeypatch.setattr(
+        "mo_speech.api._prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (b"normalized wav", ".wav", {"audio_mime_type": "audio/wav"}),
+    )
     client = TestClient(create_app())
 
     first_response = client.post(
@@ -687,9 +715,21 @@ def test_openai_realtime_translation_session_api_uses_target_language(monkeypatc
     assert captured == {"target_language": "ja-JP"}
 
 
-def test_audio_history_output_api_saves_uploaded_audio(tmp_path) -> None:
+def test_audio_history_output_api_saves_uploaded_audio_as_wav(tmp_path, monkeypatch) -> None:
     from mo_speech.audio_history import AudioHistoryStore
 
+    monkeypatch.setattr(
+        "mo_speech.api._prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (
+            b"normalized streaming wav",
+            ".wav",
+            {
+                "audio_mime_type": "audio/wav",
+                "history_audio_format": "wav_24000_mono_pcm16",
+                "original_audio_suffix": suffix,
+            },
+        ),
+    )
     history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
     client = TestClient(
         create_app(
@@ -711,10 +751,14 @@ def test_audio_history_output_api_saves_uploaded_audio(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["saved"] is True
+    assert payload["entry"]["filename"].endswith(".wav")
+    assert payload["entry"]["media_type"] == "audio/wav"
     assert payload["entry"]["metadata"]["endpoint"] == "openai-realtime-streaming"
+    assert payload["entry"]["metadata"]["filename"] == "streaming.webm"
+    assert payload["entry"]["metadata"]["original_content_type"] == "audio/webm"
     audio_response = client.get(payload["entry"]["url"])
     assert audio_response.status_code == 200
-    assert audio_response.content == b"streaming output"
+    assert audio_response.content == b"normalized streaming wav"
 
 
 def test_audio_history_api_reports_storage_settings(tmp_path) -> None:

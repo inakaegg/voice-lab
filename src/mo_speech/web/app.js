@@ -1113,7 +1113,7 @@ async function fetchHistoryAudioBlob(entry) {
     throw new Error("履歴音声を取得できませんでした");
   }
   const blob = await response.blob();
-  const filename = entry.metadata?.filename || entry.filename || `history.${extensionForMimeType(blob.type || "audio/wav")}`;
+  const filename = entry.filename || entry.metadata?.filename || `history.${extensionForMimeType(blob.type || "audio/wav")}`;
   return { blob, filename };
 }
 
