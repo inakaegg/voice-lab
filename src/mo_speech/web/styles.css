@@ -169,6 +169,25 @@ button:disabled {
   font-size: 13px;
 }
 
+.selection-status {
+  background: #f7f9fb;
+  border: 1px solid #dde3ea;
+  border-radius: 6px;
+  color: #5f6b7a;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: -6px 0 12px;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
+.selection-status[data-state="selected"] {
+  background: #eef6fb;
+  border-color: #b9d6ea;
+  color: #255f85;
+  font-weight: 600;
+}
+
 .input-level-row meter {
   width: 100%;
 }

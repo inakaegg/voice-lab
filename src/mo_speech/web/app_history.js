@@ -143,10 +143,16 @@ function createTrashIcon() {
 async function useHistoryAudioAsInput(entry) {
   try {
     const { blob, filename } = await fetchHistoryAudioBlob(entry);
-    useAudioBlobAsInput(blob, filename, "履歴音声を入力に設定しました", {
-      kind: entry.kind,
-      filename: entry.filename,
-    });
+    useAudioBlobAsInput(
+      blob,
+      filename,
+      "履歴音声を入力に設定しました",
+      {
+        kind: entry.kind,
+        filename: entry.filename,
+      },
+      "履歴から入力",
+    );
   } catch (error) {
     renderError(error.message || "履歴音声を入力に設定できませんでした");
   }
@@ -155,7 +161,7 @@ async function useHistoryAudioAsInput(entry) {
 async function useHistoryAudioAsReference(entry) {
   try {
     const { blob, filename } = await fetchHistoryAudioBlob(entry);
-    useAudioBlobAsReference(blob, filename, "履歴音声をVC参照に設定しました");
+    useAudioBlobAsReference(blob, filename, "履歴音声をVC参照に設定しました", "履歴からVC参照");
   } catch (error) {
     renderError(error.message || "履歴音声をVC参照に設定できませんでした");
   }
@@ -171,21 +177,23 @@ async function fetchHistoryAudioBlob(entry) {
   return { blob, filename };
 }
 
-function useAudioBlobAsInput(blob, filename, message, historySource = null) {
+function useAudioBlobAsInput(blob, filename, message, historySource = null, selectionLabel = "入力に設定") {
   audioInput.value = "";
   recordedBlob = blob;
   recordedChunks = [];
   recordedFileName = filename || `input.${extensionForMimeType(blob.type || "audio/wav")}`;
   inputHistorySource = historySource;
   renderInputAudioPreview(blob, recordedFileName);
+  setInputAudioSelectionStatus(selectionLabel, blob, recordedFileName);
   recordingLabel.textContent = "入力に設定済み";
   setStatus(message || "入力音声を設定しました");
 }
 
-function useAudioBlobAsReference(blob, filename, message) {
+function useAudioBlobAsReference(blob, filename, message, selectionLabel = "VC参照に設定") {
   referenceAudioInput.value = "";
   referenceAudioBlob = blob;
   referenceAudioFileName = filename || `reference.${extensionForMimeType(blob.type || "audio/wav")}`;
+  setReferenceAudioSelectionStatus(selectionLabel, blob, referenceAudioFileName);
   if (operationModeSelect.value !== "voice_conversion") {
     operationModeSelect.value = "voice_conversion";
     syncOperationMode();

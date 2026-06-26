@@ -113,6 +113,7 @@
             <label id="audio-label" for="audio">入力音声ファイル</label>
             <input id="audio" name="audio" type="file" accept="audio/*" />
           </div>
+          <p id="audio-selection-status" class="selection-status audio-input-only recorded-audio-only">入力音声なし</p>
           <p id="source-audio-hint" class="route-hint audio-input-only recorded-audio-only">
             録音またはファイル選択で入力音声を指定します。
           </p>
@@ -121,6 +122,7 @@
             <label for="reference_audio">参照音声ファイル</label>
             <input id="reference_audio" name="reference_audio" type="file" accept="audio/*" />
           </div>
+          <p id="reference-audio-selection-status" class="selection-status vc-only" hidden>VC参照音声なし</p>
 
           <div class="field-row audio-input-only">
             <label for="audio_device">マイク</label>

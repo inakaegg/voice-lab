@@ -23,6 +23,7 @@ async function startRecording() {
   recordedFileName = "recording.audio";
   inputHistorySource = null;
   clearInputAudioPreview();
+  clearInputAudioSelectionStatus("録音中");
   recordingDetails.textContent = "録音中";
   startInputLevelMeter(stream);
   mediaRecorder = new MediaRecorder(stream, chooseRecorderOptions());
@@ -41,6 +42,7 @@ async function startRecording() {
     if (recordedBlob.size < 1024) {
       recordedBlob = null;
       recordingDetails.textContent = "録音データが小さすぎます。マイク入力を確認してください。";
+      clearInputAudioSelectionStatus("録音失敗");
       stream.getTracks().forEach((track) => track.stop());
       recordingLabel.textContent = "録音失敗";
       recordButton.disabled = false;
@@ -49,6 +51,7 @@ async function startRecording() {
       return;
     }
     renderInputAudioPreview(recordedBlob, recordedFileName);
+    setInputAudioSelectionStatus("録音済み", recordedBlob, recordedFileName);
     stream.getTracks().forEach((track) => track.stop());
     recordingLabel.textContent = "録音済み";
     recordButton.disabled = false;
@@ -79,11 +82,24 @@ function handleAudioFileChange() {
   if (file) {
     recordingLabel.textContent = "ファイル選択済み";
     renderInputAudioPreview(file, file.name);
+    setInputAudioSelectionStatus("ファイル選択", file, file.name);
     return;
   }
   recordingLabel.textContent = "録音なし";
   recordingDetails.textContent = sourceAudioEmptyText();
   clearInputAudioPreview();
+  clearInputAudioSelectionStatus(sourceAudioEmptyText());
+}
+
+function handleReferenceAudioFileChange() {
+  const file = referenceAudioInput.files[0];
+  referenceAudioBlob = null;
+  referenceAudioFileName = "reference.audio";
+  if (file) {
+    setReferenceAudioSelectionStatus("ファイル選択", file, file.name);
+    return;
+  }
+  clearReferenceAudioSelectionStatus();
 }
 
 async function handleTtsTextFileChange() {
@@ -148,6 +164,40 @@ function renderInputAudioPreview(blob, filename = "") {
   inputAudio.hidden = false;
   const name = filename || "選択済み音声";
   recordingDetails.textContent = `${name} / ${blob.type || "unknown"} / ${formatBytes(blob.size)}`;
+}
+
+function setInputAudioSelectionStatus(label, blob, filename = "") {
+  setAudioSelectionStatus(audioSelectionStatus, label, blob, filename);
+}
+
+function clearInputAudioSelectionStatus(message = "入力音声なし") {
+  clearAudioSelectionStatus(audioSelectionStatus, message || "入力音声なし");
+}
+
+function setReferenceAudioSelectionStatus(label, blob, filename = "") {
+  setAudioSelectionStatus(referenceAudioSelectionStatus, label, blob, filename);
+}
+
+function clearReferenceAudioSelectionStatus(message = "VC参照音声なし") {
+  clearAudioSelectionStatus(referenceAudioSelectionStatus, message || "VC参照音声なし");
+}
+
+function setAudioSelectionStatus(element, label, blob, filename = "") {
+  if (!element) {
+    return;
+  }
+  const displayName = filename || blob?.name || "音声";
+  const sizeText = blob?.size ? ` / ${formatBytes(blob.size)}` : "";
+  element.textContent = `${label}: ${displayName}${sizeText}`;
+  element.dataset.state = "selected";
+}
+
+function clearAudioSelectionStatus(element, message) {
+  if (!element) {
+    return;
+  }
+  element.textContent = message;
+  delete element.dataset.state;
 }
 
 function clearInputAudioPreview() {

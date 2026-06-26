@@ -4,22 +4,19 @@ audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
 historyRefreshButton.addEventListener("click", loadAudioHistory);
 useOutputAsInputButton.addEventListener("click", () => {
   if (currentOutputBlob) {
-    useAudioBlobAsInput(currentOutputBlob, currentOutputFileName, "出力音声を入力に設定しました");
+    useAudioBlobAsInput(currentOutputBlob, currentOutputFileName, "出力音声を入力に設定しました", null, "出力音声を入力");
   }
 });
 useOutputAsReferenceButton.addEventListener("click", () => {
   if (currentOutputBlob) {
-    useAudioBlobAsReference(currentOutputBlob, currentOutputFileName, "出力音声をVC参照に設定しました");
+    useAudioBlobAsReference(currentOutputBlob, currentOutputFileName, "出力音声をVC参照に設定しました", "出力音声をVC参照");
   }
 });
 textResultActionButtons.forEach((button) => {
   button.addEventListener("click", () => useTextResultForTts(button.dataset.resultSource || ""));
 });
 audioInput.addEventListener("change", handleAudioFileChange);
-referenceAudioInput.addEventListener("change", () => {
-  referenceAudioBlob = null;
-  referenceAudioFileName = "reference.audio";
-});
+referenceAudioInput.addEventListener("change", handleReferenceAudioFileChange);
 ttsTextFileInput.addEventListener("change", handleTtsTextFileChange);
 operationModeSelect.addEventListener("change", () => {
   stopRealtimeStreaming();

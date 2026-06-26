@@ -74,7 +74,9 @@ def test_root_serves_browser_ui() -> None:
     assert "seed_vc_inference_cfg_rate" in response.text
     assert "translation-only" in response.text
     assert "audio-label" in response.text
+    assert "audio-selection-status" in response.text
     assert "source-audio-hint" in response.text
+    assert "reference-audio-selection-status" in response.text
     assert "text-result-section" in response.text
     assert "output-audio-heading" in response.text
     assert "route-hint" in response.text
@@ -192,6 +194,10 @@ def test_static_assets_are_served() -> None:
     assert "renderOutputAudioBlob" in js_text
     assert "outputAudio.play()" in js_text
     assert "renderInputAudioPreview" in js_text
+    assert "setInputAudioSelectionStatus" in js_text
+    assert "setReferenceAudioSelectionStatus" in js_text
+    assert "履歴から入力" in js_text
+    assert "履歴からVC参照" in js_text
     assert "loadAudioDevices" in js_text
     assert "selectedAudioConstraint" in js_text
     assert "chooseRecorderOptions" in js_text
