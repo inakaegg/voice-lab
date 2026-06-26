@@ -11,8 +11,8 @@
 ## デプロイ
 
 - Dockerfile、RunPod Serverless handler、ローカルFastAPIからRunPod Serverlessを呼ぶbackend adapterは用意済み。
-- RunPod endpoint作成、APIキー設定、Network Volumeへのモデル配置、デプロイ先 `/health` 確認は未実行。
-- 実デプロイは認証とモデル配置が必要なため、現時点では完了扱いにしない。
+- RunPod Serverless endpoint作成、OpenAI API経路のwarmup、短い音声翻訳、Seed-VC単体変換のスモーク確認は実行済み。
+- Cloudflare gateway、外部オブジェクトストレージへの履歴保存、本番用の認証/秘密情報ローテーション手順は未実装。
 
 ## TTS品質
 
