@@ -429,14 +429,12 @@ def test_user_settings_api_rejects_unknown_theme(tmp_path, monkeypatch) -> None:
 
 
 def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None:
-    captured: list[dict[str, object]] = []
+    captured: dict[str, object] = {}
 
     class Responses:
         @staticmethod
         def create(**kwargs):
-            captured.append(kwargs)
-            if "Indonesian" in kwargs["instructions"]:
-                return SimpleNamespace(output_text="Tolong naikkan gaji saya.")
+            captured.update(kwargs)
             return SimpleNamespace(output_text="きゅうりょうを あげてください。")
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -452,12 +450,10 @@ def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None
     assert response.json() == {
         "kanji_text": "給料を上げてください。",
         "hiragana_text": "きゅうりょうを あげてください。",
-        "indonesian_text": "Tolong naikkan gaji saya.",
+        "indonesian_text": "",
     }
-    assert "hiragana only" in captured[0]["instructions"]
-    assert captured[0]["input"] == "給料を上げてください。"
-    assert "Indonesian" in captured[1]["instructions"]
-    assert captured[1]["input"] == "給料を上げてください。"
+    assert "hiragana only" in captured["instructions"]
+    assert captured["input"] == "給料を上げてください。"
 
 
 def test_user_display_text_api_uses_indonesian_output_as_indonesian_text() -> None:

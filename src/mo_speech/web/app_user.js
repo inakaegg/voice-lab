@@ -54,6 +54,7 @@ let userDisplayText = {
   kanji_text: "",
   hiragana_text: "",
   indonesian_text: "",
+  target_language: "",
 };
 let userTextMode = "hiragana";
 let currentStatusKey = "tap_to_speak";
@@ -556,14 +557,15 @@ async function renderUserTexts(result) {
     userOutputTexts.hidden = true;
     return;
   }
+  const targetLanguage = result.target_language || resolvedUserTargetLanguage();
   userOutputTexts.hidden = false;
   userDisplayText = {
     kanji_text: text,
-    hiragana_text: "よみこみちゅう",
-    indonesian_text: "memuat...",
+    hiragana_text: targetLanguage === "id-ID" ? "" : "よみこみちゅう",
+    indonesian_text: targetLanguage === "id-ID" ? text : "",
+    target_language: targetLanguage,
   };
   renderUserTextMode();
-  const targetLanguage = result.target_language || resolvedUserTargetLanguage();
   const displayTextSignature = currentUserDisplayTextSignature(text, targetLanguage);
   const cachedDisplayText = displayTextCache.get(displayTextSignature);
   if (cachedDisplayText) {
@@ -576,15 +578,17 @@ async function renderUserTexts(result) {
     userDisplayText = {
       kanji_text: displayText.kanji_text || text,
       hiragana_text: displayText.hiragana_text || text,
-      indonesian_text: displayText.indonesian_text || text,
+      indonesian_text: targetLanguage === "id-ID" ? displayText.indonesian_text || text : "",
+      target_language: targetLanguage,
     };
     displayTextCache.set(displayTextSignature, userDisplayText);
     renderUserTextMode();
   } catch (_error) {
     userDisplayText = {
       kanji_text: text,
-      hiragana_text: text,
-      indonesian_text: text,
+      hiragana_text: targetLanguage === "id-ID" ? "" : text,
+      indonesian_text: targetLanguage === "id-ID" ? text : "",
+      target_language: targetLanguage,
     };
     displayTextCache.set(displayTextSignature, userDisplayText);
     renderUserTextMode();
@@ -1081,15 +1085,29 @@ function clearUserVoiceCache() {
 }
 
 function renderUserTextMode() {
-  userOutputTextMode.textContent = uiText("display_mode");
-  userOutputText.classList.toggle("ruby-line", userTextMode === "ruby");
-  if (userTextMode === "indonesian") {
+  const outputLanguage = userDisplayText.target_language || resolvedUserTargetLanguage();
+  const isJapaneseOutput = outputLanguage === "ja-JP";
+  const isIndonesianOutput = outputLanguage === "id-ID";
+  const showRuby = isJapaneseOutput && userTextMode === "ruby";
+  userOutputText.classList.toggle("ruby-line", showRuby);
+  if (isIndonesianOutput) {
+    userOutputTextMode.textContent = uiText("display_mode", "indonesian");
     userOutputText.textContent = userDisplayText.indonesian_text || userDisplayText.kanji_text;
+  } else if (showRuby) {
+    userOutputTextMode.textContent = uiText("display_mode", "ruby");
+    const kanji = escapeHtml(userDisplayText.kanji_text);
+    const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
+    userOutputText.innerHTML = `<ruby>${kanji}<rt>${hiragana}</rt></ruby>`;
+  } else if (isJapaneseOutput) {
+    userOutputTextMode.textContent = uiText("display_mode", "hiragana");
+    userOutputText.textContent = userDisplayText.hiragana_text || userDisplayText.kanji_text;
   } else if (userTextMode === "ruby") {
+    userOutputTextMode.textContent = uiText("display_mode", "ruby");
     const kanji = escapeHtml(userDisplayText.kanji_text);
     const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
     userOutputText.innerHTML = `<ruby>${kanji}<rt>${hiragana}</rt></ruby>`;
   } else {
+    userOutputTextMode.textContent = uiText("display_mode", userTextMode);
     userOutputText.textContent = userDisplayText.hiragana_text || userDisplayText.kanji_text;
   }
 }
