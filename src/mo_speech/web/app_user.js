@@ -6,9 +6,12 @@ const recordTimer = document.querySelector("#record-timer");
 const userOutputAudio = document.querySelector("#user-output-audio");
 const userReplayButton = document.querySelector("#user-replay-button");
 const userReplayLabel = document.querySelector("#user-replay-label");
+const userProcessingPanel = document.querySelector("#user-processing-panel");
+const userProcessingFill = document.querySelector("#user-processing-fill");
 const userOutputTexts = document.querySelector("#user-output-texts");
-const userOutputHiragana = document.querySelector("#user-output-hiragana");
-const userOutputKanji = document.querySelector("#user-output-kanji");
+const userOutputTextCard = document.querySelector("#user-output-text-card");
+const userOutputTextMode = document.querySelector("#user-output-text-mode");
+const userOutputText = document.querySelector("#user-output-text");
 const userError = document.querySelector("#user-error");
 const userTargetLanguage = document.querySelector("#target_language");
 const similarVoiceToggle = document.querySelector("#similar_voice");
@@ -23,6 +26,16 @@ let userRecordingChunks = [];
 let userRecordingStartedAt = 0;
 let recordTimerId = null;
 let currentUserOutputUrl = "";
+let lastUserInputBlob = null;
+let lastUserInputFileName = "";
+let lastAppliedUserRequestSignature = "";
+let hasUserOutput = false;
+let isUserProcessing = false;
+let userDisplayText = {
+  kanji_text: "",
+  hiragana_text: "",
+};
+let userTextMode = "hiragana";
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -31,9 +44,19 @@ let userSettings = {
 
 userRecordButton.addEventListener("click", handleUserRecordButton);
 userReplayButton.addEventListener("click", toggleUserReplay);
+userOutputTextCard.addEventListener("click", cycleUserTextMode);
+userOutputTextCard.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    cycleUserTextMode();
+  }
+});
 userOutputAudio.addEventListener("ended", syncReplayButton);
 userOutputAudio.addEventListener("pause", syncReplayButton);
 userOutputAudio.addEventListener("play", syncReplayButton);
+[similarVoiceToggle, jokeModeToggle, osakaDialectToggle, variationModeToggle].forEach((toggle) => {
+  toggle.addEventListener("change", markUserOutputStale);
+});
 refreshUserSettings();
 loadUserRuntime();
 
@@ -47,7 +70,7 @@ async function handleUserRecordButton() {
       nudgeRecordButton();
       return;
     }
-    setUserStatus("へんかんちゅう");
+    setUserStatus("しょりちゅう");
     userRecordButton.classList.remove("is-recording", "is-ready-to-stop");
     userRecordButton.classList.add("is-processing");
     userMediaRecorder.stop();
@@ -61,6 +84,8 @@ async function startUserRecording() {
   userOutputAudio.hidden = true;
   userReplayButton.hidden = true;
   userOutputTexts.hidden = true;
+  hideUserProcessing();
+  hasUserOutput = false;
   userOutputAudio.removeAttribute("src");
   if (currentUserOutputUrl) {
     URL.revokeObjectURL(currentUserOutputUrl);
@@ -97,7 +122,7 @@ async function submitUserTranslation() {
   userRecordButton.classList.add("is-processing");
   userRecordButton.disabled = true;
   userMinimumHint.hidden = true;
-  setUserStatus("へんかんちゅう");
+  setUserStatus("しょりちゅう");
 
   try {
     await refreshUserSettings();
@@ -105,43 +130,9 @@ async function submitUserTranslation() {
     if (audioBlob.size < 1) {
       throw new Error("ろくおんが ありません");
     }
-
-    const formData = new FormData();
-    formData.append("translation_backend", "openai");
-    formData.append("source_language", "auto");
-    formData.append("target_language", userTargetLanguage.value || "ja-JP");
-    formData.append("voice_mode", similarVoiceToggle.checked ? "convert" : "default");
-    if (similarVoiceToggle.checked) {
-      formData.append("seed_vc_diffusion_steps", "30");
-      formData.append("seed_vc_reference_max_seconds", "10");
-      formData.append("seed_vc_reference_auto_select", "true");
-      formData.append("seed_vc_length_adjust", "1.0");
-      formData.append("seed_vc_inference_cfg_rate", "0.7");
-    }
-
-    const textTransformOptions = userTextTransformOptions();
-    if (Object.keys(textTransformOptions).length > 0) {
-      formData.append("text_transform", "user_effects");
-      formData.append("text_transform_options", JSON.stringify(textTransformOptions));
-    }
-    formData.append("audio", audioBlob, "user-recording.webm");
-
-    const response = await fetch("/api/translate-speech-jobs", {
-      method: "POST",
-      body: formData,
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.detail || "へんかんできませんでした");
-    }
-
-    const job = await response.json();
-    renderUserJob(job);
-    const completedJob = await pollUserTranslationJob(job.job_id);
-    if (!completedJob.result) {
-      throw new Error("できたこえが ありません");
-    }
-    await renderUserResult(completedJob.result);
+    lastUserInputBlob = audioBlob;
+    lastUserInputFileName = "user-recording.webm";
+    await runUserTranslation(audioBlob, lastUserInputFileName);
     setUserStatus("できました");
   } catch (error) {
     renderUserError(error.message || "エラー");
@@ -151,6 +142,59 @@ async function submitUserTranslation() {
     userRecordButton.classList.remove("is-processing");
     userRecordButton.setAttribute("aria-label", "ろくおん");
   }
+}
+
+async function runUserTranslation(audioBlob, fileName) {
+  isUserProcessing = true;
+  hasUserOutput = false;
+  userReplayButton.hidden = true;
+  setUserProcessingProgress(4);
+  const requestSignature = currentUserRequestSignature();
+  const formData = buildUserTranslationFormData(audioBlob, fileName);
+
+  const response = await fetch("/api/translate-speech-jobs", {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || "へんかんできませんでした");
+  }
+
+  const job = await response.json();
+  renderUserJob(job);
+  const completedJob = await pollUserTranslationJob(job.job_id);
+  if (!completedJob.result) {
+    throw new Error("できたこえが ありません");
+  }
+  await renderUserResult(completedJob.result);
+  lastAppliedUserRequestSignature = requestSignature;
+  hasUserOutput = true;
+  setUserProcessingProgress(100);
+  hideUserProcessing();
+}
+
+function buildUserTranslationFormData(audioBlob, fileName) {
+  const formData = new FormData();
+  formData.append("translation_backend", "openai");
+  formData.append("source_language", "auto");
+  formData.append("target_language", userTargetLanguage.value || "ja-JP");
+  formData.append("voice_mode", similarVoiceToggle.checked ? "convert" : "default");
+  if (similarVoiceToggle.checked) {
+    formData.append("seed_vc_diffusion_steps", "30");
+    formData.append("seed_vc_reference_max_seconds", "10");
+    formData.append("seed_vc_reference_auto_select", "true");
+    formData.append("seed_vc_length_adjust", "1.0");
+    formData.append("seed_vc_inference_cfg_rate", "0.7");
+  }
+
+  const textTransformOptions = userTextTransformOptions();
+  if (Object.keys(textTransformOptions).length > 0) {
+    formData.append("text_transform", "user_effects");
+    formData.append("text_transform_options", JSON.stringify(textTransformOptions));
+  }
+  formData.append("audio", audioBlob, fileName);
+  return formData;
 }
 
 function userTextTransformOptions() {
@@ -166,6 +210,14 @@ function userTextTransformOptions() {
     options.joke_position = userSettings.joke_position || "after";
   }
   return options;
+}
+
+function currentUserRequestSignature() {
+  return JSON.stringify({
+    target_language: userTargetLanguage.value || "ja-JP",
+    similar_voice: similarVoiceToggle.checked,
+    text_transform_options: userTextTransformOptions(),
+  });
 }
 
 async function pollUserTranslationJob(jobId) {
@@ -188,20 +240,21 @@ async function pollUserTranslationJob(jobId) {
 
 function renderUserJob(job) {
   const stage = job.current_stage?.stage || "";
+  setUserStatus("しょりちゅう");
   if (job.status === "queued") {
-    setUserStatus("じゅんびちゅう");
+    setUserProcessingProgress(8);
   } else if (stage === "asr") {
-    setUserStatus("きいています");
+    setUserProcessingProgress(25);
   } else if (stage === "translation" || stage === "text_transform") {
-    setUserStatus("ことばを かえています");
+    setUserProcessingProgress(stage === "translation" ? 48 : 62);
   } else if (stage === "tts") {
-    setUserStatus("こえを つくっています");
+    setUserProcessingProgress(78);
   } else if (stage === "voice_conversion") {
-    setUserStatus("こえを にせています");
+    setUserProcessingProgress(92);
   } else if (stage === "complete") {
-    setUserStatus("できました");
+    setUserProcessingProgress(100);
   } else if (job.status === "running") {
-    setUserStatus("へんかんちゅう");
+    setUserProcessingProgress(16);
   }
 }
 
@@ -217,14 +270,25 @@ async function renderUserTexts(result) {
     return;
   }
   userOutputTexts.hidden = false;
-  userOutputKanji.textContent = text;
-  userOutputHiragana.textContent = "よみこみちゅう";
+  userDisplayText = {
+    kanji_text: text,
+    hiragana_text: "よみこみちゅう",
+  };
+  userTextMode = "hiragana";
+  renderUserTextMode();
   try {
     const displayText = await loadUserDisplayText(text, userTargetLanguage.value || "ja-JP");
-    userOutputKanji.textContent = displayText.kanji_text || text;
-    userOutputHiragana.textContent = displayText.hiragana_text || text;
+    userDisplayText = {
+      kanji_text: displayText.kanji_text || text,
+      hiragana_text: displayText.hiragana_text || text,
+    };
+    renderUserTextMode();
   } catch (_error) {
-    userOutputHiragana.textContent = text;
+    userDisplayText = {
+      kanji_text: text,
+      hiragana_text: text,
+    };
+    renderUserTextMode();
   }
 }
 
@@ -256,6 +320,7 @@ async function refreshUserSettings() {
     userSettings = await response.json();
     userTargetLanguage.value = userSettings.target_language || "ja-JP";
     renderUserLanguageLabel();
+    syncReplayButton();
   } catch (_error) {
     userTargetLanguage.value = "ja-JP";
   }
@@ -351,6 +416,11 @@ async function toggleUserReplay() {
   if (!userOutputAudio.src) {
     return;
   }
+  await refreshUserSettings();
+  if (lastUserInputBlob && hasUserOutput && currentUserRequestSignature() !== lastAppliedUserRequestSignature) {
+    await reprocessLatestUserOutput();
+    return;
+  }
   if (userOutputAudio.paused) {
     await userOutputAudio.play().catch(() => {});
   } else {
@@ -359,10 +429,79 @@ async function toggleUserReplay() {
   syncReplayButton();
 }
 
+async function reprocessLatestUserOutput() {
+  clearUserError();
+  userOutputAudio.pause();
+  userReplayButton.disabled = true;
+  userRecordButton.disabled = true;
+  userRecordButton.classList.add("is-processing");
+  setUserStatus("しょりちゅう");
+  try {
+    await runUserTranslation(lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
+    setUserStatus("できました");
+  } catch (error) {
+    renderUserError(error.message || "エラー");
+  } finally {
+    userReplayButton.disabled = false;
+    userRecordButton.disabled = false;
+    userRecordButton.classList.remove("is-processing");
+    userRecordButton.setAttribute("aria-label", "ろくおん");
+    syncReplayButton();
+  }
+}
+
 function syncReplayButton() {
+  if (hasUserOutput && lastAppliedUserRequestSignature !== "" && currentUserRequestSignature() !== lastAppliedUserRequestSignature) {
+    userReplayButton.dataset.state = "stale";
+    userReplayLabel.textContent = "つくりなおす";
+    return;
+  }
   const isPlaying = !userOutputAudio.paused && !userOutputAudio.ended;
   userReplayButton.dataset.state = isPlaying ? "playing" : "paused";
   userReplayLabel.textContent = isPlaying ? "とめる" : "もういちど";
+}
+
+function markUserOutputStale() {
+  if (hasUserOutput) {
+    syncReplayButton();
+  }
+}
+
+function cycleUserTextMode() {
+  const modes = ["hiragana", "kanji", "ruby"];
+  const nextIndex = (modes.indexOf(userTextMode) + 1) % modes.length;
+  userTextMode = modes[nextIndex];
+  renderUserTextMode();
+}
+
+function renderUserTextMode() {
+  const modeLabels = {
+    hiragana: "ひらがな",
+    kanji: "かんじ",
+    ruby: "ルビ",
+  };
+  userOutputTextMode.textContent = modeLabels[userTextMode] || "ひらがな";
+  userOutputText.classList.toggle("ruby-line", userTextMode === "ruby");
+  if (userTextMode === "kanji") {
+    userOutputText.textContent = userDisplayText.kanji_text;
+  } else if (userTextMode === "ruby") {
+    const kanji = escapeHtml(userDisplayText.kanji_text);
+    const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
+    userOutputText.innerHTML = `<ruby>${kanji}<rt>${hiragana}</rt></ruby>`;
+  } else {
+    userOutputText.textContent = userDisplayText.hiragana_text || userDisplayText.kanji_text;
+  }
+}
+
+function setUserProcessingProgress(percent) {
+  userProcessingPanel.hidden = false;
+  userProcessingFill.style.width = `${Math.max(0, Math.min(percent, 100))}%`;
+}
+
+function hideUserProcessing() {
+  userProcessingPanel.hidden = true;
+  userProcessingFill.style.width = "0%";
+  isUserProcessing = false;
 }
 
 function renderUserLanguageLabel() {
@@ -387,6 +526,7 @@ function clearUserError() {
 function renderUserError(message) {
   stopUserRecordingStream();
   stopRecordTimer();
+  hideUserProcessing();
   userRecordButton.classList.remove("is-recording", "is-locked", "is-ready-to-stop", "is-processing");
   userRecordButton.disabled = false;
   userMinimumHint.hidden = true;
@@ -394,4 +534,13 @@ function renderUserError(message) {
   userError.hidden = false;
   userError.textContent = message;
   setUserStatus("もういちど");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }

@@ -59,8 +59,9 @@ def test_root_serves_simple_user_ui() -> None:
     assert "バリエーション" in response.text
     assert "target_language" in response.text
     assert 'value="ja-JP"' in response.text
-    assert "user-output-hiragana" in response.text
-    assert "user-output-kanji" in response.text
+    assert "user-processing-panel" in response.text
+    assert "user-processing-bar" in response.text
+    assert "user-output-text" in response.text
     assert "user-replay-button" in response.text
     assert "translation_backend" not in response.text
     assert "operation_mode" not in response.text
@@ -228,6 +229,11 @@ def test_static_assets_are_served() -> None:
     assert "loadUserDisplayText" in js_text
     assert "refreshUserSettings" in js_text
     assert "toggleUserReplay" in js_text
+    assert "reprocessLatestUserOutput" in js_text
+    assert "markUserOutputStale" in js_text
+    assert "cycleUserTextMode" in js_text
+    assert "setUserProcessingProgress" in js_text
+    assert "しょりちゅう" in js_text
     assert "seed_vc_reference_auto_select" in js_text
     assert "user-settings" in js_text
     assert "renderInputAudioPreview" in js_text
@@ -254,8 +260,12 @@ def test_static_assets_are_served() -> None:
     assert ".user-stage" in css_response.text
     assert ".record-orb" in css_response.text
     assert ".record-progress" in css_response.text
+    assert ".user-processing-panel" in css_response.text
+    assert ".user-processing-fill" in css_response.text
     assert ".replay-button" in css_response.text
     assert ".user-output-texts" in css_response.text
+    assert ".user-output-text" in css_response.text
+    assert ".ruby-line" in css_response.text
     assert ".toggle-tile" in css_response.text
     assert ".history-title" in css_response.text
     assert ".history-text" in css_response.text

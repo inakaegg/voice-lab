@@ -51,14 +51,16 @@
       </section>
 
       <section class="user-output" aria-label="できたこえ">
+        <div id="user-processing-panel" class="user-processing-panel" hidden>
+          <span>しょりちゅう</span>
+          <div class="user-processing-bar" aria-hidden="true">
+            <span id="user-processing-fill" class="user-processing-fill"></span>
+          </div>
+        </div>
         <div id="user-output-texts" class="user-output-texts" hidden>
-          <article>
-            <h2>ひらがな</h2>
-            <p id="user-output-hiragana"></p>
-          </article>
-          <article>
-            <h2>かんじ</h2>
-            <p id="user-output-kanji"></p>
+          <article id="user-output-text-card" class="user-output-text-card" role="button" tabindex="0">
+            <h2 id="user-output-text-mode">ひらがな</h2>
+            <p id="user-output-text" class="user-output-text"></p>
           </article>
         </div>
         <button id="user-replay-button" class="replay-button" type="button" hidden>

@@ -809,32 +809,75 @@ audio {
   margin-top: 0;
 }
 
+.user-processing-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.user-processing-panel span {
+  color: #1d3f36;
+  font-size: 18px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.user-processing-bar {
+  background: rgba(38, 61, 77, 0.14);
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.user-processing-fill {
+  background: linear-gradient(90deg, #2f8064, #d2a13a);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 0.22s ease;
+  width: 0%;
+}
+
 .user-output-texts {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.user-output-texts article {
+.user-output-text-card {
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(86, 106, 113, 0.2);
   border-radius: 8px;
+  cursor: pointer;
   padding: 12px;
 }
 
-.user-output-texts h2 {
+.user-output-text-card:focus-visible {
+  outline: 3px solid #245d92;
+  outline-offset: 3px;
+}
+
+.user-output-text-card h2 {
   color: #44605b;
   font-size: 13px;
   margin: 0 0 6px;
 }
 
-.user-output-texts p {
+.user-output-text {
   color: #17212b;
   font-size: 19px;
   font-weight: 800;
   line-height: 1.55;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.ruby-line ruby {
+  line-height: 2;
+}
+
+.ruby-line rt {
+  color: #45615b;
+  font-size: 0.62em;
+  font-weight: 800;
 }
 
 .replay-button {
@@ -883,6 +926,40 @@ audio {
 
 .replay-button[data-state="playing"] .replay-icon::after {
   right: 1px;
+}
+
+.replay-button[data-state="stale"] {
+  background: #2f8064;
+}
+
+.replay-button[data-state="stale"] .replay-icon {
+  border: 0;
+  height: 18px;
+  position: relative;
+  width: 18px;
+}
+
+.replay-button[data-state="stale"] .replay-icon::before {
+  border: 3px solid #ffffff;
+  border-left-color: transparent;
+  border-radius: 50%;
+  content: "";
+  height: 18px;
+  left: -1px;
+  position: absolute;
+  top: -1px;
+  width: 18px;
+}
+
+.replay-button[data-state="stale"] .replay-icon::after {
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid #ffffff;
+  border-top: 5px solid transparent;
+  content: "";
+  position: absolute;
+  right: -4px;
+  top: -1px;
+  transform: rotate(35deg);
 }
 
 .user-error {
@@ -948,7 +1025,4 @@ audio {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .user-output-texts {
-    grid-template-columns: 1fr;
-  }
 }
