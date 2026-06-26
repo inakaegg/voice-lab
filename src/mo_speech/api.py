@@ -358,16 +358,22 @@ def create_app(
         with NamedTemporaryFile(suffix=_upload_suffix(reference_audio.filename)) as temp_reference:
             temp_reference.write(reference_audio_bytes)
             temp_reference.flush()
-            output = _prepare_seed_vc_reference_preview(
-                Path(temp_reference.name),
-                seed_vc_settings=_create_seed_vc_settings(
-                    diffusion_steps=None,
-                    length_adjust=None,
-                    inference_cfg_rate=None,
-                    reference_max_seconds=seed_vc_reference_max_seconds,
-                    reference_auto_select=seed_vc_reference_auto_select,
-                ),
-            )
+            try:
+                output = _prepare_seed_vc_reference_preview(
+                    Path(temp_reference.name),
+                    seed_vc_settings=_create_seed_vc_settings(
+                        diffusion_steps=None,
+                        length_adjust=None,
+                        inference_cfg_rate=None,
+                        reference_max_seconds=seed_vc_reference_max_seconds,
+                        reference_auto_select=seed_vc_reference_auto_select,
+                    ),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                LOGGER.exception("preview_seed_vc_reference failed")
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         return {
             "audio_mime_type": output.audio_mime_type or "audio/wav",

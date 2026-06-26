@@ -179,6 +179,7 @@ def test_static_assets_are_served() -> None:
     assert "seed_vc_reference_auto_select" in js_text
     assert "previewSeedVcReferenceAudio" in js_text
     assert "seed-vc/reference-preview" in js_text
+    assert "参照音声の確認APIに接続できませんでした" in js_text
     assert "renderSeedVcReferencePreview" in js_text
     assert "seedVcPresets" in js_text
     assert "applySeedVcPreset" in js_text
@@ -978,6 +979,26 @@ def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
     assert provider.last_seed_vc_settings.inference_cfg_rate == 0.55
     assert provider.last_seed_vc_settings.reference_max_seconds == 4.5
     assert provider.last_seed_vc_settings.reference_auto_select is True
+
+
+def test_seed_vc_reference_preview_api_reports_prepare_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_prepare_reference_preview(audio_path: Path, seed_vc_settings: SeedVcRuntimeSettings | None = None) -> TtsOutput:
+        raise RuntimeError("ffmpeg failed")
+
+    monkeypatch.setattr(
+        "mo_speech.api._prepare_seed_vc_reference_preview",
+        fake_prepare_reference_preview,
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/seed-vc/reference-preview",
+        data={"seed_vc_reference_auto_select": "false"},
+        files={"reference_audio": ("reference.wav", b"reference audio", "audio/wav")},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ffmpeg failed"
 
 
 def test_seed_vc_reference_preview_api_returns_normalized_audio(monkeypatch: pytest.MonkeyPatch) -> None:

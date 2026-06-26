@@ -266,10 +266,16 @@ async function previewSeedVcReferenceAudio(event) {
     appendSeedVcSettings(formData, "seed-vc");
     formData.append("reference_audio", referenceAudio.blob, referenceAudio.filename);
 
-    const response = await fetch("/api/seed-vc/reference-preview", {
-      method: "POST",
-      body: formData,
-    });
+    let response = null;
+    try {
+      response = await fetch(new URL("/api/seed-vc/reference-preview", window.location.href), {
+        method: "POST",
+        body: formData,
+      });
+    } catch (error) {
+      const detail = error.message ? ` (${error.message})` : "";
+      throw new Error(`参照音声の確認APIに接続できませんでした。サーバーを起動し直してページを再読み込みしてください。${detail}`);
+    }
 
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => ({}));
