@@ -376,6 +376,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="audio history file not found") from exc
         return FileResponse(audio_path, media_type=_audio_media_type(audio_path))
 
+    @app.delete("/api/audio-history/{kind}/{filename}")
+    def delete_audio_history_file(kind: str, filename: str) -> dict[str, bool]:
+        try:
+            return {"deleted": active_audio_history_store.delete_entry(kind, filename)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="audio history file not found") from exc
+
     return app
 
 

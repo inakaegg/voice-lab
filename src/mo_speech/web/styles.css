@@ -410,6 +410,21 @@ audio {
   padding: 5px 8px;
 }
 
+.history-delete-button {
+  align-items: center;
+  background: #8a1f11;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px;
+  width: 34px;
+}
+
+.history-delete-button svg {
+  height: 17px;
+  width: 17px;
+}
+
 .history-item audio {
   margin-top: 0;
 }

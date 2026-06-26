@@ -118,6 +118,8 @@ def test_static_assets_are_served() -> None:
     assert "submitTextToSpeech" in js_response.text
     assert "handleTtsTextFileChange" in js_response.text
     assert "ttsTextFileInput" in js_response.text
+    assert "deleteHistoryAudio" in js_response.text
+    assert "history-delete-button" in js_response.text
     assert "loadAudioHistory" in js_response.text
     assert "useHistoryAudioAsInput" in js_response.text
     assert "useHistoryAudioAsReference" in js_response.text
@@ -176,6 +178,7 @@ def test_static_assets_are_served() -> None:
     assert ".history-warning" in css_response.text
     assert ".history-storage" in css_response.text
     assert ".history-actions" in css_response.text
+    assert ".history-delete-button" in css_response.text
     assert ".result-actions" in css_response.text
     assert ".error-message" in css_response.text
 
@@ -736,6 +739,33 @@ def test_audio_history_api_reports_storage_settings(tmp_path) -> None:
     assert settings["outputs_dir"] == str(history_root.resolve() / "outputs")
     assert settings["limit"] == 7
     assert settings["env_var"] == "MO_AUDIO_HISTORY_DIR"
+
+
+def test_audio_history_api_deletes_entry_and_metadata(tmp_path) -> None:
+    from mo_speech.audio_history import AudioHistoryStore
+
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    saved = history_store.save_output(
+        b"output-audio",
+        suffix=".wav",
+        metadata={"filename": "output.wav", "text_preview": "こんにちは"},
+    )
+    assert saved is not None
+    client = TestClient(
+        create_app(
+            voice_conversion_service=_fake_voice_conversion_service(),
+            audio_history_store=history_store,
+        )
+    )
+
+    response = client.delete(f"/api/audio-history/outputs/{saved.audio_path.name}")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    assert not saved.audio_path.exists()
+    assert not saved.metadata_path.exists()
+    assert client.get(f"/api/audio-history/outputs/{saved.audio_path.name}").status_code == 404
+    assert client.get("/api/audio-history").json()["outputs"] == []
 
 
 def test_translate_speech_job_api_reports_partial_result_while_running() -> None:

@@ -94,6 +94,12 @@ class AudioHistoryStore:
             raise FileNotFoundError(filename)
         return audio_path
 
+    def delete_entry(self, kind: str, filename: str) -> bool:
+        audio_path = self.resolve_audio_path(kind, filename)
+        audio_path.unlink()
+        audio_path.with_suffix(audio_path.suffix + ".json").unlink(missing_ok=True)
+        return True
+
     def update_metadata(self, entry: AudioHistoryEntry | None, metadata: dict[str, object]) -> AudioHistoryEntry | None:
         if entry is None or not self.enabled or not entry.metadata_path.is_file():
             return entry

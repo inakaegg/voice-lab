@@ -81,6 +81,19 @@ def test_audio_history_store_updates_existing_metadata(tmp_path) -> None:
     assert json.loads(updated.metadata_path.read_text(encoding="utf-8"))["text_preview"] == "Selamat pagi."
 
 
+def test_audio_history_store_deletes_audio_and_metadata(tmp_path) -> None:
+    store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    saved = store.save_output(b"output", suffix=".wav", metadata={"filename": "output.wav"})
+
+    assert saved is not None
+    deleted = store.delete_entry("outputs", saved.audio_path.name)
+
+    assert deleted is True
+    assert not saved.audio_path.exists()
+    assert not saved.metadata_path.exists()
+    assert store.list_entries("outputs") == []
+
+
 def test_audio_history_store_rejects_invalid_history_filename(tmp_path) -> None:
     store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
 

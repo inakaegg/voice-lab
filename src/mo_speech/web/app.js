@@ -1015,6 +1015,13 @@ function renderAudioHistoryList(container, entries) {
     useAsReference.className = "secondary-button";
     useAsReference.textContent = "VC参照に使う";
     useAsReference.addEventListener("click", () => useHistoryAudioAsReference(entry));
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "history-delete-button";
+    deleteButton.title = "削除";
+    deleteButton.setAttribute("aria-label", `${entry.label || entry.filename || "音声履歴"}を削除`);
+    deleteButton.append(createTrashIcon());
+    deleteButton.addEventListener("click", () => deleteHistoryAudio(entry));
     actions.append(useAsInput, useAsReference);
     item.append(title, audio);
     if (entry.tts_text) {
@@ -1029,6 +1036,7 @@ function renderAudioHistoryList(container, entries) {
       useTextForTts.addEventListener("click", () => useHistoryTextForTts(entry));
       actions.append(useTextForTts);
     }
+    actions.append(deleteButton);
     item.append(meta);
     if (entry.playable_hint) {
       const warning = document.createElement("p");
@@ -1039,6 +1047,43 @@ function renderAudioHistoryList(container, entries) {
     item.append(actions);
     container.append(item);
   });
+}
+
+async function deleteHistoryAudio(entry) {
+  const label = entry.label || entry.filename || "この音声履歴";
+  if (!window.confirm(`${label}を削除しますか？`)) {
+    return;
+  }
+  try {
+    const response = await fetch(entry.url, { method: "DELETE" });
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "履歴音声を削除できませんでした");
+    }
+    if (inputHistorySource?.kind === entry.kind && inputHistorySource?.filename === entry.filename) {
+      inputHistorySource = null;
+    }
+    setStatus("履歴音声を削除しました");
+    await loadAudioHistory();
+  } catch (error) {
+    renderError(error.message || "履歴音声を削除できませんでした");
+  }
+}
+
+function createTrashIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 11v6m4-6v6");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("stroke-width", "2");
+  svg.append(path);
+  return svg;
 }
 
 async function useHistoryAudioAsInput(entry) {
