@@ -9,7 +9,6 @@ const userOutputAudio = document.querySelector("#user-output-audio");
 const userReplayButton = document.querySelector("#user-replay-button");
 const userReplayLabel = document.querySelector("#user-replay-label");
 const userProcessingPanel = document.querySelector("#user-processing-panel");
-const userProcessingLabel = document.querySelector("#user-processing-label");
 const userProcessingFill = document.querySelector("#user-processing-fill");
 const userOutputTexts = document.querySelector("#user-output-texts");
 const userOutputTextCard = document.querySelector("#user-output-text-card");
@@ -61,6 +60,8 @@ let currentPlaybackQueue = [];
 let currentPlaybackIndex = -1;
 let userSeedVcAvailable = true;
 let userSeedVcUnavailableReason = "";
+let userInputCacheVersion = 0;
+let processingDotCount = 0;
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -245,6 +246,7 @@ async function submitUserTranslation() {
     }
     lastUserInputBlob = audioBlob;
     lastUserInputFileName = "user-recording.webm";
+    userInputCacheVersion += 1;
     await runUserTranslation(audioBlob, lastUserInputFileName);
     setUserStatus("done");
   } catch (error) {
@@ -387,7 +389,7 @@ async function applyUserVoiceModeToBase() {
   hasUserOutput = true;
 }
 
-async function runUserVoiceConversion(baseAudioBlob) {
+async function runUserVoiceConversion(baseAudioBlob, sourceStem = "user-base-output") {
   if (!lastUserInputBlob) {
     throw new Error("もとの ろくおんが ありません");
   }
@@ -399,7 +401,7 @@ async function runUserVoiceConversion(baseAudioBlob) {
   formData.append("seed_vc_reference_auto_select", "true");
   formData.append("seed_vc_length_adjust", "1.0");
   formData.append("seed_vc_inference_cfg_rate", "0.7");
-  formData.append("source_audio", baseAudioBlob, userAudioFileNameForMime(baseAudioBlob.type, "user-base-output"));
+  formData.append("source_audio", baseAudioBlob, userAudioFileNameForMime(baseAudioBlob.type, sourceStem));
   formData.append("reference_audio", lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
 
   const response = await fetch("/api/voice-conversion-jobs", {
@@ -603,21 +605,39 @@ async function buildUserPlaybackQueue(mainOutputUrl) {
 }
 
 async function getUserJokeAudioUrl(jokeText) {
+  const baseJokeAudio = await getUserJokeBaseAudio(jokeText);
+  if (!similarVoiceToggle.checked || !userSeedVcAvailable || !lastUserInputBlob) {
+    return baseJokeAudio.url;
+  }
+  try {
+    return await getVoiceConvertedUserJokeAudioUrl(jokeText, baseJokeAudio.blob);
+  } catch (error) {
+    if (!isVoiceBackendUnavailableError(error)) {
+      throw error;
+    }
+    syncSimilarVoiceAvailability({ available: false, reason: error.message || "" });
+    return baseJokeAudio.url;
+  }
+}
+
+async function getUserJokeBaseAudio(jokeText) {
   const cacheKey = JSON.stringify({
+    kind: "base",
     text: jokeText,
     target_language: userJokeTargetLanguage,
     tts_backend: userJokeTtsBackend,
   });
   const cached = jokeAudioCache.get(cacheKey);
   if (cached) {
-    return cached.url;
+    return cached;
   }
   const stored = loadStoredUserJokeAudio(cacheKey);
   if (stored) {
     const storedBlob = audioBlobFromResult(stored);
     const storedUrl = URL.createObjectURL(storedBlob);
-    jokeAudioCache.set(cacheKey, { url: storedUrl, blob: storedBlob });
-    return storedUrl;
+    const cachedJoke = { url: storedUrl, blob: storedBlob };
+    jokeAudioCache.set(cacheKey, cachedJoke);
+    return cachedJoke;
   }
   const response = await fetch("/api/user-joke-output", {
     method: "POST",
@@ -635,9 +655,33 @@ async function getUserJokeAudioUrl(jokeText) {
   const result = await response.json();
   const jokeBlob = audioBlobFromResult(result);
   const url = URL.createObjectURL(jokeBlob);
-  jokeAudioCache.set(cacheKey, { url, blob: jokeBlob });
+  const cachedJoke = { url, blob: jokeBlob };
+  jokeAudioCache.set(cacheKey, cachedJoke);
   saveStoredUserJokeAudio(cacheKey, result);
+  return cachedJoke;
+}
+
+async function getVoiceConvertedUserJokeAudioUrl(jokeText, jokeBlob) {
+  const cacheKey = JSON.stringify({
+    kind: "voice",
+    text: jokeText,
+    target_language: userJokeTargetLanguage,
+    tts_backend: userJokeTtsBackend,
+    reference_recording: userInputCacheVersion,
+  });
+  const cached = jokeAudioCache.get(cacheKey);
+  if (cached) {
+    return cached.url;
+  }
+  const voiceResult = await convertUserJokeAudioBlob(jokeBlob);
+  const convertedBlob = audioBlobFromResult(voiceResult);
+  const url = URL.createObjectURL(convertedBlob);
+  jokeAudioCache.set(cacheKey, { url, blob: convertedBlob, result: voiceResult });
   return url;
+}
+
+async function convertUserJokeAudioBlob(jokeBlob) {
+  return runUserVoiceConversion(jokeBlob, "user-joke-output");
 }
 
 function audioBlobFromResult(result) {
@@ -956,8 +1000,18 @@ function resetUserOutputCache() {
   baseResultCache.clear();
   voiceResultCache.clear();
   displayTextCache.clear();
+  clearUserJokeMemoryCache();
   lastAppliedUserRequestSignature = "";
   hasUserOutput = false;
+}
+
+function clearUserJokeMemoryCache() {
+  jokeAudioCache.forEach((cached) => {
+    if (cached?.url) {
+      URL.revokeObjectURL(cached.url);
+    }
+  });
+  jokeAudioCache.clear();
 }
 
 function clearUserVoiceCache() {
@@ -997,10 +1051,9 @@ function startProcessingLabelAnimation() {
   if (processingTimerId !== null) {
     return;
   }
-  let dotCount = 0;
   const updateLabel = () => {
-    dotCount = (dotCount % 4) + 1;
-    userProcessingLabel.innerHTML = `${escapeHtml(plainUserText("processing"))}<span class="processing-dots">${".".repeat(dotCount)}</span>`;
+    processingDotCount = (processingDotCount % 4) + 1;
+    userStatus.innerHTML = buildProcessingLabelHtml(processingDotCount);
   };
   updateLabel();
   processingTimerId = window.setInterval(updateLabel, 450);
@@ -1011,7 +1064,15 @@ function stopProcessingLabelAnimation() {
     window.clearInterval(processingTimerId);
   }
   processingTimerId = null;
-  renderUserText(userProcessingLabel, "processing");
+  processingDotCount = 0;
+}
+
+function buildProcessingLabelHtml(dotCount) {
+  const label = userTextMode === "ruby" ? uiText("processing", "ruby") : escapeHtml(uiText("processing", userTextMode));
+  const dots = [1, 2, 3, 4]
+    .map((index) => `<span class="processing-dot${index <= dotCount ? " is-visible" : ""}">.</span>`)
+    .join("");
+  return `${label}<span class="processing-dots" aria-hidden="true">${dots}</span>`;
 }
 
 function renderUserLanguageLabel() {
@@ -1020,12 +1081,16 @@ function renderUserLanguageLabel() {
 
 function setUserStatus(key) {
   currentStatusKey = key;
-  renderUserText(userStatus, key);
+  if (key === "processing" && !userProcessingPanel.hidden) {
+    userStatus.innerHTML = buildProcessingLabelHtml(processingDotCount || 1);
+  } else {
+    renderUserText(userStatus, key);
+  }
   syncUserStatusVisibility();
 }
 
 function syncUserStatusVisibility() {
-  userStatus.hidden = currentStatusKey === "processing" && !userProcessingPanel.hidden;
+  userStatus.hidden = false;
 }
 
 function clearUserError() {
@@ -1067,8 +1132,11 @@ function renderStaticUserTexts() {
     userMinimumHint,
     userRecordButton.classList.contains("is-ready-to-stop") ? "tap_to_stop" : "speak_five_seconds",
   );
-  renderUserText(userStatus, currentStatusKey);
-  renderUserText(userProcessingLabel, "processing");
+  if (currentStatusKey === "processing" && !userProcessingPanel.hidden) {
+    userStatus.innerHTML = buildProcessingLabelHtml(processingDotCount || 1);
+  } else {
+    renderUserText(userStatus, currentStatusKey);
+  }
 }
 
 function renderUserText(element, key) {

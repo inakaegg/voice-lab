@@ -62,13 +62,15 @@ def test_root_serves_simple_user_ui() -> None:
     assert "target_language" in response.text
     assert 'value="user-auto"' in response.text
     assert "user-processing-panel" in response.text
-    assert "user-processing-label" in response.text
     assert "user-processing-bar" in response.text
     assert "user-output-text" in response.text
     assert "user-replay-button" in response.text
     assert "translation_backend" not in response.text
     assert "operation_mode" not in response.text
     assert "/static/app_user.js" in response.text
+    assert response.text.index("user-record-button") < response.text.index("user-status")
+    assert response.text.index("user-status") < response.text.index("user-processing-panel")
+    assert response.text.index("user-processing-panel") < response.text.index("user-toggles")
 
 
 def test_admin_serves_browser_ui() -> None:
@@ -245,9 +247,11 @@ def test_static_assets_are_served() -> None:
     assert "voiceResultCache" in js_text
     assert "displayTextCache" in js_text
     assert "jokeAudioCache" in js_text
+    assert "convertUserJokeAudioBlob" in js_text
     assert "localStorage" in js_text
     assert "startProcessingLabelAnimation" in js_text
-    assert 'plainUserText("processing")' in js_text
+    assert "buildProcessingLabelHtml" in js_text
+    assert "processing-dot" in js_text
     assert "processing-dots" in js_text
     assert "user-text-output" in js_text
     assert "user-joke-output" in js_text
@@ -288,6 +292,7 @@ def test_static_assets_are_served() -> None:
     assert ".user-processing-panel" in css_response.text
     assert ".user-processing-fill" in css_response.text
     assert ".processing-dots" in css_response.text
+    assert ".processing-dot" in css_response.text
     assert "progress-sheen" in css_response.text
     assert ".replay-button" in css_response.text
     assert ".user-output-texts" in css_response.text

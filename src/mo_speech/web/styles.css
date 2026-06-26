@@ -728,7 +728,7 @@ audio {
   font-size: 24px;
   font-weight: 800;
   line-height: 1.35;
-  margin: 30px 0 6px;
+  margin: 30px 0 10px;
   min-height: 2.8rem;
 }
 
@@ -832,20 +832,25 @@ audio {
 
 .user-processing-panel {
   display: grid;
-  gap: 8px;
-}
-
-.user-processing-panel span {
-  color: #1d3f36;
-  font-size: 18px;
-  font-weight: 900;
-  text-align: center;
+  justify-items: center;
+  margin: 0 0 8px;
+  width: min(72vw, 360px);
 }
 
 .processing-dots {
-  display: inline-block;
-  min-width: 2.6ch;
-  text-align: left;
+  display: inline-grid;
+  grid-template-columns: repeat(4, 1ch);
+  text-align: center;
+  vertical-align: baseline;
+  width: 4ch;
+}
+
+.processing-dot {
+  visibility: hidden;
+}
+
+.processing-dot.is-visible {
+  visibility: visible;
 }
 
 .user-processing-bar {
@@ -853,6 +858,7 @@ audio {
   border-radius: 999px;
   height: 12px;
   overflow: hidden;
+  width: 100%;
 }
 
 .user-processing-fill {

@@ -23,6 +23,11 @@
         <p id="user-status" class="user-status" role="status" aria-live="polite">
           おして はなす
         </p>
+        <div id="user-processing-panel" class="user-processing-panel" hidden>
+          <div class="user-processing-bar" aria-hidden="true">
+            <span id="user-processing-fill" class="user-processing-fill"></span>
+          </div>
+        </div>
         <p id="user-minimum-hint" class="user-minimum-hint" hidden>
           5びょう いじょう はなしてください
         </p>
@@ -52,12 +57,6 @@
       </section>
 
       <section class="user-output" aria-label="できたこえ">
-        <div id="user-processing-panel" class="user-processing-panel" hidden>
-          <span id="user-processing-label">しょりちゅう</span>
-          <div class="user-processing-bar" aria-hidden="true">
-            <span id="user-processing-fill" class="user-processing-fill"></span>
-          </div>
-        </div>
         <div id="user-output-texts" class="user-output-texts" hidden>
           <article id="user-output-text-card" class="user-output-text-card">
             <h2 id="user-output-text-mode">ひらがな</h2>
