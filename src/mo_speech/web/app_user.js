@@ -53,6 +53,7 @@ let isUserProcessing = false;
 let userDisplayText = {
   kanji_text: "",
   hiragana_text: "",
+  indonesian_text: "",
 };
 let userTextMode = "hiragana";
 let currentStatusKey = "tap_to_speak";
@@ -77,88 +78,88 @@ const userJokeAudioStoragePrefix = "mo:user-joke-audio:";
 const userUiTexts = {
   app_title: {
     hiragana: "へんな へんかん アプリ",
-    kanji: "変な変換アプリ",
     ruby: "<ruby>変<rt>へん</rt></ruby>な<ruby>変換<rt>へんかん</rt></ruby>アプリ",
+    indonesian: "Aplikasi Konversi Aneh",
   },
   speak_heading: {
     hiragana: "はなしてください",
-    kanji: "話してください",
     ruby: "<ruby>話<rt>はな</rt></ruby>してください",
+    indonesian: "Silakan berbicara",
   },
   display_mode: {
-    hiragana: "ひらがな",
-    kanji: "漢字",
-    ruby: "ルビ",
+    hiragana: "🇯🇵 ひらがな",
+    ruby: "🇯🇵 ルビ",
+    indonesian: "🇮🇩 Indonesia",
   },
   similar_voice: {
     hiragana: "にてるこえ",
-    kanji: "似てる声",
     ruby: "<ruby>似<rt>に</rt></ruby>てる<ruby>声<rt>こえ</rt></ruby>",
+    indonesian: "suara mirip",
   },
   joke: {
     hiragana: "ジョーク",
-    kanji: "ジョーク",
     ruby: "ジョーク",
+    indonesian: "lelucon",
   },
   osaka: {
     hiragana: "おおさかべん",
-    kanji: "大阪弁",
     ruby: "<ruby>大阪弁<rt>おおさかべん</rt></ruby>",
+    indonesian: "dialek Osaka",
   },
   variation: {
     hiragana: "バリエーション",
-    kanji: "バリエーション",
     ruby: "バリエーション",
+    indonesian: "variasi",
   },
   tap_to_speak: {
     hiragana: "おして はなす",
-    kanji: "押して話す",
     ruby: "<ruby>押<rt>お</rt></ruby>して<ruby>話<rt>はな</rt></ruby>す",
+    indonesian: "tekan lalu bicara",
   },
   speak_five_seconds: {
     hiragana: "5びょう いじょう はなしてください",
-    kanji: "5秒以上話してください",
     ruby: "5<ruby>秒<rt>びょう</rt></ruby><ruby>以上<rt>いじょう</rt></ruby><ruby>話<rt>はな</rt></ruby>してください",
+    indonesian: "bicara minimal 5 detik",
   },
   keep_speaking: {
     hiragana: "もうすこし はなしてください",
-    kanji: "もう少し話してください",
     ruby: "もう<ruby>少<rt>すこ</rt></ruby>し<ruby>話<rt>はな</rt></ruby>してください",
+    indonesian: "bicara sedikit lagi",
   },
   recording: {
     hiragana: "ろくおんちゅう",
-    kanji: "録音中",
     ruby: "<ruby>録音中<rt>ろくおんちゅう</rt></ruby>",
+    indonesian: "sedang merekam",
   },
   tap_to_stop: {
     hiragana: "おすと とまる",
-    kanji: "押すと止まる",
     ruby: "<ruby>押<rt>お</rt></ruby>すと<ruby>止<rt>と</rt></ruby>まる",
+    indonesian: "tekan untuk berhenti",
   },
   processing: {
     hiragana: "しょりちゅう",
-    kanji: "処理中",
     ruby: "<ruby>処理中<rt>しょりちゅう</rt></ruby>",
+    indonesian: "sedang diproses",
   },
   done: {
     hiragana: "できました",
-    kanji: "できました",
     ruby: "できました",
+    indonesian: "selesai",
   },
   retry: {
     hiragana: "もういちど",
-    kanji: "もう一度",
     ruby: "もう<ruby>一度<rt>いちど</rt></ruby>",
+    indonesian: "putar lagi",
   },
   stop: {
     hiragana: "とめる",
-    kanji: "止める",
     ruby: "<ruby>止<rt>と</rt></ruby>める",
+    indonesian: "berhenti",
   },
   rebuild: {
     hiragana: "つくりなおす",
-    kanji: "作り直す",
     ruby: "<ruby>作<rt>つく</rt></ruby>り<ruby>直<rt>なお</rt></ruby>す",
+    indonesian: "buat ulang",
   },
 };
 
@@ -168,6 +169,8 @@ displayModeButton.addEventListener("click", cycleUserTextMode);
 userOutputAudio.addEventListener("ended", handleUserAudioEnded);
 userOutputAudio.addEventListener("pause", syncReplayButton);
 userOutputAudio.addEventListener("play", syncReplayButton);
+window.addEventListener("beforeunload", handleUserBeforeUnload);
+window.addEventListener("pagehide", cancelUserRecordingForNavigation);
 [similarVoiceToggle, jokeModeToggle, osakaDialectToggle, variationModeToggle].forEach((toggle) => {
   toggle.addEventListener("change", markUserOutputStale);
 });
@@ -557,6 +560,7 @@ async function renderUserTexts(result) {
   userDisplayText = {
     kanji_text: text,
     hiragana_text: "よみこみちゅう",
+    indonesian_text: "memuat...",
   };
   renderUserTextMode();
   const targetLanguage = result.target_language || resolvedUserTargetLanguage();
@@ -572,6 +576,7 @@ async function renderUserTexts(result) {
     userDisplayText = {
       kanji_text: displayText.kanji_text || text,
       hiragana_text: displayText.hiragana_text || text,
+      indonesian_text: displayText.indonesian_text || text,
     };
     displayTextCache.set(displayTextSignature, userDisplayText);
     renderUserTextMode();
@@ -579,6 +584,7 @@ async function renderUserTexts(result) {
     userDisplayText = {
       kanji_text: text,
       hiragana_text: text,
+      indonesian_text: text,
     };
     displayTextCache.set(displayTextSignature, userDisplayText);
     renderUserTextMode();
@@ -804,6 +810,9 @@ function syncJapaneseTextEffectAvailability(targetLanguage) {
   [osakaDialectToggle, variationModeToggle].forEach((toggle) => {
     const tile = toggle.closest(".toggle-tile");
     toggle.disabled = !userTextEffectsAvailable;
+    if (tile) {
+      tile.hidden = !userTextEffectsAvailable;
+    }
     tile?.classList.toggle("is-disabled", !userTextEffectsAvailable);
     if (userTextEffectsAvailable) {
       tile?.removeAttribute("title");
@@ -820,6 +829,25 @@ function syncJapaneseTextEffectAvailability(targetLanguage) {
 function applyUserTheme(theme) {
   const supportedThemes = new Set(["blue", "pop", "mint"]);
   document.body.dataset.theme = supportedThemes.has(theme) ? theme : "blue";
+}
+
+function handleUserBeforeUnload(event) {
+  if (!userMediaRecorder || userMediaRecorder.state !== "recording") {
+    return;
+  }
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+function cancelUserRecordingForNavigation() {
+  if (!userMediaRecorder || userMediaRecorder.state !== "recording") {
+    return;
+  }
+  userMediaRecorder.removeEventListener("stop", submitUserTranslation);
+  userMediaRecorder.stop();
+  stopUserRecordingStream();
+  stopRecordTimer();
+  userRecordingChunks = [];
 }
 
 function isVoiceBackendUnavailableError(error) {
@@ -1055,8 +1083,8 @@ function clearUserVoiceCache() {
 function renderUserTextMode() {
   userOutputTextMode.textContent = uiText("display_mode");
   userOutputText.classList.toggle("ruby-line", userTextMode === "ruby");
-  if (userTextMode === "kanji") {
-    userOutputText.textContent = userDisplayText.kanji_text;
+  if (userTextMode === "indonesian") {
+    userOutputText.textContent = userDisplayText.indonesian_text || userDisplayText.kanji_text;
   } else if (userTextMode === "ruby") {
     const kanji = escapeHtml(userDisplayText.kanji_text);
     const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
@@ -1145,7 +1173,7 @@ function renderUserError(message) {
 }
 
 function cycleUserTextMode() {
-  const modes = ["hiragana", "ruby", "kanji"];
+  const modes = ["hiragana", "ruby", "indonesian"];
   const nextIndex = (modes.indexOf(userTextMode) + 1) % modes.length;
   userTextMode = modes[nextIndex];
   renderStaticUserTexts();

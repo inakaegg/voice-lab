@@ -59,6 +59,10 @@ def test_root_serves_simple_user_ui() -> None:
     assert "ジョーク" in response.text
     assert "おおさかべん" in response.text
     assert "バリエーション" in response.text
+    assert "toggle-icon" in response.text
+    assert "😊" in response.text
+    assert "🏯" in response.text
+    assert "✨" in response.text
     assert "target_language" in response.text
     assert 'value="user-auto"' in response.text
     assert "user-processing-panel" in response.text
@@ -243,6 +247,8 @@ def test_static_assets_are_served() -> None:
     assert "markUserOutputStale" in js_text
     assert "syncJapaneseTextEffectAvailability" in js_text
     assert "applyUserTheme" in js_text
+    assert "cancelUserRecordingForNavigation" in js_text
+    assert "beforeunload" in js_text
     assert "runUserTextOutput" in js_text
     assert "runUserVoiceConversion" in js_text
     assert "applyUserVoiceModeToBase" in js_text
@@ -265,7 +271,11 @@ def test_static_assets_are_served() -> None:
     assert "id-ID" in js_text
     assert "voice-conversion-jobs" in js_text
     assert "cycleUserTextMode" in js_text
-    assert '["hiragana", "ruby", "kanji"]' in js_text
+    assert '["hiragana", "ruby", "indonesian"]' in js_text
+    assert "indonesian_text" in js_text
+    assert "🇯🇵 ひらがな" in js_text
+    assert "🇯🇵 ルビ" in js_text
+    assert "🇮🇩 Indonesia" in js_text
     assert "setUserProcessingProgress" in js_text
     assert "しょりちゅう" in js_text
     assert "seed_vc_reference_auto_select" in js_text
@@ -310,6 +320,7 @@ def test_static_assets_are_served() -> None:
     assert ".ruby-line" in css_response.text
     assert ".toggle-tile" in css_response.text
     assert ".toggle-tile.is-disabled" in css_response.text
+    assert ".toggle-icon" in css_response.text
     assert ".history-title" in css_response.text
     assert ".history-text" in css_response.text
     assert ".history-warning" in css_response.text
@@ -418,12 +429,14 @@ def test_user_settings_api_rejects_unknown_theme(tmp_path, monkeypatch) -> None:
 
 
 def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+    captured: list[dict[str, object]] = []
 
     class Responses:
         @staticmethod
         def create(**kwargs):
-            captured.update(kwargs)
+            captured.append(kwargs)
+            if "Indonesian" in kwargs["instructions"]:
+                return SimpleNamespace(output_text="Tolong naikkan gaji saya.")
             return SimpleNamespace(output_text="きゅうりょうを あげてください。")
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -439,8 +452,28 @@ def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None
     assert response.json() == {
         "kanji_text": "給料を上げてください。",
         "hiragana_text": "きゅうりょうを あげてください。",
+        "indonesian_text": "Tolong naikkan gaji saya.",
     }
-    assert "hiragana only" in captured["instructions"]
+    assert "hiragana only" in captured[0]["instructions"]
+    assert captured[0]["input"] == "給料を上げてください。"
+    assert "Indonesian" in captured[1]["instructions"]
+    assert captured[1]["input"] == "給料を上げてください。"
+
+
+def test_user_display_text_api_uses_indonesian_output_as_indonesian_text() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/user-display-text",
+        json={"text": "Terima kasih.", "target_language": "id-ID"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kanji_text": "Terima kasih.",
+        "hiragana_text": "",
+        "indonesian_text": "Terima kasih.",
+    }
 
 
 def test_user_text_output_api_reuses_translated_text_for_tts(monkeypatch) -> None:
