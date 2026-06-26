@@ -183,13 +183,14 @@
               <p class="route-hint">現在のユーザー画面は、入力が日本語ならインドネシア語、それ以外なら日本語へ自動切替します。</p>
             </div>
             <div class="field-row">
-              <label for="user_joke_text">ジョークモードの追加テキスト</label>
+              <label for="user_joke_text">ジョークモードの候補テキスト</label>
               <textarea
                 id="user_joke_text"
                 name="user_joke_text"
-                rows="3"
-                placeholder="ユーザー画面でジョークON時に読み上げへ加える文"
+                rows="5"
+                placeholder="1行に1件ずつ、ジョークON時に音声だけで追加する文"
               ></textarea>
+              <p class="route-hint">ジョークは出力テキストには表示せず、本文音声の前後に音声だけ追加します。</p>
             </div>
             <div class="field-row">
               <label for="user_joke_position">追加位置</label>
@@ -197,6 +198,18 @@
                 <option value="after">出力音声の後</option>
                 <option value="before">出力音声の前</option>
               </select>
+            </div>
+            <div class="field-row">
+              <label for="user_joke_selection">ジョーク選択</label>
+              <select id="user_joke_selection" name="user_joke_selection">
+                <option value="rotation">ローテーション</option>
+                <option value="random">ランダム</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="user_joke_variation_count">LLMバリエーション数</label>
+              <input id="user_joke_variation_count" name="user_joke_variation_count" type="number" min="0" max="5" value="0" />
+              <p class="route-hint">保存時に元ジョークごとに生成します。ユーザーの変換中には生成しません。</p>
             </div>
             <div class="field-row">
               <label for="user_theme">ユーザー画面テーマ</label>

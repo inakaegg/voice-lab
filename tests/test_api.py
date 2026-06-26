@@ -139,7 +139,11 @@ def test_admin_serves_browser_ui() -> None:
     assert "history-storage" in response.text
     assert "user-settings-panel" in response.text
     assert "user_joke_text" in response.text
+    assert "user_joke_selection" in response.text
+    assert "user_joke_variation_count" in response.text
     assert "user_theme" in response.text
+    assert "ローテーション" in response.text
+    assert "ランダム" in response.text
     assert "青" in response.text
     assert "ポップ" in response.text
     assert "ミント" in response.text
@@ -259,6 +263,11 @@ def test_static_assets_are_served() -> None:
     assert "voiceResultCache" in js_text
     assert "displayTextCache" in js_text
     assert "jokeAudioCache" in js_text
+    assert "userJokePool" in js_text
+    assert "selectUserJokeText" in js_text
+    assert "currentUserJokeSettingsSignature" in js_text
+    assert "joke_variants" in js_text
+    assert "joke_selection" in js_text
     assert "convertUserJokeAudioBlob" in js_text
     assert "localStorage" in js_text
     assert "startProcessingLabelAnimation" in js_text
@@ -281,6 +290,9 @@ def test_static_assets_are_served() -> None:
     assert "seed_vc_reference_auto_select" in js_text
     assert "user-settings" in js_text
     assert "user_theme" in js_text
+    assert "user_joke_selection" in js_text
+    assert "user_joke_variation_count" in js_text
+    assert "splitAdminJokeTexts" in js_text
     assert "renderInputAudioPreview" in js_text
     assert "setInputAudioSelectionStatus" in js_text
     assert "setReferenceAudioSelectionStatus" in js_text
@@ -288,6 +300,7 @@ def test_static_assets_are_served() -> None:
     assert "履歴からVC参照" in js_text
     assert "loadAudioDevices" in js_text
     assert "selectedAudioConstraint" in js_text
+    assert "joke_text: hasJoke" not in js_text
     assert "chooseRecorderOptions" in js_text
     assert "startInputLevelMeter" in js_text
     assert "syncTranslationBackendAvailability" in js_text
@@ -389,7 +402,12 @@ def test_user_settings_api_defaults_to_japanese(tmp_path, monkeypatch) -> None:
     assert response.json() == {
         "target_language": "ja-JP",
         "joke_text": "",
+        "joke_texts": [],
         "joke_position": "after",
+        "joke_selection": "rotation",
+        "joke_variation_count": 0,
+        "joke_variants": [],
+        "joke_pool": [],
         "theme": "blue",
     }
 
@@ -402,17 +420,72 @@ def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> Non
         "/api/user-settings",
         json={
             "target_language": "ja-JP",
-            "joke_text": "きょうも がんばってください。",
+            "joke_texts": ["きょうも がんばってください。", "いいこえです。"],
             "joke_position": "before",
+            "joke_selection": "random",
+            "joke_variation_count": 0,
             "theme": "pop",
         },
     )
 
     assert response.status_code == 200
     assert response.json()["joke_position"] == "before"
+    assert response.json()["joke_selection"] == "random"
     assert response.json()["theme"] == "pop"
-    assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。"
+    assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。\nいいこえです。"
+    assert client.get("/api/user-settings").json()["joke_pool"] == [
+        "きょうも がんばってください。",
+        "いいこえです。",
+    ]
     assert client.get("/api/user-settings").json()["theme"] == "pop"
+
+
+def test_user_settings_api_generates_joke_variations_on_admin_save(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Responses:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text='{"variants":[["A1","A2"],["B1","B2"]]}')
+
+    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: SimpleNamespace(responses=Responses())))
+    client = TestClient(create_app())
+
+    response = client.put(
+        "/api/user-settings",
+        json={
+            "target_language": "ja-JP",
+            "joke_texts": ["A", "B"],
+            "joke_position": "after",
+            "joke_selection": "rotation",
+            "joke_variation_count": 2,
+            "theme": "blue",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["joke_variants"] == ["A1", "B1", "A2", "B2"]
+    assert payload["joke_pool"] == ["A", "B", "A1", "B1", "A2", "B2"]
+    assert "variants_per_joke" in captured["input"]
+    assert '"variants_per_joke": 2' in captured["input"]
+    assert client.get("/api/user-settings").json()["joke_pool"] == ["A", "B", "A1", "B1", "A2", "B2"]
+
+
+def test_user_settings_api_rejects_unknown_joke_selection(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
+    client = TestClient(create_app())
+
+    response = client.put(
+        "/api/user-settings",
+        json={"target_language": "ja-JP", "joke_position": "after", "joke_selection": "shuffle", "theme": "blue"},
+    )
+
+    assert response.status_code == 400
+    assert "unsupported joke_selection" in response.json()["detail"]
 
 
 def test_user_settings_api_rejects_unknown_theme(tmp_path, monkeypatch) -> None:

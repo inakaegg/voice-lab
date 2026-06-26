@@ -65,16 +65,24 @@ let userSeedVcUnavailableReason = "";
 let userInputCacheVersion = 0;
 let processingDotCount = 0;
 let userTextEffectsAvailable = false;
+let currentSelectedJokeText = "";
+let currentSelectedJokeSettingsSignature = "";
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
+  joke_texts: [],
   joke_position: "after",
+  joke_selection: "rotation",
+  joke_variation_count: 0,
+  joke_variants: [],
+  joke_pool: [],
   theme: "blue",
 };
 const userAutoTargetLanguage = "user-auto";
 const userJokeTargetLanguage = "id-ID";
 const userJokeTtsBackend = "openai";
 const userJokeAudioStoragePrefix = "mo:user-joke-audio:";
+const userJokeRotationStoragePrefix = "mo:user-joke-rotation:";
 
 const userUiTexts = {
   app_title: {
@@ -443,12 +451,19 @@ function userTextTransformOptions() {
 }
 
 function currentUserRequestSignature() {
-  const hasJoke = jokeModeToggle.checked && Boolean(userSettings.joke_text);
+  const hasJoke = jokeModeToggle.checked && userJokePool().length > 0;
   return JSON.stringify({
     voice: currentUserVoiceSignature(),
     joke_mode: hasJoke,
-    joke_text: hasJoke ? userSettings.joke_text || "" : "",
-    joke_position: hasJoke ? userSettings.joke_position || "after" : "",
+    joke_settings: hasJoke ? currentUserJokeSettingsSignature() : "",
+  });
+}
+
+function currentUserJokeSettingsSignature() {
+  return JSON.stringify({
+    pool: userJokePool(),
+    selection: userSettings.joke_selection || "rotation",
+    position: userSettings.joke_position || "after",
   });
 }
 
@@ -610,14 +625,89 @@ async function renderUserOutput(result) {
 }
 
 async function buildUserPlaybackQueue(mainOutputUrl) {
-  if (!jokeModeToggle.checked || !userSettings.joke_text) {
+  if (!jokeModeToggle.checked) {
     return [mainOutputUrl];
   }
-  const jokeUrl = await getUserJokeAudioUrl(userSettings.joke_text);
+  const jokeText = selectedUserJokeTextForCurrentOutput();
+  if (!jokeText) {
+    return [mainOutputUrl];
+  }
+  const jokeUrl = await getUserJokeAudioUrl(jokeText);
   if ((userSettings.joke_position || "after") === "before") {
     return [jokeUrl, mainOutputUrl];
   }
   return [mainOutputUrl, jokeUrl];
+}
+
+function selectedUserJokeTextForCurrentOutput() {
+  const pool = userJokePool();
+  if (pool.length === 0) {
+    currentSelectedJokeText = "";
+    currentSelectedJokeSettingsSignature = "";
+    return "";
+  }
+  const settingsSignature = currentUserJokeSettingsSignature();
+  if (
+    currentSelectedJokeText &&
+    currentSelectedJokeSettingsSignature === settingsSignature &&
+    pool.includes(currentSelectedJokeText)
+  ) {
+    return currentSelectedJokeText;
+  }
+  currentSelectedJokeText = selectUserJokeText(pool, settingsSignature);
+  currentSelectedJokeSettingsSignature = settingsSignature;
+  return currentSelectedJokeText;
+}
+
+function userJokePool() {
+  if (Array.isArray(userSettings.joke_pool)) {
+    return normalizeUserJokeTexts(userSettings.joke_pool);
+  }
+  return [
+    ...normalizeUserJokeTexts(userSettings.joke_texts),
+    ...normalizeUserJokeTexts(userSettings.joke_variants),
+  ];
+}
+
+function selectUserJokeText(pool = userJokePool(), settingsSignature = currentUserJokeSettingsSignature()) {
+  if (pool.length === 0) {
+    return "";
+  }
+  if ((userSettings.joke_selection || "rotation") === "random") {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  const storageKey = `${userJokeRotationStoragePrefix}${settingsSignature}`;
+  const index = readUserJokeRotationIndex(storageKey);
+  const selected = pool[index % pool.length];
+  writeUserJokeRotationIndex(storageKey, index + 1);
+  return selected;
+}
+
+function normalizeUserJokeTexts(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function readUserJokeRotationIndex(storageKey) {
+  try {
+    const value = Number(window.localStorage.getItem(storageKey) || 0);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+
+function writeUserJokeRotationIndex(storageKey, index) {
+  try {
+    window.localStorage.setItem(storageKey, String(index));
+  } catch (_error) {
+    return;
+  }
 }
 
 async function getUserJokeAudioUrl(jokeText) {
@@ -1065,6 +1155,8 @@ function resetUserOutputCache() {
   voiceResultCache.clear();
   displayTextCache.clear();
   clearUserJokeMemoryCache();
+  currentSelectedJokeText = "";
+  currentSelectedJokeSettingsSignature = "";
   syncJapaneseTextEffectAvailability("");
   lastAppliedUserRequestSignature = "";
   hasUserOutput = false;

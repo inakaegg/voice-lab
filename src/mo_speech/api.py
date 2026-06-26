@@ -55,6 +55,7 @@ from .text_display import create_user_display_text
 from .transforms import apply_text_transform
 from .user_settings import (
     UserSettingsStore,
+    prepare_user_settings_for_write,
     serialize_user_settings,
 )
 
@@ -134,18 +135,21 @@ def create_app(
         }
 
     @app.get("/api/user-settings")
-    def user_settings() -> dict[str, str]:
+    def user_settings() -> dict[str, object]:
         try:
             return serialize_user_settings(active_user_settings_store.read())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.put("/api/user-settings")
-    def update_user_settings(payload: dict[str, object] = Body(...)) -> dict[str, str]:
+    def update_user_settings(payload: dict[str, object] = Body(...)) -> dict[str, object]:
         try:
-            return serialize_user_settings(active_user_settings_store.write(payload))
+            prepared_payload = prepare_user_settings_for_write(payload)
+            return serialize_user_settings(active_user_settings_store.write(prepared_payload))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/api/user-display-text")
     def user_display_text(payload: dict[str, str] = Body(...)) -> dict[str, str]:
