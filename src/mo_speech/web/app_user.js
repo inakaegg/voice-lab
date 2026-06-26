@@ -1002,7 +1002,7 @@ function renderUserError(message) {
 }
 
 function cycleUserTextMode() {
-  const modes = ["hiragana", "kanji", "ruby"];
+  const modes = ["hiragana", "ruby", "kanji"];
   const nextIndex = (modes.indexOf(userTextMode) + 1) % modes.length;
   userTextMode = modes[nextIndex];
   renderStaticUserTexts();

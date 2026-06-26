@@ -9,7 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mo_speech.api import create_app
-from mo_speech.pipeline import PipelineProgress, PipelineResult, TtsOutput
+from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
+from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from mo_speech.providers.voice import (
     SeedVcRuntimeSettings,
     VoiceConversionBackendInfo,
@@ -251,6 +252,7 @@ def test_static_assets_are_served() -> None:
     assert "id-ID" in js_text
     assert "voice-conversion-jobs" in js_text
     assert "cycleUserTextMode" in js_text
+    assert '["hiragana", "ruby", "kanji"]' in js_text
     assert "setUserProcessingProgress" in js_text
     assert "しょりちゅう" in js_text
     assert "seed_vc_reference_auto_select" in js_text
@@ -804,6 +806,43 @@ def test_translate_speech_job_api_runs_openai_backend() -> None:
         raise AssertionError("openai translation job did not finish")
 
     assert status_payload["result"]["translated_text"] == "Halo."
+
+
+def test_translate_speech_job_api_accepts_user_auto_target_language() -> None:
+    openai_pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "Halo."}),
+        translator=FakeTranslationProvider({("auto", "ja-JP", "Halo."): "こんにちは。"}),
+        tts=FakeTtsProvider(),
+    )
+    openai_pipeline.supported_routes = {("auto", "id-ID"), ("auto", "ja-JP")}
+    client = TestClient(
+        create_app(openai_pipeline=openai_pipeline, voice_conversion_service=_fake_voice_conversion_service())
+    )
+
+    response = client.post(
+        "/api/translate-speech-jobs",
+        data={
+            "translation_backend": "openai",
+            "source_language": "auto",
+            "target_language": "user-auto",
+            "voice_mode": "default",
+        },
+        files={"audio": ("sample.webm", b"fake audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    for _ in range(20):
+        status_payload = client.get(f"/api/translate-speech-jobs/{payload['job_id']}").json()
+        if status_payload["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("user-auto translation job did not finish")
+
+    assert status_payload["error"] is None
+    assert status_payload["result"]["translated_text"] == "こんにちは。"
+    assert status_payload["result"]["target_language"] == "ja-JP"
 
 
 def test_translate_speech_job_api_marks_unexpected_provider_error_failed() -> None:
