@@ -49,6 +49,10 @@ from .providers.voice import (
     create_voice_conversion_service_from_env,
     prepare_seed_vc_reference_preview as _prepare_seed_vc_reference_preview,
 )
+from .user_settings import (
+    UserSettingsStore,
+    serialize_user_settings,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
@@ -76,6 +80,7 @@ def create_app(
     text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     audio_history_store: AudioHistoryStore | None = None,
+    user_settings_store: UserSettingsStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="mo speech translation")
     active_pipeline = pipeline or create_pipeline_from_env()
@@ -89,6 +94,7 @@ def create_app(
     active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
+    active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
@@ -98,6 +104,10 @@ def create_app(
 
     @app.get("/")
     def index() -> FileResponse:
+        return FileResponse(WEB_DIR / "user.html")
+
+    @app.get("/admin")
+    def admin() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
 
     @app.get("/health")
@@ -119,6 +129,20 @@ def create_app(
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
         }
 
+    @app.get("/api/user-settings")
+    def user_settings() -> dict[str, str]:
+        try:
+            return serialize_user_settings(active_user_settings_store.read())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/user-settings")
+    def update_user_settings(payload: dict[str, object] = Body(...)) -> dict[str, str]:
+        try:
+            return serialize_user_settings(active_user_settings_store.write(payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/translate-speech")
     async def translate_speech(
         audio: Annotated[UploadFile, File()],
@@ -127,6 +151,7 @@ def create_app(
         translation_backend: Annotated[str, Form()] = "openai",
         voice_mode: Annotated[str, Form()] = "default",
         text_transform: Annotated[str | None, Form()] = None,
+        text_transform_options: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
         text_transform_unit: Annotated[str, Form()] = "text",
         seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
@@ -165,6 +190,7 @@ def create_app(
                 target_language,
                 voice_mode,
                 text_transform,
+                text_transform_options,
                 text_transform_suffix,
                 text_transform_unit,
                 seed_vc_diffusion_steps,
@@ -206,6 +232,7 @@ def create_app(
         translation_backend: Annotated[str, Form()] = "openai",
         voice_mode: Annotated[str, Form()] = "default",
         text_transform: Annotated[str | None, Form()] = None,
+        text_transform_options: Annotated[str | None, Form()] = None,
         text_transform_suffix: Annotated[str | None, Form()] = None,
         text_transform_unit: Annotated[str, Form()] = "text",
         seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
@@ -245,6 +272,7 @@ def create_app(
             target_language,
             voice_mode,
             text_transform,
+            text_transform_options,
             text_transform_suffix,
             text_transform_unit,
             seed_vc_diffusion_steps,

@@ -524,3 +524,246 @@ audio {
     grid-template-columns: 1fr;
   }
 }
+
+.user-body {
+  background: linear-gradient(180deg, #f7fbf8 0%, #eef4f6 52%, #f8f7f2 100%);
+  color: #17212b;
+}
+
+.user-stage {
+  align-items: center;
+  box-sizing: border-box;
+  display: grid;
+  gap: 24px;
+  grid-template-rows: 1fr auto auto;
+  min-height: 100vh;
+  padding: 28px clamp(18px, 4vw, 48px);
+}
+
+.user-hero {
+  align-self: end;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.user-kicker {
+  color: #376355;
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.user-hero h1 {
+  font-size: 38px;
+  margin: 0 0 26px;
+}
+
+.record-orb {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #e6462e;
+  border: 8px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 18px 42px rgba(58, 68, 78, 0.22), inset 0 -10px 0 rgba(95, 15, 7, 0.12);
+  display: grid;
+  isolation: isolate;
+  justify-items: center;
+  min-height: 0;
+  padding: 0;
+  position: relative;
+  width: min(46vw, 230px);
+}
+
+.record-orb:focus-visible {
+  outline: 4px solid #245d92;
+  outline-offset: 8px;
+}
+
+.record-waves {
+  border: 2px solid rgba(230, 70, 46, 0.28);
+  border-radius: 50%;
+  inset: -20px;
+  opacity: 0;
+  position: absolute;
+  z-index: -1;
+}
+
+.record-orb.is-recording .record-waves {
+  animation: record-pulse 1.25s ease-out infinite;
+  opacity: 1;
+}
+
+.record-icon {
+  background: #ffffff;
+  border-radius: 20px;
+  height: 66px;
+  position: relative;
+  width: 48px;
+}
+
+.record-icon::before {
+  border: 8px solid #ffffff;
+  border-top: 0;
+  border-radius: 0 0 34px 34px;
+  content: "";
+  height: 46px;
+  left: -17px;
+  position: absolute;
+  top: 30px;
+  width: 66px;
+}
+
+.record-icon::after {
+  background: #ffffff;
+  border-radius: 4px;
+  bottom: -52px;
+  content: "";
+  height: 42px;
+  left: 20px;
+  position: absolute;
+  width: 8px;
+}
+
+.user-status {
+  color: #1d3f36;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 30px 0 6px;
+  min-height: 2.8rem;
+}
+
+.user-minimum-hint {
+  color: #5d6a64;
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.user-toggles {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-self: stretch;
+  margin: 0 auto;
+  max-width: 760px;
+  width: 100%;
+}
+
+.toggle-tile {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(86, 106, 113, 0.22);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #35454c;
+  cursor: pointer;
+  display: grid;
+  font-size: 15px;
+  font-weight: 800;
+  gap: 9px;
+  justify-items: center;
+  min-height: 92px;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.toggle-tile input {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.toggle-art {
+  background: #b8c5c2;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.64);
+  height: 30px;
+  position: relative;
+  width: 56px;
+}
+
+.toggle-art::after {
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(30, 40, 48, 0.2);
+  content: "";
+  height: 24px;
+  left: 3px;
+  position: absolute;
+  top: 3px;
+  transition: transform 0.18s ease;
+  width: 24px;
+}
+
+.toggle-tile:has(input:checked) {
+  background: #e9f5ef;
+  border-color: #68a88d;
+  color: #1d5a46;
+}
+
+.toggle-tile:has(input:checked) .toggle-art {
+  background: #2f8064;
+}
+
+.toggle-tile:has(input:checked) .toggle-art::after {
+  transform: translateX(26px);
+}
+
+.user-output {
+  margin: 0 auto;
+  max-width: 680px;
+  width: 100%;
+}
+
+.user-output audio {
+  margin-top: 0;
+}
+
+.user-error {
+  background: #fff1f0;
+  border: 1px solid #e9aaa2;
+  border-radius: 8px;
+  color: #8a1f11;
+  font-weight: 700;
+  line-height: 1.5;
+  margin: 0;
+  padding: 12px 14px;
+  text-align: center;
+}
+
+@keyframes record-pulse {
+  from {
+    opacity: 0.8;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.24);
+  }
+}
+
+@media (max-width: 720px) {
+  .user-stage {
+    gap: 18px;
+    padding: 22px 16px;
+  }
+
+  .user-hero h1 {
+    font-size: 31px;
+  }
+
+  .record-orb {
+    width: min(68vw, 210px);
+  }
+
+  .user-toggles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

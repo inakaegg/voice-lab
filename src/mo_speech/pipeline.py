@@ -71,7 +71,7 @@ class PipelineRequest:
     target_language: str
     voice_mode: str = "default"
     text_transform: str | None = None
-    text_transform_options: dict[str, str] = field(default_factory=dict)
+    text_transform_options: dict[str, object] = field(default_factory=dict)
     voice_settings: dict[str, object] = field(default_factory=dict)
 
 

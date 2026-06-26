@@ -170,6 +170,37 @@
             </div>
           </fieldset>
 
+          <fieldset id="user-settings-panel" class="suffix-panel">
+            <legend>ユーザー画面設定</legend>
+            <div class="field-row">
+              <label for="user_target_language">ユーザー画面の出力言語</label>
+              <select id="user_target_language" name="user_target_language">
+                <option value="ja-JP">日本語</option>
+                <option value="id-ID">インドネシア語</option>
+                <option value="zh-CN">中国語（普通話）</option>
+                <option value="en-US">英語</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="user_joke_text">ジョークモードの追加テキスト</label>
+              <textarea
+                id="user_joke_text"
+                name="user_joke_text"
+                rows="3"
+                placeholder="ユーザー画面でジョークON時に読み上げへ加える文"
+              ></textarea>
+            </div>
+            <div class="field-row">
+              <label for="user_joke_position">追加位置</label>
+              <select id="user_joke_position" name="user_joke_position">
+                <option value="after">出力音声の後</option>
+                <option value="before">出力音声の前</option>
+              </select>
+            </div>
+            <button type="button" id="user-settings-save" class="secondary-button">ユーザー画面設定を保存</button>
+            <p id="user-settings-status" class="route-hint"></p>
+          </fieldset>
+
           <fieldset id="seed-vc-settings" class="suffix-panel" hidden>
             <legend>Seed-VC詳細設定</legend>
             <div class="field-row">
@@ -335,5 +366,6 @@
     <script src="/static/app_history.js" defer></script>
     <script src="/static/app_seed_vc.js" defer></script>
     <script src="/static/app.js" defer></script>
+    <script src="/static/app_admin_settings.js" defer></script>
   </body>
 </html>

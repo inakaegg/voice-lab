@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -56,7 +57,7 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
     audio_decode_ms = _elapsed_ms(decode_started)
     suffix = payload.get("text_transform_suffix")
     text_transform_unit = str(payload.get("text_transform_unit", "text"))
-    text_transform_options: dict[str, str] = {}
+    text_transform_options = _text_transform_options_from_payload(payload)
     if suffix is not None:
         text_transform_options["suffix"] = str(suffix)
     if text_transform_unit:
@@ -314,6 +315,20 @@ def _optional_str(value: object) -> str | None:
     if value is None or value == "":
         return None
     return str(value)
+
+
+def _text_transform_options_from_payload(payload: dict[str, object]) -> dict[str, object]:
+    raw_options = payload.get("text_transform_options")
+    if raw_options is None:
+        return {}
+    if isinstance(raw_options, dict):
+        return dict(raw_options)
+    if isinstance(raw_options, str) and raw_options.strip():
+        parsed = json.loads(raw_options)
+        if not isinstance(parsed, dict):
+            raise ValueError("text_transform_options must be an object")
+        return parsed
+    return {}
 
 
 def _normalize_tts_output(output: bytes | TtsOutput, audio_mime_type: str) -> TtsOutput:

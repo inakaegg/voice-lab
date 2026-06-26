@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -42,6 +43,7 @@ def create_pipeline_request(
     target_language: str,
     voice_mode: str,
     text_transform: str | None,
+    text_transform_options_json: str | None,
     text_transform_suffix: str | None,
     text_transform_unit: str,
     seed_vc_diffusion_steps: int | None,
@@ -50,7 +52,7 @@ def create_pipeline_request(
     seed_vc_reference_max_seconds: float | None,
     seed_vc_reference_auto_select: bool | None,
 ) -> PipelineRequest:
-    options: dict[str, str] = {}
+    options: dict[str, object] = _parse_text_transform_options(text_transform_options_json)
     if text_transform_suffix is not None:
         options["suffix"] = text_transform_suffix
     if text_transform_unit:
@@ -72,3 +74,15 @@ def create_pipeline_request(
             )
         },
     )
+
+
+def _parse_text_transform_options(raw_options: str | None) -> dict[str, object]:
+    if raw_options is None or raw_options.strip() == "":
+        return {}
+    try:
+        parsed = json.loads(raw_options)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="text_transform_options must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="text_transform_options must be a JSON object")
+    return parsed

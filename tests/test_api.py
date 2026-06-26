@@ -43,10 +43,29 @@ def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch
     assert Path("tmp/audio-history").resolve() != (tmp_path / "isolated-history").resolve()
 
 
-def test_root_serves_browser_ui() -> None:
+def test_root_serves_simple_user_ui() -> None:
     client = TestClient(create_app())
 
     response = client.get("/")
+
+    assert response.status_code == 200
+    assert "こえを かえる" in response.text
+    assert "5びょう いじょう はなしてください" in response.text
+    assert "にてるこえ" in response.text
+    assert "ジョーク" in response.text
+    assert "おおさかべん" in response.text
+    assert "バリエーション" in response.text
+    assert "target_language" in response.text
+    assert 'value="ja-JP"' in response.text
+    assert "translation_backend" not in response.text
+    assert "operation_mode" not in response.text
+    assert "/static/app_user.js" in response.text
+
+
+def test_admin_serves_browser_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/admin")
 
     assert response.status_code == 200
     assert "音声翻訳" in response.text
@@ -103,6 +122,9 @@ def test_root_serves_browser_ui() -> None:
     assert "history-recordings" in response.text
     assert "history-outputs" in response.text
     assert "history-storage" in response.text
+    assert "user-settings-panel" in response.text
+    assert "user_joke_text" in response.text
+    assert "user-settings-save" in response.text
     assert "use-output-as-input" in response.text
     assert "use-output-as-reference" in response.text
     assert "text-result-action" in response.text
@@ -120,7 +142,9 @@ def test_root_serves_browser_ui() -> None:
     assert response.text.index("/static/app_realtime.js") < response.text.index("/static/app_history.js")
     assert response.text.index("/static/app_history.js") < response.text.index("/static/app_seed_vc.js")
     assert response.text.index("/static/app_seed_vc.js") < response.text.index("/static/app.js")
+    assert response.text.index("/static/app.js") < response.text.index("/static/app_admin_settings.js")
     assert "/static/app.js" in response.text
+    assert "/static/app_admin_settings.js" in response.text
 
 
 def test_static_assets_are_served() -> None:
@@ -135,6 +159,8 @@ def test_static_assets_are_served() -> None:
         "app_history.js",
         "app_seed_vc.js",
         "app.js",
+        "app_admin_settings.js",
+        "app_user.js",
     ]
     js_responses = [client.get(f"/static/{name}") for name in js_asset_names]
     js_text = "\n".join(response.text for response in js_responses)
@@ -193,6 +219,9 @@ def test_static_assets_are_served() -> None:
     assert "VC出力音声" in js_text
     assert "renderOutputAudioBlob" in js_text
     assert "outputAudio.play()" in js_text
+    assert "submitUserTranslation" in js_text
+    assert "seed_vc_reference_auto_select" in js_text
+    assert "user-settings" in js_text
     assert "renderInputAudioPreview" in js_text
     assert "setInputAudioSelectionStatus" in js_text
     assert "setReferenceAudioSelectionStatus" in js_text
@@ -214,6 +243,9 @@ def test_static_assets_are_served() -> None:
     assert ".runtime-panel" not in css_response.text
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
+    assert ".user-stage" in css_response.text
+    assert ".record-orb" in css_response.text
+    assert ".toggle-tile" in css_response.text
     assert ".history-title" in css_response.text
     assert ".history-text" in css_response.text
     assert ".history-warning" in css_response.text
@@ -270,6 +302,38 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
             "settings": {},
         }
     ]
+
+
+def test_user_settings_api_defaults_to_japanese(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
+    client = TestClient(create_app())
+
+    response = client.get("/api/user-settings")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "target_language": "ja-JP",
+        "joke_text": "",
+        "joke_position": "after",
+    }
+
+
+def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
+    client = TestClient(create_app())
+
+    response = client.put(
+        "/api/user-settings",
+        json={
+            "target_language": "ja-JP",
+            "joke_text": "きょうも がんばってください。",
+            "joke_position": "before",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["joke_position"] == "before"
+    assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。"
 
 
 def test_runtime_api_returns_supported_voice_modes_from_tts_provider() -> None:

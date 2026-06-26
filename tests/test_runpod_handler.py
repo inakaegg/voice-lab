@@ -79,6 +79,25 @@ def test_runpod_handler_defaults_to_openai_translation_backend(monkeypatch: pyte
     }
 
 
+def test_runpod_handler_accepts_user_effect_options_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
+    event = {
+        "input": {
+            "audio_base64": base64.b64encode(b"fake audio").decode("ascii"),
+            "translation_backend": "qwen",
+            "source_language": "ja-JP",
+            "target_language": "zh-CN",
+            "voice_mode": "default",
+            "text_transform": "user_effects",
+            "text_transform_options": '{"joke_text":"先にひとこと。","joke_position":"before"}',
+        }
+    }
+
+    payload = runpod_handler.handler(event)
+
+    assert payload["transformed_text"] == "先にひとこと。 谢谢。"
+
+
 def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = FakeVcProvider()
     monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([provider]))

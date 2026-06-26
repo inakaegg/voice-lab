@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>こえを かえる</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="user-body">
+    <main class="user-stage" aria-label="こえを かえる">
+      <input id="target_language" name="target_language" type="hidden" value="ja-JP" />
+
+      <section class="user-hero" aria-label="ろくおん">
+        <p class="user-kicker">にほんご</p>
+        <h1>こえを かえる</h1>
+        <button id="user-record-button" class="record-orb" type="button" aria-label="ろくおん">
+          <span class="record-waves" aria-hidden="true"></span>
+          <span class="record-icon" aria-hidden="true"></span>
+        </button>
+        <p id="user-status" class="user-status" role="status" aria-live="polite">
+          おして はなす
+        </p>
+        <p id="user-minimum-hint" class="user-minimum-hint" hidden>
+          5びょう いじょう はなしてください
+        </p>
+      </section>
+
+      <section class="user-toggles" aria-label="せってい">
+        <label class="toggle-tile">
+          <input id="similar_voice" type="checkbox" checked />
+          <span class="toggle-art" aria-hidden="true"></span>
+          <span>にてるこえ</span>
+        </label>
+        <label class="toggle-tile">
+          <input id="joke_mode" type="checkbox" />
+          <span class="toggle-art" aria-hidden="true"></span>
+          <span>ジョーク</span>
+        </label>
+        <label class="toggle-tile">
+          <input id="osaka_dialect" type="checkbox" />
+          <span class="toggle-art" aria-hidden="true"></span>
+          <span>おおさかべん</span>
+        </label>
+        <label class="toggle-tile">
+          <input id="variation_mode" type="checkbox" />
+          <span class="toggle-art" aria-hidden="true"></span>
+          <span>バリエーション</span>
+        </label>
+      </section>
+
+      <section class="user-output" aria-label="できたこえ">
+        <audio id="user-output-audio" controls hidden></audio>
+        <p id="user-error" class="user-error" hidden></p>
+      </section>
+    </main>
+    <script src="/static/app_user.js" defer></script>
+  </body>
+</html>

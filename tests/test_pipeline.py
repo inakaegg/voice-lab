@@ -1,4 +1,6 @@
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,6 +130,57 @@ def test_append_suffix_to_each_sentence(tmp_path: Path) -> None:
     )
 
     assert pipeline.run(request).transformed_text == "おはようございますモー。ありがとうございますモー。"
+
+
+def test_user_effects_adds_joke_text_before_tts(tmp_path: Path) -> None:
+    request = PipelineRequest(
+        audio_path=tmp_path / "input.wav",
+        source_language="auto",
+        target_language="ja-JP",
+        text_transform="user_effects",
+        text_transform_options={"joke_text": "まずは ひとこと。", "joke_position": "before"},
+    )
+    request.audio_path.write_bytes(b"fake audio")
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "I want a raise."}),
+        translator=FakeTranslationProvider({("auto", "ja-JP", "I want a raise."): "給料を上げてください。"}),
+        tts=FakeTtsProvider(),
+    )
+    pipeline.supported_routes = {("auto", "ja-JP")}
+
+    assert pipeline.run(request).transformed_text == "まずは ひとこと。 給料を上げてください。"
+
+
+def test_user_effects_rewrites_with_openai_for_osaka_and_variation(tmp_path: Path, monkeypatch) -> None:
+    request = PipelineRequest(
+        audio_path=tmp_path / "input.wav",
+        source_language="auto",
+        target_language="ja-JP",
+        text_transform="user_effects",
+        text_transform_options={"osaka_dialect": "true", "variation": "true"},
+    )
+    request.audio_path.write_bytes(b"fake audio")
+    captured: dict[str, object] = {}
+
+    class Responses:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text="給料50万ほしいねん。")
+
+    client = SimpleNamespace(responses=Responses())
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: client))
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "I want a million yen salary."}),
+        translator=FakeTranslationProvider({("auto", "ja-JP", "I want a million yen salary."): "給料100万ほしい。"}),
+        tts=FakeTtsProvider(),
+    )
+    pipeline.supported_routes = {("auto", "ja-JP")}
+
+    assert pipeline.run(request).transformed_text == "給料50万ほしいねん。"
+    assert "Osaka dialect" in captured["instructions"]
+    assert "small playful variation" in captured["instructions"]
 
 
 def test_pipeline_rejects_unknown_voice_mode(tmp_path: Path) -> None:
