@@ -135,6 +135,7 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 | `SEED_VC_LENGTH_ADJUST` | `1.0` | Seed-VCの出力長補正。 |
 | `SEED_VC_INFERENCE_CFG_RATE` | `0.7` | Seed-VCのCFG係数。 |
 | `SEED_VC_REFERENCE_MAX_SECONDS` | `10` | Seed-VCに渡す参照音声の上限秒数。 |
+| `SEED_VC_REFERENCE_AUTO_SELECT` | `0` | `1` の場合は、参照音声の発話区間を軽量に自動選択する。選択不能時は先頭切り出しに戻す。 |
 | `CHATTERBOX_PYTHON` | 現在のPython | Chatterbox VCを実行するPython。 |
 | `CHATTERBOX_DEVICE` | `auto` | Chatterboxのdevice。Mac M1では `auto` でMPSを優先する。 |
 | `CHATTERBOX_REFERENCE_MAX_SECONDS` | `10` | Chatterboxに渡す参照音声の上限秒数。 |
@@ -180,7 +181,7 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 
 `/api/runtime` の `voice_conversion_backends` で `seed-vc` が `available=true` になっていれば、UIの「VC比較」から実行できる。
 
-UIでは、VC比較モードでSeed-VCを選択した場合と、音声翻訳モードで `Qwen生成後にSeed-VC変換` を選択した場合に、`diffusion steps`、参照音声の上限秒数、`length adjust`、`inference cfg rate` をjob単位で変更できる。未変更時は起動時の環境変数から決まる既定値を使う。
+UIでは、VC比較モードでSeed-VCを選択した場合と、音声翻訳モードで `Qwen生成後にSeed-VC変換` を選択した場合に、`diffusion steps`、参照音声の上限秒数、参照音声の発話区間自動選択、`length adjust`、`inference cfg rate` をjob単位で変更できる。未変更時は起動時の環境変数から決まる既定値を使う。
 
 OpenAI API経路を使う場合も、UIの声質変換でSeed-VCを選ぶと同じSeed-VC設定を使う。
 

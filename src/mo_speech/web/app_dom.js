@@ -18,6 +18,7 @@ const seedVcSettingsPanel = document.querySelector("#seed-vc-settings");
 const seedVcPresetSelect = document.querySelector("#seed_vc_preset");
 const seedVcDiffusionStepsInput = document.querySelector("#seed_vc_diffusion_steps");
 const seedVcReferenceMaxSecondsInput = document.querySelector("#seed_vc_reference_max_seconds");
+const seedVcReferenceAutoSelectInput = document.querySelector("#seed_vc_reference_auto_select");
 const seedVcLengthAdjustInput = document.querySelector("#seed_vc_length_adjust");
 const seedVcInferenceCfgRateInput = document.querySelector("#seed_vc_inference_cfg_rate");
 const audioDeviceSelect = document.querySelector("#audio_device");

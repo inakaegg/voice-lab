@@ -80,7 +80,8 @@ def test_runpod_handler_defaults_to_openai_translation_backend(monkeypatch: pyte
 
 
 def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([FakeVcProvider()]))
+    provider = FakeVcProvider()
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([provider]))
     event = {
         "input": {
             "operation_mode": "voice_conversion",
@@ -91,6 +92,7 @@ def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPa
             "voice_backend": "seed-vc",
             "seed_vc_diffusion_steps": 10,
             "seed_vc_reference_max_seconds": 5,
+            "seed_vc_reference_auto_select": True,
         }
     }
 
@@ -101,6 +103,8 @@ def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPa
     assert payload["providers"]["voice_conversion"] == "fake-vc-provider"
     assert payload["serverless"]["operation_mode"] == "voice_conversion"
     assert payload["serverless_timings_ms"]["handler_total"] >= 0
+    assert provider.last_seed_vc_settings is not None
+    assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
 def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,10 +140,14 @@ class FakeVcProvider:
     name = "fake-vc-provider"
     audio_mime_type = "audio/wav"
 
+    def __init__(self):
+        self.last_seed_vc_settings = None
+
     def backend_info(self) -> VoiceConversionBackendInfo:
         return VoiceConversionBackendInfo(self.backend_id, self.label, self.name, True)
 
     def convert(self, *, source_audio_path, reference_audio_path, seed_vc_settings=None, progress_callback=None):
+        self.last_seed_vc_settings = seed_vc_settings
         if progress_callback is not None:
             progress_callback(PipelineProgress("voice_conversion", "声質変換", self.name))
         return type(

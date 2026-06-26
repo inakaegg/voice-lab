@@ -64,6 +64,7 @@ def test_root_serves_browser_ui() -> None:
     assert "最高品質検証" in response.text
     assert "seed_vc_diffusion_steps" in response.text
     assert "seed_vc_reference_max_seconds" in response.text
+    assert "seed_vc_reference_auto_select" in response.text
     assert "seed_vc_length_adjust" in response.text
     assert "seed_vc_inference_cfg_rate" in response.text
     assert "translation-only" in response.text
@@ -170,6 +171,7 @@ def test_static_assets_are_served() -> None:
     assert "syncVoiceBackendAvailability" in js_text
     assert "syncSeedVcSettingsVisibility" in js_text
     assert "appendSeedVcSettings" in js_text
+    assert "seed_vc_reference_auto_select" in js_text
     assert "seedVcPresets" in js_text
     assert "applySeedVcPreset" in js_text
     assert "syncSeedVcPresetSelection" in js_text
@@ -459,6 +461,7 @@ def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> Non
             "seed_vc_length_adjust": "0.95",
             "seed_vc_inference_cfg_rate": "0.6",
             "seed_vc_reference_max_seconds": "5",
+            "seed_vc_reference_auto_select": "true",
         },
         files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
     )
@@ -470,6 +473,7 @@ def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> Non
     assert settings.length_adjust == 0.95
     assert settings.inference_cfg_rate == 0.6
     assert settings.reference_max_seconds == 5.0
+    assert settings.reference_auto_select is True
 
 
 def test_translate_speech_job_api_reports_progress_and_result() -> None:
@@ -943,6 +947,7 @@ def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
             "seed_vc_length_adjust": "1.2",
             "seed_vc_inference_cfg_rate": "0.55",
             "seed_vc_reference_max_seconds": "4.5",
+            "seed_vc_reference_auto_select": "true",
         },
         files={
             "source_audio": ("source.wav", b"source audio", "audio/wav"),
@@ -964,6 +969,7 @@ def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
     assert provider.last_seed_vc_settings.length_adjust == 1.2
     assert provider.last_seed_vc_settings.inference_cfg_rate == 0.55
     assert provider.last_seed_vc_settings.reference_max_seconds == 4.5
+    assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
 def test_translate_speech_api_rejects_unsupported_route() -> None:

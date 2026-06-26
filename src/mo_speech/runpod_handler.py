@@ -286,6 +286,7 @@ def _seed_vc_settings_from_payload(payload: dict[str, object]) -> SeedVcRuntimeS
         length_adjust=_optional_float(payload.get("seed_vc_length_adjust")),
         inference_cfg_rate=_optional_float(payload.get("seed_vc_inference_cfg_rate")),
         reference_max_seconds=_optional_float(payload.get("seed_vc_reference_max_seconds")),
+        reference_auto_select=_optional_bool(payload.get("seed_vc_reference_auto_select")),
     )
 
 
@@ -299,6 +300,14 @@ def _optional_float(value: object) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in {"1", "true", "yes", "on"}
 
 
 def _optional_str(value: object) -> str | None:

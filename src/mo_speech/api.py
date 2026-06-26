@@ -131,6 +131,7 @@ def create_app(
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
+        seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
         input_history_kind: Annotated[str | None, Form()] = None,
         input_history_filename: Annotated[str | None, Form()] = None,
     ) -> dict[str, object]:
@@ -168,6 +169,7 @@ def create_app(
                 seed_vc_length_adjust,
                 seed_vc_inference_cfg_rate,
                 seed_vc_reference_max_seconds,
+                seed_vc_reference_auto_select,
             )
             try:
                 result = _select_translation_pipeline(translation_pipelines, translation_backend).run(request)
@@ -208,6 +210,7 @@ def create_app(
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
+        seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
         input_history_kind: Annotated[str | None, Form()] = None,
         input_history_filename: Annotated[str | None, Form()] = None,
     ) -> dict[str, object]:
@@ -246,6 +249,7 @@ def create_app(
             seed_vc_length_adjust,
             seed_vc_inference_cfg_rate,
             seed_vc_reference_max_seconds,
+            seed_vc_reference_auto_select,
         )
         try:
             return job_store.start(request, audio_path, translation_backend, recording_entry=recording_entry)
@@ -299,6 +303,7 @@ def create_app(
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
+        seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
     ) -> dict[str, object]:
         source_audio_bytes = await source_audio.read()
         source_suffix = _upload_suffix(source_audio.filename)
@@ -333,6 +338,7 @@ def create_app(
                 length_adjust=seed_vc_length_adjust,
                 inference_cfg_rate=seed_vc_inference_cfg_rate,
                 reference_max_seconds=seed_vc_reference_max_seconds,
+                reference_auto_select=seed_vc_reference_auto_select,
             ),
         )
         return voice_conversion_job_store.start(request, [source_audio_path, reference_audio_path])

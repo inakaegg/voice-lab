@@ -13,6 +13,7 @@ from mo_speech.providers.voice import (
     DEFAULT_SEED_VC_DIFFUSION_STEPS,
     DEFAULT_SEED_VC_INFERENCE_CFG_RATE,
     DEFAULT_SEED_VC_LENGTH_ADJUST,
+    DEFAULT_SEED_VC_REFERENCE_AUTO_SELECT,
     DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS,
     QwenSeedVcTtsProvider,
     QwenVoiceCloneTtsProvider,
@@ -27,14 +28,17 @@ def test_seed_vc_default_settings_are_quality_preset(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("SEED_VC_DIFFUSION_STEPS", raising=False)
     monkeypatch.delenv("SEED_VC_LENGTH_ADJUST", raising=False)
     monkeypatch.delenv("SEED_VC_INFERENCE_CFG_RATE", raising=False)
+    monkeypatch.delenv("SEED_VC_REFERENCE_AUTO_SELECT", raising=False)
     monkeypatch.delenv("SEED_VC_REFERENCE_MAX_SECONDS", raising=False)
 
     provider = SeedVcDirectVoiceConversionProvider()
 
     assert DEFAULT_SEED_VC_DIFFUSION_STEPS == 30
     assert DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS == 10.0
+    assert DEFAULT_SEED_VC_REFERENCE_AUTO_SELECT is False
     assert provider.diffusion_steps == DEFAULT_SEED_VC_DIFFUSION_STEPS
     assert provider.reference_max_seconds == DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS
+    assert provider.reference_auto_select is DEFAULT_SEED_VC_REFERENCE_AUTO_SELECT
     assert provider.length_adjust == DEFAULT_SEED_VC_LENGTH_ADJUST
     assert provider.inference_cfg_rate == DEFAULT_SEED_VC_INFERENCE_CFG_RATE
 
@@ -465,6 +469,68 @@ def test_seed_vc_direct_provider_uses_runtime_settings(
     assert command[command.index("--length-adjust") + 1] == "1.15"
     assert command[command.index("--inference-cfg-rate") + 1] == "0.5"
     assert any("-t" in command and "3.5" in command for command in ffmpeg_commands)
+
+
+def test_seed_vc_direct_provider_auto_selects_reference_segment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_audio = tmp_path / "source.webm"
+    reference_audio = tmp_path / "reference.wav"
+    source_audio.write_bytes(b"source audio")
+    reference_audio.write_bytes(b"reference audio")
+    captured: dict[str, object] = {}
+    ffmpeg_commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "ffprobe":
+            return subprocess.CompletedProcess(command, 0, stdout="8.0\n", stderr="")
+
+        if command[0] == "ffmpeg":
+            ffmpeg_commands.append(command)
+            if "-af" in command and "silencedetect" in command[command.index("-af") + 1]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout="",
+                    stderr=(
+                        "[silencedetect @ 0x1] silence_start: 0\n"
+                        "[silencedetect @ 0x1] silence_end: 1 | silence_duration: 1\n"
+                        "[silencedetect @ 0x1] silence_start: 4\n"
+                        "[silencedetect @ 0x1] silence_end: 8 | silence_duration: 4\n"
+                    ),
+                )
+            Path(command[-1]).write_bytes(f"prepared:{Path(command[-1]).name}".encode())
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        output_dir = Path(command[command.index("--output") + 1])
+        captured["command"] = command
+        captured["target_bytes"] = Path(command[command.index("--target") + 1]).read_bytes()
+        (output_dir / "converted.wav").write_bytes(b"auto selected seed vc wav")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("mo_speech.providers.voice.subprocess.run", fake_run)
+
+    provider = SeedVcDirectVoiceConversionProvider(
+        python_executable="voice-python",
+        work_dir=tmp_path / "seed-work",
+        reference_max_seconds=2,
+    )
+
+    result = provider.convert(
+        source_audio_path=source_audio,
+        reference_audio_path=reference_audio,
+        seed_vc_settings=SeedVcRuntimeSettings(reference_auto_select=True),
+    )
+
+    reference_prepare_command = next(command for command in ffmpeg_commands if Path(command[-1]).name == "reference.wav")
+
+    assert result.audio_bytes == b"auto selected seed vc wav"
+    assert result.timings_ms["reference_segment_select"] >= 0
+    assert captured["target_bytes"] == b"prepared:reference.wav"
+    assert "-ss" in reference_prepare_command
+    assert reference_prepare_command[reference_prepare_command.index("-ss") + 1] == "1.5"
+    assert reference_prepare_command[reference_prepare_command.index("-t") + 1] == "2"
 
 
 def test_chatterbox_direct_provider_invokes_helper(

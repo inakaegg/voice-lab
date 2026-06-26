@@ -5,6 +5,7 @@ function syncSeedVcSettingsDefaults() {
   }
   setInputValue(seedVcDiffusionStepsInput, settings.diffusion_steps);
   setInputValue(seedVcReferenceMaxSecondsInput, settings.reference_max_seconds);
+  setCheckedValue(seedVcReferenceAutoSelectInput, settings.reference_auto_select);
   setInputValue(seedVcLengthAdjustInput, settings.length_adjust);
   setInputValue(seedVcInferenceCfgRateInput, settings.inference_cfg_rate);
   syncSeedVcPresetSelection();
@@ -36,6 +37,7 @@ function appendSeedVcSettings(formData, voiceBackend) {
   }
   appendNumberSetting(formData, "seed_vc_diffusion_steps", seedVcDiffusionStepsInput.value);
   appendNumberSetting(formData, "seed_vc_reference_max_seconds", seedVcReferenceMaxSecondsInput.value);
+  formData.append("seed_vc_reference_auto_select", seedVcReferenceAutoSelectInput.checked ? "true" : "false");
   appendNumberSetting(formData, "seed_vc_length_adjust", seedVcLengthAdjustInput.value);
   appendNumberSetting(formData, "seed_vc_inference_cfg_rate", seedVcInferenceCfgRateInput.value);
 }
@@ -90,4 +92,11 @@ function setInputValue(input, value) {
     return;
   }
   input.value = String(value);
+}
+
+function setCheckedValue(input, value) {
+  if (!input || value === undefined || value === null) {
+    return;
+  }
+  input.checked = Boolean(value);
 }

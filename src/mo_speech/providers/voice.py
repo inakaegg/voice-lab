@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,7 @@ DEFAULT_SEED_VC_DIFFUSION_STEPS = 30
 DEFAULT_SEED_VC_LENGTH_ADJUST = 1.0
 DEFAULT_SEED_VC_INFERENCE_CFG_RATE = 0.7
 DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS = 10.0
+DEFAULT_SEED_VC_REFERENCE_AUTO_SELECT = False
 
 
 class BasicTtsProvider(Protocol):
@@ -66,6 +68,18 @@ class SeedVcRuntimeSettings:
     length_adjust: float | None = None
     inference_cfg_rate: float | None = None
     reference_max_seconds: float | None = None
+    reference_auto_select: bool | None = None
+
+
+@dataclass(frozen=True)
+class _ReferenceAudioPreparation:
+    reference_segment_select_ms: float | None = None
+
+
+@dataclass(frozen=True)
+class _ReferenceAudioSegment:
+    start_seconds: float
+    duration_seconds: float
 
 
 @dataclass(frozen=True)
@@ -246,6 +260,11 @@ class SeedVcVoiceConversionTtsProvider:
     reference_max_seconds: float = field(
         default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", str(DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS)))
     )
+    reference_auto_select: bool = field(
+        default_factory=lambda: _str_to_bool(
+            os.getenv("SEED_VC_REFERENCE_AUTO_SELECT", "1" if DEFAULT_SEED_VC_REFERENCE_AUTO_SELECT else "0")
+        )
+    )
     reference_sample_rate: int = field(default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_SAMPLE_RATE", "24000")))
     reference_prepare_timeout_seconds: int = field(
         default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_PREPARE_TIMEOUT_SECONDS", "90"))
@@ -294,12 +313,13 @@ class SeedVcVoiceConversionTtsProvider:
             source_audio_path.write_bytes(base_output.audio_bytes)
             reference_audio_for_seed = temp_path / "reference.wav"
             reference_prepare_started = perf_counter()
-            _prepare_seed_reference_audio(
+            reference_preparation = _prepare_seed_reference_audio(
                 reference_audio_path,
                 reference_audio_for_seed,
                 max_seconds=settings.reference_max_seconds,
                 sample_rate=self.reference_sample_rate,
                 timeout_seconds=self.reference_prepare_timeout_seconds,
+                auto_select=settings.reference_auto_select,
             )
             reference_prepare_ms = _elapsed_ms(reference_prepare_started)
             output_dir = temp_path / "output"
@@ -344,6 +364,8 @@ class SeedVcVoiceConversionTtsProvider:
         timings_ms = dict(base_output.timings_ms)
         timings_ms["tts"] = timings_ms.get("tts", tts_ms)
         timings_ms["voice_reference_prepare"] = reference_prepare_ms
+        if reference_preparation.reference_segment_select_ms is not None:
+            timings_ms["reference_segment_select"] = reference_preparation.reference_segment_select_ms
         timings_ms["voice_conversion"] = _elapsed_ms(conversion_started)
         return TtsOutput(
             audio_bytes=audio_bytes,
@@ -372,6 +394,11 @@ class SeedVcDirectVoiceConversionProvider:
     source_sample_rate: int = field(default_factory=lambda: int(os.getenv("VC_SOURCE_SAMPLE_RATE", "24000")))
     reference_max_seconds: float = field(
         default_factory=lambda: float(os.getenv("SEED_VC_REFERENCE_MAX_SECONDS", str(DEFAULT_SEED_VC_REFERENCE_MAX_SECONDS)))
+    )
+    reference_auto_select: bool = field(
+        default_factory=lambda: _str_to_bool(
+            os.getenv("SEED_VC_REFERENCE_AUTO_SELECT", "1" if DEFAULT_SEED_VC_REFERENCE_AUTO_SELECT else "0")
+        )
     )
     reference_sample_rate: int = field(default_factory=lambda: int(os.getenv("SEED_VC_REFERENCE_SAMPLE_RATE", "24000")))
     audio_prepare_timeout_seconds: int = field(
@@ -412,6 +439,7 @@ class SeedVcDirectVoiceConversionProvider:
                     "length_adjust": self.length_adjust,
                     "inference_cfg_rate": self.inference_cfg_rate,
                     "reference_max_seconds": self.reference_max_seconds,
+                    "reference_auto_select": self.reference_auto_select,
                 }
             },
         )
@@ -443,12 +471,13 @@ class SeedVcDirectVoiceConversionProvider:
 
             _notify_progress(progress_callback, "reference_audio_prepare", "参照音声準備", "ffmpeg")
             reference_prepare_started = perf_counter()
-            _prepare_vc_audio(
+            reference_preparation = _prepare_seed_reference_audio(
                 reference_audio_path,
                 reference_wav,
                 max_seconds=settings.reference_max_seconds,
                 sample_rate=self.reference_sample_rate,
                 timeout_seconds=self.audio_prepare_timeout_seconds,
+                auto_select=settings.reference_auto_select,
             )
             reference_prepare_ms = _elapsed_ms(reference_prepare_started)
 
@@ -490,14 +519,18 @@ class SeedVcDirectVoiceConversionProvider:
             converted_audio_path = _find_single_wav(output_dir)
             audio_bytes = converted_audio_path.read_bytes()
 
+        timings_ms = {
+            "source_audio_prepare": source_prepare_ms,
+            "reference_audio_prepare": reference_prepare_ms,
+            "voice_conversion": _elapsed_ms(conversion_started),
+        }
+        if reference_preparation.reference_segment_select_ms is not None:
+            timings_ms["reference_segment_select"] = reference_preparation.reference_segment_select_ms
+
         return TtsOutput(
             audio_bytes=audio_bytes,
             audio_mime_type=self.audio_mime_type,
-            timings_ms={
-                "source_audio_prepare": source_prepare_ms,
-                "reference_audio_prepare": reference_prepare_ms,
-                "voice_conversion": _elapsed_ms(conversion_started),
-            },
+            timings_ms=timings_ms,
         )
 
 
@@ -749,8 +782,17 @@ def _run_command(
     timeout_seconds: int,
     cwd: Path | None = None,
 ) -> None:
+    _run_command_capture(command, timeout_seconds=timeout_seconds, cwd=cwd)
+
+
+def _run_command_capture(
+    command: list[str],
+    *,
+    timeout_seconds: int,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     try:
-        subprocess.run(
+        return subprocess.run(
             command,
             check=True,
             capture_output=True,
@@ -781,20 +823,170 @@ def _prepare_seed_reference_audio(
     max_seconds: float,
     sample_rate: int,
     timeout_seconds: int,
-) -> None:
+    auto_select: bool = False,
+) -> _ReferenceAudioPreparation:
+    segment_select_ms: float | None = None
+    segment: _ReferenceAudioSegment | None = None
+    if auto_select:
+        selection_started = perf_counter()
+        try:
+            segment = _select_seed_reference_segment(
+                input_path,
+                max_seconds=max_seconds,
+                timeout_seconds=timeout_seconds,
+            )
+        except RuntimeError:
+            segment = None
+        segment_select_ms = _elapsed_ms(selection_started)
+
+    if segment is None:
+        segment = _ReferenceAudioSegment(
+            start_seconds=0.0,
+            duration_seconds=max_seconds if max_seconds > 0 else 0.0,
+        )
+
     command = [
         "ffmpeg",
         "-y",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-i",
-        str(input_path.resolve()),
     ]
-    if max_seconds > 0:
-        command.extend(["-t", _format_seconds(max_seconds)])
+    if segment.start_seconds > 0:
+        command.extend(["-ss", _format_seconds(segment.start_seconds)])
+    command.extend(
+        [
+            "-i",
+            str(input_path.resolve()),
+        ]
+    )
+    if segment.duration_seconds > 0:
+        command.extend(["-t", _format_seconds(segment.duration_seconds)])
     command.extend(["-ac", "1", "-ar", str(sample_rate), str(output_path)])
     _run_command(command, timeout_seconds=timeout_seconds)
+    return _ReferenceAudioPreparation(reference_segment_select_ms=segment_select_ms)
+
+
+def _select_seed_reference_segment(
+    input_path: Path,
+    *,
+    max_seconds: float,
+    timeout_seconds: int,
+) -> _ReferenceAudioSegment | None:
+    if max_seconds <= 0:
+        return None
+
+    duration_seconds = _probe_audio_duration(input_path, timeout_seconds=timeout_seconds)
+    if duration_seconds is None or duration_seconds <= 0:
+        return None
+
+    silence_ranges = _detect_silence_ranges(
+        input_path,
+        duration_seconds=duration_seconds,
+        timeout_seconds=timeout_seconds,
+    )
+    speech_ranges = _speech_ranges_from_silence_ranges(duration_seconds, silence_ranges)
+    if not speech_ranges:
+        return None
+
+    best_start, best_end = max(speech_ranges, key=lambda item: (item[1] - item[0], -item[0]))
+    best_duration = best_end - best_start
+    if best_duration < min(0.75, max_seconds):
+        return None
+
+    selected_duration = min(max_seconds, best_duration)
+    selected_start = best_start
+    if best_duration > selected_duration:
+        selected_start = best_start + ((best_duration - selected_duration) / 2)
+    selected_start = max(0.0, min(selected_start, max(0.0, duration_seconds - selected_duration)))
+
+    return _ReferenceAudioSegment(
+        start_seconds=selected_start,
+        duration_seconds=selected_duration,
+    )
+
+
+def _probe_audio_duration(input_path: Path, *, timeout_seconds: int) -> float | None:
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(input_path.resolve()),
+    ]
+    try:
+        completed = _run_command_capture(command, timeout_seconds=timeout_seconds)
+    except RuntimeError:
+        return None
+    try:
+        return float((completed.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def _detect_silence_ranges(
+    input_path: Path,
+    *,
+    duration_seconds: float,
+    timeout_seconds: int,
+) -> list[tuple[float, float]]:
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(input_path.resolve()),
+        "-af",
+        "silencedetect=noise=-35dB:d=0.25",
+        "-f",
+        "null",
+        "-",
+    ]
+    completed = _run_command_capture(command, timeout_seconds=timeout_seconds)
+    return _parse_silence_ranges(completed.stderr or "", duration_seconds=duration_seconds)
+
+
+def _parse_silence_ranges(log_text: str, *, duration_seconds: float) -> list[tuple[float, float]]:
+    ranges: list[tuple[float, float]] = []
+    current_start: float | None = None
+    for line in log_text.splitlines():
+        start_match = re.search(r"silence_start:\s*([0-9.]+)", line)
+        if start_match is not None:
+            current_start = float(start_match.group(1))
+            continue
+
+        end_match = re.search(r"silence_end:\s*([0-9.]+)", line)
+        if end_match is not None and current_start is not None:
+            end_seconds = float(end_match.group(1))
+            if end_seconds > current_start:
+                ranges.append((current_start, end_seconds))
+            current_start = None
+
+    if current_start is not None and duration_seconds > current_start:
+        ranges.append((current_start, duration_seconds))
+    return ranges
+
+
+def _speech_ranges_from_silence_ranges(
+    duration_seconds: float,
+    silence_ranges: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    speech_ranges: list[tuple[float, float]] = []
+    cursor = 0.0
+    for silence_start, silence_end in sorted(silence_ranges):
+        silence_start = max(0.0, min(silence_start, duration_seconds))
+        silence_end = max(silence_start, min(silence_end, duration_seconds))
+        if silence_start > cursor:
+            speech_ranges.append((cursor, silence_start))
+        cursor = max(cursor, silence_end)
+
+    if cursor < duration_seconds:
+        speech_ranges.append((cursor, duration_seconds))
+
+    return [(start, end) for start, end in speech_ranges if end - start > 0.05]
 
 
 def _prepare_vc_audio(
@@ -932,6 +1124,11 @@ def _effective_seed_vc_settings(
             else runtime_settings.inference_cfg_rate
         ),
         reference_max_seconds=runtime_settings.reference_max_seconds or provider.reference_max_seconds,
+        reference_auto_select=(
+            provider.reference_auto_select
+            if runtime_settings.reference_auto_select is None
+            else runtime_settings.reference_auto_select
+        ),
     )
 
 

@@ -14,6 +14,7 @@ def create_seed_vc_settings(
     length_adjust: float | None,
     inference_cfg_rate: float | None,
     reference_max_seconds: float | None,
+    reference_auto_select: bool | None,
 ) -> SeedVcRuntimeSettings:
     validate_optional_number("seed_vc_diffusion_steps", diffusion_steps, minimum=1, maximum=80)
     validate_optional_number("seed_vc_length_adjust", length_adjust, minimum=0.25, maximum=4.0)
@@ -24,6 +25,7 @@ def create_seed_vc_settings(
         length_adjust=length_adjust,
         inference_cfg_rate=inference_cfg_rate,
         reference_max_seconds=reference_max_seconds,
+        reference_auto_select=reference_auto_select,
     )
 
 
@@ -46,6 +48,7 @@ def create_pipeline_request(
     seed_vc_length_adjust: float | None,
     seed_vc_inference_cfg_rate: float | None,
     seed_vc_reference_max_seconds: float | None,
+    seed_vc_reference_auto_select: bool | None,
 ) -> PipelineRequest:
     options: dict[str, str] = {}
     if text_transform_suffix is not None:
@@ -65,6 +68,7 @@ def create_pipeline_request(
                 length_adjust=seed_vc_length_adjust,
                 inference_cfg_rate=seed_vc_inference_cfg_rate,
                 reference_max_seconds=seed_vc_reference_max_seconds,
+                reference_auto_select=seed_vc_reference_auto_select,
             )
         },
     )
