@@ -232,6 +232,22 @@ def test_runpod_handler_requires_audio_base64(monkeypatch: pytest.MonkeyPatch) -
         runpod_handler.handler({"input": {"source_language": "ja-JP", "target_language": "zh-CN"}})
 
 
+@pytest.mark.parametrize(
+    ("mime_type", "suffix"),
+    [
+        ("audio/mp4", ".m4a"),
+        ("audio/mp4a-latm", ".m4a"),
+        ("audio/x-m4a", ".m4a"),
+        ("audio/webm", ".webm"),
+        ("video/webm", ".webm"),
+        ("audio/mpeg", ".mp3"),
+        ("audio/x-wav", ".wav"),
+    ],
+)
+def test_runpod_handler_audio_suffix_keeps_container_type(mime_type: str, suffix: str) -> None:
+    assert runpod_handler._audio_suffix(mime_type) == suffix
+
+
 class FakeVcProvider:
     backend_id = "seed-vc"
     label = "Seed-VC"
