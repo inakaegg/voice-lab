@@ -813,6 +813,11 @@ audio {
   transform: translateX(26px);
 }
 
+.toggle-tile.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .user-output {
   display: grid;
   gap: 14px;
@@ -835,6 +840,12 @@ audio {
   font-size: 18px;
   font-weight: 900;
   text-align: center;
+}
+
+.processing-dots {
+  display: inline-block;
+  min-width: 2.6ch;
+  text-align: left;
 }
 
 .user-processing-bar {

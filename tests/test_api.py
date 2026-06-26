@@ -238,6 +238,8 @@ def test_static_assets_are_served() -> None:
     assert "runUserTextOutput" in js_text
     assert "runUserVoiceConversion" in js_text
     assert "applyUserVoiceModeToBase" in js_text
+    assert "syncSimilarVoiceAvailability" in js_text
+    assert "userStatus.hidden" in js_text
     assert "translationResultCache" in js_text
     assert "baseResultCache" in js_text
     assert "voiceResultCache" in js_text
@@ -246,6 +248,7 @@ def test_static_assets_are_served() -> None:
     assert "localStorage" in js_text
     assert "startProcessingLabelAnimation" in js_text
     assert 'plainUserText("processing")' in js_text
+    assert "processing-dots" in js_text
     assert "user-text-output" in js_text
     assert "user-joke-output" in js_text
     assert "user-auto" in js_text
@@ -284,12 +287,14 @@ def test_static_assets_are_served() -> None:
     assert ".record-progress" in css_response.text
     assert ".user-processing-panel" in css_response.text
     assert ".user-processing-fill" in css_response.text
+    assert ".processing-dots" in css_response.text
     assert "progress-sheen" in css_response.text
     assert ".replay-button" in css_response.text
     assert ".user-output-texts" in css_response.text
     assert ".user-output-text" in css_response.text
     assert ".ruby-line" in css_response.text
     assert ".toggle-tile" in css_response.text
+    assert ".toggle-tile.is-disabled" in css_response.text
     assert ".history-title" in css_response.text
     assert ".history-text" in css_response.text
     assert ".history-warning" in css_response.text

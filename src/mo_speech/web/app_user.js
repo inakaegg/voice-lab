@@ -59,6 +59,8 @@ let userTextMode = "hiragana";
 let currentStatusKey = "tap_to_speak";
 let currentPlaybackQueue = [];
 let currentPlaybackIndex = -1;
+let userSeedVcAvailable = true;
+let userSeedVcUnavailableReason = "";
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -191,6 +193,7 @@ async function handleUserRecordButton() {
 
 async function startUserRecording() {
   await refreshUserSettings();
+  await loadUserRuntime();
   userOutputAudio.hidden = true;
   userReplayButton.hidden = true;
   userOutputTexts.hidden = true;
@@ -337,7 +340,7 @@ async function applyUserVoiceModeToBase() {
   }
   const requestSignature = currentUserRequestSignature();
   const voiceSignature = currentUserVoiceSignature();
-  if (!similarVoiceToggle.checked) {
+  if (!similarVoiceToggle.checked || !userSeedVcAvailable) {
     await renderUserResult(lastBaseResult);
     lastAppliedUserRequestSignature = requestSignature;
     hasUserOutput = true;
@@ -351,7 +354,19 @@ async function applyUserVoiceModeToBase() {
     hasUserOutput = true;
     return;
   }
-  const voiceResult = await runUserVoiceConversion(lastBaseAudioBlob);
+  let voiceResult;
+  try {
+    voiceResult = await runUserVoiceConversion(lastBaseAudioBlob);
+  } catch (error) {
+    if (!isVoiceBackendUnavailableError(error)) {
+      throw error;
+    }
+    syncSimilarVoiceAvailability({ available: false, reason: error.message || "" });
+    await renderUserResult(lastBaseResult);
+    lastAppliedUserRequestSignature = currentUserRequestSignature();
+    hasUserOutput = true;
+    return;
+  }
   const mergedVoiceResult = {
     ...lastBaseResult,
     audio_mime_type: voiceResult.audio_mime_type,
@@ -708,9 +723,33 @@ async function loadUserRuntime() {
     if (openai && openai.available === false) {
       setUserStatus("APIキーが ひつようです");
     }
+    const seedVc = (runtime.voice_conversion_backends || []).find((backend) => backend.id === "seed-vc");
+    syncSimilarVoiceAvailability(seedVc);
   } catch (_error) {
     return;
   }
+}
+
+function syncSimilarVoiceAvailability(seedVcBackend) {
+  userSeedVcAvailable = Boolean(seedVcBackend?.available);
+  userSeedVcUnavailableReason = userSeedVcAvailable ? "" : seedVcBackend?.reason || "Seed-VCが使えません";
+  const similarVoiceTile = similarVoiceToggle.closest(".toggle-tile");
+  similarVoiceToggle.disabled = !userSeedVcAvailable;
+  similarVoiceTile?.classList.toggle("is-disabled", !userSeedVcAvailable);
+  if (userSeedVcAvailable) {
+    similarVoiceTile?.removeAttribute("title");
+  } else if (userSeedVcUnavailableReason) {
+    similarVoiceTile?.setAttribute("title", userSeedVcUnavailableReason);
+  }
+  if (!userSeedVcAvailable) {
+    similarVoiceToggle.checked = false;
+  }
+  syncReplayButton();
+}
+
+function isVoiceBackendUnavailableError(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("voice backend is not available") || message.includes("seed_vc をimportできません");
 }
 
 function chooseUserRecorderOptions() {
@@ -943,6 +982,7 @@ function renderUserTextMode() {
 function setUserProcessingProgress(percent) {
   userProcessingPanel.hidden = false;
   startProcessingLabelAnimation();
+  syncUserStatusVisibility();
   userProcessingFill.style.width = `${Math.max(0, Math.min(percent, 100))}%`;
 }
 
@@ -960,7 +1000,7 @@ function startProcessingLabelAnimation() {
   let dotCount = 0;
   const updateLabel = () => {
     dotCount = (dotCount % 4) + 1;
-    userProcessingLabel.textContent = `${plainUserText("processing")}${".".repeat(dotCount)}`;
+    userProcessingLabel.innerHTML = `${escapeHtml(plainUserText("processing"))}<span class="processing-dots">${".".repeat(dotCount)}</span>`;
   };
   updateLabel();
   processingTimerId = window.setInterval(updateLabel, 450);
@@ -981,6 +1021,11 @@ function renderUserLanguageLabel() {
 function setUserStatus(key) {
   currentStatusKey = key;
   renderUserText(userStatus, key);
+  syncUserStatusVisibility();
+}
+
+function syncUserStatusVisibility() {
+  userStatus.hidden = currentStatusKey === "processing" && !userProcessingPanel.hidden;
 }
 
 function clearUserError() {
