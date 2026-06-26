@@ -178,6 +178,8 @@ def test_static_assets_are_served() -> None:
     assert "textResultSection" in js_text
     assert "変換元音声ファイル" in js_text
     assert "VC出力音声" in js_text
+    assert "renderOutputAudioBlob" in js_text
+    assert "outputAudio.play()" in js_text
     assert "renderInputAudioPreview" in js_text
     assert "loadAudioDevices" in js_text
     assert "selectedAudioConstraint" in js_text

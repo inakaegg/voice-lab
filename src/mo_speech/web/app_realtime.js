@@ -199,14 +199,9 @@ function stopRealtimeOutputRecording(outputRecording) {
 }
 
 function renderStreamingOutputBlob(blob) {
-  setCurrentOutputBlob(blob, `realtime-streaming-output.${extensionForMimeType(blob.type || "audio/webm")}`);
-  if (outputAudioObjectUrl) {
-    URL.revokeObjectURL(outputAudioObjectUrl);
-  }
-  outputAudio.srcObject = null;
-  outputAudioObjectUrl = URL.createObjectURL(blob);
-  outputAudio.src = outputAudioObjectUrl;
-  outputAudio.autoplay = false;
+  renderOutputAudioBlob(blob, `realtime-streaming-output.${extensionForMimeType(blob.type || "audio/webm")}`, {
+    autoplay: false,
+  });
 }
 
 async function saveRealtimeStreamingOutput(blob) {

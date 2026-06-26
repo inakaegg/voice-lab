@@ -240,6 +240,24 @@ function setCurrentOutputBlob(blob, filename) {
   useOutputAsReferenceButton.disabled = false;
 }
 
+function renderOutputAudioBlob(blob, filename, { autoplay = true } = {}) {
+  setCurrentOutputBlob(blob, filename);
+  if (outputAudioObjectUrl) {
+    URL.revokeObjectURL(outputAudioObjectUrl);
+  }
+  outputAudio.srcObject = null;
+  outputAudioObjectUrl = URL.createObjectURL(blob);
+  outputAudio.src = outputAudioObjectUrl;
+  outputAudio.autoplay = false;
+  if (!autoplay) {
+    return;
+  }
+  const playPromise = outputAudio.play();
+  if (playPromise?.catch) {
+    playPromise.catch(() => {});
+  }
+}
+
 function clearCurrentOutputBlob() {
   currentOutputBlob = null;
   currentOutputFileName = "output.audio";

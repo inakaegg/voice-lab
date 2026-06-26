@@ -368,13 +368,7 @@ function renderResult(payload) {
 
   const audioBytes = base64ToBytes(payload.audio_base64);
   const audioBlob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
-  setCurrentOutputBlob(audioBlob, `translation-output.${extensionForMimeType(audioBlob.type || "audio/wav")}`);
-  if (outputAudioObjectUrl) {
-    URL.revokeObjectURL(outputAudioObjectUrl);
-  }
-  outputAudio.srcObject = null;
-  outputAudioObjectUrl = URL.createObjectURL(audioBlob);
-  outputAudio.src = outputAudioObjectUrl;
+  renderOutputAudioBlob(audioBlob, `translation-output.${extensionForMimeType(audioBlob.type || "audio/wav")}`);
 
   const timings = document.querySelector("#timings");
   renderKeyValueList(timings, payload.timings_ms || {}, (value) => `${Number(value).toFixed(1)} ms`);
@@ -396,13 +390,7 @@ function renderVoiceConversionResult(payload) {
 
   const audioBytes = base64ToBytes(payload.audio_base64);
   const audioBlob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
-  setCurrentOutputBlob(audioBlob, `output.${extensionForMimeType(audioBlob.type || "audio/wav")}`);
-  if (outputAudioObjectUrl) {
-    URL.revokeObjectURL(outputAudioObjectUrl);
-  }
-  outputAudio.srcObject = null;
-  outputAudioObjectUrl = URL.createObjectURL(audioBlob);
-  outputAudio.src = outputAudioObjectUrl;
+  renderOutputAudioBlob(audioBlob, `output.${extensionForMimeType(audioBlob.type || "audio/wav")}`);
 
   const timings = document.querySelector("#timings");
   renderKeyValueList(timings, payload.timings_ms || {}, (value) => `${Number(value).toFixed(1)} ms`);
