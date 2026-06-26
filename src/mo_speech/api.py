@@ -38,7 +38,12 @@ from .api_runtime import (
 from .api_serializers import normalize_tts_provider_output as _normalize_tts_provider_output
 from .api_serializers import serialize_pipeline_result as _serialize_pipeline_result
 from .audio_history import AudioHistoryStore
-from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
+from .factory import (
+    create_openai_pipeline,
+    create_pipeline_from_env,
+    create_realtime_translation_pipeline,
+    create_runpod_serverless_pipeline,
+)
 from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
 from .providers.openai_api import (
@@ -82,6 +87,7 @@ def create_app(
     pipeline: SpeechTranslationPipeline | None = None,
     openai_pipeline: SpeechTranslationPipeline | None = None,
     openai_realtime_pipeline=None,
+    runpod_serverless_pipeline: SpeechTranslationPipeline | None = None,
     text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     audio_history_store: AudioHistoryStore | None = None,
@@ -91,10 +97,12 @@ def create_app(
     active_pipeline = pipeline or create_pipeline_from_env()
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
     active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()
+    active_runpod_serverless_pipeline = runpod_serverless_pipeline or create_runpod_serverless_pipeline()
     translation_pipelines = {
         "openai": active_openai_pipeline,
         "openai_realtime": active_openai_realtime_pipeline,
         "qwen": active_pipeline,
+        "runpod_serverless": active_runpod_serverless_pipeline,
     }
     active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
@@ -129,6 +137,7 @@ def create_app(
                 active_pipeline,
                 active_openai_pipeline,
                 active_openai_realtime_pipeline,
+                active_runpod_serverless_pipeline,
             ),
             "text_tts_backends": text_tts_backend_statuses(active_text_tts_providers),
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),

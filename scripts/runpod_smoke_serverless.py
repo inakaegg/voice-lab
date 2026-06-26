@@ -16,7 +16,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, text-TTS, or voice-conversion smoke request.")
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
-    parser.add_argument("--operation-mode", choices=("translation", "text_tts", "voice_conversion"), default="translation")
+    parser.add_argument(
+        "--operation-mode",
+        choices=("translation", "text_tts", "voice_conversion", "warmup"),
+        default="translation",
+    )
+    parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
     parser.add_argument("--audio")
     parser.add_argument("--reference-audio")
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
@@ -33,7 +38,14 @@ def main() -> int:
     parser.add_argument("--text-transform", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM"))
     parser.add_argument("--text-transform-suffix", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM_SUFFIX"))
     parser.add_argument("--text-transform-unit", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM_UNIT", "text"))
+    parser.add_argument("--preload-translation", action="store_true", default=os.getenv("RUNPOD_SMOKE_PRELOAD_TRANSLATION") == "1")
+    parser.add_argument(
+        "--preload-voice-conversion",
+        action="store_true",
+        default=os.getenv("RUNPOD_SMOKE_PRELOAD_VOICE_CONVERSION") == "1",
+    )
     parser.add_argument("--timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_TIMEOUT_SECONDS", "1800")))
+    parser.add_argument("--poll-interval", type=float, default=float(os.getenv("RUNPOD_SMOKE_POLL_INTERVAL_SECONDS", "1.0")))
     args = parser.parse_args()
 
     if not args.endpoint_id:
@@ -41,7 +53,14 @@ def main() -> int:
     if not args.api_key:
         raise SystemExit("RUNPOD_API_KEY or --api-key is required")
 
-    if args.operation_mode == "text_tts":
+    if args.operation_mode == "warmup":
+        input_payload = {
+            "operation_mode": "warmup",
+            "translation_backend": args.translation_backend,
+            "preload_translation": args.preload_translation or not args.preload_voice_conversion,
+            "preload_voice_conversion": args.preload_voice_conversion,
+        }
+    elif args.operation_mode == "text_tts":
         if not args.text:
             raise SystemExit("--text is required for text_tts")
         input_payload = {
@@ -94,19 +113,16 @@ def main() -> int:
 
     payload: dict[str, Any] = {"input": input_payload}
 
-    request = urllib.request.Request(
-        f"https://api.runpod.ai/v2/{args.endpoint_id}/runsync",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {args.api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(request, timeout=args.timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        if args.request_mode == "async":
+            body = _run_async_request(args.endpoint_id, args.api_key, payload, args.timeout, args.poll_interval)
+        else:
+            body = _json_request(
+                f"https://api.runpod.ai/v2/{args.endpoint_id}/runsync",
+                args.api_key,
+                payload,
+                timeout=args.timeout,
+            )
     except urllib.error.HTTPError as exc:
         sys.stderr.write(exc.read().decode("utf-8", errors="replace"))
         sys.stderr.write("\n")
@@ -116,6 +132,57 @@ def main() -> int:
     if body.get("status") in {"FAILED", "TIMED_OUT", "CANCELLED"}:
         return 1
     return 0
+
+
+def _run_async_request(endpoint_id: str, api_key: str, payload: dict[str, Any], timeout: int, poll_interval: float) -> dict[str, Any]:
+    started = _monotonic_seconds()
+    body = _json_request(f"https://api.runpod.ai/v2/{endpoint_id}/run", api_key, payload, timeout=timeout)
+    job_id = body.get("id")
+    if not job_id:
+        return body
+    while True:
+        status_body = _json_request(
+            f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
+            api_key,
+            None,
+            timeout=timeout,
+            method="GET",
+        )
+        status = status_body.get("status")
+        if status in {"COMPLETED", "FAILED", "TIMED_OUT", "CANCELLED"}:
+            return status_body
+        if _monotonic_seconds() - started >= timeout:
+            return {"id": job_id, "status": "TIMED_OUT", "error": f"polling timed out after {timeout}s"}
+        import time
+
+        time.sleep(poll_interval)
+
+
+def _json_request(
+    url: str,
+    api_key: str,
+    payload: dict[str, Any] | None,
+    *,
+    timeout: int,
+    method: str = "POST",
+) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _monotonic_seconds() -> float:
+    import time
+
+    return time.monotonic()
 
 
 if __name__ == "__main__":

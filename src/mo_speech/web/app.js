@@ -699,6 +699,13 @@ function syncRuntimeNote() {
     runtimeNote.textContent = "OpenAI Realtime translationへWebRTCで接続し、翻訳音声を逐次再生します。";
     return;
   }
+  if (translationBackendSelect.value === "runpod_serverless") {
+    const backend = selectedTranslationBackendInfo();
+    const health = backend?.settings?.health;
+    const warmText = health?.checked ? (health.warm ? "warm workerあり" : "warm状態は未確認またはcold") : "warm状態未確認";
+    runtimeNote.textContent = `RunPod Serverlessへ非同期jobを送ります。${warmText}。`;
+    return;
+  }
   runtimeNote.textContent =
     runtimeProviderMode === "local"
       ? "Qwen/local系providerで録音または選択した音声を処理します。"
@@ -756,6 +763,12 @@ function syncTranslationBackendAvailability() {
             label: "音声翻訳（Qwen/local）",
             available: true,
             reason: "",
+          },
+          {
+            id: "runpod_serverless",
+            label: "音声翻訳（RunPod Serverless）",
+            available: false,
+            reason: "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。",
           },
         ];
   const currentValue = translationBackendSelect.value;

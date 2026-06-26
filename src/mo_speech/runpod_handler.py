@@ -44,6 +44,8 @@ def handler(event: dict[str, Any]) -> dict[str, object]:
         return _handle_text_tts(payload, handler_started)
     if operation_mode == "voice_conversion":
         return _handle_voice_conversion(payload, handler_started)
+    if operation_mode in {"warmup", "preload"}:
+        return _handle_warmup(payload, handler_started)
     raise ValueError(f"unsupported operation_mode: {operation_mode}")
 
 
@@ -91,6 +93,7 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
         "timings_ms": result.timings_ms,
         "providers": result.providers,
         "warnings": result.warnings,
+        "target_language": result.target_language,
     }
     _attach_serverless_metrics(
         response,
@@ -102,6 +105,45 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
         load_metric_name="pipeline_load",
         load_ms=pipeline_load_ms,
     )
+    return response
+
+
+def _handle_warmup(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    translation_backend = str(payload.get("translation_backend", "qwen"))
+    preload_translation = _optional_bool(payload.get("preload_translation"))
+    preload_voice_conversion = _optional_bool(payload.get("preload_voice_conversion"))
+    if preload_translation is None:
+        preload_translation = True
+    if preload_voice_conversion is None:
+        preload_voice_conversion = False
+
+    pipeline_load_ms: float | None = None
+    voice_conversion_service_load_ms: float | None = None
+    providers: dict[str, str] = {}
+    if preload_translation:
+        _, pipeline_load_ms = _translation_pipeline(translation_backend)
+        providers["translation_backend"] = translation_backend
+    if preload_voice_conversion:
+        _, voice_conversion_service_load_ms = _voice_conversion_service()
+        providers["voice_conversion"] = "seed-vc"
+
+    response: dict[str, object] = {
+        "warm": True,
+        "providers": providers,
+        "warnings": [],
+    }
+    response["serverless_timings_ms"] = {
+        "handler_total": _elapsed_ms(handler_started),
+        "worker_uptime_at_start": (handler_started - _WORKER_STARTED_AT) * 1000,
+        "audio_decode": 0.0,
+        "temp_audio_write": 0.0,
+        "pipeline_load": pipeline_load_ms or 0.0,
+        "voice_conversion_service_load": voice_conversion_service_load_ms or 0.0,
+    }
+    response["serverless"] = {
+        "operation_mode": "warmup",
+        "worker_cold": pipeline_load_ms is not None or voice_conversion_service_load_ms is not None,
+    }
     return response
 
 
@@ -358,7 +400,7 @@ def _elapsed_ms(started: float) -> float:
 
 def _preload_for_serverless() -> None:
     if os.getenv("MO_RUNPOD_PRELOAD_ON_START") == "1":
-        _pipeline()
+        _translation_pipeline(os.getenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", "qwen"))
     if os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
         _voice_conversion_service()
 

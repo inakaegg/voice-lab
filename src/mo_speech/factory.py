@@ -23,6 +23,12 @@ def create_realtime_translation_pipeline():
     return create_openai_realtime_translation_pipeline()
 
 
+def create_runpod_serverless_pipeline() -> SpeechTranslationPipeline:
+    from .providers.runpod_serverless import create_runpod_serverless_pipeline as _create_runpod_serverless_pipeline
+
+    return _create_runpod_serverless_pipeline()
+
+
 def create_demo_pipeline() -> SpeechTranslationPipeline:
     return SpeechTranslationPipeline(
         asr=FakeAsrProvider(

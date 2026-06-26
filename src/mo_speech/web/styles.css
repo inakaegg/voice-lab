@@ -651,6 +651,17 @@ audio {
   margin: 0 0 8px;
 }
 
+.user-warmup-status {
+  background: var(--user-accent-soft);
+  border: 1px solid var(--user-panel-border);
+  border-radius: 999px;
+  color: var(--user-accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+  margin: 0 0 8px;
+  padding: 5px 10px;
+}
+
 .user-hero h1 {
   font-size: 38px;
   margin: 0 0 26px;

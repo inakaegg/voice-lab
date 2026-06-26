@@ -4,14 +4,15 @@
 
 RunPodへデプロイするためのDockerfile、CLI補助スクリプト、Serverless handlerは用意している。RunPod APIキー、Docker registry、Network Volume ID、GPU在庫はアカウント側の設定が必要なため、実リソース作成は未実行。
 
-結論として、いまの推奨手順は以下。
+結論として、次のRunPod対応ブランチではServerlessを先にアプリの推論backendとして接続する。
 
-1. RunPod PodでFastAPIのWeb UIとAPIをまとめて動かし、GPU上で縦切り動作を確認する。
-2. 同じモデル構成で速度、VRAM、コールドスタート、音質を測る。
-3. 公開MVPではUI/gatewayをCloudflare側へ分け、RunPodは推論APIだけにする。
-4. Serverless化は、Podでモデルと依存関係が動くことを確認してから行う。
+1. RunPod Serverless endpointを推論APIとして用意し、ローカルFastAPIを一時的なUI/gatewayとして使う。
+2. FastAPIの `runpod_serverless` 翻訳backendと `seed-vc` VC backendからRunPodへ非同期jobを投げる。
+3. RunPod `/health` と `warmup` operationでcold startとwarm状態を分けて表示、計測する。
+4. Seed-VCのwarm実行が十分速いと実測できた場合だけ、ユーザー画面ではVCを既定動作にし、`にてるこえ` トグルを隠す検討に進む。
+5. 公開MVPではUI/gatewayをCloudflare側へ分け、RunPodは推論APIだけにする。
 
-## なぜ最初はPodで確認するか
+## Podで確認する場合
 
 RunPod Serverlessはhandler型の推論APIに向く。一方、現在のアプリはFastAPIがWeb UIも配信しているため、ブラウザで録音、アップロード、結果表示、音声再生まで確認する初回検証にはPodが向く。
 
@@ -21,12 +22,13 @@ RunPod PodではHTTP portを公開できる。`8000/http` を公開すると、F
 https://<pod-id>-8000.proxy.runpod.net
 ```
 
-Serverlessは後段の推論APIとして使う。URLはRunPodの形式に従う。
+Serverlessは後段の推論APIとして使う。URLはRunPodの形式に従う。長い音声処理は `/run` で非同期jobを作り、`/status/<job-id>` をpollingする。短い確認やwarmup確認では `/runsync` も使える。
 
 ```text
 https://api.runpod.ai/v2/<endpoint-id>/runsync
 https://api.runpod.ai/v2/<endpoint-id>/run
 https://api.runpod.ai/v2/<endpoint-id>/status/<job-id>
+https://api.runpod.ai/v2/<endpoint-id>/health
 ```
 
 ## CLI準備
@@ -66,6 +68,10 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_NETWORK_VOLUME_ID` | 作成済みNetwork Volume ID |
 | `RUNPOD_SERVERLESS_TEMPLATE_ID` | Serverless endpoint作成時のtemplate ID |
 | `RUNPOD_ENDPOINT_ID` | Serverlessスモーク確認先 |
+| `RUNPOD_SERVERLESS_TRANSLATION_BACKEND` | Serverless handler内部で使う翻訳backend。既定は `openai`。GPU上のローカルモデル検証では `qwen`。 |
+| `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
+| `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
+| `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
 | `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー |
 
 課金リソースを作らずにコマンドだけ確認する場合は、各CLIスクリプトに `RUNPOD_DRY_RUN=1` を付ける。
@@ -238,6 +244,30 @@ python scripts/runpod_smoke_serverless.py \
   --target-language ja-JP \
   --voice-mode convert
 ```
+
+workerを明示的にwarmupする場合:
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+python scripts/runpod_smoke_serverless.py \
+  --operation-mode warmup \
+  --translation-backend qwen \
+  --preload-voice-conversion
+```
+
+ローカルFastAPIからServerless backendを使う場合は、FastAPI側にも以下を設定する。
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+RUNPOD_SERVERLESS_TRANSLATION_BACKEND=qwen \
+RUNPOD_SERVERLESS_REQUEST_MODE=async \
+MO_VC_BACKENDS=runpod-seed-vc \
+uvicorn mo_speech.api:app --host 0.0.0.0 --port 8000
+```
+
+この構成ではFastAPIがUIと履歴保存を担当し、ASR/翻訳/TTS/VCはRunPod Serverless handlerへ送る。Cloudflare gatewayとオブジェクトストレージ履歴は別段階で追加する。
 
 OpenAI API経路を測る場合は、RunPod endpointの環境変数に `OPENAI_API_KEY` を渡した上で `--translation-backend openai` を指定する。
 

@@ -53,6 +53,7 @@ def test_root_serves_simple_user_ui() -> None:
     assert response.status_code == 200
     assert "へんな へんかん アプリ" in response.text
     assert "display-mode-button" in response.text
+    assert "user-warmup-status" in response.text
     assert "はなしてください" in response.text
     assert "5びょう いじょう はなしてください" in response.text
     assert "にてるこえ" in response.text
@@ -127,6 +128,7 @@ def test_admin_serves_browser_ui() -> None:
     assert "音声翻訳（OpenAI API）" in response.text
     assert "音声翻訳（OpenAI Realtime）" in response.text
     assert "音声翻訳（OpenAI Realtime streaming）" in response.text
+    assert "音声翻訳（RunPod Serverless）" in response.text
     assert response.text.index('value="openai"') < response.text.index('value="qwen"')
     assert "realtime-streaming-panel" in response.text
     assert "接続開始後に話す" in response.text
@@ -249,6 +251,8 @@ def test_static_assets_are_served() -> None:
     assert "submitUserTranslation" in js_text
     assert "loadUserDisplayText" in js_text
     assert "refreshUserSettings" in js_text
+    assert "selectedUserTranslationBackend" in js_text
+    assert "syncUserWarmupStatus" in js_text
     assert "displayModeButton" in js_text
     assert "toggleUserReplay" in js_text
     assert "reprocessLatestUserOutput" in js_text
@@ -374,6 +378,7 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
         "openai_realtime",
         "openai_realtime_stream",
         "qwen",
+        "runpod_serverless",
     ]
     assert payload["translation_backends"][0]["available"] is False
     assert payload["translation_backends"][0]["settings"]["supported_target_languages"][:4] == [
@@ -391,6 +396,8 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
         {"source_language": "id-ID", "target_language": "ja-JP"},
         {"source_language": "ja-JP", "target_language": "zh-CN"},
     ]
+    assert payload["translation_backends"][4]["available"] is False
+    assert "RUNPOD_ENDPOINT_ID" in payload["translation_backends"][4]["reason"]
     assert [backend["id"] for backend in payload["text_tts_backends"]] == ["google_translate", "openai"]
     assert payload["text_tts_backends"][1]["settings"]["supported_target_languages"][0] == "auto"
     assert "fr" in payload["text_tts_backends"][1]["settings"]["supported_target_languages"]

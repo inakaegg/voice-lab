@@ -46,7 +46,10 @@
 - ユーザー用画面の設定トグルは、単なるスイッチ表示ではなく、アイコンまたは絵文字を上、短い文言を下に置くボタン型にする。OFFは軽く浮いたボタン、ONは押し込まれて凹んだボタンに見えるよう、影、内側の影、アイコン位置、背景色で状態差を出す。PCではhoverで軽く浮く視覚効果を付け、スマホでもタップ時に沈む反応が出るようにする。`ジョーク` は笑顔、`おおさかべん` は大阪城、`バリエーション` は特殊効果を連想できる表示にする。
 - ユーザー用画面ではブラウザ標準のaudio controlsを主UIにせず、出力音声の再生/停止を専用トグルボタンで表示する。出力後にトグルが変更された場合、再生ボタンは作り直し操作として扱い、必要な段階だけ再処理して最新出力を置き換える。出力言語が変わった場合は録音から再翻訳し、大阪弁/バリエーションだけが変わった場合は翻訳済みテキストからテキスト加工とTTSだけを再実行し、`にてるこえ` だけが変わった場合はベースTTS音声へのSeed-VC適用またはベースTTS音声への復帰だけを行う。ジョークだけが変わった場合は本文音声を再生成せず、ジョーク音声の生成またはキャッシュ復元と再生キューの組み直しだけを行う。同じ録音内で既に作った組み合わせへ戻した場合は、翻訳結果、ベースTTS音声、Seed-VC音声を組み合わせごとにキャッシュして再利用し、不要な再生成を避ける。
 - ユーザー用画面の音声翻訳は、翻訳方式を `OpenAI API` 固定、入力言語を `auto` とする。出力言語はユーザー画面専用の自動判定とし、ASR結果が日本語の場合は `id-ID`、日本語以外の場合は `ja-JP` へ翻訳する。
+- RunPod Serverless backendが利用可能な環境では、ユーザー用画面の音声翻訳は `runpod_serverless` を優先する。未設定または利用不可の場合は従来どおり `OpenAI API` を使う。RunPod利用時もブラウザへRunPod API keyを出さず、ローカルFastAPIまたは将来のgatewayがRunPod APIを呼び出す。
 - ユーザー用画面の `にてるこえ` トグルがONの場合は、翻訳/テキスト加工/TTSで作ったベース音声をSeed-VCへ渡して声質変換する。Seed-VCの参照音声は入力音声自身、`seed_vc_reference_auto_select=true` 固定とする。runtime APIで直接VC backendの `seed-vc` が利用不可の場合は、このトグルを自動OFFかつ無効表示にし、本文音声の生成までは完了させる。
+- RunPod Serverless backendのwarm状態は `/api/runtime` の `runpod_serverless` backend情報に含める。ユーザー用画面では、RunPod backendが選ばれている場合だけwarm状態を短い表示で出す。完全なscale-to-zeroでは初回にcold startが入るため、必要なら録音前または管理者操作から `warmup` operationを実行してモデルロード済み状態へ寄せる。
+- `にてるこえ` トグルをユーザー用画面から消し、VCを既定動作にするかどうかはRunPod上のwarm状態でSeed-VC変換が十分速いと実測できた後に判断する。実測前はトグルを残し、ON/OFF比較と回帰確認を可能にする。
 - ユーザー用画面の `ジョーク` トグルがONの場合は、管理者用画面で指定したジョーク候補を、入力音声の言語や本文の出力言語に関わらずインドネシア語音声として本文音声の前または後に付ける。管理者用画面では複数のジョーク文を1行1件で登録でき、ユーザー用画面では候補からランダムまたはローテーションで1件を選ぶ。ジョーク文のLLMバリエーション数を指定した場合は、管理者用設定の保存時に元ジョークごとに指定数の派生文を生成して保存し、ユーザーの変換リクエスト中にはLLMでジョーク文を増やさない。保存後と読み込み後の管理者用画面では、生成済みバリエーションと、実際にユーザー画面で選択対象になる候補プールを表示する。例として元ジョークが3件、バリエーション数が2の場合、候補は元3件、1つ目の派生3件、2つ目の派生3件の計9件になる。暫定実装では選ばれたジョーク文を `id-ID` に翻訳してからOpenAI TTSで音声化し、同じジョーク文のベースTTS音声はブラウザに保存して再利用する。`にてるこえ` がONの場合は、本文音声だけでなくジョーク音声も同じ入力音声を参照にSeed-VCへ通してから再生キューへ入れる。VC済みジョーク音声は参照音声に依存するため、永続保存せず録音単位のメモリキャッシュだけで再利用する。ジョークは本文の出力テキストには表示せず、音声キューにだけ追加する。音声ファイルを管理者が直接指定して結合する方式は別段階の拡張とする。
 - ユーザー用画面の `おおさかべん` と `バリエーション` はLLM加工を必要とし、初期実装ではOpenAI Responses APIを使う。これらは日本語出力を加工する機能なので、既定ではOFFかつ非表示にし、最新の処理結果が `target_language=ja-JP` の場合だけ表示して有効にする。表示後にON/OFFを変えた場合は、録音や翻訳をやり直さず、翻訳済み日本語テキストから加工とTTS以降だけを `つくりなおす`。将来はOpenAI互換APIとしてRunPod上のQwen/vLLMへ差し替えられるよう、モデル名は環境変数で変えられる構成にする。
 - 録音中にページ再読み込みまたはページ離脱が起きそうな場合、ブラウザの離脱確認を出す。離脱が実行された場合は、録音停止イベントから翻訳ジョブを開始しないようにし、マイクストリームを閉じてローカル録音をキャンセル扱いにする。
@@ -157,11 +160,12 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 リクエスト:
 
 - `audio`: アップロードされた音声ファイル
-- `translation_backend`: `openai`、`openai_realtime`、`openai_realtime_stream`、`qwen`
+- `translation_backend`: `openai`、`openai_realtime`、`openai_realtime_stream`、`qwen`、`runpod_serverless`
   - `openai`: OpenAI APIでASR、翻訳、TTSを3段に分けて行う。
   - `openai_realtime`: OpenAI Realtime translationで音声入力から翻訳音声を生成する。入力言語はAPI側の自動判定に任せる。
   - `openai_realtime_stream`: ブラウザWebRTCでOpenAI Realtime translationへ接続する。`POST /api/translate-speech-jobs` は使わず、ブラウザ側で直接Realtime translation callを確立する。
   - `qwen`: 既存のローカル/Qwen系pipelineを使う。fake modeではデモ応答を返す。
+  - `runpod_serverless`: ローカルFastAPIまたはgatewayからRunPod Serverless endpointへ非同期jobを投げ、RunPod handlerのレスポンスを通常の `PipelineResult` と同じ形に戻す。endpoint IDとAPI keyが未設定の場合はruntime APIで無効表示にする。
 - 音声翻訳のUI既定は `openai` とする。`OPENAI_API_KEY` が未設定の場合はUIで無効表示し、利用可能なbackendへフォールバックする。
 - `source_language`: 例 `id-ID`
 - `target_language`: 例 `ja-JP`。ユーザー用画面では `user-auto` を送り、ASR結果が日本語なら `id-ID`、日本語以外なら `ja-JP` として処理する。
@@ -255,6 +259,7 @@ UIでの読み上げ言語の扱い:
 - Google Translate TTS endpointは `tl` パラメータが必要なため、読み上げ言語を明示指定する。
 - テキストファイル指定時も、ブラウザで内容を読み込んでテキスト欄へ反映し、必要なら編集してから読み上げる。
 - `/api/runtime` はプロバイダの有効/無効をUI制御に使う内部APIとして残すが、`mode fake` のような内部実行モードは通常UIには表示しない。
+- `/api/runtime` の `runpod_serverless` backend情報には、endpoint設定の有無、内部で使う翻訳backend、RunPod `/health` から要約したwarm状態、リクエスト方式を含める。health確認に失敗しても設定済みbackend自体はただちに無効扱いにせず、warm状態を不明として表示する。
 
 レスポンス:
 

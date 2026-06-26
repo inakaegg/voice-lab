@@ -10,7 +10,7 @@
 
 ## デプロイ
 
-- DockerfileとRunPod Serverless handlerは用意済み。
+- Dockerfile、RunPod Serverless handler、ローカルFastAPIからRunPod Serverlessを呼ぶbackend adapterは用意済み。
 - RunPod endpoint作成、APIキー設定、Network Volumeへのモデル配置、デプロイ先 `/health` 確認は未実行。
 - 実デプロイは認証とモデル配置が必要なため、現時点では完了扱いにしない。
 
@@ -23,7 +23,8 @@
 
 - local providerの初回リクエストはモデルロードを含むため遅い。
 - `MO_PRELOAD_MODELS=1` で起動時にロードを前倒しできるが、起動時間は長くなる。
-- Qwen3-TTS/Seed-VCの低遅延常駐worker、ストリーミング出力、非同期job形式は未実装。
+- FastAPI gatewayからRunPod Serverlessへ投げる非同期job形式は実装済み。
+- Qwen3-TTS/Seed-VCの低遅延常駐workerとストリーミング出力は未実装。
 
 ## ブラウザ
 

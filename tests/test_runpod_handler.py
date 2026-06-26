@@ -146,6 +146,40 @@ def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> N
     assert payload["serverless_timings_ms"]["text_tts_provider_load"] >= 0
 
 
+def test_runpod_handler_warms_translation_and_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def fake_translation_pipeline(translation_backend):
+        calls.append(("translation", translation_backend))
+        return object(), 12.0
+
+    def fake_voice_conversion_service():
+        calls.append(("voice_conversion", "seed-vc"))
+        return object(), 34.0
+
+    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
+    monkeypatch.setattr(runpod_handler, "_voice_conversion_service", fake_voice_conversion_service)
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "warmup",
+                "translation_backend": "qwen",
+                "preload_translation": True,
+                "preload_voice_conversion": True,
+            }
+        }
+    )
+
+    assert calls == [("translation", "qwen"), ("voice_conversion", "seed-vc")]
+    assert payload["warm"] is True
+    assert payload["providers"] == {"translation_backend": "qwen", "voice_conversion": "seed-vc"}
+    assert payload["serverless"]["operation_mode"] == "warmup"
+    assert payload["serverless"]["worker_cold"] is True
+    assert payload["serverless_timings_ms"]["pipeline_load"] == 12.0
+    assert payload["serverless_timings_ms"]["voice_conversion_service_load"] == 34.0
+
+
 def test_runpod_handler_requires_audio_base64(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
 

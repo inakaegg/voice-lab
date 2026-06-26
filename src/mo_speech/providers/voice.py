@@ -704,6 +704,10 @@ def create_voice_conversion_service_from_env() -> VoiceConversionService:
     for backend_id in backend_ids:
         if backend_id == "seed-vc":
             providers.append(SeedVcDirectVoiceConversionProvider())
+        elif backend_id in ("runpod-seed-vc", "runpod_serverless_seed_vc"):
+            from .runpod_serverless import RunpodServerlessVoiceConversionProvider
+
+            providers.append(RunpodServerlessVoiceConversionProvider())
         elif backend_id == "chatterbox":
             providers.append(ChatterboxDirectVoiceConversionProvider())
         elif backend_id in ("openvoice", "openvoice-v2"):

@@ -6,6 +6,10 @@ from .providers.openai_api import (
     openai_realtime_pipeline_status,
     openai_realtime_streaming_status,
 )
+from .providers.runpod_serverless import (
+    RunpodServerlessSpeechTranslationPipeline,
+    runpod_serverless_pipeline_status,
+)
 from .providers.voice import VoiceConversionService
 
 
@@ -21,6 +25,7 @@ def translation_backends(
     qwen_pipeline: SpeechTranslationPipeline,
     openai_pipeline: SpeechTranslationPipeline,
     openai_realtime_pipeline,
+    runpod_serverless_pipeline: RunpodServerlessSpeechTranslationPipeline | None = None,
 ) -> list[dict[str, object]]:
     return [
         openai_pipeline_status(openai_pipeline),
@@ -42,6 +47,7 @@ def translation_backends(
                 "text_transform": True,
             },
         },
+        runpod_serverless_pipeline_status(runpod_serverless_pipeline),
     ]
 
 

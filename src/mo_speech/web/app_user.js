@@ -1,5 +1,6 @@
 const userRecordButton = document.querySelector("#user-record-button");
 const userLanguageLabel = document.querySelector("#user-language-label");
+const userWarmupStatus = document.querySelector("#user-warmup-status");
 const displayModeButton = document.querySelector("#display-mode-button");
 const speakHeading = document.querySelector("#speak-heading");
 const userStatus = document.querySelector("#user-status");
@@ -67,6 +68,8 @@ let processingDotCount = 0;
 let userTextEffectsAvailable = false;
 let currentSelectedJokeText = "";
 let currentSelectedJokeSettingsSignature = "";
+let userTranslationBackend = "openai";
+let userWarmupStatusKey = "";
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -169,6 +172,21 @@ const userUiTexts = {
     hiragana: "つくりなおす",
     ruby: "<ruby>作<rt>つく</rt></ruby>り<ruby>直<rt>なお</rt></ruby>す",
     indonesian: "buat ulang",
+  },
+  warm_ready: {
+    hiragana: "じゅんびOK",
+    ruby: "<ruby>準備<rt>じゅんび</rt></ruby>OK",
+    indonesian: "siap",
+  },
+  warm_cold: {
+    hiragana: "じゅんびちゅう",
+    ruby: "<ruby>準備中<rt>じゅんびちゅう</rt></ruby>",
+    indonesian: "menyiapkan",
+  },
+  warm_unknown: {
+    hiragana: "じゅんびかくにんちゅう",
+    ruby: "<ruby>準備<rt>じゅんび</rt></ruby><ruby>確認中<rt>かくにんちゅう</rt></ruby>",
+    indonesian: "memeriksa kesiapan",
   },
 };
 
@@ -307,7 +325,7 @@ async function runUserTranslation(audioBlob, fileName) {
 
 function buildUserTranslationFormData(audioBlob, fileName) {
   const formData = new FormData();
-  formData.append("translation_backend", "openai");
+  formData.append("translation_backend", selectedUserTranslationBackend());
   formData.append("source_language", "auto");
   formData.append("target_language", userTargetLanguage.value || "ja-JP");
   formData.append("voice_mode", "default");
@@ -476,8 +494,13 @@ function currentUserVoiceSignature() {
 
 function currentUserTranslationSignature() {
   return JSON.stringify({
+    translation_backend: selectedUserTranslationBackend(),
     target_language: userTargetLanguage.value || userAutoTargetLanguage,
   });
+}
+
+function selectedUserTranslationBackend() {
+  return userTranslationBackend || "openai";
 }
 
 function currentUserBaseTextSignature() {
@@ -871,15 +894,40 @@ async function loadUserRuntime() {
       return;
     }
     const runtime = await response.json();
+    const runpod = (runtime.translation_backends || []).find((backend) => backend.id === "runpod_serverless");
+    userTranslationBackend = runpod?.available ? "runpod_serverless" : "openai";
+    syncUserWarmupStatus(runpod);
     const openai = (runtime.translation_backends || []).find((backend) => backend.id === "openai");
-    if (openai && openai.available === false) {
+    if (userTranslationBackend === "openai" && openai && openai.available === false) {
       setUserStatus("APIキーが ひつようです");
     }
     const seedVc = (runtime.voice_conversion_backends || []).find((backend) => backend.id === "seed-vc");
     syncSimilarVoiceAvailability(seedVc);
   } catch (_error) {
+    syncUserWarmupStatus(null);
     return;
   }
+}
+
+function syncUserWarmupStatus(runpodBackend) {
+  if (!userWarmupStatus) {
+    return;
+  }
+  if (!runpodBackend?.available) {
+    userWarmupStatusKey = "";
+    userWarmupStatus.hidden = true;
+    return;
+  }
+  const health = runpodBackend.settings?.health || {};
+  if (health.checked && health.warm) {
+    userWarmupStatusKey = "warm_ready";
+  } else if (health.checked) {
+    userWarmupStatusKey = "warm_cold";
+  } else {
+    userWarmupStatusKey = "warm_unknown";
+  }
+  userWarmupStatus.hidden = false;
+  renderUserText(userWarmupStatus, userWarmupStatusKey);
 }
 
 function syncSimilarVoiceAvailability(seedVcBackend) {
@@ -1294,6 +1342,9 @@ function cycleUserTextMode() {
 function renderStaticUserTexts() {
   displayModeButton.textContent = uiText("display_mode", userTextMode);
   renderUserText(userLanguageLabel, "app_title");
+  if (userWarmupStatusKey) {
+    renderUserText(userWarmupStatus, userWarmupStatusKey);
+  }
   renderUserText(speakHeading, "speak_heading");
   renderUserText(similarVoiceLabel, "similar_voice");
   renderUserText(jokeModeLabel, "joke");

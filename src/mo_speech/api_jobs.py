@@ -347,6 +347,13 @@ def planned_stages(pipeline: SpeechTranslationPipeline, request: PipelineRequest
                 {"stage": "voice_conversion", "label": "声質変換", "provider": "Seed-VC"},
             ]
         )
+    elif request.voice_mode == "convert" and pipeline.tts.name == "runpod-serverless-tts":
+        stages.extend(
+            [
+                {"stage": "tts", "label": "音声生成", "provider": "RunPod Serverless"},
+                {"stage": "voice_conversion", "label": "声質変換", "provider": "RunPod Serverless"},
+            ]
+        )
     else:
         stages.append({"stage": "tts", "label": "音声生成", "provider": pipeline.tts.name})
     return stages
