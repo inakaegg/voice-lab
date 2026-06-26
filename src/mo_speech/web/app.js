@@ -47,6 +47,7 @@ form.source_language.addEventListener("change", syncTargetOptions);
 form.target_language.addEventListener("change", syncVoiceModeHint);
 ttsTargetLanguageSelect.addEventListener("change", syncTtsBackendAvailability);
 seedVcPresetSelect.addEventListener("change", applySeedVcPreset);
+seedVcReferencePreviewButton.addEventListener("click", previewSeedVcReferenceAudio);
 [seedVcDiffusionStepsInput, seedVcReferenceMaxSecondsInput, seedVcLengthAdjustInput, seedVcInferenceCfgRateInput].forEach(
   (input) => input.addEventListener("input", syncSeedVcPresetSelection),
 );
@@ -251,6 +252,97 @@ async function submitVoiceConversion(event) {
   } finally {
     submitButton.disabled = false;
   }
+}
+
+async function previewSeedVcReferenceAudio(event) {
+  event.preventDefault();
+  clearError();
+  setStatus("参照音声準備中");
+  seedVcReferencePreviewButton.disabled = true;
+
+  try {
+    const referenceAudio = selectedSeedVcReferenceAudio();
+    const formData = new FormData();
+    appendSeedVcSettings(formData, "seed-vc");
+    formData.append("reference_audio", referenceAudio.blob, referenceAudio.filename);
+
+    const response = await fetch("/api/seed-vc/reference-preview", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.detail || "参照音声の確認に失敗しました");
+    }
+
+    renderSeedVcReferencePreview(referenceAudio.blob, await response.json());
+    setStatus("参照音声確認完了");
+  } catch (error) {
+    renderError(error.message || "エラー");
+  } finally {
+    seedVcReferencePreviewButton.disabled = false;
+  }
+}
+
+function selectedSeedVcReferenceAudio() {
+  if (operationModeSelect.value === "voice_conversion") {
+    const referenceFile = referenceAudioInput.files[0];
+    if (referenceFile) {
+      assertAudioBlob(referenceFile, "参照音声ファイルが空です");
+      return { blob: referenceFile, filename: referenceFile.name || "reference.audio" };
+    }
+    if (referenceAudioBlob) {
+      assertAudioBlob(referenceAudioBlob, "参照音声ファイルが空です");
+      return { blob: referenceAudioBlob, filename: referenceAudioFileName };
+    }
+    throw new Error("参照音声ファイルを選択してください");
+  }
+
+  const inputFile = audioInput.files[0];
+  if (inputFile) {
+    assertAudioBlob(inputFile, "音声ファイルが空です");
+    return { blob: inputFile, filename: inputFile.name || "input.audio" };
+  }
+  if (recordedBlob) {
+    assertAudioBlob(recordedBlob, "音声ファイルが空です");
+    return { blob: recordedBlob, filename: recordedFileName };
+  }
+  throw new Error("入力音声ファイルを選択するか録音してください");
+}
+
+function assertAudioBlob(blob, message) {
+  if (!blob || blob.size < 1) {
+    throw new Error(message);
+  }
+}
+
+function renderSeedVcReferencePreview(originalBlob, payload) {
+  clearSeedVcReferencePreview();
+
+  const normalizedBytes = base64ToBytes(payload.audio_base64);
+  const normalizedBlob = new Blob([normalizedBytes], { type: payload.audio_mime_type || "audio/wav" });
+  referencePreviewOriginalObjectUrl = URL.createObjectURL(originalBlob);
+  referencePreviewNormalizedObjectUrl = URL.createObjectURL(normalizedBlob);
+  referencePreviewOriginalAudio.src = referencePreviewOriginalObjectUrl;
+  referencePreviewNormalizedAudio.src = referencePreviewNormalizedObjectUrl;
+  renderKeyValueList(referencePreviewTimings, payload.timings_ms || {}, (value) => `${Number(value).toFixed(1)} ms`);
+  referencePreviewSection.hidden = false;
+}
+
+function clearSeedVcReferencePreview() {
+  if (referencePreviewOriginalObjectUrl) {
+    URL.revokeObjectURL(referencePreviewOriginalObjectUrl);
+    referencePreviewOriginalObjectUrl = null;
+  }
+  if (referencePreviewNormalizedObjectUrl) {
+    URL.revokeObjectURL(referencePreviewNormalizedObjectUrl);
+    referencePreviewNormalizedObjectUrl = null;
+  }
+  referencePreviewOriginalAudio.removeAttribute("src");
+  referencePreviewNormalizedAudio.removeAttribute("src");
+  referencePreviewTimings.replaceChildren();
+  referencePreviewSection.hidden = true;
 }
 
 async function pollTextToSpeechJob(jobId) {
@@ -950,6 +1042,7 @@ function clearResultOutputs() {
   processingPanel.hidden = true;
   processingCurrent.textContent = "待機中";
   processingSteps.replaceChildren();
+  clearSeedVcReferencePreview();
   clearCurrentOutputBlob();
   if (outputAudioObjectUrl) {
     URL.revokeObjectURL(outputAudioObjectUrl);

@@ -212,6 +212,9 @@
               />
               参照音声の発話区間を自動選択
             </label>
+            <button type="button" id="seed-vc-reference-preview-button" class="secondary-button">
+              参照音声を確認
+            </button>
             <div class="field-row">
               <label for="seed_vc_length_adjust">length adjust</label>
               <input
@@ -248,6 +251,20 @@
             <h2>処理状況</h2>
             <p id="processing-current">待機中</p>
             <ol id="processing-steps"></ol>
+          </section>
+          <section id="reference-preview-section" class="reference-preview-panel" aria-label="参照音声プレビュー" hidden>
+            <h2>参照音声プレビュー</h2>
+            <div class="reference-preview-grid">
+              <article>
+                <h3>正規化前</h3>
+                <audio id="reference-preview-original" controls></audio>
+              </article>
+              <article>
+                <h3>正規化後</h3>
+                <audio id="reference-preview-normalized" controls></audio>
+              </article>
+            </div>
+            <dl id="reference-preview-timings" class="timings"></dl>
           </section>
           <div id="text-result-section" class="result-grid translation-only">
             <article>

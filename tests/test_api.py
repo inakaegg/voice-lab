@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 from threading import Event
 from time import sleep
@@ -65,6 +66,10 @@ def test_root_serves_browser_ui() -> None:
     assert "seed_vc_diffusion_steps" in response.text
     assert "seed_vc_reference_max_seconds" in response.text
     assert "seed_vc_reference_auto_select" in response.text
+    assert "seed-vc-reference-preview-button" in response.text
+    assert "reference-preview-section" in response.text
+    assert "reference-preview-original" in response.text
+    assert "reference-preview-normalized" in response.text
     assert "seed_vc_length_adjust" in response.text
     assert "seed_vc_inference_cfg_rate" in response.text
     assert "translation-only" in response.text
@@ -172,6 +177,9 @@ def test_static_assets_are_served() -> None:
     assert "syncSeedVcSettingsVisibility" in js_text
     assert "appendSeedVcSettings" in js_text
     assert "seed_vc_reference_auto_select" in js_text
+    assert "previewSeedVcReferenceAudio" in js_text
+    assert "seed-vc/reference-preview" in js_text
+    assert "renderSeedVcReferencePreview" in js_text
     assert "seedVcPresets" in js_text
     assert "applySeedVcPreset" in js_text
     assert "syncSeedVcPresetSelection" in js_text
@@ -970,6 +978,48 @@ def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
     assert provider.last_seed_vc_settings.inference_cfg_rate == 0.55
     assert provider.last_seed_vc_settings.reference_max_seconds == 4.5
     assert provider.last_seed_vc_settings.reference_auto_select is True
+
+
+def test_seed_vc_reference_preview_api_returns_normalized_audio(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_prepare_reference_preview(audio_path: Path, seed_vc_settings: SeedVcRuntimeSettings | None = None) -> TtsOutput:
+        captured["audio_exists"] = audio_path.exists()
+        captured["audio_bytes"] = audio_path.read_bytes()
+        captured["settings"] = seed_vc_settings
+        return TtsOutput(
+            audio_bytes=b"normalized reference wav",
+            audio_mime_type="audio/wav",
+            timings_ms={"reference_audio_prepare": 12.5, "reference_segment_select": 3.5},
+        )
+
+    monkeypatch.setattr(
+        "mo_speech.api._prepare_seed_vc_reference_preview",
+        fake_prepare_reference_preview,
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/seed-vc/reference-preview",
+        data={
+            "seed_vc_reference_max_seconds": "4.5",
+            "seed_vc_reference_auto_select": "true",
+        },
+        files={"reference_audio": ("reference.wav", b"reference audio", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert base64.b64decode(payload["audio_base64"]) == b"normalized reference wav"
+    assert payload["audio_mime_type"] == "audio/wav"
+    assert payload["timings_ms"] == {"reference_audio_prepare": 12.5, "reference_segment_select": 3.5}
+    assert payload["providers"] == {"reference_audio_prepare": "ffmpeg"}
+    assert captured["audio_exists"] is True
+    assert captured["audio_bytes"] == b"reference audio"
+    settings = captured["settings"]
+    assert isinstance(settings, SeedVcRuntimeSettings)
+    assert settings.reference_max_seconds == 4.5
+    assert settings.reference_auto_select is True
 
 
 def test_translate_speech_api_rejects_unsupported_route() -> None:

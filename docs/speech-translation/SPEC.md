@@ -146,6 +146,7 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - multipart formでは、初期実装として `text_transform_suffix` と `text_transform_unit` を受け取る。
 - `voice_mode=convert` でSeed-VCを使う場合は、`seed_vc_diffusion_steps`、`seed_vc_reference_max_seconds`、`seed_vc_reference_auto_select`、`seed_vc_length_adjust`、`seed_vc_inference_cfg_rate` を任意指定できる。
 - `seed_vc_reference_auto_select=true` の場合は、Seed-VCへ渡す参照音声を `ffprobe` と `ffmpeg silencedetect` で軽量に選ぶ。発話候補を取れない場合は従来どおり先頭から `seed_vc_reference_max_seconds` 秒を使い、ノイズによって参照音声が空になる挙動にはしない。追加の選択時間は `timings_ms.reference_segment_select` で返す。
+- UIでは、Seed-VC本体を実行する前に参照音声の正規化だけを実行できる。翻訳モードでは入力音声、VC単体では参照音声ファイルを対象にし、正規化前と正規化後の音声を並べて再生比較できる。
 - `voice_mode=convert` では、処理状況UIがTTSと声質変換を別stageとして表示し、Seed-VC開始後は `声質変換` を実行中として表示する。
 
 UIでは、実行内容を以下の構造にする。
@@ -260,6 +261,21 @@ UIでの読み上げ言語の扱い:
   - UIでは、高速確認、リーズナブル、品質優先、最高品質検証のプリセットを提供する。既定は品質優先。
 
 レスポンス:
+
+`POST /api/seed-vc/reference-preview`
+
+リクエスト:
+
+- `reference_audio`: 正規化対象の参照音声ファイル
+- `seed_vc_reference_max_seconds`: 声質参照に使う上限秒数。
+- `seed_vc_reference_auto_select`: 声質参照の発話区間を軽量に自動選択する。
+
+レスポンス:
+
+- `audio_mime_type`: 正規化後音声のMIME type。現時点では `audio/wav`。
+- `audio_base64`: 正規化後音声。
+- `timings_ms.reference_audio_prepare`: 正規化全体の所要時間。
+- `timings_ms.reference_segment_select`: 自動選択ON時の発話区間選択時間。
 
 - `job_id`
 - `status`

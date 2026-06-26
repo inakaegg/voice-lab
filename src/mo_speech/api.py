@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from pathlib import Path
@@ -46,6 +47,7 @@ from .providers.voice import (
     VoiceConversionRequest,
     VoiceConversionService,
     create_voice_conversion_service_from_env,
+    prepare_seed_vc_reference_preview as _prepare_seed_vc_reference_preview,
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -342,6 +344,38 @@ def create_app(
             ),
         )
         return voice_conversion_job_store.start(request, [source_audio_path, reference_audio_path])
+
+    @app.post("/api/seed-vc/reference-preview")
+    async def preview_seed_vc_reference(
+        reference_audio: Annotated[UploadFile, File()],
+        seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
+        seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
+    ) -> dict[str, object]:
+        reference_audio_bytes = await reference_audio.read()
+        if not reference_audio_bytes:
+            raise HTTPException(status_code=400, detail="reference_audio is empty")
+
+        with NamedTemporaryFile(suffix=_upload_suffix(reference_audio.filename)) as temp_reference:
+            temp_reference.write(reference_audio_bytes)
+            temp_reference.flush()
+            output = _prepare_seed_vc_reference_preview(
+                Path(temp_reference.name),
+                seed_vc_settings=_create_seed_vc_settings(
+                    diffusion_steps=None,
+                    length_adjust=None,
+                    inference_cfg_rate=None,
+                    reference_max_seconds=seed_vc_reference_max_seconds,
+                    reference_auto_select=seed_vc_reference_auto_select,
+                ),
+            )
+
+        return {
+            "audio_mime_type": output.audio_mime_type or "audio/wav",
+            "audio_base64": base64.b64encode(output.audio_bytes).decode("ascii"),
+            "timings_ms": output.timings_ms,
+            "providers": {"reference_audio_prepare": "ffmpeg"},
+            "warnings": output.warnings,
+        }
 
     @app.get("/api/voice-conversion-jobs/{job_id}")
     def get_voice_conversion_job(job_id: str) -> dict[str, object]:

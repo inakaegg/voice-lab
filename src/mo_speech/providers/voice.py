@@ -99,6 +99,36 @@ class VoiceConversionResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def prepare_seed_vc_reference_preview(
+    input_path: Path,
+    seed_vc_settings: SeedVcRuntimeSettings | None = None,
+) -> TtsOutput:
+    provider = SeedVcDirectVoiceConversionProvider()
+    settings = _effective_seed_vc_settings(provider, seed_vc_settings)
+    provider.work_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=provider.work_dir) as temp_dir:
+        output_path = Path(temp_dir) / "reference.wav"
+        prepare_started = perf_counter()
+        reference_preparation = _prepare_seed_reference_audio(
+            input_path,
+            output_path,
+            max_seconds=settings.reference_max_seconds,
+            sample_rate=provider.reference_sample_rate,
+            timeout_seconds=provider.audio_prepare_timeout_seconds,
+            auto_select=settings.reference_auto_select,
+        )
+        timings_ms = {"reference_audio_prepare": _elapsed_ms(prepare_started)}
+        if reference_preparation.reference_segment_select_ms is not None:
+            timings_ms["reference_segment_select"] = reference_preparation.reference_segment_select_ms
+        audio_bytes = output_path.read_bytes()
+
+    return TtsOutput(
+        audio_bytes=audio_bytes,
+        audio_mime_type="audio/wav",
+        timings_ms=timings_ms,
+    )
+
+
 class DirectVoiceConversionProvider(Protocol):
     backend_id: str
     label: str
