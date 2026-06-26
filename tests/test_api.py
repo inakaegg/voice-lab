@@ -341,8 +341,9 @@ def test_static_assets_are_served() -> None:
     assert ".toggle-tile" in css_response.text
     assert ".toggle-tile.is-disabled" in css_response.text
     assert ".toggle-icon" in css_response.text
-    assert ".toggle-tile::after" in css_response.text
-    assert ".toggle-tile:has(input:checked)::after" in css_response.text
+    assert ".toggle-tile::after" not in css_response.text
+    assert ".toggle-tile:not(.is-disabled):hover" in css_response.text
+    assert ".toggle-tile:not(.is-disabled):active" in css_response.text
     assert "inset 0 5px 12px" in css_response.text
     assert "translateY(2px) scale(0.96)" in css_response.text
     assert ".joke-preview-title" in css_response.text

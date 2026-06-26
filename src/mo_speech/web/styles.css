@@ -846,22 +846,9 @@ audio {
   justify-items: center;
   min-height: 102px;
   padding: 12px 10px;
-  position: relative;
   text-align: center;
   transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease,
     transform 0.16s ease;
-}
-
-.toggle-tile::after {
-  background: var(--user-toggle-off);
-  border-radius: 50%;
-  box-shadow: inset 0 1px 2px rgba(40, 52, 62, 0.18);
-  content: "";
-  height: 10px;
-  position: absolute;
-  right: 10px;
-  top: 10px;
-  width: 10px;
 }
 
 .toggle-tile input {
@@ -889,17 +876,35 @@ audio {
   width: 50px;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .toggle-tile:not(.is-disabled):hover {
+    border-color: var(--user-accent);
+    box-shadow: 0 12px 24px rgba(40, 52, 62, 0.14), inset 0 -3px 0 rgba(40, 52, 62, 0.08);
+    transform: translateY(-1px);
+  }
+
+  .toggle-tile:not(.is-disabled):has(input:checked):hover {
+    box-shadow: inset 0 5px 12px rgba(40, 52, 62, 0.12), 0 4px 8px rgba(40, 52, 62, 0.1);
+    transform: translateY(1px);
+  }
+}
+
+.toggle-tile:not(.is-disabled):active {
+  box-shadow: inset 0 5px 12px rgba(40, 52, 62, 0.16), 0 2px 4px rgba(40, 52, 62, 0.08);
+  transform: translateY(2px);
+}
+
+.toggle-tile:not(.is-disabled):active .toggle-icon {
+  box-shadow: inset 0 4px 8px rgba(40, 52, 62, 0.14), 0 1px 2px rgba(40, 52, 62, 0.08);
+  transform: translateY(2px) scale(0.96);
+}
+
 .toggle-tile:has(input:checked) {
   background: var(--user-accent-soft);
   border-color: var(--user-accent);
   box-shadow: inset 0 5px 12px rgba(40, 52, 62, 0.14), 0 2px 4px rgba(40, 52, 62, 0.08);
   color: var(--user-accent-strong);
   transform: translateY(2px);
-}
-
-.toggle-tile:has(input:checked)::after {
-  background: var(--user-accent);
-  box-shadow: 0 0 0 4px var(--user-accent-soft), inset 0 1px 2px rgba(40, 52, 62, 0.18);
 }
 
 .toggle-tile:has(input:checked) .toggle-icon {
