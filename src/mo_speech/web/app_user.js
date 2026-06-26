@@ -6,6 +6,7 @@ const speakHeading = document.querySelector("#speak-heading");
 const userStatus = document.querySelector("#user-status");
 const userMinimumHint = document.querySelector("#user-minimum-hint");
 const recordTimer = document.querySelector("#record-timer");
+const recordLevelBars = Array.from(document.querySelectorAll(".record-level-bar"));
 const userOutputAudio = document.querySelector("#user-output-audio");
 const userReplayButton = document.querySelector("#user-replay-button");
 const userReplayLabel = document.querySelector("#user-replay-label");
@@ -33,6 +34,16 @@ let userRecordingChunks = [];
 let userRecordingStartedAt = 0;
 let recordTimerId = null;
 let processingTimerId = null;
+let processingProgressTimerId = null;
+let processingProgressDisplayed = 0;
+let processingProgressTarget = 0;
+let processingProgressTargetStartedAt = 0;
+let userAudioContext = null;
+let userAudioLevelSource = null;
+let userAudioAnalyser = null;
+let userAudioLevelData = null;
+let userAudioLevelFrame = null;
+let userAudioLevelSmoothed = 0;
 let currentUserOutputUrl = "";
 let lastUserInputBlob = null;
 let lastUserInputFileName = "";
@@ -84,6 +95,7 @@ let userSettings = {
 const userAutoTargetLanguage = "user-auto";
 const userJokeTargetLanguage = "id-ID";
 const userJokeTtsBackend = "openai";
+const userSeedVcDiffusionSteps = "8";
 const userJokeAudioStoragePrefix = "mo:user-joke-audio:";
 const userJokeRotationStoragePrefix = "mo:user-joke-rotation:";
 
@@ -249,6 +261,7 @@ async function startUserRecording() {
     });
     userMediaRecorder.addEventListener("stop", submitUserTranslation);
     userRecordingStartedAt = performance.now();
+    startUserAudioLevelMeter(userRecordingStream);
     userMediaRecorder.start();
     userRecordButton.classList.add("is-recording", "is-locked");
     userRecordButton.style.setProperty("--record-progress", "0deg");
@@ -346,7 +359,7 @@ async function runUserTextOutput() {
   isUserProcessing = true;
   hasUserOutput = false;
   userReplayButton.hidden = true;
-  setUserProcessingProgress(54);
+  setUserProcessingProgress(38);
   const baseTextSignature = currentUserBaseTextSignature();
   const response = await fetch("/api/user-text-output", {
     method: "POST",
@@ -426,10 +439,10 @@ async function runUserVoiceConversion(baseAudioBlob, sourceStem = "user-base-out
   if (!lastUserInputBlob) {
     throw new Error("もとの ろくおんが ありません");
   }
-  setUserProcessingProgress(84);
+  setUserProcessingProgress(58);
   const formData = new FormData();
   formData.append("voice_backend", "seed-vc");
-  formData.append("seed_vc_diffusion_steps", "30");
+  formData.append("seed_vc_diffusion_steps", userSeedVcDiffusionSteps);
   formData.append("seed_vc_reference_max_seconds", "10");
   formData.append("seed_vc_reference_auto_select", "true");
   formData.append("seed_vc_length_adjust", "1.0");
@@ -559,13 +572,13 @@ function renderUserJob(job) {
   if (job.status === "queued") {
     setUserProcessingProgress(8);
   } else if (stage === "asr") {
-    setUserProcessingProgress(25);
+    setUserProcessingProgress(22);
   } else if (stage === "translation" || stage === "text_transform") {
-    setUserProcessingProgress(stage === "translation" ? 48 : 62);
+    setUserProcessingProgress(stage === "translation" ? 40 : 52);
   } else if (stage === "tts") {
-    setUserProcessingProgress(78);
+    setUserProcessingProgress(66);
   } else if (stage === "voice_conversion") {
-    setUserProcessingProgress(92);
+    setUserProcessingProgress(78);
   } else if (stage === "complete") {
     setUserProcessingProgress(100);
   } else if (job.status === "running") {
@@ -576,9 +589,9 @@ function renderUserJob(job) {
 function renderUserVoiceJob(job) {
   setUserStatus("processing");
   if (job.status === "queued") {
-    setUserProcessingProgress(84);
+    setUserProcessingProgress(58);
   } else if (job.current_stage?.stage === "voice_conversion" || job.status === "running") {
-    setUserProcessingProgress(92);
+    setUserProcessingProgress(72);
   } else if (job.current_stage?.stage === "complete") {
     setUserProcessingProgress(100);
   }
@@ -1008,10 +1021,85 @@ function chooseUserRecorderOptions() {
 }
 
 function stopUserRecordingStream() {
+  stopUserAudioLevelMeter();
   if (userRecordingStream) {
     userRecordingStream.getTracks().forEach((track) => track.stop());
   }
   userRecordingStream = null;
+}
+
+function startUserAudioLevelMeter(stream) {
+  stopUserAudioLevelMeter();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass || recordLevelBars.length === 0) {
+    return;
+  }
+  try {
+    userAudioContext = new AudioContextClass();
+    userAudioLevelSource = userAudioContext.createMediaStreamSource(stream);
+    userAudioAnalyser = userAudioContext.createAnalyser();
+    userAudioAnalyser.fftSize = 256;
+    userAudioLevelData = new Uint8Array(userAudioAnalyser.fftSize);
+    userAudioLevelSource.connect(userAudioAnalyser);
+    userAudioContext.resume?.().catch(() => {});
+    renderUserAudioLevel(0);
+    updateUserAudioLevel();
+  } catch (_error) {
+    stopUserAudioLevelMeter();
+  }
+}
+
+function stopUserAudioLevelMeter() {
+  if (userAudioLevelFrame !== null) {
+    window.cancelAnimationFrame(userAudioLevelFrame);
+  }
+  userAudioLevelFrame = null;
+  try {
+    userAudioLevelSource?.disconnect();
+  } catch (_error) {
+    // ignore disconnect races while the page is closing.
+  }
+  userAudioLevelSource = null;
+  userAudioAnalyser = null;
+  userAudioLevelData = null;
+  userAudioLevelSmoothed = 0;
+  if (userAudioContext && userAudioContext.state !== "closed") {
+    userAudioContext.close().catch(() => {});
+  }
+  userAudioContext = null;
+  renderUserAudioLevel(0);
+}
+
+function updateUserAudioLevel() {
+  if (!userAudioAnalyser || !userAudioLevelData) {
+    return;
+  }
+  userAudioAnalyser.getByteTimeDomainData(userAudioLevelData);
+  let sum = 0;
+  for (const value of userAudioLevelData) {
+    const centered = (value - 128) / 128;
+    sum += centered * centered;
+  }
+  const rms = Math.sqrt(sum / userAudioLevelData.length);
+  const level = Math.min(1, rms * 5.8);
+  userAudioLevelSmoothed = userAudioLevelSmoothed * 0.72 + level * 0.28;
+  renderUserAudioLevel(userAudioLevelSmoothed);
+  userAudioLevelFrame = window.requestAnimationFrame(updateUserAudioLevel);
+}
+
+function renderUserAudioLevel(level) {
+  const normalized = Math.max(0, Math.min(level, 1));
+  userRecordButton.style.setProperty("--record-audio-level", normalized.toFixed(3));
+  const center = (recordLevelBars.length - 1) / 2;
+  const now = performance.now();
+  recordLevelBars.forEach((bar, index) => {
+    const distance = Math.abs(index - center) / Math.max(center, 1);
+    const centerWeight = 1 - distance * 0.45;
+    const movement = normalized > 0.03 ? Math.sin(now / 95 + index * 0.88) * 0.08 : 0;
+    const barLevel = Math.max(0.14, Math.min(1, normalized * (0.72 + centerWeight) + movement));
+    bar.style.opacity = String(Math.max(0.46, Math.min(1, 0.52 + normalized * 0.58)));
+    bar.style.transform = `scaleY(${barLevel.toFixed(3)})`;
+  });
 }
 
 function startRecordTimer() {
@@ -1110,7 +1198,7 @@ async function reprocessLatestUserOutput() {
   userRecordButton.classList.add("is-processing");
   setUserStatus("processing");
   isUserProcessing = true;
-  setUserProcessingProgress(72);
+  setUserProcessingProgress(12);
   try {
     const translationSignature = currentUserTranslationSignature();
     const baseTextSignature = currentUserBaseTextSignature();
@@ -1130,7 +1218,7 @@ async function reprocessLatestUserOutput() {
       await runUserTextOutput();
     } else {
       isUserProcessing = true;
-      setUserProcessingProgress(similarVoiceToggle.checked ? 84 : 100);
+      setUserProcessingProgress(similarVoiceToggle.checked ? 58 : 92);
       await applyUserVoiceModeToBase();
       setUserProcessingProgress(100);
       hideUserProcessing();
@@ -1255,13 +1343,28 @@ function renderUserTextMode() {
 function setUserProcessingProgress(percent) {
   userProcessingPanel.hidden = false;
   startProcessingLabelAnimation();
+  startProcessingProgressAnimation();
   syncUserStatusVisibility();
-  userProcessingFill.style.width = `${Math.max(0, Math.min(percent, 100))}%`;
+  const clamped = Math.max(0, Math.min(percent, 100));
+  if (clamped >= 100) {
+    processingProgressTarget = 100;
+    processingProgressDisplayed = 100;
+    renderUserProcessingProgress();
+    return;
+  }
+  if (clamped > processingProgressTarget) {
+    processingProgressTarget = clamped;
+    processingProgressTargetStartedAt = performance.now();
+  }
+  if (processingProgressDisplayed <= 0 && clamped > 0) {
+    processingProgressDisplayed = Math.min(clamped, 6);
+    renderUserProcessingProgress();
+  }
 }
 
 function hideUserProcessing() {
   userProcessingPanel.hidden = true;
-  userProcessingFill.style.width = "0%";
+  stopProcessingProgressAnimation();
   stopProcessingLabelAnimation();
   isUserProcessing = false;
 }
@@ -1284,6 +1387,49 @@ function stopProcessingLabelAnimation() {
   }
   processingTimerId = null;
   processingDotCount = 0;
+}
+
+function startProcessingProgressAnimation() {
+  if (processingProgressTimerId !== null) {
+    return;
+  }
+  if (processingProgressTargetStartedAt <= 0) {
+    processingProgressTargetStartedAt = performance.now();
+  }
+  processingProgressTimerId = window.setInterval(updateProcessingProgressAnimation, 120);
+  updateProcessingProgressAnimation();
+}
+
+function stopProcessingProgressAnimation() {
+  if (processingProgressTimerId !== null) {
+    window.clearInterval(processingProgressTimerId);
+  }
+  processingProgressTimerId = null;
+  processingProgressDisplayed = 0;
+  processingProgressTarget = 0;
+  processingProgressTargetStartedAt = 0;
+  renderUserProcessingProgress();
+}
+
+function updateProcessingProgressAnimation() {
+  if (processingProgressTarget >= 100) {
+    processingProgressDisplayed = 100;
+    renderUserProcessingProgress();
+    return;
+  }
+  const stageElapsedSeconds = Math.max(0, (performance.now() - processingProgressTargetStartedAt) / 1000);
+  const waitingLift = Math.min(24, Math.log1p(stageElapsedSeconds) * 5.2);
+  const desired = Math.min(96, Math.max(processingProgressTarget, processingProgressTarget + waitingLift));
+  const diff = desired - processingProgressDisplayed;
+  if (diff > 0) {
+    processingProgressDisplayed += Math.max(0.12, Math.min(diff * 0.1, 0.85));
+    renderUserProcessingProgress();
+  }
+}
+
+function renderUserProcessingProgress() {
+  const width = Math.max(0, Math.min(processingProgressDisplayed, 100));
+  userProcessingFill.style.width = `${width.toFixed(1)}%`;
 }
 
 function buildProcessingLabelHtml(dotCount) {

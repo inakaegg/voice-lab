@@ -680,7 +680,7 @@ audio {
   min-height: 0;
   padding: 0;
   position: relative;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   width: min(46vw, 230px);
 }
 
@@ -758,6 +758,34 @@ audio {
   width: 8px;
 }
 
+.record-level-meter {
+  align-items: end;
+  display: none;
+  gap: 5px;
+  height: 66px;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(48%, 104px);
+  z-index: 1;
+}
+
+.record-level-bar {
+  background: #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.34);
+  display: block;
+  flex: 1;
+  height: 100%;
+  max-width: 8px;
+  min-width: 5px;
+  opacity: 0.48;
+  transform: scaleY(0.14);
+  transform-origin: bottom;
+  transition: opacity 0.08s linear, transform 0.08s linear;
+}
+
 .record-orb.is-recording {
   background: var(--user-recording);
   transform: scale(1.02);
@@ -772,7 +800,12 @@ audio {
 .record-orb.is-recording .record-icon {
   border-radius: 14px;
   height: 64px;
+  opacity: 0;
   width: 64px;
+}
+
+.record-orb.is-recording .record-level-meter {
+  display: flex;
 }
 
 .record-orb.is-recording .record-icon::before,
@@ -793,7 +826,24 @@ audio {
 }
 
 .record-orb.is-processing {
-  background: var(--user-processing);
+  animation: processing-orb-gradient 2.2s ease-in-out infinite;
+  background: linear-gradient(
+    135deg,
+    var(--user-processing),
+    var(--user-progress-start),
+    var(--user-progress-end),
+    #ffb84d,
+    var(--user-processing)
+  );
+  background-size: 260% 260%;
+  box-shadow: 0 18px 44px rgba(58, 68, 78, 0.24), 0 0 34px rgba(10, 132, 255, 0.24),
+    inset 0 -10px 0 rgba(28, 44, 105, 0.16);
+}
+
+.record-orb.is-processing .record-waves {
+  animation: processing-pulse 1.4s ease-out infinite;
+  border-color: color-mix(in srgb, var(--user-progress-end) 54%, white);
+  opacity: 1;
 }
 
 .record-orb.is-processing .record-icon {
@@ -911,17 +961,18 @@ audio {
 }
 
 .toggle-tile:has(input:checked) {
-  background: var(--user-accent-soft);
+  background: linear-gradient(180deg, #ffffff 0%, var(--user-accent-soft) 100%);
   border-color: var(--user-accent);
-  box-shadow: inset 0 5px 12px rgba(40, 52, 62, 0.14), 0 2px 4px rgba(40, 52, 62, 0.08);
+  box-shadow: inset 0 6px 14px rgba(40, 52, 62, 0.15), 0 0 0 3px var(--user-accent-soft),
+    0 2px 4px rgba(40, 52, 62, 0.08);
   color: var(--user-accent-strong);
   transform: translateY(2px);
 }
 
 .toggle-tile:has(input:checked) .toggle-icon {
-  background: var(--user-panel-bg);
+  background: linear-gradient(180deg, var(--user-progress-end), var(--user-accent));
   border-color: var(--user-accent);
-  box-shadow: inset 0 4px 8px rgba(40, 52, 62, 0.14), 0 1px 2px rgba(40, 52, 62, 0.08);
+  box-shadow: inset 0 4px 9px rgba(10, 51, 98, 0.22), 0 1px 2px rgba(40, 52, 62, 0.08);
   transform: translateY(2px) scale(0.96);
 }
 
@@ -985,7 +1036,7 @@ audio {
   height: 100%;
   overflow: hidden;
   position: relative;
-  transition: width 0.22s ease;
+  transition: width 0.12s linear;
   width: 0%;
 }
 
@@ -1159,6 +1210,29 @@ audio {
 @keyframes processing-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes processing-orb-gradient {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes processing-pulse {
+  from {
+    opacity: 0.62;
+    transform: scale(0.84);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.3);
   }
 }
 
