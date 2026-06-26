@@ -239,7 +239,7 @@ RUNPOD_ENDPOINT_ID=<endpoint-id> \
 RUNPOD_API_KEY=<api-key> \
 python scripts/runpod_smoke_serverless.py \
   --audio /path/to/audio.mp3 \
-  --translation-backend qwen \
+  --translation-backend openai \
   --source-language id-ID \
   --target-language ja-JP \
   --voice-mode convert
@@ -252,7 +252,7 @@ RUNPOD_ENDPOINT_ID=<endpoint-id> \
 RUNPOD_API_KEY=<api-key> \
 python scripts/runpod_smoke_serverless.py \
   --operation-mode warmup \
-  --translation-backend qwen \
+  --translation-backend openai \
   --preload-voice-conversion
 ```
 
@@ -261,7 +261,7 @@ python scripts/runpod_smoke_serverless.py \
 ```sh
 RUNPOD_ENDPOINT_ID=<endpoint-id> \
 RUNPOD_API_KEY=<api-key> \
-RUNPOD_SERVERLESS_TRANSLATION_BACKEND=qwen \
+RUNPOD_SERVERLESS_TRANSLATION_BACKEND=openai \
 RUNPOD_SERVERLESS_REQUEST_MODE=async \
 MO_VC_BACKENDS=runpod-seed-vc \
 uvicorn mo_speech.api:app --host 0.0.0.0 --port 8000
@@ -269,7 +269,7 @@ uvicorn mo_speech.api:app --host 0.0.0.0 --port 8000
 
 この構成ではFastAPIがUIと履歴保存を担当し、ASR/翻訳/TTS/VCはRunPod Serverless handlerへ送る。Cloudflare gatewayとオブジェクトストレージ履歴は別段階で追加する。
 
-OpenAI API経路を測る場合は、RunPod endpointの環境変数に `OPENAI_API_KEY` を渡した上で `--translation-backend openai` を指定する。
+GPU上のローカル翻訳を比較する場合は、RunPod endpointの環境変数に `MO_TRANSLATION_PROVIDER=qwen3` を渡した上で `--translation-backend qwen` を指定する。ユーザー画面相当の品質確認では、OpenAI API経路を使う。
 
 ```sh
 RUNPOD_ENDPOINT_ID=<endpoint-id> \

@@ -152,8 +152,19 @@ runpod_resolve_datetime() {
 }
 
 print_command() {
+  local redact_next=0
   printf 'running:'
-  printf ' %q' "$@"
+  for arg in "$@"; do
+    if [[ "${redact_next}" == "1" ]]; then
+      printf ' %q' '<env-json-redacted>'
+      redact_next=0
+      continue
+    fi
+    printf ' %q' "${arg}"
+    if [[ "${arg}" == "--env" ]]; then
+      redact_next=1
+    fi
+  done
   printf '\n'
 }
 

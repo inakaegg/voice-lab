@@ -400,7 +400,7 @@ def _elapsed_ms(started: float) -> float:
 
 def _preload_for_serverless() -> None:
     if os.getenv("MO_RUNPOD_PRELOAD_ON_START") == "1":
-        _translation_pipeline(os.getenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", "qwen"))
+        _translation_pipeline(os.getenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", "openai"))
     if os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
         _voice_conversion_service()
 
