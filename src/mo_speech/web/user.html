@@ -3,19 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>こえを かえる</title>
+    <title>にほんごへへんかん</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body class="user-body">
-    <main class="user-stage" aria-label="こえを かえる">
+    <main class="user-stage" aria-label="にほんごへへんかん">
       <input id="target_language" name="target_language" type="hidden" value="ja-JP" />
 
       <section class="user-hero" aria-label="ろくおん">
-        <p class="user-kicker">にほんご</p>
-        <h1>こえを かえる</h1>
+        <p id="user-language-label" class="user-kicker">にほんご へ へんかん</p>
+        <h1>はなしてください</h1>
         <button id="user-record-button" class="record-orb" type="button" aria-label="ろくおん">
+          <span class="record-progress" aria-hidden="true"></span>
           <span class="record-waves" aria-hidden="true"></span>
           <span class="record-icon" aria-hidden="true"></span>
+          <span id="record-timer" class="record-timer" aria-hidden="true">5</span>
         </button>
         <p id="user-status" class="user-status" role="status" aria-live="polite">
           おして はなす
@@ -49,7 +51,21 @@
       </section>
 
       <section class="user-output" aria-label="できたこえ">
-        <audio id="user-output-audio" controls hidden></audio>
+        <div id="user-output-texts" class="user-output-texts" hidden>
+          <article>
+            <h2>ひらがな</h2>
+            <p id="user-output-hiragana"></p>
+          </article>
+          <article>
+            <h2>かんじ</h2>
+            <p id="user-output-kanji"></p>
+          </article>
+        </div>
+        <button id="user-replay-button" class="replay-button" type="button" hidden>
+          <span class="replay-icon" aria-hidden="true"></span>
+          <span id="user-replay-label">もういちど</span>
+        </button>
+        <audio id="user-output-audio" hidden></audio>
         <p id="user-error" class="user-error" hidden></p>
       </section>
     </main>

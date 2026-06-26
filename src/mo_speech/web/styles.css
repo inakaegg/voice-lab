@@ -572,6 +572,7 @@ audio {
   min-height: 0;
   padding: 0;
   position: relative;
+  transition: background 0.18s ease, transform 0.18s ease;
   width: min(46vw, 230px);
 }
 
@@ -592,6 +593,30 @@ audio {
 .record-orb.is-recording .record-waves {
   animation: record-pulse 1.25s ease-out infinite;
   opacity: 1;
+}
+
+.record-progress {
+  background: conic-gradient(#1d6f59 var(--record-progress, 0deg), rgba(255, 255, 255, 0.28) 0deg);
+  border-radius: 50%;
+  inset: -16px;
+  opacity: 0;
+  position: absolute;
+  z-index: -1;
+}
+
+.record-timer {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  bottom: 24px;
+  color: #173b32;
+  display: none;
+  font-size: 17px;
+  font-weight: 900;
+  justify-content: center;
+  min-width: 38px;
+  padding: 5px 8px;
+  position: absolute;
 }
 
 .record-icon {
@@ -623,6 +648,63 @@ audio {
   left: 20px;
   position: absolute;
   width: 8px;
+}
+
+.record-orb.is-recording {
+  background: #c96f25;
+  transform: scale(1.02);
+}
+
+.record-orb.is-recording .record-progress,
+.record-orb.is-recording .record-timer {
+  display: grid;
+  opacity: 1;
+}
+
+.record-orb.is-recording .record-icon {
+  border-radius: 14px;
+  height: 64px;
+  width: 64px;
+}
+
+.record-orb.is-recording .record-icon::before,
+.record-orb.is-recording .record-icon::after {
+  display: none;
+}
+
+.record-orb.is-ready-to-stop {
+  background: #28765d;
+}
+
+.record-orb.is-ready-to-stop .record-progress {
+  background: conic-gradient(#58c59e 360deg, rgba(255, 255, 255, 0.28) 0deg);
+}
+
+.record-orb.is-locked .record-timer {
+  color: #7c3400;
+}
+
+.record-orb.is-processing {
+  background: #536879;
+}
+
+.record-orb.is-processing .record-icon {
+  animation: processing-spin 0.9s linear infinite;
+  background: transparent;
+  border: 9px solid rgba(255, 255, 255, 0.42);
+  border-radius: 50%;
+  border-top-color: #ffffff;
+  height: 70px;
+  width: 70px;
+}
+
+.record-orb.is-processing .record-icon::before,
+.record-orb.is-processing .record-icon::after {
+  display: none;
+}
+
+.record-orb.is-nudged {
+  animation: record-nudge 0.24s ease;
 }
 
 .user-status {
@@ -716,6 +798,8 @@ audio {
 }
 
 .user-output {
+  display: grid;
+  gap: 14px;
   margin: 0 auto;
   max-width: 680px;
   width: 100%;
@@ -723,6 +807,82 @@ audio {
 
 .user-output audio {
   margin-top: 0;
+}
+
+.user-output-texts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.user-output-texts article {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(86, 106, 113, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.user-output-texts h2 {
+  color: #44605b;
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+.user-output-texts p {
+  color: #17212b;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.replay-button {
+  align-items: center;
+  background: #263d4d;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(40, 52, 62, 0.16);
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  justify-self: center;
+  min-width: 176px;
+  padding: 12px 20px;
+}
+
+.replay-icon {
+  border-bottom: 10px solid transparent;
+  border-left: 15px solid #ffffff;
+  border-top: 10px solid transparent;
+  height: 0;
+  width: 0;
+}
+
+.replay-button[data-state="playing"] .replay-icon {
+  border: 0;
+  height: 18px;
+  position: relative;
+  width: 18px;
+}
+
+.replay-button[data-state="playing"] .replay-icon::before,
+.replay-button[data-state="playing"] .replay-icon::after {
+  background: #ffffff;
+  border-radius: 2px;
+  content: "";
+  height: 18px;
+  position: absolute;
+  top: 0;
+  width: 6px;
+}
+
+.replay-button[data-state="playing"] .replay-icon::before {
+  left: 1px;
+}
+
+.replay-button[data-state="playing"] .replay-icon::after {
+  right: 1px;
 }
 
 .user-error {
@@ -749,6 +909,27 @@ audio {
   }
 }
 
+@keyframes record-nudge {
+  0%,
+  100% {
+    transform: translateX(0) scale(1.02);
+  }
+
+  30% {
+    transform: translateX(-8px) scale(1.02);
+  }
+
+  65% {
+    transform: translateX(8px) scale(1.02);
+  }
+}
+
+@keyframes processing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 720px) {
   .user-stage {
     gap: 18px;
@@ -765,5 +946,9 @@ audio {
 
   .user-toggles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .user-output-texts {
+    grid-template-columns: 1fr;
   }
 }

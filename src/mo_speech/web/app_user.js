@@ -1,7 +1,14 @@
 const userRecordButton = document.querySelector("#user-record-button");
+const userLanguageLabel = document.querySelector("#user-language-label");
 const userStatus = document.querySelector("#user-status");
 const userMinimumHint = document.querySelector("#user-minimum-hint");
+const recordTimer = document.querySelector("#record-timer");
 const userOutputAudio = document.querySelector("#user-output-audio");
+const userReplayButton = document.querySelector("#user-replay-button");
+const userReplayLabel = document.querySelector("#user-replay-label");
+const userOutputTexts = document.querySelector("#user-output-texts");
+const userOutputHiragana = document.querySelector("#user-output-hiragana");
+const userOutputKanji = document.querySelector("#user-output-kanji");
 const userError = document.querySelector("#user-error");
 const userTargetLanguage = document.querySelector("#target_language");
 const similarVoiceToggle = document.querySelector("#similar_voice");
@@ -14,6 +21,8 @@ let userMediaRecorder = null;
 let userRecordingStream = null;
 let userRecordingChunks = [];
 let userRecordingStartedAt = 0;
+let recordTimerId = null;
+let currentUserOutputUrl = "";
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -21,7 +30,11 @@ let userSettings = {
 };
 
 userRecordButton.addEventListener("click", handleUserRecordButton);
-loadUserSettings();
+userReplayButton.addEventListener("click", toggleUserReplay);
+userOutputAudio.addEventListener("ended", syncReplayButton);
+userOutputAudio.addEventListener("pause", syncReplayButton);
+userOutputAudio.addEventListener("play", syncReplayButton);
+refreshUserSettings();
 loadUserRuntime();
 
 async function handleUserRecordButton() {
@@ -31,9 +44,12 @@ async function handleUserRecordButton() {
     if (elapsedMs < minimumRecordingMs) {
       setUserStatus("もうすこし はなしてください");
       userMinimumHint.hidden = false;
+      nudgeRecordButton();
       return;
     }
     setUserStatus("へんかんちゅう");
+    userRecordButton.classList.remove("is-recording", "is-ready-to-stop");
+    userRecordButton.classList.add("is-processing");
     userMediaRecorder.stop();
     return;
   }
@@ -41,8 +57,15 @@ async function handleUserRecordButton() {
 }
 
 async function startUserRecording() {
+  await refreshUserSettings();
   userOutputAudio.hidden = true;
+  userReplayButton.hidden = true;
+  userOutputTexts.hidden = true;
   userOutputAudio.removeAttribute("src");
+  if (currentUserOutputUrl) {
+    URL.revokeObjectURL(currentUserOutputUrl);
+    currentUserOutputUrl = "";
+  }
   userRecordingChunks = [];
   try {
     userRecordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -55,9 +78,13 @@ async function startUserRecording() {
     userMediaRecorder.addEventListener("stop", submitUserTranslation);
     userRecordingStartedAt = performance.now();
     userMediaRecorder.start();
-    userRecordButton.classList.add("is-recording");
+    userRecordButton.classList.add("is-recording", "is-locked");
+    userRecordButton.style.setProperty("--record-progress", "0deg");
+    userRecordButton.setAttribute("aria-label", "ろくおんちゅう");
+    userMinimumHint.textContent = "5びょう いじょう はなしてください";
     userMinimumHint.hidden = false;
     setUserStatus("5びょう いじょう はなしてください");
+    startRecordTimer();
   } catch (error) {
     renderUserError(error.message || "マイクが つかえません");
   }
@@ -65,11 +92,15 @@ async function startUserRecording() {
 
 async function submitUserTranslation() {
   stopUserRecordingStream();
-  userRecordButton.classList.remove("is-recording");
+  stopRecordTimer();
+  userRecordButton.classList.remove("is-recording", "is-locked", "is-ready-to-stop");
+  userRecordButton.classList.add("is-processing");
+  userRecordButton.disabled = true;
   userMinimumHint.hidden = true;
   setUserStatus("へんかんちゅう");
 
   try {
+    await refreshUserSettings();
     const audioBlob = new Blob(userRecordingChunks, { type: userMediaRecorder?.mimeType || "audio/webm" });
     if (audioBlob.size < 1) {
       throw new Error("ろくおんが ありません");
@@ -110,12 +141,15 @@ async function submitUserTranslation() {
     if (!completedJob.result) {
       throw new Error("できたこえが ありません");
     }
-    renderUserOutput(completedJob.result);
+    await renderUserResult(completedJob.result);
     setUserStatus("できました");
   } catch (error) {
     renderUserError(error.message || "エラー");
   } finally {
     userRecordingChunks = [];
+    userRecordButton.disabled = false;
+    userRecordButton.classList.remove("is-processing");
+    userRecordButton.setAttribute("aria-label", "ろくおん");
   }
 }
 
@@ -171,6 +205,29 @@ function renderUserJob(job) {
   }
 }
 
+async function renderUserResult(result) {
+  await renderUserTexts(result);
+  renderUserOutput(result);
+}
+
+async function renderUserTexts(result) {
+  const text = (result.transformed_text || result.translated_text || "").trim();
+  if (!text) {
+    userOutputTexts.hidden = true;
+    return;
+  }
+  userOutputTexts.hidden = false;
+  userOutputKanji.textContent = text;
+  userOutputHiragana.textContent = "よみこみちゅう";
+  try {
+    const displayText = await loadUserDisplayText(text, userTargetLanguage.value || "ja-JP");
+    userOutputKanji.textContent = displayText.kanji_text || text;
+    userOutputHiragana.textContent = displayText.hiragana_text || text;
+  } catch (_error) {
+    userOutputHiragana.textContent = text;
+  }
+}
+
 function renderUserOutput(result) {
   const mimeType = result.audio_mime_type || "audio/wav";
   const binary = atob(result.audio_base64);
@@ -179,22 +236,42 @@ function renderUserOutput(result) {
     bytes[index] = binary.charCodeAt(index);
   }
   const audioBlob = new Blob([bytes], { type: mimeType });
-  userOutputAudio.src = URL.createObjectURL(audioBlob);
-  userOutputAudio.hidden = false;
+  if (currentUserOutputUrl) {
+    URL.revokeObjectURL(currentUserOutputUrl);
+  }
+  currentUserOutputUrl = URL.createObjectURL(audioBlob);
+  userOutputAudio.src = currentUserOutputUrl;
+  userOutputAudio.hidden = true;
+  userReplayButton.hidden = false;
   userOutputAudio.play().catch(() => {});
+  syncReplayButton();
 }
 
-async function loadUserSettings() {
+async function refreshUserSettings() {
   try {
-    const response = await fetch("/api/user-settings");
+    const response = await fetch("/api/user-settings", { cache: "no-store" });
     if (!response.ok) {
-      return;
+      return userSettings;
     }
     userSettings = await response.json();
     userTargetLanguage.value = userSettings.target_language || "ja-JP";
+    renderUserLanguageLabel();
   } catch (_error) {
     userTargetLanguage.value = "ja-JP";
   }
+  return userSettings;
+}
+
+async function loadUserDisplayText(text, targetLanguage) {
+  const response = await fetch("/api/user-display-text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, target_language: targetLanguage }),
+  });
+  if (!response.ok) {
+    throw new Error("ひらがなを つくれませんでした");
+  }
+  return response.json();
 }
 
 async function loadUserRuntime() {
@@ -230,6 +307,74 @@ function stopUserRecordingStream() {
   userRecordingStream = null;
 }
 
+function startRecordTimer() {
+  stopRecordTimer();
+  updateRecordTimer();
+  recordTimerId = window.setInterval(updateRecordTimer, 100);
+}
+
+function stopRecordTimer() {
+  if (recordTimerId !== null) {
+    window.clearInterval(recordTimerId);
+  }
+  recordTimerId = null;
+  userRecordButton.style.setProperty("--record-progress", "0deg");
+  recordTimer.textContent = "5";
+}
+
+function updateRecordTimer() {
+  const elapsedMs = performance.now() - userRecordingStartedAt;
+  const progress = Math.min(elapsedMs / minimumRecordingMs, 1);
+  const remainingSeconds = Math.max(Math.ceil((minimumRecordingMs - elapsedMs) / 1000), 0);
+  userRecordButton.style.setProperty("--record-progress", `${Math.round(progress * 360)}deg`);
+  if (progress < 1) {
+    userRecordButton.classList.add("is-locked");
+    userRecordButton.classList.remove("is-ready-to-stop");
+    recordTimer.textContent = String(remainingSeconds);
+    return;
+  }
+  userRecordButton.classList.remove("is-locked");
+  userRecordButton.classList.add("is-ready-to-stop");
+  recordTimer.textContent = "OK";
+  userMinimumHint.textContent = "おすと とまる";
+  setUserStatus("ろくおんちゅう");
+}
+
+function nudgeRecordButton() {
+  userRecordButton.classList.remove("is-nudged");
+  window.requestAnimationFrame(() => {
+    userRecordButton.classList.add("is-nudged");
+  });
+}
+
+async function toggleUserReplay() {
+  if (!userOutputAudio.src) {
+    return;
+  }
+  if (userOutputAudio.paused) {
+    await userOutputAudio.play().catch(() => {});
+  } else {
+    userOutputAudio.pause();
+  }
+  syncReplayButton();
+}
+
+function syncReplayButton() {
+  const isPlaying = !userOutputAudio.paused && !userOutputAudio.ended;
+  userReplayButton.dataset.state = isPlaying ? "playing" : "paused";
+  userReplayLabel.textContent = isPlaying ? "とめる" : "もういちど";
+}
+
+function renderUserLanguageLabel() {
+  const labels = {
+    "ja-JP": "にほんご へ へんかん",
+    "id-ID": "インドネシアご へ へんかん",
+    "zh-CN": "ちゅうごくご へ へんかん",
+    "en-US": "えいご へ へんかん",
+  };
+  userLanguageLabel.textContent = labels[userTargetLanguage.value] || "ことばを へんかん";
+}
+
 function setUserStatus(message) {
   userStatus.textContent = message;
 }
@@ -241,8 +386,11 @@ function clearUserError() {
 
 function renderUserError(message) {
   stopUserRecordingStream();
-  userRecordButton.classList.remove("is-recording");
+  stopRecordTimer();
+  userRecordButton.classList.remove("is-recording", "is-locked", "is-ready-to-stop", "is-processing");
+  userRecordButton.disabled = false;
   userMinimumHint.hidden = true;
+  userMinimumHint.textContent = "5びょう いじょう はなしてください";
   userError.hidden = false;
   userError.textContent = message;
   setUserStatus("もういちど");

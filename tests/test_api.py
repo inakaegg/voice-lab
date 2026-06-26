@@ -1,4 +1,5 @@
 import base64
+import sys
 from pathlib import Path
 from threading import Event
 from time import sleep
@@ -49,7 +50,8 @@ def test_root_serves_simple_user_ui() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "こえを かえる" in response.text
+    assert "にほんご へ へんかん" in response.text
+    assert "はなしてください" in response.text
     assert "5びょう いじょう はなしてください" in response.text
     assert "にてるこえ" in response.text
     assert "ジョーク" in response.text
@@ -57,6 +59,9 @@ def test_root_serves_simple_user_ui() -> None:
     assert "バリエーション" in response.text
     assert "target_language" in response.text
     assert 'value="ja-JP"' in response.text
+    assert "user-output-hiragana" in response.text
+    assert "user-output-kanji" in response.text
+    assert "user-replay-button" in response.text
     assert "translation_backend" not in response.text
     assert "operation_mode" not in response.text
     assert "/static/app_user.js" in response.text
@@ -220,6 +225,9 @@ def test_static_assets_are_served() -> None:
     assert "renderOutputAudioBlob" in js_text
     assert "outputAudio.play()" in js_text
     assert "submitUserTranslation" in js_text
+    assert "loadUserDisplayText" in js_text
+    assert "refreshUserSettings" in js_text
+    assert "toggleUserReplay" in js_text
     assert "seed_vc_reference_auto_select" in js_text
     assert "user-settings" in js_text
     assert "renderInputAudioPreview" in js_text
@@ -245,6 +253,9 @@ def test_static_assets_are_served() -> None:
     assert ".history-panel" in css_response.text
     assert ".user-stage" in css_response.text
     assert ".record-orb" in css_response.text
+    assert ".record-progress" in css_response.text
+    assert ".replay-button" in css_response.text
+    assert ".user-output-texts" in css_response.text
     assert ".toggle-tile" in css_response.text
     assert ".history-title" in css_response.text
     assert ".history-text" in css_response.text
@@ -334,6 +345,32 @@ def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> Non
     assert response.status_code == 200
     assert response.json()["joke_position"] == "before"
     assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。"
+
+
+def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Responses:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text="きゅうりょうを あげてください。")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: SimpleNamespace(responses=Responses())))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/user-display-text",
+        json={"text": "給料を上げてください。", "target_language": "ja-JP"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kanji_text": "給料を上げてください。",
+        "hiragana_text": "きゅうりょうを あげてください。",
+    }
+    assert "hiragana only" in captured["instructions"]
 
 
 def test_runtime_api_returns_supported_voice_modes_from_tts_provider() -> None:

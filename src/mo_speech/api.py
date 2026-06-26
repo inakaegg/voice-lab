@@ -49,6 +49,7 @@ from .providers.voice import (
     create_voice_conversion_service_from_env,
     prepare_seed_vc_reference_preview as _prepare_seed_vc_reference_preview,
 )
+from .text_display import create_user_display_text
 from .user_settings import (
     UserSettingsStore,
     serialize_user_settings,
@@ -142,6 +143,16 @@ def create_app(
             return serialize_user_settings(active_user_settings_store.write(payload))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/user-display-text")
+    def user_display_text(payload: dict[str, str] = Body(...)) -> dict[str, str]:
+        try:
+            return create_user_display_text(
+                str(payload.get("text", "")),
+                str(payload.get("target_language", "ja-JP")),
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/api/translate-speech")
     async def translate_speech(
