@@ -50,7 +50,8 @@ def test_root_serves_simple_user_ui() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "にほんご へ へんかん" in response.text
+    assert "へんな へんかん アプリ" in response.text
+    assert "display-mode-button" in response.text
     assert "はなしてください" in response.text
     assert "5びょう いじょう はなしてください" in response.text
     assert "にてるこえ" in response.text
@@ -58,7 +59,7 @@ def test_root_serves_simple_user_ui() -> None:
     assert "おおさかべん" in response.text
     assert "バリエーション" in response.text
     assert "target_language" in response.text
-    assert 'value="ja-JP"' in response.text
+    assert 'value="user-auto"' in response.text
     assert "user-processing-panel" in response.text
     assert "user-processing-label" in response.text
     assert "user-processing-bar" in response.text
@@ -229,6 +230,7 @@ def test_static_assets_are_served() -> None:
     assert "submitUserTranslation" in js_text
     assert "loadUserDisplayText" in js_text
     assert "refreshUserSettings" in js_text
+    assert "displayModeButton" in js_text
     assert "toggleUserReplay" in js_text
     assert "reprocessLatestUserOutput" in js_text
     assert "markUserOutputStale" in js_text
@@ -239,9 +241,14 @@ def test_static_assets_are_served() -> None:
     assert "baseResultCache" in js_text
     assert "voiceResultCache" in js_text
     assert "displayTextCache" in js_text
+    assert "jokeAudioCache" in js_text
+    assert "localStorage" in js_text
     assert "startProcessingLabelAnimation" in js_text
-    assert "しょりちゅう${" in js_text
+    assert 'plainUserText("processing")' in js_text
     assert "user-text-output" in js_text
+    assert "user-joke-output" in js_text
+    assert "user-auto" in js_text
+    assert "id-ID" in js_text
     assert "voice-conversion-jobs" in js_text
     assert "cycleUserTextMode" in js_text
     assert "setUserProcessingProgress" in js_text
@@ -270,6 +277,7 @@ def test_static_assets_are_served() -> None:
     assert ".processing-panel" in css_response.text
     assert ".history-panel" in css_response.text
     assert ".user-stage" in css_response.text
+    assert ".display-mode-button" in css_response.text
     assert ".record-orb" in css_response.text
     assert ".record-progress" in css_response.text
     assert ".user-processing-panel" in css_response.text
@@ -428,10 +436,55 @@ def test_user_text_output_api_reuses_translated_text_for_tts(monkeypatch) -> Non
     assert payload["transcript"] == "I want a raise."
     assert payload["translated_text"] == "給料を上げてください。"
     assert payload["transformed_text"] == "給料を上げてください。 お願いします。"
+    assert payload["target_language"] == "ja-JP"
     assert payload["audio_base64"] != ""
     assert payload["providers"]["asr"] == "cached"
     assert payload["providers"]["translation"] == "cached"
     assert captured["input"] == "給料を上げてください。 お願いします。"
+
+
+def test_user_joke_output_api_translates_to_indonesian_then_tts() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeTranslator:
+        name = "fake-openai-translation"
+
+        def translate(self, text, source_language, target_language):
+            captured["translation"] = {
+                "text": text,
+                "source_language": source_language,
+                "target_language": target_language,
+            }
+            return "Ini lelucon singkat."
+
+    class FakeTts:
+        name = "fake-openai-tts"
+        audio_mime_type = "audio/wav"
+
+        def synthesize(self, text, target_language):
+            captured["tts"] = {"text": text, "target_language": target_language}
+            return TtsOutput(audio_bytes=f"TTS:{target_language}:{text}".encode(), audio_mime_type="audio/wav")
+
+    openai_pipeline = SimpleNamespace(translator=FakeTranslator(), tts=FakeTts())
+    client = TestClient(create_app(openai_pipeline=openai_pipeline))  # type: ignore[arg-type]
+
+    response = client.post(
+        "/api/user-joke-output",
+        json={"text": "まずはジョークです。", "target_language": "id-ID", "tts_backend": "openai"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["transcript"] == "まずはジョークです。"
+    assert payload["translated_text"] == "Ini lelucon singkat."
+    assert payload["target_language"] == "id-ID"
+    assert base64.b64decode(payload["audio_base64"]) == b"TTS:id-ID:Ini lelucon singkat."
+    assert captured["translation"] == {
+        "text": "まずはジョークです。",
+        "source_language": "auto",
+        "target_language": "id-ID",
+    }
+    assert captured["tts"] == {"text": "Ini lelucon singkat.", "target_language": "id-ID"}
 
 
 def test_runtime_api_returns_supported_voice_modes_from_tts_provider() -> None:

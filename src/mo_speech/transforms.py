@@ -33,7 +33,10 @@ def _apply_append_suffix(text: str, options: dict[str, object]) -> str:
 
 def _apply_user_effects(text: str, options: dict[str, object]) -> str:
     output = text
-    if _option_enabled(options.get("osaka_dialect")) or _option_enabled(options.get("variation")):
+    target_language = str(options.get("target_language", "ja-JP"))
+    if target_language == "ja-JP" and (
+        _option_enabled(options.get("osaka_dialect")) or _option_enabled(options.get("variation"))
+    ):
         output = _rewrite_user_effects_with_openai(
             output,
             osaka_dialect=_option_enabled(options.get("osaka_dialect")),

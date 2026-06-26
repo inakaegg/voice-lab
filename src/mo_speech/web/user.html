@@ -3,16 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>にほんごへへんかん</title>
+    <title>へんなへんかんアプリ</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body class="user-body">
-    <main class="user-stage" aria-label="にほんごへへんかん">
-      <input id="target_language" name="target_language" type="hidden" value="ja-JP" />
+    <main class="user-stage" aria-label="へんなへんかんアプリ">
+      <input id="target_language" name="target_language" type="hidden" value="user-auto" />
+      <button id="display-mode-button" class="display-mode-button" type="button">ひらがな</button>
 
       <section class="user-hero" aria-label="ろくおん">
-        <p id="user-language-label" class="user-kicker">にほんご へ へんかん</p>
-        <h1>はなしてください</h1>
+        <p id="user-language-label" class="user-kicker">へんな へんかん アプリ</p>
+        <h1 id="speak-heading">はなしてください</h1>
         <button id="user-record-button" class="record-orb" type="button" aria-label="ろくおん">
           <span class="record-progress" aria-hidden="true"></span>
           <span class="record-waves" aria-hidden="true"></span>
@@ -31,22 +32,22 @@
         <label class="toggle-tile">
           <input id="similar_voice" type="checkbox" checked />
           <span class="toggle-art" aria-hidden="true"></span>
-          <span>にてるこえ</span>
+          <span id="similar-voice-label">にてるこえ</span>
         </label>
         <label class="toggle-tile">
           <input id="joke_mode" type="checkbox" />
           <span class="toggle-art" aria-hidden="true"></span>
-          <span>ジョーク</span>
+          <span id="joke-mode-label">ジョーク</span>
         </label>
         <label class="toggle-tile">
           <input id="osaka_dialect" type="checkbox" />
           <span class="toggle-art" aria-hidden="true"></span>
-          <span>おおさかべん</span>
+          <span id="osaka-dialect-label">おおさかべん</span>
         </label>
         <label class="toggle-tile">
           <input id="variation_mode" type="checkbox" />
           <span class="toggle-art" aria-hidden="true"></span>
-          <span>バリエーション</span>
+          <span id="variation-mode-label">バリエーション</span>
         </label>
       </section>
 
@@ -58,7 +59,7 @@
           </div>
         </div>
         <div id="user-output-texts" class="user-output-texts" hidden>
-          <article id="user-output-text-card" class="user-output-text-card" role="button" tabindex="0">
+          <article id="user-output-text-card" class="user-output-text-card">
             <h2 id="user-output-text-mode">ひらがな</h2>
             <p id="user-output-text" class="user-output-text"></p>
           </article>

@@ -172,7 +172,7 @@ def create_app(
             transformed_text = apply_text_transform(
                 translated_text,
                 "user_effects" if text_transform_options else None,
-                text_transform_options,
+                {**text_transform_options, "target_language": target_language},
             )
             tts_output = _normalize_tts_provider_output(
                 active_openai_pipeline.tts.synthesize(transformed_text, target_language),
@@ -196,12 +196,60 @@ def create_app(
                 "tts": active_openai_pipeline.tts.name,
             },
             warnings=tts_output.warnings,
+            target_language=target_language,
         )
         active_audio_history_store.save_output(
             result.output_audio_bytes,
             suffix=_mime_suffix(result.output_audio_mime_type),
             metadata={
                 "endpoint": "user-text-output",
+                "translation_backend": "openai",
+                "target_language": target_language,
+                "voice_mode": "default",
+                "audio_mime_type": result.output_audio_mime_type,
+                **_history_text_metadata_from_pipeline_result(result),
+            },
+        )
+        return _serialize_pipeline_result(result)
+
+    @app.post("/api/user-joke-output")
+    def user_joke_output(payload: dict[str, object] = Body(...)) -> dict[str, object]:
+        text = str(payload.get("text", "")).strip()
+        target_language = str(payload.get("target_language", "id-ID"))
+        if text == "":
+            raise HTTPException(status_code=400, detail="text is required")
+
+        try:
+            translated_text = active_openai_pipeline.translator.translate(text, "auto", target_language)
+            tts_output = _normalize_tts_provider_output(
+                active_openai_pipeline.tts.synthesize(translated_text, target_language),
+                active_openai_pipeline.tts.audio_mime_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        result = PipelineResult(
+            transcript=text,
+            translated_text=translated_text,
+            transformed_text=translated_text,
+            output_audio_bytes=tts_output.audio_bytes,
+            output_audio_mime_type=tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
+            timings_ms=tts_output.timings_ms,
+            providers={
+                "asr": "none",
+                "translation": active_openai_pipeline.translator.name,
+                "tts": active_openai_pipeline.tts.name,
+            },
+            warnings=tts_output.warnings,
+            target_language=target_language,
+        )
+        active_audio_history_store.save_output(
+            result.output_audio_bytes,
+            suffix=_mime_suffix(result.output_audio_mime_type),
+            metadata={
+                "endpoint": "user-joke-output",
                 "translation_backend": "openai",
                 "target_language": target_language,
                 "voice_mode": "default",
@@ -284,7 +332,7 @@ def create_app(
                 "endpoint": "translate-speech",
                 "translation_backend": translation_backend,
                 "source_language": source_language,
-                "target_language": target_language,
+                "target_language": result.target_language or target_language,
                 "voice_mode": voice_mode,
                 "audio_mime_type": result.output_audio_mime_type,
                 **_history_text_metadata_from_pipeline_result(result),

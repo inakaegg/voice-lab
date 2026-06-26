@@ -85,6 +85,7 @@ class PipelineResult:
     timings_ms: dict[str, float]
     providers: dict[str, str]
     warnings: list[str] = field(default_factory=list)
+    target_language: str = ""
 
 
 class SpeechTranslationPipeline:
@@ -101,9 +102,10 @@ class SpeechTranslationPipeline:
 
     def run(self, request: PipelineRequest, progress_callback: ProgressCallback | None = None) -> PipelineResult:
         total_started = perf_counter()
+        dynamic_target = request.target_language == "user-auto"
         route = (request.source_language, request.target_language)
         supported_routes = getattr(self, "supported_routes", SUPPORTED_ROUTES)
-        if route not in supported_routes:
+        if not dynamic_target and route not in supported_routes:
             raise ValueError(f"unsupported route: {request.source_language} -> {request.target_language}")
         if request.voice_mode not in SUPPORTED_VOICE_MODES:
             raise ValueError(f"unsupported voice mode: {request.voice_mode}")
@@ -118,6 +120,9 @@ class SpeechTranslationPipeline:
         _notify_progress(progress_callback, "asr", "文字起こし", self.asr.name)
         transcript = self.asr.transcribe(request.audio_path, request.source_language)
         timings_ms["asr"] = _elapsed_ms(started)
+        target_language = _resolve_target_language(request.target_language, transcript)
+        if dynamic_target and (request.source_language, target_language) not in supported_routes:
+            raise ValueError(f"unsupported route: {request.source_language} -> {target_language}")
 
         started = perf_counter()
         _notify_progress(
@@ -130,7 +135,7 @@ class SpeechTranslationPipeline:
         translated_text = self.translator.translate(
             transcript,
             request.source_language,
-            request.target_language,
+            target_language,
         )
         timings_ms["translation"] = _elapsed_ms(started)
 
@@ -146,7 +151,7 @@ class SpeechTranslationPipeline:
         transformed_text = apply_text_transform(
             translated_text,
             request.text_transform,
-            request.text_transform_options,
+            {**request.text_transform_options, "target_language": target_language},
         )
         timings_ms["text_transform"] = _elapsed_ms(started)
 
@@ -163,7 +168,7 @@ class SpeechTranslationPipeline:
                 translated_text=translated_text,
                 transformed_text=transformed_text,
             )
-            tts_output = _normalize_tts_output(self.tts.synthesize(transformed_text, request.target_language))
+            tts_output = _normalize_tts_output(self.tts.synthesize(transformed_text, target_language))
         else:
             synthesize_with_voice = getattr(self.tts, "synthesize_with_voice", None)
             if synthesize_with_voice is None:
@@ -173,7 +178,7 @@ class SpeechTranslationPipeline:
                     synthesize_with_voice,
                     self.tts.name,
                     transformed_text,
-                    request.target_language,
+                    target_language,
                     reference_audio_path=request.audio_path,
                     reference_text=transcript,
                     reference_language=request.source_language,
@@ -201,6 +206,7 @@ class SpeechTranslationPipeline:
                 "tts": self.tts.name,
             },
             warnings=warnings,
+            target_language=target_language,
         )
 
 
@@ -267,3 +273,18 @@ def _normalize_tts_output(output: bytes | TtsOutput) -> TtsOutput:
     if isinstance(output, TtsOutput):
         return output
     return TtsOutput(audio_bytes=output)
+
+
+def _resolve_target_language(requested_target_language: str, transcript: str) -> str:
+    if requested_target_language != "user-auto":
+        return requested_target_language
+    if _contains_japanese_text(transcript):
+        return "id-ID"
+    return "ja-JP"
+
+
+def _contains_japanese_text(text: str) -> bool:
+    return any(
+        ("\u3040" <= char <= "\u30ff") or ("\u4e00" <= char <= "\u9fff")
+        for char in text
+    )

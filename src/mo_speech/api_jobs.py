@@ -114,7 +114,7 @@ class TranslationJobStore:
                     "job_id": job_id,
                     "translation_backend": translation_backend,
                     "source_language": request.source_language,
-                    "target_language": request.target_language,
+                    "target_language": result.target_language or request.target_language,
                     "voice_mode": request.voice_mode,
                     "audio_mime_type": result.output_audio_mime_type,
                     **history_text_metadata_from_pipeline_result(result),

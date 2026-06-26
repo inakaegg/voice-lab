@@ -32,7 +32,50 @@ def test_pipeline_runs_required_id_to_ja_route(tmp_path: Path) -> None:
     assert result.transformed_text == "おはようございます。ありがとうございます。"
     assert result.providers == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
     assert result.output_audio_bytes.startswith(b"FAKE-WAV:ja-JP:")
+    assert result.target_language == "ja-JP"
     assert result.timings_ms["total"] >= result.timings_ms["asr"]
+
+
+def test_pipeline_user_auto_outputs_indonesian_for_japanese_transcript(tmp_path: Path) -> None:
+    request = PipelineRequest(
+        audio_path=tmp_path / "input.wav",
+        source_language="auto",
+        target_language="user-auto",
+    )
+    request.audio_path.write_bytes(b"fake audio")
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "給料を上げてください。"}),
+        translator=FakeTranslationProvider({("auto", "id-ID", "給料を上げてください。"): "Tolong naikkan gaji saya."}),
+        tts=FakeTtsProvider(),
+    )
+    pipeline.supported_routes = {("auto", "id-ID"), ("auto", "ja-JP")}
+
+    result = pipeline.run(request)
+
+    assert result.translated_text == "Tolong naikkan gaji saya."
+    assert result.output_audio_bytes.startswith(b"FAKE-WAV:id-ID:")
+    assert result.target_language == "id-ID"
+
+
+def test_pipeline_user_auto_outputs_japanese_for_non_japanese_transcript(tmp_path: Path) -> None:
+    request = PipelineRequest(
+        audio_path=tmp_path / "input.wav",
+        source_language="auto",
+        target_language="user-auto",
+    )
+    request.audio_path.write_bytes(b"fake audio")
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "Saya ingin libur tujuh hari."}),
+        translator=FakeTranslationProvider({("auto", "ja-JP", "Saya ingin libur tujuh hari."): "週休7日にしてください。"}),
+        tts=FakeTtsProvider(),
+    )
+    pipeline.supported_routes = {("auto", "id-ID"), ("auto", "ja-JP")}
+
+    result = pipeline.run(request)
+
+    assert result.translated_text == "週休7日にしてください。"
+    assert result.output_audio_bytes.startswith(b"FAKE-WAV:ja-JP:")
+    assert result.target_language == "ja-JP"
 
 
 def test_pipeline_reports_processing_progress(tmp_path: Path) -> None:

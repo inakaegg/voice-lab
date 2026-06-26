@@ -16,6 +16,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, object]:
         "timings_ms": result.timings_ms,
         "providers": result.providers,
         "warnings": result.warnings,
+        "target_language": result.target_language,
     }
 
 
