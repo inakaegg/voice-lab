@@ -4,6 +4,7 @@ import pytest
 
 from mo_speech.pipeline import PipelineProgress, PipelineRequest, SpeechTranslationPipeline, TtsOutput
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
+from mo_speech.providers.openai_api import OpenAiSeedVcTtsProvider
 
 
 def test_pipeline_runs_required_id_to_ja_route(tmp_path: Path) -> None:
@@ -287,6 +288,64 @@ def test_pipeline_merges_voice_provider_timings_and_warnings(tmp_path: Path) -> 
     assert result.timings_ms["voice_conversion"] == 34.5
     assert result.timings_ms["total"] >= 0
     assert result.warnings == ["voice conversion warning"]
+
+
+def test_openai_seed_vc_pipeline_reports_voice_conversion_progress(tmp_path: Path) -> None:
+    request = PipelineRequest(
+        audio_path=tmp_path / "input.wav",
+        source_language="ja-JP",
+        target_language="zh-CN",
+        voice_mode="convert",
+    )
+    request.audio_path.write_bytes(b"fake audio")
+    progress: list[PipelineProgress] = []
+
+    class BaseTtsProvider:
+        model = "fake-gpt-4o-mini-tts"
+        name = "fake-openai-tts"
+        audio_mime_type = "audio/wav"
+        supported_voice_modes = ("default",)
+
+        def synthesize(self, text: str, target_language: str) -> TtsOutput:
+            return TtsOutput(audio_bytes=b"openai source wav", audio_mime_type="audio/wav", timings_ms={"tts": 1.0})
+
+    class SeedVcProvider:
+        def synthesize_with_voice(
+            self,
+            text: str,
+            target_language: str,
+            *,
+            reference_audio_path: Path,
+            reference_text: str,
+            reference_language: str,
+            voice_mode: str,
+            voice_settings: dict[str, object] | None = None,
+            progress_callback=None,
+        ) -> TtsOutput:
+            if progress_callback is not None:
+                progress_callback(PipelineProgress("tts", "音声生成", "fake-openai-tts"))
+                progress_callback(PipelineProgress("voice_conversion", "声質変換", "Seed-VC"))
+            return TtsOutput(
+                audio_bytes=b"seed vc wav",
+                audio_mime_type="audio/wav",
+                timings_ms={"tts": 1.0, "voice_conversion": 2.0},
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"ja-JP": "ありがとう。"}),
+        translator=FakeTranslationProvider({("ja-JP", "zh-CN", "ありがとう。"): "谢谢。"}),
+        tts=OpenAiSeedVcTtsProvider(base_tts=BaseTtsProvider(), seed_vc_tts=SeedVcProvider()),  # type: ignore[arg-type]
+    )
+
+    pipeline.run(request, progress_callback=progress.append)
+
+    assert [item.stage for item in progress] == [
+        "asr",
+        "translation",
+        "text_transform",
+        "tts",
+        "voice_conversion",
+    ]
 
 
 def test_pipeline_preloads_providers_that_support_it() -> None:

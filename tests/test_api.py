@@ -328,6 +328,56 @@ def test_translate_speech_api_saves_local_audio_history(tmp_path, monkeypatch) -
     assert history["recordings"][0]["label"] == "ありがとう。"
 
 
+def test_translate_speech_job_reusing_history_input_does_not_duplicate_recording(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
+    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+    client = TestClient(create_app())
+
+    first_response = client.post(
+        "/api/translate-speech-jobs",
+        data={"translation_backend": "qwen", "source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
+        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
+    )
+    assert first_response.status_code == 200
+    first_job_id = first_response.json()["job_id"]
+    for _ in range(20):
+        first_status = client.get(f"/api/translate-speech-jobs/{first_job_id}").json()
+        if first_status["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("initial translation job did not finish")
+
+    initial_history = client.get("/api/audio-history").json()
+    reused_filename = initial_history["recordings"][0]["filename"]
+
+    second_response = client.post(
+        "/api/translate-speech-jobs",
+        data={
+            "translation_backend": "qwen",
+            "source_language": "ja-JP",
+            "target_language": "zh-CN",
+            "voice_mode": "default",
+            "input_history_kind": "recordings",
+            "input_history_filename": reused_filename,
+        },
+        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
+    )
+    assert second_response.status_code == 200
+    second_job_id = second_response.json()["job_id"]
+    for _ in range(20):
+        second_status = client.get(f"/api/translate-speech-jobs/{second_job_id}").json()
+        if second_status["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("reused history translation job did not finish")
+
+    history = client.get("/api/audio-history").json()
+    assert [entry["filename"] for entry in history["recordings"]] == [reused_filename]
+
+
 def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> None:
     captured_request = None
 

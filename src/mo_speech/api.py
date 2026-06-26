@@ -116,22 +116,26 @@ def create_app(
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
+        input_history_kind: Annotated[str | None, Form()] = None,
+        input_history_filename: Annotated[str | None, Form()] = None,
     ) -> dict[str, object]:
         audio_bytes = await audio.read()
         input_suffix = _upload_suffix(audio.filename)
-        recording_entry = active_audio_history_store.save_recording(
-            audio_bytes,
-            suffix=input_suffix,
-            metadata={
-                "endpoint": "translate-speech",
-                "translation_backend": translation_backend,
-                "source_language": source_language,
-                "target_language": target_language,
-                "voice_mode": voice_mode,
-                "filename": audio.filename or "",
-                "content_type": audio.content_type or "",
-            },
-        )
+        recording_entry = None
+        if not _is_reused_history_input(active_audio_history_store, input_history_kind, input_history_filename):
+            recording_entry = active_audio_history_store.save_recording(
+                audio_bytes,
+                suffix=input_suffix,
+                metadata={
+                    "endpoint": "translate-speech",
+                    "translation_backend": translation_backend,
+                    "source_language": source_language,
+                    "target_language": target_language,
+                    "voice_mode": voice_mode,
+                    "filename": audio.filename or "",
+                    "content_type": audio.content_type or "",
+                },
+            )
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
@@ -188,22 +192,26 @@ def create_app(
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
+        input_history_kind: Annotated[str | None, Form()] = None,
+        input_history_filename: Annotated[str | None, Form()] = None,
     ) -> dict[str, object]:
         audio_bytes = await audio.read()
         input_suffix = _upload_suffix(audio.filename)
-        recording_entry = active_audio_history_store.save_recording(
-            audio_bytes,
-            suffix=input_suffix,
-            metadata={
-                "endpoint": "translate-speech-jobs",
-                "translation_backend": translation_backend,
-                "source_language": source_language,
-                "target_language": target_language,
-                "voice_mode": voice_mode,
-                "filename": audio.filename or "",
-                "content_type": audio.content_type or "",
-            },
-        )
+        recording_entry = None
+        if not _is_reused_history_input(active_audio_history_store, input_history_kind, input_history_filename):
+            recording_entry = active_audio_history_store.save_recording(
+                audio_bytes,
+                suffix=input_suffix,
+                metadata={
+                    "endpoint": "translate-speech-jobs",
+                    "translation_backend": translation_backend,
+                    "source_language": source_language,
+                    "target_language": target_language,
+                    "voice_mode": voice_mode,
+                    "filename": audio.filename or "",
+                    "content_type": audio.content_type or "",
+                },
+            )
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename), delete=False) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
@@ -873,6 +881,20 @@ def _serialize_audio_history_entry(kind: str, entry: AudioHistoryEntry) -> dict[
         "created_at": metadata.get("created_at", ""),
         "size_bytes": metadata.get("size_bytes", entry.audio_path.stat().st_size),
     }
+
+
+def _is_reused_history_input(
+    store: AudioHistoryStore,
+    input_history_kind: str | None,
+    input_history_filename: str | None,
+) -> bool:
+    if not input_history_kind or not input_history_filename:
+        return False
+    try:
+        store.resolve_audio_path(input_history_kind, input_history_filename)
+    except (FileNotFoundError, ValueError):
+        return False
+    return True
 
 
 def _history_text_metadata_from_pipeline_result(result: PipelineResult) -> dict[str, str]:

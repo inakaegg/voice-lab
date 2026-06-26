@@ -144,6 +144,7 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - `text_transform_options`: 任意の加工設定。例 `{"suffix":"モー"}`
 - multipart formでは、初期実装として `text_transform_suffix` と `text_transform_unit` を受け取る。
 - `voice_mode=convert` でSeed-VCを使う場合は、`seed_vc_diffusion_steps`、`seed_vc_reference_max_seconds`、`seed_vc_length_adjust`、`seed_vc_inference_cfg_rate` を任意指定できる。
+- `voice_mode=convert` では、処理状況UIがTTSと声質変換を別stageとして表示し、Seed-VC開始後は `声質変換` を実行中として表示する。
 
 UIでは、実行内容を以下の構造にする。
 
@@ -286,6 +287,7 @@ UIでの読み上げ言語の扱い:
 - UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
 - 履歴一覧と再利用対象は保存済み音声ファイルだけとし、`.json` metadata、`.DS_Store`、その他の非音声ファイルは表示しない。
 - UIでは、保存済み音声を次の入力音声またはVC参照音声へ再利用できる。
+- 履歴音声を次の入力音声へ再利用した場合、同じ音声を新しい `recordings` として重複保存しない。新規録音または新規ファイルアップロードだけを入力履歴へ保存する。
 - UIでは、保存済み音声の処理種別だけでなく、翻訳結果や読み上げテキストの短いプレビューを表示する。
 - 翻訳出力やテキスト読み上げ出力の履歴では、実際にTTSへ渡したテキストを音声と紐づけて保存し、UIからテキスト読み上げ入力へ再利用できる。
 - 履歴音声を入力またはVC参照に指定する場合、ブラウザの制約でファイルinput欄そのものには値を入れられないため、録音詳細とステータスに選択済みファイル名を表示する。

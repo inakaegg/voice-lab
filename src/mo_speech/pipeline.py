@@ -153,16 +153,16 @@ class SpeechTranslationPipeline:
         warnings: list[str] = []
 
         started = perf_counter()
-        _notify_progress(
-            progress_callback,
-            "tts",
-            "音声生成",
-            self.tts.name,
-            transcript=transcript,
-            translated_text=translated_text,
-            transformed_text=transformed_text,
-        )
         if request.voice_mode == "default":
+            _notify_progress(
+                progress_callback,
+                "tts",
+                "音声生成",
+                self.tts.name,
+                transcript=transcript,
+                translated_text=translated_text,
+                transformed_text=transformed_text,
+            )
             tts_output = _normalize_tts_output(self.tts.synthesize(transformed_text, request.target_language))
         else:
             synthesize_with_voice = getattr(self.tts, "synthesize_with_voice", None)

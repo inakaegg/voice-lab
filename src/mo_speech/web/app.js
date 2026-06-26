@@ -156,6 +156,7 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let recordedBlob = null;
 let recordedFileName = "recording.audio";
+let inputHistorySource = null;
 let referenceAudioBlob = null;
 let referenceAudioFileName = "reference.audio";
 let currentOutputBlob = null;
@@ -257,6 +258,7 @@ async function startRecording() {
   recordedChunks = [];
   recordedBlob = null;
   recordedFileName = "recording.audio";
+  inputHistorySource = null;
   clearInputAudioPreview();
   recordingDetails.textContent = "録音中";
   startInputLevelMeter(stream);
@@ -309,6 +311,7 @@ function handleAudioFileChange() {
   recordedBlob = null;
   recordedChunks = [];
   recordedFileName = "recording.audio";
+  inputHistorySource = null;
   stopInputLevelMeter();
   if (file) {
     recordingLabel.textContent = "ファイル選択済み";
@@ -514,6 +517,10 @@ async function submitTranslation(event) {
       formData.append("audio", file);
     } else if (recordedBlob) {
       formData.append("audio", recordedBlob, recordedFileName);
+      if (inputHistorySource) {
+        formData.append("input_history_kind", inputHistorySource.kind);
+        formData.append("input_history_filename", inputHistorySource.filename);
+      }
     } else {
       throw new Error("音声ファイルを選択するか録音してください");
     }
@@ -1037,7 +1044,10 @@ function renderAudioHistoryList(container, entries) {
 async function useHistoryAudioAsInput(entry) {
   try {
     const { blob, filename } = await fetchHistoryAudioBlob(entry);
-    useAudioBlobAsInput(blob, filename, "履歴音声を入力に設定しました");
+    useAudioBlobAsInput(blob, filename, "履歴音声を入力に設定しました", {
+      kind: entry.kind,
+      filename: entry.filename,
+    });
   } catch (error) {
     renderError(error.message || "履歴音声を入力に設定できませんでした");
   }
@@ -1062,11 +1072,12 @@ async function fetchHistoryAudioBlob(entry) {
   return { blob, filename };
 }
 
-function useAudioBlobAsInput(blob, filename, message) {
+function useAudioBlobAsInput(blob, filename, message, historySource = null) {
   audioInput.value = "";
   recordedBlob = blob;
   recordedChunks = [];
   recordedFileName = filename || `input.${extensionForMimeType(blob.type || "audio/wav")}`;
+  inputHistorySource = historySource;
   renderInputAudioPreview(blob, recordedFileName);
   recordingLabel.textContent = "入力に設定済み";
   setStatus(message || "入力音声を設定しました");

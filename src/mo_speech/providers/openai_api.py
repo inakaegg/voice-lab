@@ -15,7 +15,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from ..pipeline import PipelineProgress, PipelineRequest, PipelineResult, SpeechTranslationPipeline, TtsOutput
+from ..pipeline import PipelineProgress, PipelineRequest, PipelineResult, ProgressCallback, SpeechTranslationPipeline, TtsOutput
 from .voice import SeedVcVoiceConversionTtsProvider
 
 
@@ -250,11 +250,31 @@ class OpenAiSeedVcTtsProvider:
     def synthesize(self, text: str, target_language: str) -> TtsOutput:
         return self.base_tts.synthesize(text, target_language)
 
-    def synthesize_with_voice(self, *args, **kwargs) -> TtsOutput:
-        if kwargs.get("voice_mode") != "convert":
-            return self.base_tts.synthesize(args[0], args[1])
+    def synthesize_with_voice(
+        self,
+        text: str,
+        target_language: str,
+        *,
+        reference_audio_path: Path,
+        reference_text: str,
+        reference_language: str,
+        voice_mode: str,
+        voice_settings: dict[str, object] | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> TtsOutput:
+        if voice_mode != "convert":
+            return self.base_tts.synthesize(text, target_language)
         assert self.seed_vc_tts is not None
-        return self.seed_vc_tts.synthesize_with_voice(*args, **kwargs)
+        return self.seed_vc_tts.synthesize_with_voice(
+            text,
+            target_language,
+            reference_audio_path=reference_audio_path,
+            reference_text=reference_text,
+            reference_language=reference_language,
+            voice_mode=voice_mode,
+            voice_settings=voice_settings,
+            progress_callback=progress_callback,
+        )
 
 
 def create_openai_pipeline() -> SpeechTranslationPipeline:
