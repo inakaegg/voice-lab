@@ -109,7 +109,7 @@ def _handle_translation(payload: dict[str, object], handler_started: float) -> d
 
 
 def _handle_warmup(payload: dict[str, object], handler_started: float) -> dict[str, object]:
-    translation_backend = str(payload.get("translation_backend", "qwen"))
+    translation_backend = str(payload.get("translation_backend", "openai"))
     preload_translation = _optional_bool(payload.get("preload_translation"))
     preload_voice_conversion = _optional_bool(payload.get("preload_voice_conversion"))
     if preload_translation is None:

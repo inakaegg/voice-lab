@@ -180,6 +180,29 @@ def test_runpod_handler_warms_translation_and_voice_conversion(monkeypatch: pyte
     assert payload["serverless_timings_ms"]["voice_conversion_service_load"] == 34.0
 
 
+def test_runpod_handler_warmup_defaults_to_openai_translation_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def fake_translation_pipeline(translation_backend):
+        calls.append(("translation", translation_backend))
+        return object(), 12.0
+
+    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "warmup",
+                "preload_translation": True,
+                "preload_voice_conversion": False,
+            }
+        }
+    )
+
+    assert calls == [("translation", "openai")]
+    assert payload["providers"] == {"translation_backend": "openai"}
+
+
 def test_runpod_preload_defaults_to_openai_translation_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
