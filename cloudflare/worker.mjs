@@ -1,6 +1,10 @@
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
+const USER_SETTINGS_KV_KEY = "user-settings";
+const AUDIO_HISTORY_INDEX_KV_KEY = "audio-history:index";
+const AUDIO_HISTORY_DEFAULT_LIMIT = 10;
+const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
@@ -39,12 +43,24 @@ async function handleApiRequest(request, env, ctx, url) {
       return jsonResponse(await runtimePayload(env));
     }
     if (request.method === "GET" && url.pathname === "/api/user-settings") {
-      return jsonResponse(readUserSettings(env));
+      return jsonResponse(await readUserSettings(env));
     }
     if (request.method === "PUT" && url.pathname === "/api/user-settings") {
       const payload = await request.json();
-      ephemeralUserSettings = coerceUserSettings(payload);
-      return jsonResponse(ephemeralUserSettings);
+      return jsonResponse(await writeUserSettings(payload, env));
+    }
+    if (request.method === "GET" && url.pathname === "/api/audio-history") {
+      return jsonResponse(await listAudioHistory(env));
+    }
+    if (request.method === "POST" && url.pathname === "/api/audio-history/outputs") {
+      return jsonResponse(await saveUploadedAudioHistoryOutput(request, env));
+    }
+    if ((request.method === "GET" || request.method === "DELETE") && url.pathname.startsWith("/api/audio-history/")) {
+      const [, , , kind, filename] = url.pathname.split("/");
+      if (request.method === "GET") {
+        return getAudioHistoryFile(kind, decodeURIComponent(filename || ""), env);
+      }
+      return jsonResponse(await deleteAudioHistoryFile(kind, decodeURIComponent(filename || ""), env));
     }
     if (request.method === "POST" && url.pathname === "/api/user-display-text") {
       return jsonResponse(await createUserDisplayText(await request.json(), env));
@@ -232,7 +248,14 @@ function workerCountsFromHealth(workers) {
   return counts;
 }
 
-function readUserSettings(env) {
+async function readUserSettings(env) {
+  const kv = stateKv(env);
+  if (kv) {
+    const stored = await kvGetJson(kv, USER_SETTINGS_KV_KEY, null);
+    if (stored && typeof stored === "object") {
+      return coerceUserSettings(stored);
+    }
+  }
   if (ephemeralUserSettings) {
     return ephemeralUserSettings;
   }
@@ -244,6 +267,26 @@ function readUserSettings(env) {
     }
   }
   return DEFAULT_USER_SETTINGS;
+}
+
+async function writeUserSettings(payload, env) {
+  const settings = await prepareUserSettingsForWrite(payload, env);
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(USER_SETTINGS_KV_KEY, JSON.stringify(settings));
+  } else {
+    ephemeralUserSettings = settings;
+  }
+  return settings;
+}
+
+async function prepareUserSettingsForWrite(payload, env) {
+  const settings = coerceUserSettings(payload);
+  if (settings.joke_variation_count <= 0 || settings.joke_texts.length === 0) {
+    return coerceUserSettings({ ...settings, joke_variants: [] });
+  }
+  const jokeVariants = await generateJokeVariants(settings.joke_texts, settings.joke_variation_count, env);
+  return coerceUserSettings({ ...settings, joke_variants: jokeVariants });
 }
 
 function coerceUserSettings(payload = {}) {
@@ -273,17 +316,70 @@ function coerceTextList(value) {
     .slice(0, 20);
 }
 
+async function generateJokeVariants(jokeTexts, variationCount, env) {
+  const rawText = await openAiText(env, {
+    model: env.OPENAI_JOKE_VARIATION_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+    instructions:
+      "You create short joke text variations for a speech conversion app. Keep each variation in the same language as its source joke. Return only strict JSON in this shape: {\"variants\":[[\"variant 1 for source 1\",\"variant 2 for source 1\"],[\"variant 1 for source 2\",\"variant 2 for source 2\"]]}. Each inner array must correspond to the source joke at the same index.",
+    input: JSON.stringify({ jokes: jokeTexts, variants_per_joke: variationCount }),
+  });
+  return parseJokeVariantsResponse(rawText, jokeTexts.length, variationCount);
+}
+
+function parseJokeVariantsResponse(rawText, sourceCount, variationCount) {
+  let text = String(rawText || "").trim();
+  if (text.startsWith("```")) {
+    text = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  }
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch (error) {
+    throw httpError(502, "joke variation response was not valid JSON");
+  }
+  const variants = Array.isArray(payload) ? payload : payload?.variants;
+  if (!Array.isArray(variants)) {
+    throw httpError(502, "joke variation response did not include variants");
+  }
+  let matrix = [];
+  if (variants.every((row) => Array.isArray(row))) {
+    matrix = variants.slice(0, sourceCount).map((row) =>
+      row.map((item) => String(item).trim()).filter(Boolean).slice(0, variationCount)
+    );
+  } else {
+    const flat = variants.map((item) => String(item).trim()).filter(Boolean);
+    matrix = Array.from({ length: sourceCount }, (_, index) =>
+      flat.slice(index * variationCount, (index + 1) * variationCount)
+    );
+  }
+  if (matrix.length < sourceCount || matrix.some((row) => row.length < variationCount)) {
+    throw httpError(502, "joke variation response did not include enough variants");
+  }
+  const ordered = [];
+  for (let variantIndex = 0; variantIndex < variationCount; variantIndex += 1) {
+    for (let sourceIndex = 0; sourceIndex < sourceCount; sourceIndex += 1) {
+      ordered.push(matrix[sourceIndex][variantIndex]);
+    }
+  }
+  return ordered;
+}
+
 async function createTranslationJob(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
+  const audioBase64 = await blobToBase64(audio);
+  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
+  const sourceLanguage = stringFormValue(form, "source_language", "auto");
+  const targetLanguage = stringFormValue(form, "target_language", "user-auto");
+  const voiceMode = stringFormValue(form, "voice_mode", "default");
   const payload = {
     operation_mode: "translation",
-    audio_base64: await blobToBase64(audio),
-    audio_mime_type: normalizeMimeType(audio.type || guessAudioMimeType(audio.name)),
+    audio_base64: audioBase64,
+    audio_mime_type: audioMimeType,
     translation_backend: env.RUNPOD_SERVERLESS_TRANSLATION_BACKEND || "openai",
-    source_language: stringFormValue(form, "source_language", "auto"),
-    target_language: stringFormValue(form, "target_language", "user-auto"),
-    voice_mode: stringFormValue(form, "voice_mode", "default"),
+    source_language: sourceLanguage,
+    target_language: targetLanguage,
+    voice_mode: voiceMode,
     text_transform: optionalStringFormValue(form, "text_transform"),
     text_transform_options: parseJsonFormValue(form, "text_transform_options", {}),
     text_transform_suffix: optionalStringFormValue(form, "text_transform_suffix"),
@@ -291,7 +387,23 @@ async function createTranslationJob(request, env) {
     ...seedVcPayloadFromForm(form),
   };
   const body = await submitRunpodJob(env, payload);
-  return jobSnapshotFromRunpod(body, "translation");
+  const snapshot = jobSnapshotFromRunpod(body, "translation");
+  await saveAudioHistoryEntry(env, "recordings", {
+    audio_base64: audioBase64,
+    audio_mime_type: audioMimeType,
+    filename: `${safeHistoryToken(snapshot.job_id || crypto.randomUUID())}-input.${extensionForMimeType(audioMimeType)}`,
+    metadata: {
+      endpoint: "translate-speech-jobs",
+      translation_backend: payload.translation_backend,
+      source_language: sourceLanguage,
+      target_language: targetLanguage,
+      voice_mode: voiceMode,
+      filename: audio.name || "",
+      original_content_type: audio.type || audioMimeType,
+      original_audio_suffix: `.${extensionForMimeType(audioMimeType)}`,
+    },
+  });
+  return snapshot;
 }
 
 async function createVoiceConversionJob(request, env) {
@@ -327,7 +439,11 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
     throw httpError(400, "job_id is required");
   }
   const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
-  return jobSnapshotFromRunpod(body, kind);
+  const snapshot = jobSnapshotFromRunpod(body, kind);
+  if (snapshot.status === "succeeded" && snapshot.result?.audio_base64) {
+    await saveRunpodOutputHistory(env, jobId, kind, snapshot.result);
+  }
+  return snapshot;
 }
 
 function jobSnapshotFromRunpod(body, kind) {
@@ -427,7 +543,7 @@ async function createUserTextOutput(payload, env) {
     : {};
   const transformedText = await transformUserText(translatedText, targetLanguage, transformOptions, env);
   const tts = await openAiSpeech(env, transformedText);
-  return {
+  const result = {
     transcript: String(payload.transcript || ""),
     translated_text: translatedText,
     transformed_text: transformedText,
@@ -442,6 +558,13 @@ async function createUserTextOutput(payload, env) {
     warnings: [],
     target_language: targetLanguage,
   };
+  await savePipelineOutputHistory(env, result, {
+    endpoint: "user-text-output",
+    translation_backend: "openai",
+    target_language: targetLanguage,
+    voice_mode: "default",
+  });
+  return result;
 }
 
 async function createUserJokeOutput(payload, env) {
@@ -456,7 +579,7 @@ async function createUserJokeOutput(payload, env) {
     input: text,
   });
   const tts = await openAiSpeech(env, translatedText || text);
-  return {
+  const result = {
     transcript: text,
     translated_text: translatedText || text,
     transformed_text: translatedText || text,
@@ -471,6 +594,372 @@ async function createUserJokeOutput(payload, env) {
     warnings: [],
     target_language: targetLanguage,
   };
+  await savePipelineOutputHistory(env, result, {
+    endpoint: "user-joke-output",
+    translation_backend: "openai",
+    target_language: targetLanguage,
+    voice_mode: "default",
+  });
+  return result;
+}
+
+async function listAudioHistory(env) {
+  const kv = stateKv(env);
+  return {
+    settings: audioHistorySettings(env),
+    recordings: kv ? (await readAudioHistoryIndex(env)).recordings.map(serializeAudioHistoryEntry) : [],
+    outputs: kv ? (await readAudioHistoryIndex(env)).outputs.map(serializeAudioHistoryEntry) : [],
+  };
+}
+
+async function saveUploadedAudioHistoryOutput(request, env) {
+  const form = await request.formData();
+  const audio = requiredBlob(form, "audio");
+  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
+  const saved = await saveAudioHistoryEntry(env, "outputs", {
+    audio_base64: await blobToBase64(audio),
+    audio_mime_type: audioMimeType,
+    metadata: {
+      endpoint: stringFormValue(form, "endpoint", "manual"),
+      translation_backend: stringFormValue(form, "translation_backend", ""),
+      target_language: stringFormValue(form, "target_language", ""),
+      filename: audio.name || "",
+      content_type: audio.type || audioMimeType,
+    },
+  });
+  return {
+    saved: Boolean(saved),
+    entry: saved ? serializeAudioHistoryEntry(saved) : null,
+  };
+}
+
+async function getAudioHistoryFile(kind, filename, env) {
+  validateAudioHistoryPath(kind, filename);
+  const kv = requireStateKv(env);
+  const index = await readAudioHistoryIndex(env);
+  const entry = index[kind].find((item) => item.filename === filename);
+  if (!entry) {
+    throw httpError(404, "audio history file not found");
+  }
+  const audioBase64 = await kv.get(entry.audio_key);
+  if (!audioBase64) {
+    throw httpError(404, "audio history file not found");
+  }
+  return new Response(base64ToBytes(audioBase64), {
+    headers: {
+      "Content-Type": entry.media_type || "application/octet-stream",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function deleteAudioHistoryFile(kind, filename, env) {
+  validateAudioHistoryPath(kind, filename);
+  const kv = requireStateKv(env);
+  const index = await readAudioHistoryIndex(env);
+  const existing = index[kind].find((entry) => entry.filename === filename);
+  if (!existing) {
+    throw httpError(404, "audio history file not found");
+  }
+  index[kind] = index[kind].filter((entry) => entry.filename !== filename);
+  await kv.delete(existing.audio_key);
+  await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
+  return { deleted: true };
+}
+
+async function savePipelineOutputHistory(env, result, metadata = {}) {
+  return saveAudioHistoryEntry(env, "outputs", {
+    audio_base64: result.audio_base64,
+    audio_mime_type: result.audio_mime_type || "audio/wav",
+    metadata: {
+      ...metadata,
+      audio_mime_type: result.audio_mime_type || "audio/wav",
+      ...historyTextMetadataFromResult(result),
+    },
+  });
+}
+
+async function saveRunpodOutputHistory(env, jobId, kind, result) {
+  const endpoint = kind === "voice_conversion" ? "voice-conversion-jobs" : "translate-speech-jobs";
+  return saveAudioHistoryEntry(env, "outputs", {
+    audio_base64: result.audio_base64,
+    audio_mime_type: result.audio_mime_type || "audio/wav",
+    filename: `${safeHistoryToken(jobId)}-output.${extensionForMimeType(result.audio_mime_type || "audio/wav")}`,
+    metadata: {
+      endpoint,
+      translation_backend: kind === "translation" ? "runpod_serverless" : "",
+      voice_backend: kind === "voice_conversion" ? "seed-vc" : "",
+      target_language: result.target_language || "",
+      voice_mode: kind === "voice_conversion" ? "convert" : "",
+      audio_mime_type: result.audio_mime_type || "audio/wav",
+      ...historyTextMetadataFromResult(result),
+    },
+  });
+}
+
+async function saveAudioHistoryEntry(env, kind, { audio_base64, audio_mime_type, filename = "", metadata = {} }) {
+  const kv = stateKv(env);
+  if (!kv || !audio_base64 || !AUDIO_HISTORY_KINDS.has(kind)) {
+    return null;
+  }
+  const index = await readAudioHistoryIndex(env);
+  const mediaType = normalizeMimeType(audio_mime_type) || "application/octet-stream";
+  const safeFilename = safeHistoryFilename(
+    filename || `${new Date().toISOString().replace(/[:.]/g, "")}-${crypto.randomUUID()}.${extensionForMimeType(mediaType)}`,
+  );
+  const audioKey = `audio-history:${kind}:${safeFilename}:audio`;
+  const normalizedMetadata = normalizeMetadata(metadata);
+  const entry = {
+    kind,
+    filename: safeFilename,
+    audio_key: audioKey,
+    media_type: mediaType,
+    size_bytes: base64ByteLength(audio_base64),
+    created_at: new Date().toISOString(),
+    metadata: normalizedMetadata,
+  };
+  await kv.put(audioKey, audio_base64);
+  index[kind] = [entry, ...index[kind].filter((item) => item.filename !== safeFilename)];
+  await trimAudioHistoryIndex(kv, index, kind, audioHistoryLimit(env));
+  await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
+  return entry;
+}
+
+async function trimAudioHistoryIndex(kv, index, kind, limit) {
+  const overflow = index[kind].slice(limit);
+  index[kind] = index[kind].slice(0, limit);
+  await Promise.all(overflow.map((entry) => kv.delete(entry.audio_key)));
+}
+
+async function readAudioHistoryIndex(env) {
+  const kv = stateKv(env);
+  if (!kv) {
+    return { recordings: [], outputs: [] };
+  }
+  const stored = await kvGetJson(kv, AUDIO_HISTORY_INDEX_KV_KEY, null);
+  return {
+    recordings: normalizeAudioHistoryEntries(stored?.recordings, "recordings"),
+    outputs: normalizeAudioHistoryEntries(stored?.outputs, "outputs"),
+  };
+}
+
+function normalizeAudioHistoryEntries(entries, kind) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry && typeof entry === "object" && entry.filename && entry.audio_key)
+    .map((entry) => ({
+      kind,
+      filename: String(entry.filename),
+      audio_key: String(entry.audio_key),
+      media_type: normalizeMimeType(entry.media_type) || "application/octet-stream",
+      size_bytes: Number(entry.size_bytes || 0),
+      created_at: String(entry.created_at || ""),
+      metadata: normalizeMetadata(entry.metadata || {}),
+    }));
+}
+
+function serializeAudioHistoryEntry(entry) {
+  const metadata = normalizeMetadata(entry.metadata || {});
+  const preview = metadataTextPreview(metadata);
+  return {
+    kind: entry.kind,
+    filename: entry.filename,
+    url: `/api/audio-history/${entry.kind}/${encodeURIComponent(entry.filename)}`,
+    label: audioHistoryLabel(entry.kind, metadata, preview),
+    media_type: entry.media_type,
+    size_bytes: entry.size_bytes,
+    created_at: entry.created_at,
+    metadata,
+    text_preview: preview,
+    tts_text: String(metadata.tts_text || ""),
+    details: audioHistoryDetails(entry.kind, metadata),
+    playable_hint: entry.size_bytes > 0 && entry.size_bytes < 128
+      ? "音声ファイルが小さすぎます。テスト用または失敗したダミー出力の可能性があります。"
+      : "",
+  };
+}
+
+function audioHistorySettings(env) {
+  const enabled = Boolean(stateKv(env));
+  const root = enabled ? "Cloudflare Workers KV: MO_SPEECH_KV" : "Cloudflare Workers KV未設定";
+  return {
+    enabled,
+    root,
+    resolved_root: root,
+    recordings_dir: "audio-history:recordings",
+    outputs_dir: "audio-history:outputs",
+    limit: audioHistoryLimit(env),
+    env_var: "CLOUDFLARE_AUDIO_HISTORY_LIMIT",
+  };
+}
+
+function audioHistoryLimit(env) {
+  return clampInt(env.CLOUDFLARE_AUDIO_HISTORY_LIMIT || AUDIO_HISTORY_DEFAULT_LIMIT, 1, 50, AUDIO_HISTORY_DEFAULT_LIMIT);
+}
+
+function historyTextMetadataFromResult(result) {
+  const transformed = textPreview(result.transformed_text);
+  const translated = textPreview(result.translated_text);
+  const transcript = textPreview(result.transcript);
+  const ttsText = String(result.transformed_text || result.translated_text || "").trim();
+  return {
+    text_preview: transformed || translated || transcript,
+    tts_text: ttsText,
+    transcript_preview: transcript,
+    translated_text_preview: translated,
+    transformed_text_preview: transformed,
+  };
+}
+
+function metadataTextPreview(metadata) {
+  for (const key of ["text_preview", "transformed_text_preview", "translated_text_preview", "transcript_preview"]) {
+    const value = String(metadata[key] || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function audioHistoryLabel(kind, metadata, preview) {
+  if (preview) {
+    return preview;
+  }
+  const endpoint = String(metadata.endpoint || "");
+  const filename = String(metadata.filename || metadata.audio_file || "");
+  if (endpoint === "voice-conversion-jobs") {
+    return kind === "outputs" ? "VC出力" : filename || "VC入力音声";
+  }
+  if (endpoint === "user-joke-output") {
+    return "ジョーク音声";
+  }
+  if (endpoint === "user-text-output") {
+    return "ユーザー画面TTS";
+  }
+  if (endpoint === "openai-realtime-streaming") {
+    return "Realtime streaming出力";
+  }
+  if (endpoint.startsWith("translate-speech")) {
+    return kind === "outputs" ? "翻訳音声" : filename || "入力音声";
+  }
+  return filename || (kind === "outputs" ? "出力音声" : "入力音声");
+}
+
+function audioHistoryDetails(kind, metadata) {
+  const details = [String(metadata.endpoint || kind)];
+  const route = audioHistoryRoute(metadata);
+  if (route) {
+    details.push(route);
+  }
+  for (const key of ["translation_backend", "tts_backend", "voice_backend"]) {
+    const value = String(metadata[key] || "");
+    if (value) {
+      details.push(value);
+    }
+  }
+  const filename = String(metadata.filename || "");
+  if (filename) {
+    details.push(filename);
+  }
+  return details;
+}
+
+function audioHistoryRoute(metadata) {
+  const sourceLanguage = String(metadata.source_language || "");
+  const targetLanguage = String(metadata.target_language || "");
+  if (sourceLanguage && targetLanguage) {
+    return `${sourceLanguage} -> ${targetLanguage}`;
+  }
+  return targetLanguage;
+}
+
+function textPreview(value) {
+  const text = String(value || "").trim();
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+function normalizeMetadata(metadata) {
+  const normalized = {};
+  if (!metadata || typeof metadata !== "object") {
+    return normalized;
+  }
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    normalized[key] = typeof value === "string" ? value : String(value);
+  }
+  return normalized;
+}
+
+function validateAudioHistoryPath(kind, filename) {
+  if (!AUDIO_HISTORY_KINDS.has(kind)) {
+    throw httpError(400, "unsupported audio history kind");
+  }
+  if (!filename || filename.includes("/") || filename.includes("\\")) {
+    throw httpError(400, "invalid audio history filename");
+  }
+}
+
+function stateKv(env) {
+  return env.MO_SPEECH_KV || null;
+}
+
+function requireStateKv(env) {
+  const kv = stateKv(env);
+  if (!kv) {
+    throw httpError(503, "MO_SPEECH_KV binding is required");
+  }
+  return kv;
+}
+
+async function kvGetJson(kv, key, fallback) {
+  const raw = await kv.get(key);
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function extensionForMimeType(mimeType) {
+  const normalized = normalizeMimeType(mimeType);
+  if (normalized === "audio/webm" || normalized === "video/webm") return "webm";
+  if (normalized === "audio/mpeg") return "mp3";
+  if (normalized === "audio/mp4" || normalized === "audio/m4a" || normalized === "audio/x-m4a") return "m4a";
+  if (normalized === "audio/ogg") return "ogg";
+  if (normalized === "audio/aac") return "aac";
+  if (normalized === "audio/flac") return "flac";
+  return "wav";
+}
+
+function safeHistoryToken(value) {
+  return String(value || "history").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 96) || "history";
+}
+
+function safeHistoryFilename(value) {
+  const filename = safeHistoryToken(value);
+  return filename.includes(".") ? filename : `${filename}.wav`;
+}
+
+function base64ByteLength(base64) {
+  const value = String(base64 || "").replace(/\s/g, "");
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((value.length * 3) / 4) - padding);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(String(base64 || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 async function transformUserText(text, targetLanguage, options, env) {
@@ -732,7 +1221,7 @@ function jsonResponse(payload, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("Content-Type", "application/json; charset=utf-8");
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type");
   return new Response(init.status === 204 ? null : JSON.stringify(payload), { ...init, headers });
 }

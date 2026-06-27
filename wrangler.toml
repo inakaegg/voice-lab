@@ -4,6 +4,10 @@ compatibility_date = "2025-06-27"
 
 assets = { directory = "./src/mo_speech/web", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
 
+[[kv_namespaces]]
+binding = "MO_SPEECH_KV"
+id = "8eeb96d03f7e4d97ad387a654225b649"
+
 [vars]
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
@@ -18,4 +22,5 @@ OPENAI_TTS_VOICE = "coral"
 OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
+CLOUDFLARE_AUDIO_HISTORY_LIMIT = "10"
 USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
