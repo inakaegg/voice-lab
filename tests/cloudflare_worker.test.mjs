@@ -3,12 +3,30 @@ import test from "node:test";
 
 import { handleRequest } from "../cloudflare/worker.mjs";
 
-test("Cloudflare worker maps translate form data to RunPod async job", async () => {
+test("Cloudflare worker translates speech with OpenAI and stores a completed job", async () => {
   const calls = [];
   const env = fakeEnv(async (url, init) => {
-    calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
-    return json({ id: "job-translate", status: "IN_QUEUE" });
-  });
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return new Response("Halo Jepang", { status: 200 });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      if (calls.filter((call) => call.url === url).length === 1) {
+        return json({
+          output_text: JSON.stringify({
+            source_language: "id-ID",
+            target_language: "ja-JP",
+            translated_text: "こんにちは日本",
+          }),
+        });
+      }
+      return json({ output_text: "こんにちは日本" });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
   const form = new FormData();
   form.append("audio", new Blob(["webm"], { type: "audio/webm;codecs=opus" }), "recording.webm");
   form.append("source_language", "auto");
@@ -22,17 +40,28 @@ test("Cloudflare worker maps translate form data to RunPod async job", async () 
     env,
   );
   const payload = await response.json();
+  const polled = await (
+    await handleRequest(new Request(`https://example.com/api/translate-speech-jobs/${payload.job_id}`), env)
+  ).json();
+  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
 
   assert.equal(response.status, 200);
-  assert.equal(payload.job_id, "job-translate");
-  assert.equal(payload.status, "queued");
-  assert.equal(calls[0].url, "https://api.runpod.ai/v2/endpoint/run");
-  assert.equal(calls[0].init.headers.Authorization, "Bearer runpod-secret");
-  assert.equal(calls[0].body.input.operation_mode, "translation");
-  assert.equal(calls[0].body.input.translation_backend, "openai");
-  assert.equal(calls[0].body.input.audio_mime_type, "audio/webm");
-  assert.equal(calls[0].body.input.audio_base64, Buffer.from("webm").toString("base64"));
-  assert.deepEqual(calls[0].body.input.text_transform_options, { variation: true });
+  assert.match(payload.job_id, /^cf-/);
+  assert.equal(payload.status, "succeeded");
+  assert.equal(payload.result.transcript, "Halo Jepang");
+  assert.equal(payload.result.translated_text, "こんにちは日本");
+  assert.equal(payload.result.transformed_text, "こんにちは日本");
+  assert.equal(payload.result.target_language, "ja-JP");
+  assert.equal(payload.result.audio_base64, Buffer.from([7, 8, 9]).toString("base64"));
+  assert.deepEqual(polled, payload);
+  assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
+  assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
+  assert.equal(calls[2].url, "https://api.openai.com/v1/responses");
+  assert.equal(calls[3].url, "https://api.openai.com/v1/audio/speech");
+  assert.equal(history.recordings.length, 1);
+  assert.equal(history.recordings[0].metadata.original_content_type, "audio/webm;codecs=opus");
+  assert.equal(history.outputs.length, 1);
+  assert.equal(history.outputs[0].metadata.endpoint, "translate-speech-jobs");
 });
 
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {
@@ -59,15 +88,36 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   assert.equal(calls[0].body.input.reference_audio_mime_type, "audio/webm");
 });
 
-test("Cloudflare worker maps completed RunPod status to local job snapshot", async () => {
+test("Cloudflare worker saves voice conversion source audio to KV history", async () => {
+  const env = fakeEnv(
+    async () => json({ id: "job-vc", status: "IN_QUEUE" }),
+    { kv: fakeKv() },
+  );
+  const form = new FormData();
+  form.append("voice_backend", "seed-vc");
+  form.append("source_audio", new Blob(["source"], { type: "audio/webm;codecs=opus" }), "source.webm");
+  form.append("reference_audio", new Blob(["reference"], { type: "audio/webm;codecs=opus" }), "reference.webm");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+
+  assert.equal(response.status, 200);
+  assert.equal(history.recordings.length, 1);
+  assert.equal(history.recordings[0].filename, "job-vc-source.webm");
+  assert.equal(history.recordings[0].metadata.endpoint, "voice-conversion-jobs");
+  assert.equal(history.recordings[0].metadata.content_type, "audio/webm;codecs=opus");
+});
+
+test("Cloudflare worker maps completed RunPod voice conversion status to local job snapshot", async () => {
   const env = fakeEnv(
     async () =>
       json({
-        id: "job-translate",
+        id: "job-vc",
         status: "COMPLETED",
         output: {
-          transcript: "Halo",
-          translated_text: "こんにちは",
           audio_mime_type: "audio/wav",
           audio_base64: "AAAA",
         },
@@ -76,7 +126,7 @@ test("Cloudflare worker maps completed RunPod status to local job snapshot", asy
   );
 
   const response = await handleRequest(
-    new Request("https://example.com/api/translate-speech-jobs/job-translate"),
+    new Request("https://example.com/api/voice-conversion-jobs/job-vc"),
     env,
   );
   const payload = await response.json();
@@ -84,11 +134,10 @@ test("Cloudflare worker maps completed RunPod status to local job snapshot", asy
 
   assert.equal(payload.status, "succeeded");
   assert.equal(payload.current_stage.stage, "complete");
-  assert.equal(payload.result.translated_text, "こんにちは");
+  assert.equal(payload.result.audio_base64, "AAAA");
   assert.equal(history.outputs.length, 1);
-  assert.equal(history.outputs[0].filename, "job-translate-output.wav");
-  assert.equal(history.outputs[0].metadata.endpoint, "translate-speech-jobs");
-  assert.equal(history.outputs[0].tts_text, "こんにちは");
+  assert.equal(history.outputs[0].filename, "job-vc-output.wav");
+  assert.equal(history.outputs[0].metadata.endpoint, "voice-conversion-jobs");
 });
 
 test("Cloudflare worker creates user text output with OpenAI text transform and TTS", async () => {
@@ -217,11 +266,18 @@ test("Cloudflare worker reports RunPod runtime availability and warm health", as
 
   const response = await handleRequest(new Request("https://example.com/api/runtime"), env);
   const payload = await response.json();
+  const openai = payload.translation_backends.find((backend) => backend.id === "openai");
   const runpod = payload.translation_backends.find((backend) => backend.id === "runpod_serverless");
+  const seedVc = payload.voice_conversion_backends[0];
 
-  assert.equal(runpod.available, true);
+  assert.equal(openai.available, true);
+  assert.equal(openai.providers.asr, "openai-asr-gpt-4o-transcribe");
+  assert.equal(openai.settings.request_mode, "completed_job");
+  assert.equal(runpod.available, false);
   assert.equal(runpod.settings.health.warm, true);
-  assert.equal(payload.voice_conversion_backends[0].settings.seed_vc.model_resident, true);
+  assert.equal(seedVc.available, true);
+  assert.equal(seedVc.settings.seed_vc.model_resident, true);
+  assert.equal(seedVc.settings.health.warm, true);
 });
 
 function fakeEnv(fetchImpl, options = {}) {
@@ -244,6 +300,13 @@ function fakeEnv(fetchImpl, options = {}) {
 
 function json(payload, init = {}) {
   return Response.json(payload, init);
+}
+
+function parseJsonBody(body) {
+  if (typeof body !== "string") {
+    return null;
+  }
+  return JSON.parse(body);
 }
 
 function fakeKv() {

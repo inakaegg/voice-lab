@@ -16,18 +16,19 @@ Browser
   -> Cloudflare Worker: API gateway、認証、CORS、RunPod API keyの秘匿
   -> Cloudflare R2: 保存が必要な録音、生成音声
   -> Cloudflare D1 または KV: 音声履歴metadata
-  -> RunPod Serverless または代替GPU API: ASR、翻訳、TTS、声質変換
+  -> OpenAI API: ASR、翻訳、TTS
+  -> RunPod Serverless または代替GPU API: 声質変換
   -> RunPod Network Volume または同等の永続volume: モデル重み
 ```
 
-この構成では、Webサーバー相当の静的配信をGPUサーバーへ載せない。GPU側は音声入力を受け取り、文字起こし、翻訳、出力音声、処理時間、provider情報を返す推論APIとして扱う。
+この構成では、Webサーバー相当の静的配信をGPUサーバーへ載せない。OpenAI APIで処理できるASR、翻訳、TTSはCloudflare Workerから直接呼び、GPU側はSeed-VCなどGPUが必要な声質変換APIとして扱う。
 
 ## 理由
 
 - 静的UI配信はGPUを必要としないため、Cloudflare Pagesのような静的ホスティングに分ける方が安い。
 - Cloudflare Pagesでは静的asset requestが無料枠で扱いやすい。
 - Cloudflare Workers Freeにはリクエスト数やCPU時間の制限があるため、重い処理は置かず、薄いgatewayに限定する。
-- RunPod Serverlessはワーカー実行中の秒単位課金とscale to zeroが使えるため、低アクセスMVPではGPU推論だけを載せる方が無駄が少ない。
+- RunPod Serverlessはワーカー実行中の秒単位課金とscale to zeroが使えるため、低アクセスMVPではSeed-VCなどGPU推論だけを載せる方が無駄が少ない。
 - RunPod API keyをブラウザに直接持たせるべきではないため、公開UIから直接RunPodへ投げるより、Workerなどのgatewayを挟む。
 - サーバー運用で録音や生成音声を保存する場合、GPU workerのローカルファイルやRunPod Network Volumeを履歴保存先にしない。音声blobはR2、一覧や削除管理に必要なmetadataはD1またはKVへ分ける。
 
@@ -43,12 +44,12 @@ Browser
 
 1. ローカル開発: FastAPIが静的UIとAPIを同時に提供する。
 2. GPUスモーク確認: FastAPIのWeb UIとAPIを同じGPU環境で動かし、短い音声で一通りの推論を確認する。
-3. 公開MVP: Cloudflare Worker Static Assetsへ静的UIを置き、同じWorkerをgatewayとしてRunPod APIを呼ぶ。初回デモの詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。
+3. 公開MVP: Cloudflare Worker Static Assetsへ静的UIを置き、同じWorkerからOpenAI APIとRunPod Seed-VC APIを呼ぶ。初回デモの詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。
 4. 低遅延化: GPU側を常駐worker化し、可能ならASR、翻訳、TTS、声質変換をstreamingまたは段階的jobに分ける。
 
 ## 実装への影響
 
 - frontendはAPI base URLを環境ごとに切り替えられる必要がある。
 - backendのレスポンスschemaは、ローカルFastAPIとGPU推論APIで揃える。
-- RunPod handlerはWeb UIを配信しない推論APIとして維持する。
+- RunPod handlerはWeb UIを配信しないSeed-VC推論APIとして維持する。
 - API key、RunPod token、Cloudflare tokenはリポジトリに入れない。

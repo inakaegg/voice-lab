@@ -327,7 +327,7 @@ async function runUserTranslation(audioBlob, fileName) {
 
   const job = await response.json();
   renderUserJob(job);
-  const completedJob = await pollUserTranslationJob(job.job_id);
+  const completedJob = job.status === "succeeded" ? job : await pollUserTranslationJob(job.job_id);
   if (!completedJob.result) {
     throw new Error("できたこえが ありません");
   }
@@ -909,16 +909,15 @@ async function loadUserRuntime() {
       return;
     }
     const runtime = await response.json();
-    const runpod = (runtime.translation_backends || []).find((backend) => backend.id === "runpod_serverless");
-    userTranslationBackend = runpod?.available ? "runpod_serverless" : "openai";
-    syncUserWarmupStatus(runpod);
-    maybeStartUserWarmup(runpod);
     const openai = (runtime.translation_backends || []).find((backend) => backend.id === "openai");
+    userTranslationBackend = openai?.available ? "openai" : "runpod_serverless";
     if (userTranslationBackend === "openai" && openai && openai.available === false) {
       setUserStatus("APIキーが ひつようです");
     }
     const seedVc = (runtime.voice_conversion_backends || []).find((backend) => backend.id === "seed-vc");
     syncSimilarVoiceAvailability(seedVc);
+    syncUserWarmupStatus(seedVc);
+    maybeStartUserWarmup(seedVc);
   } catch (_error) {
     syncUserWarmupStatus(null);
     return;

@@ -3,8 +3,22 @@ const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OU
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
 const AUDIO_HISTORY_INDEX_KV_KEY = "audio-history:index";
+const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const AUDIO_HISTORY_DEFAULT_LIMIT = 10;
 const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
+const OPENAI_LANGUAGE_CODES = {
+  auto: "",
+  "id-ID": "id",
+  "ja-JP": "ja",
+  "zh-CN": "zh",
+  "en-US": "en",
+};
+const OPENAI_LANGUAGE_NAMES = {
+  "id-ID": "Indonesian",
+  "ja-JP": "Japanese",
+  "zh-CN": "Chinese",
+  "en-US": "English",
+};
 
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
@@ -19,6 +33,7 @@ const DEFAULT_USER_SETTINGS = {
 };
 
 let ephemeralUserSettings = null;
+const ephemeralTranslationJobs = new Map();
 
 export default {
   async fetch(request, env, ctx) {
@@ -76,7 +91,7 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "GET" && url.pathname.startsWith("/api/translate-speech-jobs/")) {
       const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
-      return jsonResponse(await getRunpodJobSnapshot(jobId, env, "translation"));
+      return jsonResponse(await getTranslationJobSnapshot(jobId, env));
     }
     if (request.method === "POST" && url.pathname === "/api/voice-conversion-jobs") {
       return jsonResponse(await createVoiceConversionJob(request, env));
@@ -129,17 +144,37 @@ async function runtimePayload(env) {
   return {
     provider_mode: "cloudflare",
     providers: {
-      asr: "runpod-serverless-asr",
-      translation: "runpod-serverless-translation",
-      tts: "runpod-serverless-tts",
+      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     supported_voice_modes: ["default", "convert"],
     translation_backends: [
       {
+        id: "openai",
+        label: "音声翻訳（Cloudflare + OpenAI API）",
+        available: openaiAvailable,
+        reason: openaiAvailable ? "" : "OPENAI_API_KEY が設定されていません。",
+        providers: {
+          asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+          translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+          tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
+        },
+        settings: {
+          source_language_mode: "specified_or_auto",
+          supported_source_languages: ["auto", "id-ID", "ja-JP", "zh-CN", "en-US"],
+          supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"],
+          supported_voice_modes: ["default"],
+          text_transform: true,
+          request_mode: "completed_job",
+          gateway: "cloudflare",
+        },
+      },
+      {
         id: "runpod_serverless",
         label: "音声翻訳（RunPod Serverless）",
-        available: runpodAvailable,
-        reason: runpodAvailable ? "" : "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。",
+        available: false,
+        reason: "Cloudflareデモでは音声翻訳をOpenAI API、RunPodをSeed-VC専用にします。",
         providers: {
           asr: "runpod-serverless-asr",
           translation: "runpod-serverless-translation",
@@ -147,30 +182,10 @@ async function runtimePayload(env) {
         },
         settings: {
           source_language_mode: "specified_or_auto",
-          supported_source_languages: ["auto", "id-ID", "ja-JP", "zh-CN", "en-US"],
-          supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"],
           supported_voice_modes: ["default", "convert"],
           text_transform: true,
           serverless: true,
-          request_mode: "async",
-          internal_translation_backend: env.RUNPOD_SERVERLESS_TRANSLATION_BACKEND || "openai",
           health,
-        },
-      },
-      {
-        id: "openai",
-        label: "音声翻訳（OpenAI API）",
-        available: false,
-        reason: "Cloudflareデモでは音声翻訳をRunPod Serverless経由に固定します。",
-        providers: {
-          asr: "openai-asr",
-          translation: "openai-translation",
-          tts: "openai-tts",
-        },
-        settings: {
-          source_language_mode: "specified_or_auto",
-          supported_voice_modes: ["default", "convert"],
-          text_transform: true,
         },
       },
     ],
@@ -202,6 +217,7 @@ async function runtimePayload(env) {
             reference_max_seconds: numberFromEnv(env.SEED_VC_REFERENCE_MAX_SECONDS, 12),
             reference_auto_select: true,
           },
+          health,
         },
       },
     ],
@@ -367,34 +383,26 @@ function parseJokeVariantsResponse(rawText, sourceCount, variationCount) {
 async function createTranslationJob(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
-  const audioBase64 = await blobToBase64(audio);
+  const audioBytes = await audio.arrayBuffer();
+  const audioBase64 = arrayBufferToBase64(audioBytes);
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
   const sourceLanguage = stringFormValue(form, "source_language", "auto");
   const targetLanguage = stringFormValue(form, "target_language", "user-auto");
   const voiceMode = stringFormValue(form, "voice_mode", "default");
-  const payload = {
-    operation_mode: "translation",
-    audio_base64: audioBase64,
-    audio_mime_type: audioMimeType,
-    translation_backend: env.RUNPOD_SERVERLESS_TRANSLATION_BACKEND || "openai",
-    source_language: sourceLanguage,
-    target_language: targetLanguage,
-    voice_mode: voiceMode,
-    text_transform: optionalStringFormValue(form, "text_transform"),
-    text_transform_options: parseJsonFormValue(form, "text_transform_options", {}),
-    text_transform_suffix: optionalStringFormValue(form, "text_transform_suffix"),
-    text_transform_unit: stringFormValue(form, "text_transform_unit", "text"),
-    ...seedVcPayloadFromForm(form),
-  };
-  const body = await submitRunpodJob(env, payload);
-  const snapshot = jobSnapshotFromRunpod(body, "translation");
+  const translationBackend = stringFormValue(form, "translation_backend", "openai");
+  const textTransform = optionalStringFormValue(form, "text_transform");
+  const textTransformOptions = parseJsonFormValue(form, "text_transform_options", {});
+  const textTransformSuffix = optionalStringFormValue(form, "text_transform_suffix");
+  const textTransformUnit = stringFormValue(form, "text_transform_unit", "text");
+  const jobId = `cf-${crypto.randomUUID()}`;
+
   await saveAudioHistoryEntry(env, "recordings", {
     audio_base64: audioBase64,
     audio_mime_type: audioMimeType,
-    filename: `${safeHistoryToken(snapshot.job_id || crypto.randomUUID())}-input.${extensionForMimeType(audioMimeType)}`,
+    filename: `${safeHistoryToken(jobId)}-input.${extensionForMimeType(audioMimeType)}`,
     metadata: {
       endpoint: "translate-speech-jobs",
-      translation_backend: payload.translation_backend,
+      translation_backend: "openai",
       source_language: sourceLanguage,
       target_language: targetLanguage,
       voice_mode: voiceMode,
@@ -403,6 +411,69 @@ async function createTranslationJob(request, env) {
       original_audio_suffix: `.${extensionForMimeType(audioMimeType)}`,
     },
   });
+
+  const asrStarted = Date.now();
+  const transcript = await openAiTranscribe(env, {
+    audioBytes,
+    audioMimeType,
+    sourceLanguage,
+    filename: audio.name || `recording.${extensionForMimeType(audioMimeType)}`,
+  });
+  const asrMs = Date.now() - asrStarted;
+
+  const translationStarted = Date.now();
+  const translation = await translateTranscript(env, {
+    transcript,
+    sourceLanguage,
+    targetLanguage,
+  });
+  const translationMs = Date.now() - translationStarted;
+
+  const textTransformStarted = Date.now();
+  const transformedText = await transformTranslationText(env, {
+    translatedText: translation.translated_text,
+    targetLanguage: translation.target_language,
+    textTransform,
+    textTransformOptions,
+    textTransformSuffix,
+    textTransformUnit,
+  });
+  const textTransformMs = Date.now() - textTransformStarted;
+
+  const tts = await openAiSpeech(env, transformedText);
+  const result = {
+    transcript,
+    translated_text: translation.translated_text,
+    transformed_text: transformedText,
+    audio_mime_type: tts.audio_mime_type,
+    audio_base64: tts.audio_base64,
+    timings_ms: {
+      asr: asrMs,
+      translation: translationMs,
+      text_transform: textTransformMs,
+      ...(tts.timings_ms || {}),
+      total: asrMs + translationMs + textTransformMs + Number(tts.timings_ms?.tts || 0),
+    },
+    providers: {
+      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
+      ...(textTransform ? { text_transform: textTransform } : {}),
+    },
+    warnings: [],
+    target_language: translation.target_language,
+    detected_source_language: translation.source_language,
+  };
+  await savePipelineOutputHistory(env, result, {
+    endpoint: "translate-speech-jobs",
+    translation_backend: "openai",
+    requested_translation_backend: translationBackend,
+    source_language: translation.source_language || sourceLanguage,
+    target_language: translation.target_language,
+    voice_mode: voiceMode,
+  });
+  const snapshot = completedJobSnapshot(jobId, "translation", result);
+  await saveTranslationJobSnapshot(env, snapshot);
   return snapshot;
 }
 
@@ -410,17 +481,34 @@ async function createVoiceConversionJob(request, env) {
   const form = await request.formData();
   const sourceAudio = requiredBlob(form, "source_audio");
   const referenceAudio = requiredBlob(form, "reference_audio");
+  const sourceAudioBase64 = await blobToBase64(sourceAudio);
+  const sourceAudioMimeType = normalizeMimeType(sourceAudio.type || guessAudioMimeType(sourceAudio.name));
+  const referenceAudioBase64 = await blobToBase64(referenceAudio);
+  const referenceAudioMimeType = normalizeMimeType(referenceAudio.type || guessAudioMimeType(referenceAudio.name));
+  const voiceBackend = stringFormValue(form, "voice_backend", "seed-vc");
   const payload = {
     operation_mode: "voice_conversion",
-    source_audio_base64: await blobToBase64(sourceAudio),
-    source_audio_mime_type: normalizeMimeType(sourceAudio.type || guessAudioMimeType(sourceAudio.name)),
-    reference_audio_base64: await blobToBase64(referenceAudio),
-    reference_audio_mime_type: normalizeMimeType(referenceAudio.type || guessAudioMimeType(referenceAudio.name)),
-    voice_backend: stringFormValue(form, "voice_backend", "seed-vc"),
+    source_audio_base64: sourceAudioBase64,
+    source_audio_mime_type: sourceAudioMimeType,
+    reference_audio_base64: referenceAudioBase64,
+    reference_audio_mime_type: referenceAudioMimeType,
+    voice_backend: voiceBackend,
     ...seedVcPayloadFromForm(form),
   };
   const body = await submitRunpodJob(env, payload);
-  return jobSnapshotFromRunpod(body, "voice_conversion");
+  const snapshot = jobSnapshotFromRunpod(body, "voice_conversion");
+  await saveAudioHistoryEntry(env, "recordings", {
+    audio_base64: sourceAudioBase64,
+    audio_mime_type: sourceAudioMimeType,
+    filename: `${safeHistoryToken(snapshot.job_id || crypto.randomUUID())}-source.${extensionForMimeType(sourceAudioMimeType)}`,
+    metadata: {
+      endpoint: "voice-conversion-jobs",
+      voice_backend: voiceBackend,
+      filename: sourceAudio.name || "",
+      content_type: sourceAudio.type || sourceAudioMimeType,
+    },
+  });
+  return snapshot;
 }
 
 async function createWarmupJob(env) {
@@ -444,6 +532,47 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
     await saveRunpodOutputHistory(env, jobId, kind, snapshot.result);
   }
   return snapshot;
+}
+
+async function getTranslationJobSnapshot(jobId, env) {
+  if (!jobId) {
+    throw httpError(400, "job_id is required");
+  }
+  const snapshot = await readTranslationJobSnapshot(env, jobId);
+  if (!snapshot) {
+    throw httpError(404, "job not found");
+  }
+  return snapshot;
+}
+
+async function saveTranslationJobSnapshot(env, snapshot) {
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(`${TRANSLATION_JOB_KV_PREFIX}${snapshot.job_id}`, JSON.stringify(snapshot), {
+      expirationTtl: numberFromEnv(env.CLOUDFLARE_TRANSLATION_JOB_TTL_SECONDS, 3600),
+    });
+  } else {
+    ephemeralTranslationJobs.set(snapshot.job_id, snapshot);
+  }
+}
+
+async function readTranslationJobSnapshot(env, jobId) {
+  const kv = stateKv(env);
+  if (kv) {
+    return kvGetJson(kv, `${TRANSLATION_JOB_KV_PREFIX}${jobId}`, null);
+  }
+  return ephemeralTranslationJobs.get(jobId) || null;
+}
+
+function completedJobSnapshot(jobId, kind, result) {
+  return {
+    job_id: jobId,
+    status: "succeeded",
+    current_stage: { stage: "complete", label: "完了", provider: "" },
+    stages: completedStages(kind),
+    result,
+    error: null,
+  };
 }
 
 function jobSnapshotFromRunpod(body, kind) {
@@ -694,6 +823,127 @@ async function saveRunpodOutputHistory(env, jobId, kind, result) {
       audio_mime_type: result.audio_mime_type || "audio/wav",
       ...historyTextMetadataFromResult(result),
     },
+  });
+}
+
+async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage, filename }) {
+  requireEnv(env, "OPENAI_API_KEY");
+  const form = new FormData();
+  form.append("model", env.OPENAI_ASR_MODEL || "gpt-4o-transcribe");
+  form.append("response_format", "text");
+  const language = OPENAI_LANGUAGE_CODES[sourceLanguage] || "";
+  if (language) {
+    form.append("language", language);
+  }
+  form.append(
+    "file",
+    new Blob([audioBytes], { type: audioMimeType || "application/octet-stream" }),
+    filename || `audio.${extensionForMimeType(audioMimeType)}`,
+  );
+  const response = await runtimeFetch(env)("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: form,
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw httpError(response.status, `OpenAI ASR failed: ${text}`);
+  }
+  return text.trim();
+}
+
+async function translateTranscript(env, { transcript, sourceLanguage, targetLanguage }) {
+  if (!transcript.trim()) {
+    return {
+      source_language: sourceLanguage === "auto" ? "" : sourceLanguage,
+      target_language: targetLanguage === "user-auto" ? "ja-JP" : targetLanguage,
+      translated_text: "",
+    };
+  }
+  const requestedTarget = targetLanguage === "user-auto" ? "user-auto" : supportedValue(targetLanguage, Object.keys(OPENAI_LANGUAGE_NAMES), "ja-JP");
+  const instructions = requestedTarget === "user-auto"
+    ? [
+        "You translate a short speech transcript for a playful demo app.",
+        "Detect the source language from the transcript.",
+        "If the transcript is Japanese, translate it into natural Indonesian and set target_language to id-ID.",
+        "If the transcript is not Japanese, translate it into natural Japanese and set target_language to ja-JP.",
+        "Return only strict JSON: {\"source_language\":\"ja-JP|id-ID|zh-CN|en-US|auto\",\"target_language\":\"ja-JP|id-ID\",\"translated_text\":\"...\"}.",
+      ].join(" ")
+    : [
+        "You translate a short speech transcript for a speech conversion app.",
+        `Translate into ${OPENAI_LANGUAGE_NAMES[requestedTarget] || requestedTarget}.`,
+        "Detect the source language when possible.",
+        "Return only strict JSON: {\"source_language\":\"ja-JP|id-ID|zh-CN|en-US|auto\",\"target_language\":\"...\",\"translated_text\":\"...\"}.",
+      ].join(" ");
+  const rawText = await openAiText(env, {
+    model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+    instructions,
+    input: JSON.stringify({
+      source_language: sourceLanguage,
+      target_language: requestedTarget,
+      transcript,
+    }),
+  });
+  return parseTranslationResponse(rawText, sourceLanguage, requestedTarget);
+}
+
+function parseTranslationResponse(rawText, sourceLanguage, requestedTarget) {
+  let text = String(rawText || "").trim();
+  if (text.startsWith("```")) {
+    text = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  }
+  try {
+    const payload = JSON.parse(text);
+    const targetLanguage = requestedTarget === "user-auto"
+      ? supportedValue(payload.target_language, ["ja-JP", "id-ID"], "ja-JP")
+      : supportedValue(payload.target_language, Object.keys(OPENAI_LANGUAGE_NAMES), requestedTarget);
+    return {
+      source_language: supportedValue(payload.source_language, ["auto", ...Object.keys(OPENAI_LANGUAGE_NAMES)], sourceLanguage),
+      target_language: targetLanguage || "ja-JP",
+      translated_text: String(payload.translated_text || "").trim(),
+    };
+  } catch (_error) {
+    const fallbackTarget = requestedTarget === "user-auto" ? "ja-JP" : requestedTarget;
+    return {
+      source_language: sourceLanguage,
+      target_language: fallbackTarget,
+      translated_text: text,
+    };
+  }
+}
+
+async function transformTranslationText(env, {
+  translatedText,
+  targetLanguage,
+  textTransform,
+  textTransformOptions,
+  textTransformSuffix,
+  textTransformUnit,
+}) {
+  if (textTransform === "append_suffix") {
+    return appendSuffix(translatedText, textTransformSuffix || String(textTransformOptions?.suffix || ""), textTransformUnit || textTransformOptions?.unit || "text");
+  }
+  if (textTransform === "user_effects") {
+    return transformUserText(translatedText, targetLanguage, textTransformOptions || {}, env);
+  }
+  return translatedText;
+}
+
+function appendSuffix(text, suffix, unit) {
+  if (!suffix) {
+    return text;
+  }
+  if (unit === "text") {
+    return `${text}${suffix}`;
+  }
+  if (unit !== "sentence") {
+    throw httpError(400, `unsupported append_suffix unit: ${unit}`);
+  }
+  return text.replace(/([^。！？!?]+[。！？!?]?)/g, (segment) => {
+    const trimmed = segment.trim();
+    return trimmed ? `${segment}${suffix}` : segment;
   });
 }
 
