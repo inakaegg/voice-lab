@@ -306,6 +306,7 @@ test("Cloudflare worker reports RunPod runtime availability and warm health", as
   assert.equal(seedVc.available, true);
   assert.equal(seedVc.settings.seed_vc.model_resident, false);
   assert.equal(seedVc.settings.warmup.ready, false);
+  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, true);
   assert.equal(seedVc.settings.health.warm, true);
 });
 

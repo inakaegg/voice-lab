@@ -147,7 +147,10 @@ async function runtimePayload(env) {
   const health = runpodAvailable && env.RUNPOD_RUNTIME_HEALTH_CHECK !== "0"
     ? await runpodHealthSummary(env)
     : { checked: false, warm: false, worker_counts: {} };
-  const warmup = runpodAvailable ? await readRunpodVcReadyState(env) : runpodVcReadyState(false);
+  const warmup = {
+    ...(runpodAvailable ? await readRunpodVcReadyState(env) : runpodVcReadyState(false)),
+    auto_on_user_page_load: Boolean(runpodAvailable && env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD !== "0"),
+  };
   const seedVcModelResident = Boolean(warmup.ready);
   return {
     provider_mode: "cloudflare",

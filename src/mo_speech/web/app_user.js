@@ -206,6 +206,11 @@ const userUiTexts = {
     ruby: "<ruby>準備前<rt>じゅんびまえ</rt></ruby>",
     indonesian: "belum siap",
   },
+  warm_warming: {
+    hiragana: "じゅんびちゅう",
+    ruby: "<ruby>準備中<rt>じゅんびちゅう</rt></ruby>",
+    indonesian: "menyiapkan",
+  },
   warm_unknown: {
     hiragana: "じゅんびかくにんちゅう",
     ruby: "<ruby>準備<rt>じゅんび</rt></ruby><ruby>確認中<rt>かくにんちゅう</rt></ruby>",
@@ -1072,6 +1077,7 @@ async function loadUserRuntime() {
     const seedVc = (runtime.voice_conversion_backends || []).find((backend) => backend.id === "seed-vc");
     syncSimilarVoiceAvailability(seedVc);
     syncUserWarmupStatus(seedVc);
+    maybeStartUserWarmup(seedVc);
   } catch (_error) {
     syncUserWarmupStatus(null);
     return;
@@ -1086,10 +1092,20 @@ function maybeStartUserWarmup(runpodBackend) {
   if (warmup.ready || runpodBackend.settings?.seed_vc?.model_resident) {
     return;
   }
+  if (warmup.auto_on_user_page_load === false) {
+    return;
+  }
   if (userWarmupRequestInFlight || userWarmupJobId) {
     return;
   }
   userWarmupRequestInFlight = true;
+  syncUserWarmupStatus({
+    available: true,
+    settings: {
+      ...runpodBackend.settings,
+      warmup: { ...warmup, ready: false, pending: true },
+    },
+  });
   requestUserWarmup()
     .catch(() => {})
     .finally(() => {
@@ -1100,6 +1116,13 @@ function maybeStartUserWarmup(runpodBackend) {
 async function requestUserWarmup() {
   const response = await fetch("/api/warmup", { method: "POST" });
   if (!response.ok) {
+    syncUserWarmupStatus({
+      available: true,
+      settings: {
+        warmup: { ready: false },
+        health: { checked: true, warm: false, worker_counts: {} },
+      },
+    });
     return;
   }
   const job = await response.json();
@@ -1121,7 +1144,7 @@ async function requestUserWarmup() {
   syncUserWarmupStatus({
     available: true,
     settings: {
-      warmup: { ready: false },
+      warmup: { ready: false, pending: true },
       health: { checked: true, warm: false, worker_counts: {} },
     },
   });
@@ -1150,10 +1173,24 @@ async function pollUserWarmupJob(jobId) {
     }
     if (job.status === "failed") {
       userWarmupJobId = "";
+      syncUserWarmupStatus({
+        available: true,
+        settings: {
+          warmup: { ready: false },
+          health: { checked: true, warm: false, worker_counts: {} },
+        },
+      });
       return;
     }
   }
   userWarmupJobId = "";
+  syncUserWarmupStatus({
+    available: true,
+    settings: {
+      warmup: { ready: false },
+      health: { checked: true, warm: false, worker_counts: {} },
+    },
+  });
 }
 
 function syncUserWarmupStatus(runpodBackend) {
@@ -1169,6 +1206,8 @@ function syncUserWarmupStatus(runpodBackend) {
   const warmup = runpodBackend.settings?.warmup || {};
   if (warmup.ready || runpodBackend.settings?.seed_vc?.model_resident) {
     userWarmupStatusKey = "warm_ready";
+  } else if (warmup.pending || userWarmupRequestInFlight || userWarmupJobId) {
+    userWarmupStatusKey = "warm_warming";
   } else if (health.checked) {
     userWarmupStatusKey = "warm_cold";
   } else {
