@@ -75,8 +75,10 @@ def test_root_serves_simple_user_ui() -> None:
     assert "operation_mode" not in response.text
     assert "/static/app_user.js" in response.text
     assert response.text.index("user-record-button") < response.text.index("user-status")
-    assert response.text.index("user-status") < response.text.index("user-processing-panel")
+    assert response.text.index("user-status") < response.text.index("user-output-texts")
+    assert response.text.index("user-output-texts") < response.text.index("user-processing-panel")
     assert response.text.index("user-processing-panel") < response.text.index("user-toggles")
+    assert response.text.index("user-toggles") < response.text.index("user-replay-button")
 
 
 def test_admin_serves_browser_ui() -> None:
@@ -308,6 +310,8 @@ def test_static_assets_are_served() -> None:
     assert "baseJobCompleteProgressPercent" in js_text
     assert "userVoiceConversionEnabled() ? 70 : 100" in js_text
     assert "setUserProcessingProgress(82, { ceiling: 90 })" in js_text
+    assert "renderUserOutputRubyText" in js_text
+    assert "output-ruby-stack" in js_text
     assert "しょりちゅう" in js_text
     assert "seed_vc_reference_auto_select" in js_text
     assert "user-settings" in js_text
@@ -356,6 +360,9 @@ def test_static_assets_are_served() -> None:
     assert ".user-output-texts" in css_response.text
     assert ".user-output-text" in css_response.text
     assert ".ruby-line" in css_response.text
+    assert ".output-ruby-stack" in css_response.text
+    assert ".output-ruby-reading" in css_response.text
+    assert "overflow-x: hidden" in css_response.text
     assert ".toggle-tile" in css_response.text
     assert ".toggle-tile.is-disabled" in css_response.text
     assert ".toggle-icon" in css_response.text

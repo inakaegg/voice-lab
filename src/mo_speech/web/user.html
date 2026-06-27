@@ -36,6 +36,12 @@
         <p id="user-status" class="user-status" role="status" aria-live="polite">
           おして はなす
         </p>
+        <div id="user-output-texts" class="user-output-texts" hidden>
+          <article id="user-output-text-card" class="user-output-text-card">
+            <h2 id="user-output-text-mode">ひらがな</h2>
+            <p id="user-output-text" class="user-output-text"></p>
+          </article>
+        </div>
         <div id="user-processing-panel" class="user-processing-panel" hidden>
           <div class="user-processing-bar" aria-hidden="true">
             <span id="user-processing-fill" class="user-processing-fill"></span>
@@ -65,12 +71,6 @@
       </section>
 
       <section class="user-output" aria-label="できたこえ">
-        <div id="user-output-texts" class="user-output-texts" hidden>
-          <article id="user-output-text-card" class="user-output-text-card">
-            <h2 id="user-output-text-mode">ひらがな</h2>
-            <p id="user-output-text" class="user-output-text"></p>
-          </article>
-        </div>
         <button id="user-replay-button" class="replay-button" type="button" hidden>
           <span class="replay-icon" aria-hidden="true"></span>
           <span id="user-replay-label">もういちど</span>

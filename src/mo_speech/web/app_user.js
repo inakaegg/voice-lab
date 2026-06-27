@@ -1546,21 +1546,28 @@ function renderUserTextMode() {
     userOutputText.textContent = userDisplayText.indonesian_text || userDisplayText.kanji_text;
   } else if (showRuby) {
     userOutputTextMode.textContent = uiText("display_mode", "ruby");
-    const kanji = escapeHtml(userDisplayText.kanji_text);
-    const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
-    userOutputText.innerHTML = `<ruby>${kanji}<rt>${hiragana}</rt></ruby>`;
+    renderUserOutputRubyText();
   } else if (isJapaneseOutput) {
     userOutputTextMode.textContent = uiText("display_mode", "hiragana");
     userOutputText.textContent = userDisplayText.hiragana_text || userDisplayText.kanji_text;
   } else if (userTextMode === "ruby") {
     userOutputTextMode.textContent = uiText("display_mode", "ruby");
-    const kanji = escapeHtml(userDisplayText.kanji_text);
-    const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
-    userOutputText.innerHTML = `<ruby>${kanji}<rt>${hiragana}</rt></ruby>`;
+    renderUserOutputRubyText();
   } else {
     userOutputTextMode.textContent = uiText("display_mode", userTextMode);
     userOutputText.textContent = userDisplayText.hiragana_text || userDisplayText.kanji_text;
   }
+}
+
+function renderUserOutputRubyText() {
+  const kanji = escapeHtml(userDisplayText.kanji_text);
+  const hiragana = escapeHtml(userDisplayText.hiragana_text || userDisplayText.kanji_text);
+  userOutputText.innerHTML = [
+    '<span class="output-ruby-stack">',
+    `<span class="output-ruby-reading">${hiragana}</span>`,
+    `<span class="output-ruby-base">${kanji}</span>`,
+    "</span>",
+  ].join("");
 }
 
 function setUserProcessingProgress(percent, options = {}) {

@@ -7,6 +7,7 @@
 
 body {
   margin: 0;
+  overflow-x: hidden;
 }
 
 button,
@@ -618,6 +619,8 @@ audio {
   gap: 24px;
   grid-template-rows: 1fr auto auto;
   min-height: 100vh;
+  min-width: 0;
+  overflow-x: hidden;
   padding: 72px clamp(18px, 4vw, 48px) 28px;
 }
 
@@ -641,7 +644,9 @@ audio {
   align-self: end;
   display: grid;
   justify-items: center;
+  min-width: 0;
   text-align: center;
+  width: 100%;
 }
 
 .user-kicker {
@@ -872,6 +877,8 @@ audio {
   line-height: 1.35;
   margin: 30px 0 10px;
   min-height: 2.8rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .user-minimum-hint {
@@ -991,6 +998,7 @@ audio {
   gap: 14px;
   margin: 0 auto;
   max-width: 680px;
+  min-width: 0;
   width: 100%;
 }
 
@@ -1052,12 +1060,18 @@ audio {
 .user-output-texts {
   display: grid;
   gap: 10px;
+  margin: 0 auto 8px;
+  max-width: 680px;
+  min-width: 0;
+  width: 100%;
 }
 
 .user-output-text-card {
   background: var(--user-panel-bg);
   border: 1px solid var(--user-panel-border);
   border-radius: 8px;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 12px;
 }
 
@@ -1073,7 +1087,9 @@ audio {
   font-weight: 800;
   line-height: 1.55;
   margin: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ruby-line ruby {
@@ -1084,6 +1100,28 @@ audio {
   color: var(--user-accent-strong);
   font-size: 0.62em;
   font-weight: 800;
+}
+
+.output-ruby-stack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.output-ruby-reading {
+  color: var(--user-accent-strong);
+  display: block;
+  font-size: 0.78em;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.output-ruby-base {
+  display: block;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .replay-button {
