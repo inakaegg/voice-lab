@@ -73,7 +73,7 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
-| `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `600`。 |
+| `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `300`。 |
 | `RUNPOD_WORKERS_MIN` | 最小worker数。デモ用途では待機課金を避けるため `0` を既定にする。 |
 | `RUNPOD_WORKERS_MAX` | 最大worker数。既定は `1`。`2` 以上にすると同時VC jobを別workerへ振れるが、新規workerはcold startとSeed-VC preloadをそれぞれ行うため、低頻度デモでは必ず高速化する設定ではない。 |
 | `MO_PRELOAD_MODELS` | FastAPI通常pipelineの起動時preload。30GB最小デモでは `0` にし、VCだけを別途preloadする。 |
@@ -335,7 +335,7 @@ Serverless handlerのレスポンスには、通常の `timings_ms` に加えて
 
 Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker起動とモデルロードが入る。検証時は `MO_RUNPOD_PRELOAD_ON_START=1` を使い、worker起動時にpipelineを先にロードしてからhandlerを受け付ける。低アクセス本番ではcold startを許容し、録音開始時のwarmup jobやCloudflare Worker側の進行表示で体感を補う。
 
-VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードする。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前にwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=600` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードする。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前にwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。
 
 `RUNPOD_WORKERS_MAX` を増やすと、同時アクセス時にRunPodが追加workerを起動できる。ただし `RUNPOD_WORKERS_MIN=0` のデモ運用では、追加workerは基本的にcold状態から起動し、各worker内でSeed-VC preloadが必要になる。1つ目のwarm workerだけで処理できる程度の同時数なら `workers-max=1` の方が予測しやすい。複数人が同時にVCを使うデモでは `workers-max=2` を試せるが、2人目以降の初回VCはcold start分だけ遅くなる可能性を測定して判断する。
 

@@ -20,7 +20,7 @@ cmd=(
   --gpu-count "${RUNPOD_GPU_COUNT:-1}"
   --workers-min "${RUNPOD_WORKERS_MIN:-0}"
   --workers-max "${RUNPOD_WORKERS_MAX:-1}"
-  --idle-timeout "${RUNPOD_IDLE_TIMEOUT_SECONDS:-600}"
+  --idle-timeout "${RUNPOD_IDLE_TIMEOUT_SECONDS:-300}"
   --execution-timeout "${RUNPOD_EXECUTION_TIMEOUT_SECONDS:-1800}"
   --scale-by "${RUNPOD_SCALE_BY:-delay}"
   --scale-threshold "${RUNPOD_SCALE_THRESHOLD:-5}"
