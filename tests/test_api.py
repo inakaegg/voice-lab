@@ -138,6 +138,7 @@ def test_admin_serves_browser_ui() -> None:
     assert "runpod-warmup-button" in response.text
     assert "runpod-warmup-status" in response.text
     assert "RunPod手動準備" in response.text
+    assert response.text.index("runpod-warmup-panel") < response.text.index("operation_mode")
     assert response.text.index('value="openai"') < response.text.index('value="qwen"')
     assert "realtime-streaming-panel" in response.text
     assert "接続開始後に話す" in response.text

@@ -18,6 +18,17 @@
 
       <section class="workspace" aria-label="音声翻訳フォーム">
         <form id="translation-form" class="control-panel">
+          <fieldset id="runpod-warmup-panel" class="suffix-panel">
+            <legend>RunPod手動準備</legend>
+            <p class="route-hint">
+              デモ前にSeed-VC workerを起動し、モデルロードを前倒しします。押すとRunPod jobが作成され、起動中とidle timeout中は課金対象になり得ます。
+            </p>
+            <div class="warmup-admin-row">
+              <button type="button" id="runpod-warmup-button" class="secondary-button">RunPodを準備</button>
+              <p id="runpod-warmup-status" class="route-hint warmup-admin-status" data-state="unknown">未確認</p>
+            </div>
+          </fieldset>
+
           <div class="field-row">
             <label for="operation_mode">実行内容</label>
             <select id="operation_mode" name="operation_mode">
@@ -168,17 +179,6 @@
                 <option value="text">全体末尾</option>
                 <option value="sentence">文ごと</option>
               </select>
-            </div>
-          </fieldset>
-
-          <fieldset id="runpod-warmup-panel" class="suffix-panel">
-            <legend>RunPod手動準備</legend>
-            <p class="route-hint">
-              デモ前にSeed-VC workerを起動し、モデルロードを前倒しします。押すとRunPod jobが作成され、起動中とidle timeout中は課金対象になり得ます。
-            </p>
-            <div class="warmup-admin-row">
-              <button type="button" id="runpod-warmup-button" class="secondary-button">RunPodを準備</button>
-              <p id="runpod-warmup-status" class="route-hint warmup-admin-status" data-state="unknown">未確認</p>
             </div>
           </fieldset>
 

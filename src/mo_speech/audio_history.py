@@ -10,7 +10,7 @@ from uuid import uuid4
 
 
 DEFAULT_AUDIO_HISTORY_DIR = "tmp/audio-history"
-DEFAULT_AUDIO_HISTORY_LIMIT = 10
+DEFAULT_AUDIO_HISTORY_LIMIT = 100
 _AUDIO_HISTORY_SUFFIXES = {
     ".3gp",
     ".aac",

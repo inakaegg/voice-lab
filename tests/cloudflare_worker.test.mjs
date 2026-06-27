@@ -289,6 +289,15 @@ test("Cloudflare worker saves joke TTS output to KV audio history", async () => 
   assert.deepEqual(afterDelete.outputs, []);
 });
 
+test("Cloudflare worker can expose one hundred audio history entries per kind", async () => {
+  const env = fakeEnv(async () => json({ ok: true }), { kv: fakeKv() });
+  env.CLOUDFLARE_AUDIO_HISTORY_LIMIT = "100";
+
+  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+
+  assert.equal(history.settings.limit, 100);
+});
+
 test("Cloudflare worker reports RunPod runtime availability and warm health", async () => {
   const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
 

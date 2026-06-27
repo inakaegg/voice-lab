@@ -5,6 +5,15 @@ import json
 from mo_speech.audio_history import AudioHistoryStore
 
 
+def test_audio_history_store_default_limit_is_one_hundred(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("MO_AUDIO_HISTORY_LIMIT", raising=False)
+    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
+
+    store = AudioHistoryStore.from_env()
+
+    assert store.limit == 100
+
+
 def test_audio_history_store_keeps_latest_files(tmp_path) -> None:
     store = AudioHistoryStore(root=tmp_path / "history", limit=2, enabled=True)
 

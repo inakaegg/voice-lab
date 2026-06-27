@@ -151,7 +151,7 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 | `GOOGLE_TTS_TIMEOUT_SECONDS` | `30` | Google Translate TTS endpointのHTTP timeout。 |
 | `MO_AUDIO_HISTORY_ENABLED` | `1` | ローカル音声履歴を保存する。RunPodなどのサーバー環境では `0` を既定にする。 |
 | `MO_AUDIO_HISTORY_DIR` | `tmp/audio-history` | 録音と生成音声の保存先。git管理外に置く。 |
-| `MO_AUDIO_HISTORY_LIMIT` | `10` | `recordings` と `outputs` それぞれに残す件数。 |
+| `MO_AUDIO_HISTORY_LIMIT` | `100` | `recordings` と `outputs` それぞれに残す件数。 |
 
 ## 対応ルート
 

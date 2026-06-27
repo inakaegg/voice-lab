@@ -720,43 +720,78 @@ audio {
   border: 2px solid #ffffff;
   border-radius: 999px;
   box-shadow: 0 0 0 1px rgba(38, 49, 60, 0.1), 0 8px 18px rgba(38, 49, 60, 0.14);
-  height: 12px;
+  height: 16px;
+  left: clamp(16px, 4vw, 40px);
   margin: 0;
   padding: 0;
   position: fixed;
-  right: calc(clamp(16px, 4vw, 40px) + 132px);
-  top: 30px;
-  width: 12px;
+  top: 24px;
+  width: 16px;
   z-index: 11;
+}
+
+.user-warmup-status::before,
+.user-warmup-status::after {
+  content: "";
+  position: absolute;
 }
 
 .user-warmup-status[data-state="ready"] {
   background: #22c55e;
+  border-color: #1b2a3a;
+}
+
+.user-warmup-status[data-state="ready"]::before {
+  border-bottom: 2px solid #ffffff;
+  border-right: 2px solid #ffffff;
+  height: 8px;
+  left: 5px;
+  top: 1px;
+  transform: rotate(45deg);
+  width: 4px;
 }
 
 .user-warmup-status[data-state="cold"] {
-  background: #aeb8c2;
+  background: #ffffff;
+  border-color: #384656;
+  box-shadow: 0 0 0 1px rgba(38, 49, 60, 0.14), 0 8px 18px rgba(38, 49, 60, 0.12);
 }
 
 .user-warmup-status[data-state="warming"] {
-  animation: warmup-dot-pulse 1.2s ease-in-out infinite;
-  background: #3b82f6;
+  animation: warmup-dot-spin 1.15s linear infinite;
+  background: #ffffff;
+  border-color: #1f6feb transparent #1f6feb #1f6feb;
+}
+
+.user-warmup-status[data-state="warming"]::before {
+  background: #1f6feb;
+  border-radius: 999px;
+  height: 5px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px;
 }
 
 .user-warmup-status[data-state="unknown"] {
-  background: #d5dce4;
+  background: #ffffff;
+  border-color: #8b98a8;
+  border-style: dotted;
 }
 
-@keyframes warmup-dot-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 1px rgba(38, 49, 60, 0.1), 0 8px 18px rgba(38, 49, 60, 0.14);
-    transform: scale(1);
-  }
+.user-warmup-status[data-state="unknown"]::before {
+  background: #8b98a8;
+  border-radius: 999px;
+  height: 4px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+}
 
-  50% {
-    box-shadow: 0 0 0 7px rgba(59, 130, 246, 0.18), 0 8px 18px rgba(38, 49, 60, 0.14);
-    transform: scale(1.08);
+@keyframes warmup-dot-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

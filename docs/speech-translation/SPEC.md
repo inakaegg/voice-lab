@@ -348,9 +348,9 @@ UIでの読み上げ言語の扱い:
 
 ローカル開発では、動作確認と比較のために直近の音声を保存する。
 
-- 入力音声は `recordings` として直近10件を保存する。
-- 出力音声は `outputs` として直近10件を保存する。
-- 11件目以降は古い音声と対応するmetadataを削除する。
+- 入力音声は `recordings` として直近100件を保存する。
+- 出力音声は `outputs` として直近100件を保存する。
+- 101件目以降は古い音声と対応するmetadataを削除する。
 - 既定の保存先はgit管理外の `tmp/audio-history/` とする。
 - リポジトリ直下から起動した場合、既定の実保存先は `<repo>/tmp/audio-history/` になる。プロセスの作業ディレクトリが変わると相対パスの解決先も変わるため、固定したい場合は `MO_AUDIO_HISTORY_DIR` に絶対パスを指定する。
 - `recordings` の実保存先は `MO_AUDIO_HISTORY_DIR/recordings`、`outputs` の実保存先は `MO_AUDIO_HISTORY_DIR/outputs` とする。

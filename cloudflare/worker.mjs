@@ -5,7 +5,7 @@ const USER_SETTINGS_KV_KEY = "user-settings";
 const AUDIO_HISTORY_INDEX_KV_KEY = "audio-history:index";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
-const AUDIO_HISTORY_DEFAULT_LIMIT = 10;
+const AUDIO_HISTORY_DEFAULT_LIMIT = 100;
 const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 const OPENAI_LANGUAGE_CODES = {
   auto: "",
@@ -1189,7 +1189,7 @@ function audioHistorySettings(env) {
 }
 
 function audioHistoryLimit(env) {
-  return clampInt(env.CLOUDFLARE_AUDIO_HISTORY_LIMIT || AUDIO_HISTORY_DEFAULT_LIMIT, 1, 50, AUDIO_HISTORY_DEFAULT_LIMIT);
+  return clampInt(env.CLOUDFLARE_AUDIO_HISTORY_LIMIT || AUDIO_HISTORY_DEFAULT_LIMIT, 1, 100, AUDIO_HISTORY_DEFAULT_LIMIT);
 }
 
 function historyTextMetadataFromResult(result) {

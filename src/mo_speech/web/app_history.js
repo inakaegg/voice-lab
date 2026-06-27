@@ -23,7 +23,7 @@ function renderAudioHistorySettings(settings) {
   const root = settings.resolved_root || settings.root || "tmp/audio-history";
   const recordingsDir = settings.recordings_dir || `${root}/recordings`;
   const outputsDir = settings.outputs_dir || `${root}/outputs`;
-  historyStorage.textContent = `保存先: ${root} / 入力: ${recordingsDir} / 出力: ${outputsDir} / 上限: 各${settings.limit || 10}件 / 変更: ${settings.env_var || "MO_AUDIO_HISTORY_DIR"}`;
+  historyStorage.textContent = `保存先: ${root} / 入力: ${recordingsDir} / 出力: ${outputsDir} / 上限: 各${settings.limit || 100}件 / 変更: ${settings.env_var || "MO_AUDIO_HISTORY_DIR"}`;
 }
 
 function renderAudioHistoryList(container, entries) {
