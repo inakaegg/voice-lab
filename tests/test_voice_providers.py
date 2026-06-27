@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,11 @@ from mo_speech.providers.voice import (
     QwenSeedVcTtsProvider,
     QwenVoiceCloneTtsProvider,
     SeedVcDirectVoiceConversionProvider,
+    SeedVcResidentDirectVoiceConversionProvider,
     SeedVcRuntimeSettings,
     SeedVcVoiceConversionTtsProvider,
+    VoiceConversionBackendInfo,
+    VoiceConversionService,
     create_voice_conversion_service_from_env,
 )
 
@@ -531,6 +535,104 @@ def test_seed_vc_direct_provider_auto_selects_reference_segment(
     assert "-ss" in reference_prepare_command
     assert reference_prepare_command[reference_prepare_command.index("-ss") + 1] == "1.5"
     assert reference_prepare_command[reference_prepare_command.index("-t") + 1] == "2"
+
+
+def test_seed_vc_resident_provider_reuses_loaded_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_audio = tmp_path / "source.webm"
+    reference_audio = tmp_path / "reference.wav"
+    source_audio.write_bytes(b"source audio")
+    reference_audio.write_bytes(b"reference audio")
+    load_calls: list[object] = []
+    inference_calls: list[dict[str, object]] = []
+
+    class FakeStreamState:
+        def __init__(self, args, target=None, new_target_name=None, realtime=True):
+            load_calls.append(args)
+            self.target_name = new_target_name
+
+        def prepare_target(self, f0_condition, target, new_target_name=None):
+            self.target_name = new_target_name
+
+    def fake_inference(**kwargs):
+        inference_calls.append(kwargs)
+        kwargs["stream_state"].prepare_target(False, kwargs["target"], kwargs["new_target_name"])
+        return SimpleNamespace(samples=b"converted", sample_rate=24000)
+
+    fake_api = SimpleNamespace(_V1StreamState=FakeStreamState, inference=fake_inference)
+
+    def fake_prepare_vc_audio(input_path, output_path, **_kwargs):
+        output_path.write_bytes(f"prepared:{Path(input_path).name}".encode())
+
+    monkeypatch.setattr("mo_speech.providers.voice._prepare_vc_audio", fake_prepare_vc_audio)
+    monkeypatch.setattr(
+        "mo_speech.providers.voice._prepare_seed_reference_audio",
+        lambda input_path, output_path, **_kwargs: fake_prepare_vc_audio(input_path, output_path)
+        or SimpleNamespace(reference_segment_select_ms=None),
+    )
+    monkeypatch.setattr("mo_speech.providers.voice._read_seed_vc_audio_data_from_wav", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(
+        "mo_speech.providers.voice._write_seed_vc_audio_data_to_wav",
+        lambda audio, path: path.write_bytes(audio.samples),
+    )
+
+    provider = SeedVcResidentDirectVoiceConversionProvider(
+        work_dir=tmp_path / "seed-work",
+        diffusion_steps=8,
+        fp16=True,
+    )
+    monkeypatch.setattr(provider, "_load_seed_vc_api", lambda: fake_api)
+
+    provider.preload()
+    first = provider.convert(source_audio_path=source_audio, reference_audio_path=reference_audio)
+    second = provider.convert(
+        source_audio_path=source_audio,
+        reference_audio_path=reference_audio,
+        seed_vc_settings=SeedVcRuntimeSettings(diffusion_steps=4),
+    )
+
+    assert len(load_calls) == 1
+    assert first.audio_bytes == b"converted"
+    assert second.audio_bytes == b"converted"
+    assert inference_calls[0]["stream_state"] is inference_calls[1]["stream_state"]
+    assert inference_calls[0]["diffusion_steps"] == 8
+    assert inference_calls[1]["diffusion_steps"] == 4
+    assert inference_calls[0]["streaming"] is True
+    assert inference_calls[0]["end_of_stream"] is True
+
+
+def test_voice_conversion_service_preloads_resident_capable_provider() -> None:
+    calls = []
+
+    class Provider:
+        backend_id = "seed-vc"
+        label = "Seed-VC"
+        name = "fake"
+        audio_mime_type = "audio/wav"
+
+        def backend_info(self):
+            return VoiceConversionBackendInfo(self.backend_id, self.label, self.name, True)
+
+        def preload(self):
+            calls.append("preload")
+
+        def convert(self, *, source_audio_path, reference_audio_path, seed_vc_settings=None, progress_callback=None):
+            raise AssertionError("not used")
+
+    VoiceConversionService([Provider()]).preload()
+
+    assert calls == ["preload"]
+
+
+def test_voice_conversion_service_from_env_can_use_seed_vc_resident(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MO_VC_BACKENDS", "seed-vc")
+    monkeypatch.setenv("SEED_VC_EXECUTION_MODE", "resident")
+
+    service = create_voice_conversion_service_from_env()
+
+    assert isinstance(service.providers[0], SeedVcResidentDirectVoiceConversionProvider)
 
 
 def test_chatterbox_direct_provider_invokes_helper(

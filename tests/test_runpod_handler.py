@@ -225,6 +225,28 @@ def test_runpod_preload_defaults_to_openai_translation_backend(monkeypatch: pyte
     assert calls == [("translation", "openai"), ("voice_conversion", "seed-vc")]
 
 
+def test_runpod_voice_conversion_service_preloads_provider_on_first_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class FakeService:
+        def preload(self):
+            calls.append("preload")
+
+    service = FakeService()
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", None)
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE_LOAD_MS", None)
+    monkeypatch.setattr(runpod_handler, "create_voice_conversion_service_from_env", lambda: service)
+
+    loaded, first_load_ms = runpod_handler._voice_conversion_service()
+    loaded_again, second_load_ms = runpod_handler._voice_conversion_service()
+
+    assert loaded is service
+    assert loaded_again is service
+    assert first_load_ms is not None
+    assert second_load_ms is None
+    assert calls == ["preload"]
+
+
 def test_runpod_handler_requires_audio_base64(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
 

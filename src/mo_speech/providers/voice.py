@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import importlib
 import json
 import os
 import re
@@ -7,10 +9,12 @@ import shutil
 import subprocess
 import sys
 import inspect
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from time import perf_counter
+from types import SimpleNamespace
 from typing import Protocol
 
 from ..pipeline import PipelineProgress, ProgressCallback, TtsOutput
@@ -161,6 +165,12 @@ class VoiceConversionService:
         if self._backend_info_cache is None:
             self._backend_info_cache = [provider.backend_info() for provider in self.providers]
         return list(self._backend_info_cache)
+
+    def preload(self) -> None:
+        for provider in self.providers:
+            preload = getattr(provider, "preload", None)
+            if callable(preload):
+                preload()
 
     def convert(
         self,
@@ -565,6 +575,161 @@ class SeedVcDirectVoiceConversionProvider:
 
 
 @dataclass
+class SeedVcResidentDirectVoiceConversionProvider(SeedVcDirectVoiceConversionProvider):
+    name = "Plachta/Seed-VC resident"
+
+    _seed_vc_api: object | None = field(default=None, init=False, repr=False)
+    _stream_state: object | None = field(default=None, init=False, repr=False)
+    _model_load_ms: float | None = field(default=None, init=False, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+
+    def backend_info(self) -> VoiceConversionBackendInfo:
+        if shutil.which("ffmpeg") is None:
+            return VoiceConversionBackendInfo(
+                self.backend_id,
+                self.label,
+                self.name,
+                False,
+                "ffmpegが見つかりません。",
+            )
+        try:
+            self._load_seed_vc_api()
+        except Exception as exc:
+            return VoiceConversionBackendInfo(
+                self.backend_id,
+                self.label,
+                self.name,
+                False,
+                f"このPythonプロセスで seed_vc.api をimportできません: {exc}",
+            )
+        return VoiceConversionBackendInfo(
+            self.backend_id,
+            self.label,
+            self.name,
+            True,
+            settings={
+                "seed_vc": {
+                    "execution_mode": "resident",
+                    "model_resident": self._stream_state is not None,
+                    "model_load_ms": self._model_load_ms,
+                    "diffusion_steps": self.diffusion_steps,
+                    "length_adjust": self.length_adjust,
+                    "inference_cfg_rate": self.inference_cfg_rate,
+                    "reference_max_seconds": self.reference_max_seconds,
+                    "reference_auto_select": self.reference_auto_select,
+                }
+            },
+        )
+
+    def preload(self) -> None:
+        with self._lock:
+            self._ensure_stream_state(self._load_seed_vc_api())
+
+    def convert(
+        self,
+        *,
+        source_audio_path: Path,
+        reference_audio_path: Path,
+        seed_vc_settings: SeedVcRuntimeSettings | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> TtsOutput:
+        settings = _effective_seed_vc_settings(self, seed_vc_settings)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        seed_vc_api = self._load_seed_vc_api()
+        with TemporaryDirectory(dir=self.work_dir) as temp_dir:
+            temp_path = Path(temp_dir)
+            source_wav = temp_path / "source.wav"
+            reference_wav = temp_path / "reference.wav"
+
+            _notify_progress(progress_callback, "source_audio_prepare", "変換元音声準備", "ffmpeg")
+            source_prepare_started = perf_counter()
+            _prepare_vc_audio(
+                source_audio_path,
+                source_wav,
+                sample_rate=self.source_sample_rate,
+                timeout_seconds=self.audio_prepare_timeout_seconds,
+            )
+            source_prepare_ms = _elapsed_ms(source_prepare_started)
+
+            _notify_progress(progress_callback, "reference_audio_prepare", "参照音声準備", "ffmpeg")
+            reference_prepare_started = perf_counter()
+            reference_preparation = _prepare_seed_reference_audio(
+                reference_audio_path,
+                reference_wav,
+                max_seconds=settings.reference_max_seconds,
+                sample_rate=self.reference_sample_rate,
+                timeout_seconds=self.audio_prepare_timeout_seconds,
+                auto_select=settings.reference_auto_select,
+            )
+            reference_prepare_ms = _elapsed_ms(reference_prepare_started)
+
+            source_audio = _read_seed_vc_audio_data_from_wav(source_wav)
+            reference_audio = _read_seed_vc_audio_data_from_wav(reference_wav)
+            target_name = _file_content_hash(reference_wav)
+            output_wav = temp_path / "converted.wav"
+
+            _notify_progress(progress_callback, "voice_conversion", "声質変換", self.name)
+            with self._lock:
+                self._ensure_stream_state(seed_vc_api)
+                conversion_started = perf_counter()
+                output_audio = seed_vc_api.inference(
+                    source=source_audio,
+                    target=reference_audio,
+                    new_target_name=target_name,
+                    diffusion_steps=settings.diffusion_steps,
+                    length_adjust=settings.length_adjust,
+                    inference_cfg_rate=settings.inference_cfg_rate,
+                    f0_condition=False,
+                    auto_f0_adjust=False,
+                    semi_tone_shift=0,
+                    checkpoint=self.checkpoint,
+                    config=self.config,
+                    fp16=self.fp16,
+                    streaming=True,
+                    stream_state=self._stream_state,
+                    end_of_stream=True,
+                    realtime=False,
+                )
+                conversion_ms = _elapsed_ms(conversion_started)
+            _write_seed_vc_audio_data_to_wav(output_audio, output_wav)
+            audio_bytes = output_wav.read_bytes()
+
+        timings_ms = {
+            "source_audio_prepare": source_prepare_ms,
+            "reference_audio_prepare": reference_prepare_ms,
+            "voice_conversion": conversion_ms,
+        }
+        if self._model_load_ms is not None:
+            timings_ms["voice_conversion_model_load"] = self._model_load_ms
+        if reference_preparation.reference_segment_select_ms is not None:
+            timings_ms["reference_segment_select"] = reference_preparation.reference_segment_select_ms
+
+        return TtsOutput(
+            audio_bytes=audio_bytes,
+            audio_mime_type=self.audio_mime_type,
+            timings_ms=timings_ms,
+        )
+
+    def _load_seed_vc_api(self):
+        if self._seed_vc_api is None:
+            self._seed_vc_api = importlib.import_module("seed_vc.api")
+        return self._seed_vc_api
+
+    def _ensure_stream_state(self, seed_vc_api) -> None:
+        if self._stream_state is not None:
+            return
+        load_started = perf_counter()
+        args = SimpleNamespace(
+            f0_condition=False,
+            checkpoint=self.checkpoint,
+            config=self.config,
+            fp16=self.fp16,
+        )
+        self._stream_state = seed_vc_api._V1StreamState(args, target=None, new_target_name=None, realtime=False)
+        self._model_load_ms = _elapsed_ms(load_started)
+
+
+@dataclass
 class ChatterboxDirectVoiceConversionProvider:
     python_executable: str = field(default_factory=lambda: os.getenv("CHATTERBOX_PYTHON", sys.executable))
     helper_module: str = field(default_factory=lambda: os.getenv("CHATTERBOX_VC_HELPER_MODULE", CHATTERBOX_VC_HELPER_MODULE))
@@ -700,10 +865,14 @@ class OpenVoiceDirectVoiceConversionProvider:
 
 def create_voice_conversion_service_from_env() -> VoiceConversionService:
     backend_ids = _env_list("MO_VC_BACKENDS", "seed-vc,chatterbox,openvoice-v2")
+    seed_vc_execution_mode = os.getenv("SEED_VC_EXECUTION_MODE", "subprocess").strip().lower()
     providers: list[DirectVoiceConversionProvider] = []
     for backend_id in backend_ids:
         if backend_id == "seed-vc":
-            providers.append(SeedVcDirectVoiceConversionProvider())
+            if seed_vc_execution_mode in {"resident", "in-process", "in_process"}:
+                providers.append(SeedVcResidentDirectVoiceConversionProvider())
+            else:
+                providers.append(SeedVcDirectVoiceConversionProvider())
         elif backend_id in ("runpod-seed-vc", "runpod_serverless_seed_vc"):
             from .runpod_serverless import RunpodServerlessVoiceConversionProvider
 
@@ -1228,3 +1397,42 @@ def _python_has_module(python_executable: str, module_name: str) -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return completed.returncode == 0
+
+
+def _read_seed_vc_audio_data_from_wav(path: Path):
+    import numpy as np
+    import soundfile as sf
+
+    samples, sample_rate = sf.read(str(path), dtype="int16", always_2d=False)
+    if getattr(samples, "ndim", 1) > 1:
+        samples = samples.mean(axis=1).astype("int16")
+    sample_count = int(len(samples))
+    return _seed_vc_audio_data_class()(
+        np.asarray(samples, dtype="int16"),
+        None,
+        sample_count / float(sample_rate) if sample_rate else 0.0,
+        sample_count,
+        int(sample_rate),
+        {},
+    )
+
+
+def _write_seed_vc_audio_data_to_wav(audio_data, path: Path) -> None:
+    import numpy as np
+    import soundfile as sf
+
+    samples = np.asarray(audio_data.samples)
+    sf.write(str(path), samples, int(audio_data.sample_rate), subtype="PCM_16")
+
+
+def _seed_vc_audio_data_class():
+    module = importlib.import_module("seed_vc.Models.audio")
+    return module.AudioData
+
+
+def _file_content_hash(path: Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

@@ -294,6 +294,7 @@ def _voice_conversion_service() -> tuple[VoiceConversionService, float | None]:
     if _VOICE_CONVERSION_SERVICE is None:
         started = perf_counter()
         _VOICE_CONVERSION_SERVICE = create_voice_conversion_service_from_env()
+        _VOICE_CONVERSION_SERVICE.preload()
         _VOICE_CONVERSION_SERVICE_LOAD_MS = _elapsed_ms(started)
         return _VOICE_CONVERSION_SERVICE, _VOICE_CONVERSION_SERVICE_LOAD_MS
     return _VOICE_CONVERSION_SERVICE, None

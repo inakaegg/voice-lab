@@ -113,6 +113,8 @@ def create_app(
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
+    if os.getenv("MO_PRELOAD_VOICE_CONVERSION") == "1" or os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
+        active_voice_conversion_service.preload()
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.get("/")

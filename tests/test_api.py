@@ -1401,6 +1401,20 @@ def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
     assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
+def test_create_app_preloads_voice_conversion_service_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class Service(VoiceConversionService):
+        def preload(self) -> None:
+            calls.append("preload")
+
+    monkeypatch.setenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START", "1")
+
+    create_app(voice_conversion_service=Service(providers=[]))
+
+    assert calls == ["preload"]
+
+
 def test_seed_vc_reference_preview_api_reports_prepare_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_prepare_reference_preview(audio_path: Path, seed_vc_settings: SeedVcRuntimeSettings | None = None) -> TtsOutput:
         raise RuntimeError("ffmpeg failed")

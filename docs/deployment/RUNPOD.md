@@ -73,6 +73,8 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
+| `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `600`。 |
+| `RUNPOD_WORKERS_MIN` | 最小worker数。デモ用途では待機課金を避けるため `0` を既定にする。 |
 | `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー |
 
 課金リソースを作らずにコマンドだけ確認する場合は、各CLIスクリプトに `RUNPOD_DRY_RUN=1` を付ける。
@@ -146,7 +148,7 @@ RunPod PodではCLIの `--volume-mount-path /runpod-volume` で揃える。Serve
 | ASR | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` | `FASTER_WHISPER_MODEL`、`FASTER_WHISPER_DEVICE=cuda`、`FASTER_WHISPER_COMPUTE_TYPE=float16` |
 | 翻訳 | `Qwen/Qwen3-4B` | `QWEN_TRANSLATION_MODEL`、`QWEN_TRANSLATION_DEVICE_MAP=auto` |
 | TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | `QWEN_TTS_MODEL`、`QWEN_TTS_DEVICE_MAP=auto`、`QWEN_TTS_DTYPE=float16` |
-| 声質変換 | Seed-VC | `SEED_VC_FP16=true`、`SEED_VC_DIFFUSION_STEPS=30`、`SEED_VC_REFERENCE_MAX_SECONDS=10` |
+| 声質変換 | Seed-VC | `SEED_VC_EXECUTION_MODE=resident`、`SEED_VC_FP16=true`、`SEED_VC_DIFFUSION_STEPS=8`、`SEED_VC_REFERENCE_MAX_SECONDS=12` |
 
 次に試す上位または比較候補:
 
@@ -330,7 +332,9 @@ Serverless handlerのレスポンスには、通常の `timings_ms` に加えて
 
 Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker起動とモデルロードが入る。検証時は `MO_RUNPOD_PRELOAD_ON_START=1` を使い、worker起動時にpipelineを先にロードしてからhandlerを受け付ける。低アクセス本番ではcold startを許容し、録音開始時のwarmup jobやCloudflare Worker側の進行表示で体感を補う。
 
-VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` を使い、handler起動時にVC serviceを初期化する。ただし現状のSeed-VC providerは変換時にCLI subprocessを起動するため、モデルを完全に常駐させる構成ではない。Seed-VCだけを本番の主処理にする場合は、次の高速化として「Seed-VCモデルをworker process内に常駐させるprovider」を別途実装する。
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前にwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=600` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。
+
+スマホから見るデモでは、ローカルMacのFastAPIをUI/gatewayにしない。Cloudflare gatewayを置く前の暫定運用では、同じRunPod imageをGPU Podとして起動し、`CMD` のFastAPI/Uvicornを `8000/http` で公開する。`MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` の場合、Webサーバー起動時にVC preloadが完了してから画面を返せるため、cold start後に `/` が表示されたことを「Webプロセスと常駐VC providerの初期化が完了した」シグナルとして扱える。
 
 ## 完了条件
 

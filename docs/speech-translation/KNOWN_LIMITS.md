@@ -24,9 +24,9 @@
 - local providerの初回リクエストはモデルロードを含むため遅い。
 - `MO_PRELOAD_MODELS=1` で起動時にロードを前倒しできるが、起動時間は長くなる。
 - FastAPI gatewayからRunPod Serverlessへ投げる非同期job形式は実装済み。
-- RunPod Serverlessでも現行のSeed-VC経路はPython subprocessで `seed_vc.inference` を起動するため、workerがwarmでもSeed-VCモデルは常駐しない。Network Volumeでモデルダウンロードは避けられるが、推論プロセス起動とモデル初期化の時間は残る。
+- RunPod Serverlessでは `SEED_VC_EXECUTION_MODE=resident` により、Seed-VCモデルをworker process内へ常駐ロードできる。未指定時や互換確認時は従来のPython subprocess経路も残す。
 - RunPod Serverlessの非同期jobは、API往復、queue/poll、base64エンコード/デコード、音声一時ファイル書き込みのオーバーヘッドがある。短い音声ではGPUの利点よりこの固定費が見えやすい。
-- Qwen3-TTS/Seed-VCの低遅延常駐workerとストリーミング出力は未実装。
+- Qwen3-TTSの低遅延常駐化とストリーミング出力は未実装。Seed-VC resident providerはGPU環境での速度・品質スモーク確認が必要。
 
 ## ブラウザ
 
