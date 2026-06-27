@@ -1,4 +1,3 @@
-const userTargetLanguageSelect = document.querySelector("#user_target_language");
 const userJokeTextInput = document.querySelector("#user_joke_text");
 const userJokePositionSelect = document.querySelector("#user_joke_position");
 const userJokeSelectionSelect = document.querySelector("#user_joke_selection");
@@ -23,7 +22,6 @@ async function loadAdminUserSettings() {
       throw new Error("ユーザー画面設定を読み込めませんでした");
     }
     const settings = await response.json();
-    userTargetLanguageSelect.value = settings.target_language || "ja-JP";
     userJokeTextInput.value = Array.isArray(settings.joke_texts)
       ? settings.joke_texts.join("\n")
       : settings.joke_text || "";
@@ -46,7 +44,6 @@ async function saveUserSettings() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        target_language: userTargetLanguageSelect.value,
         joke_text: userJokeTextInput.value,
         joke_texts: splitAdminJokeTexts(userJokeTextInput.value),
         joke_position: userJokePositionSelect.value,

@@ -108,6 +108,8 @@ def test_admin_serves_browser_ui() -> None:
     assert "seed_vc_length_adjust" in response.text
     assert "seed_vc_inference_cfg_rate" in response.text
     assert "translation-only" in response.text
+    assert "user_target_language" not in response.text
+    assert "入力が日本語ならインドネシア語、それ以外なら日本語へ自動切替します。" in response.text
     assert "audio-label" in response.text
     assert "audio-selection-status" in response.text
     assert "source-audio-hint" in response.text

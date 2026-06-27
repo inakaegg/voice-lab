@@ -169,6 +169,7 @@ UI文言では、`clone` は「Qwenで直接声を寄せて生成」、`convert`
 - 音声翻訳のUI既定は `openai` とする。`OPENAI_API_KEY` が未設定の場合はUIで無効表示し、利用可能なbackendへフォールバックする。
 - `source_language`: 例 `id-ID`
 - `target_language`: 例 `ja-JP`。ユーザー用画面では `user-auto` を送り、ASR結果が日本語なら `id-ID`、日本語以外なら `ja-JP` として処理する。
+- 管理者用画面のユーザー画面設定では、ユーザー用画面の出力言語を選ばせない。ユーザー用画面の録音翻訳は常に `user-auto` 固定で、管理者用設定はジョーク、表示テーマなどの体験設定だけを扱う。
 - `voice_mode`: `default`、`clone`、`convert`
 - `text_transform`: 任意の加工ID。例 `append_suffix`
 - `text_transform_options`: 任意の加工設定。例 `{"suffix":"モー"}`
