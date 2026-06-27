@@ -429,6 +429,38 @@ test("Cloudflare worker stores Seed-VC ready state when voice conversion run com
   assert.equal(seedVc.settings.warmup.source, "voice_conversion");
 });
 
+test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async () => {
+  const kv = fakeKv();
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/status/warm-job")) {
+      return json({
+        id: "warm-job",
+        status: "COMPLETED",
+        output: {
+          warm: true,
+          providers: { voice_conversion: "seed-vc" },
+        },
+      });
+    }
+    if (url.endsWith("/health")) {
+      return json({ workers: [{ state: "IDLE" }] });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  };
+  const firstEnv = fakeEnv(fetchImpl, { kv });
+  firstEnv.RUNPOD_ENDPOINT_ID = "endpoint-a";
+  const secondEnv = fakeEnv(fetchImpl, { kv });
+  secondEnv.RUNPOD_ENDPOINT_ID = "endpoint-b";
+
+  await handleRequest(new Request("https://example.com/api/warmup/warm-job"), firstEnv);
+  const firstRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), firstEnv)).json();
+  const secondRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), secondEnv)).json();
+
+  assert.equal(firstRuntime.voice_conversion_backends[0].settings.warmup.ready, true);
+  assert.equal(secondRuntime.voice_conversion_backends[0].settings.warmup.ready, false);
+  assert.equal(secondRuntime.voice_conversion_backends[0].settings.seed_vc.model_resident, false);
+});
+
 function fakeEnv(fetchImpl, options = {}) {
   return {
     RUNPOD_ENDPOINT_ID: "endpoint",

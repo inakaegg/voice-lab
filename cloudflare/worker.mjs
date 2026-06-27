@@ -4,7 +4,7 @@ const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
 const AUDIO_HISTORY_INDEX_KV_KEY = "audio-history:index";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
-const RUNPOD_VC_READY_KV_KEY = "runpod:seed-vc-ready";
+const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
 const AUDIO_HISTORY_DEFAULT_LIMIT = 10;
 const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 const OPENAI_LANGUAGE_CODES = {
@@ -617,13 +617,14 @@ async function readRunpodVcReadyState(env) {
   if (!kv) {
     return runpodVcReadyState(false);
   }
-  const state = await kvGetJson(kv, RUNPOD_VC_READY_KV_KEY, null);
+  const stateKey = runpodVcReadyKvKey(env);
+  const state = await kvGetJson(kv, stateKey, null);
   if (!state || typeof state !== "object") {
     return runpodVcReadyState(false);
   }
   const expiresAt = Date.parse(String(state.expires_at || ""));
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    await kv.delete(RUNPOD_VC_READY_KV_KEY);
+    await kv.delete(stateKey);
     return runpodVcReadyState(false);
   }
   return runpodVcReadyState(true, state);
@@ -644,7 +645,11 @@ async function saveRunpodVcReadyState(env, snapshot, kind) {
     providers: snapshot.result?.providers || {},
     serverless_timings_ms: snapshot.result?.serverless_timings_ms || {},
   };
-  await kv.put(RUNPOD_VC_READY_KV_KEY, JSON.stringify(state), { expirationTtl: ttlSeconds });
+  await kv.put(runpodVcReadyKvKey(env), JSON.stringify(state), { expirationTtl: ttlSeconds });
+}
+
+function runpodVcReadyKvKey(env) {
+  return `${RUNPOD_VC_READY_KV_KEY_PREFIX}${env.RUNPOD_ENDPOINT_ID || "default"}`;
 }
 
 function isRunpodVcReadyResult(result, kind) {
