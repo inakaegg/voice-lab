@@ -81,6 +81,8 @@ let currentSelectedJokeText = "";
 let currentSelectedJokeSettingsSignature = "";
 let userTranslationBackend = "openai";
 let userWarmupStatusKey = "";
+let userWarmupJobId = "";
+let userWarmupRequestInFlight = false;
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -910,6 +912,7 @@ async function loadUserRuntime() {
     const runpod = (runtime.translation_backends || []).find((backend) => backend.id === "runpod_serverless");
     userTranslationBackend = runpod?.available ? "runpod_serverless" : "openai";
     syncUserWarmupStatus(runpod);
+    maybeStartUserWarmup(runpod);
     const openai = (runtime.translation_backends || []).find((backend) => backend.id === "openai");
     if (userTranslationBackend === "openai" && openai && openai.available === false) {
       setUserStatus("APIキーが ひつようです");
@@ -920,6 +923,73 @@ async function loadUserRuntime() {
     syncUserWarmupStatus(null);
     return;
   }
+}
+
+function maybeStartUserWarmup(runpodBackend) {
+  if (!runpodBackend?.available) {
+    return;
+  }
+  const health = runpodBackend.settings?.health || {};
+  if (health.checked && health.warm) {
+    return;
+  }
+  if (userWarmupRequestInFlight || userWarmupJobId) {
+    return;
+  }
+  userWarmupRequestInFlight = true;
+  requestUserWarmup()
+    .catch(() => {})
+    .finally(() => {
+      userWarmupRequestInFlight = false;
+    });
+}
+
+async function requestUserWarmup() {
+  const response = await fetch("/api/warmup", { method: "POST" });
+  if (!response.ok) {
+    return;
+  }
+  const job = await response.json();
+  if (job.status === "succeeded") {
+    syncUserWarmupStatus({
+      available: true,
+      settings: { health: { checked: true, warm: true, worker_counts: {} } },
+    });
+    return;
+  }
+  if (!job.job_id) {
+    return;
+  }
+  userWarmupJobId = job.job_id;
+  syncUserWarmupStatus({
+    available: true,
+    settings: { health: { checked: true, warm: false, worker_counts: {} } },
+  });
+  await pollUserWarmupJob(job.job_id);
+}
+
+async function pollUserWarmupJob(jobId) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const response = await fetch(`/api/warmup/${encodeURIComponent(jobId)}`);
+    if (!response.ok) {
+      return;
+    }
+    const job = await response.json();
+    if (job.status === "succeeded") {
+      syncUserWarmupStatus({
+        available: true,
+        settings: { health: { checked: true, warm: true, worker_counts: {} } },
+      });
+      userWarmupJobId = "";
+      return;
+    }
+    if (job.status === "failed") {
+      userWarmupJobId = "";
+      return;
+    }
+  }
+  userWarmupJobId = "";
 }
 
 function syncUserWarmupStatus(runpodBackend) {

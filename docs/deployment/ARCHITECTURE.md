@@ -43,7 +43,7 @@ Browser
 
 1. ローカル開発: FastAPIが静的UIとAPIを同時に提供する。
 2. GPUスモーク確認: FastAPIのWeb UIとAPIを同じGPU環境で動かし、短い音声で一通りの推論を確認する。
-3. 公開MVP: Cloudflare Pagesへ静的UIを置き、Cloudflare WorkerをgatewayとしてRunPod APIを呼ぶ。
+3. 公開MVP: Cloudflare Worker Static Assetsへ静的UIを置き、同じWorkerをgatewayとしてRunPod APIを呼ぶ。初回デモの詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。
 4. 低遅延化: GPU側を常駐worker化し、可能ならASR、翻訳、TTS、声質変換をstreamingまたは段階的jobに分ける。
 
 ## 実装への影響

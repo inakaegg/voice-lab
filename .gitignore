@@ -22,3 +22,4 @@ build/
 .env.*
 !.env.example
 .runpod.env
+.dev.vars

@@ -1,0 +1,21 @@
+name = "mo-speech-demo"
+main = "cloudflare/worker.mjs"
+compatibility_date = "2025-06-27"
+
+assets = { directory = "./src/mo_speech/web", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+
+[vars]
+RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
+RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
+RUNPOD_RUNTIME_HEALTH_CHECK = "1"
+RUNPOD_WARMUP_PRELOAD_TRANSLATION = "1"
+RUNPOD_WARMUP_PRELOAD_VOICE_CONVERSION = "1"
+OPENAI_TRANSLATION_MODEL = "gpt-5.5"
+OPENAI_TEXT_TRANSFORM_MODEL = "gpt-5.5"
+OPENAI_TEXT_DISPLAY_MODEL = "gpt-5.5"
+OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+OPENAI_TTS_VOICE = "coral"
+OPENAI_TTS_RESPONSE_FORMAT = "wav"
+SEED_VC_DIFFUSION_STEPS = "8"
+SEED_VC_REFERENCE_MAX_SECONDS = "12"
+USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
