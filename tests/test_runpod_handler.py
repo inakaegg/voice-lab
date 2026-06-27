@@ -126,6 +126,13 @@ def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPa
     assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
+def test_runpod_handler_audio_suffix_ignores_mime_parameters() -> None:
+    assert runpod_handler._audio_suffix("audio/webm;codecs=opus") == ".webm"
+    assert runpod_handler._audio_suffix("video/webm; codecs=opus") == ".webm"
+    assert runpod_handler._audio_suffix("audio/mp4; codecs=mp4a.40.2") == ".m4a"
+    assert runpod_handler._audio_suffix("audio/mpeg; charset=binary") == ".mp3"
+
+
 def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runpod_handler, "_TEXT_TTS_PROVIDERS", {"fake": FakeTextTtsProvider()})
     event = {

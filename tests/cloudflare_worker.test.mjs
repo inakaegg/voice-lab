@@ -10,7 +10,7 @@ test("Cloudflare worker maps translate form data to RunPod async job", async () 
     return json({ id: "job-translate", status: "IN_QUEUE" });
   });
   const form = new FormData();
-  form.append("audio", new Blob(["webm"], { type: "audio/webm" }), "recording.webm");
+  form.append("audio", new Blob(["webm"], { type: "audio/webm;codecs=opus" }), "recording.webm");
   form.append("source_language", "auto");
   form.append("target_language", "user-auto");
   form.append("voice_mode", "default");
@@ -33,6 +33,30 @@ test("Cloudflare worker maps translate form data to RunPod async job", async () 
   assert.equal(calls[0].body.input.audio_mime_type, "audio/webm");
   assert.equal(calls[0].body.input.audio_base64, Buffer.from("webm").toString("base64"));
   assert.deepEqual(calls[0].body.input.text_transform_options, { variation: true });
+});
+
+test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url, init) => {
+    calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
+    return json({ id: "job-vc", status: "IN_QUEUE" });
+  });
+  const form = new FormData();
+  form.append("voice_backend", "seed-vc");
+  form.append("source_audio", new Blob(["source"], { type: "audio/webm;codecs=opus" }), "source.webm");
+  form.append("reference_audio", new Blob(["reference"], { type: "audio/webm;codecs=opus" }), "reference.webm");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.job_id, "job-vc");
+  assert.equal(calls[0].body.input.operation_mode, "voice_conversion");
+  assert.equal(calls[0].body.input.source_audio_mime_type, "audio/webm");
+  assert.equal(calls[0].body.input.reference_audio_mime_type, "audio/webm");
 });
 
 test("Cloudflare worker maps completed RunPod status to local job snapshot", async () => {

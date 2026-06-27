@@ -745,7 +745,7 @@ def test_translate_speech_api_saves_local_audio_history_as_wav(tmp_path, monkeyp
     response = client.post(
         "/api/translate-speech",
         data={"translation_backend": "qwen", "source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
+        files={"audio": ("recording.webm", b"fake audio", "audio/webm;codecs=opus")},
     )
 
     assert response.status_code == 200
@@ -765,7 +765,7 @@ def test_translate_speech_api_saves_local_audio_history_as_wav(tmp_path, monkeyp
     assert history["recordings"][0]["filename"].endswith(".wav")
     assert history["recordings"][0]["media_type"] == "audio/wav"
     assert history["recordings"][0]["metadata"]["filename"] == "recording.webm"
-    assert history["recordings"][0]["metadata"]["original_content_type"] == "audio/webm"
+    assert history["recordings"][0]["metadata"]["original_content_type"] == "audio/webm;codecs=opus"
     assert history["recordings"][0]["metadata"]["original_audio_suffix"] == ".webm"
 
 
@@ -1515,7 +1515,7 @@ def test_translate_speech_api_preserves_uploaded_audio_suffix() -> None:
     response = client.post(
         "/api/translate-speech",
         data={"translation_backend": "qwen", "source_language": "id-ID", "target_language": "ja-JP"},
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
+        files={"audio": ("recording.webm", b"fake audio", "audio/webm;codecs=opus")},
     )
 
     assert response.status_code == 200

@@ -386,11 +386,12 @@ def _normalize_tts_output(output: bytes | TtsOutput, audio_mime_type: str) -> Tt
 
 
 def _audio_suffix(audio_mime_type: object) -> str:
-    if audio_mime_type in {"audio/mp4", "audio/mp4a-latm", "audio/m4a", "audio/x-m4a", "audio/aac"}:
+    normalized_mime_type = str(audio_mime_type or "").split(";", 1)[0].strip().lower()
+    if normalized_mime_type in {"audio/mp4", "audio/mp4a-latm", "audio/m4a", "audio/x-m4a", "audio/aac"}:
         return ".m4a"
-    if audio_mime_type in {"audio/webm", "video/webm"}:
+    if normalized_mime_type in {"audio/webm", "video/webm"}:
         return ".webm"
-    if audio_mime_type == "audio/mpeg":
+    if normalized_mime_type == "audio/mpeg":
         return ".mp3"
     return ".wav"
 

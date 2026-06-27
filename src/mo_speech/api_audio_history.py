@@ -270,10 +270,11 @@ def upload_suffix(filename: str | None) -> str:
 
 
 def mime_suffix(audio_mime_type: str | None) -> str:
-    if audio_mime_type == "audio/mp4":
+    normalized_mime_type = str(audio_mime_type or "").split(";", 1)[0].strip().lower()
+    if normalized_mime_type == "audio/mp4":
         return ".m4a"
-    if audio_mime_type == "audio/webm":
+    if normalized_mime_type == "audio/webm":
         return ".webm"
-    if audio_mime_type == "audio/mpeg":
+    if normalized_mime_type == "audio/mpeg":
         return ".mp3"
     return ".wav"

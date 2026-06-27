@@ -279,7 +279,7 @@ async function createTranslationJob(request, env) {
   const payload = {
     operation_mode: "translation",
     audio_base64: await blobToBase64(audio),
-    audio_mime_type: audio.type || guessAudioMimeType(audio.name),
+    audio_mime_type: normalizeMimeType(audio.type || guessAudioMimeType(audio.name)),
     translation_backend: env.RUNPOD_SERVERLESS_TRANSLATION_BACKEND || "openai",
     source_language: stringFormValue(form, "source_language", "auto"),
     target_language: stringFormValue(form, "target_language", "user-auto"),
@@ -301,9 +301,9 @@ async function createVoiceConversionJob(request, env) {
   const payload = {
     operation_mode: "voice_conversion",
     source_audio_base64: await blobToBase64(sourceAudio),
-    source_audio_mime_type: sourceAudio.type || guessAudioMimeType(sourceAudio.name),
+    source_audio_mime_type: normalizeMimeType(sourceAudio.type || guessAudioMimeType(sourceAudio.name)),
     reference_audio_base64: await blobToBase64(referenceAudio),
-    reference_audio_mime_type: referenceAudio.type || guessAudioMimeType(referenceAudio.name),
+    reference_audio_mime_type: normalizeMimeType(referenceAudio.type || guessAudioMimeType(referenceAudio.name)),
     voice_backend: stringFormValue(form, "voice_backend", "seed-vc"),
     ...seedVcPayloadFromForm(form),
   };
@@ -690,6 +690,13 @@ function guessAudioMimeType(name = "") {
   if (lower.endsWith(".m4a")) return "audio/mp4";
   if (lower.endsWith(".ogg") || lower.endsWith(".opus")) return "audio/ogg";
   return "audio/wav";
+}
+
+function normalizeMimeType(value = "") {
+  return String(value || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
 }
 
 function audioMimeFromOpenAiFormat(format) {
