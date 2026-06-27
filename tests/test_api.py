@@ -304,6 +304,10 @@ def test_static_assets_are_served() -> None:
     assert "🇯🇵 ルビ" in js_text
     assert "🇮🇩 Indonesia" in js_text
     assert "setUserProcessingProgress" in js_text
+    assert "processingProgressCeiling" in js_text
+    assert "baseJobCompleteProgressPercent" in js_text
+    assert "userVoiceConversionEnabled() ? 70 : 100" in js_text
+    assert "setUserProcessingProgress(82, { ceiling: 90 })" in js_text
     assert "しょりちゅう" in js_text
     assert "seed_vc_reference_auto_select" in js_text
     assert "user-settings" in js_text

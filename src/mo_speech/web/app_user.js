@@ -38,6 +38,7 @@ let processingProgressTimerId = null;
 let processingProgressDisplayed = 0;
 let processingProgressTarget = 0;
 let processingProgressTargetStartedAt = 0;
+let processingProgressCeiling = 96;
 let userAudioContext = null;
 let userAudioLevelSource = null;
 let userAudioAnalyser = null;
@@ -319,7 +320,7 @@ async function runUserTranslation(audioBlob, fileName) {
   isUserProcessing = true;
   hasUserOutput = false;
   userReplayButton.hidden = true;
-  setUserProcessingProgress(4);
+  setUserProcessingProgress(4, { ceiling: 12 });
   const translationSignature = currentUserTranslationSignature();
   const baseTextSignature = currentUserBaseTextSignature();
   const formData = buildUserTranslationFormData(audioBlob, fileName);
@@ -369,7 +370,7 @@ async function runUserTextOutput() {
   isUserProcessing = true;
   hasUserOutput = false;
   userReplayButton.hidden = true;
-  setUserProcessingProgress(38);
+  setUserProcessingProgress(38, { ceiling: userVoiceConversionEnabled() ? 68 : 96 });
   const baseTextSignature = currentUserBaseTextSignature();
   const response = await fetch("/api/user-text-output", {
     method: "POST",
@@ -449,7 +450,7 @@ async function runUserVoiceConversion(baseAudioBlob, sourceStem = "user-base-out
   if (!lastUserInputBlob) {
     throw new Error("もとの ろくおんが ありません");
   }
-  setUserProcessingProgress(58);
+  setUserProcessingProgress(72, { ceiling: 82 });
   const formData = new FormData();
   formData.append("voice_backend", "seed-vc");
   formData.append("seed_vc_diffusion_steps", userSeedVcDiffusionSteps);
@@ -711,31 +712,39 @@ function renderUserJob(job) {
   const stage = job.current_stage?.stage || "";
   setUserStatus("processing");
   if (job.status === "queued") {
-    setUserProcessingProgress(8);
+    setUserProcessingProgress(8, { ceiling: userVoiceConversionEnabled() ? 14 : 18 });
   } else if (stage === "asr") {
-    setUserProcessingProgress(22);
+    setUserProcessingProgress(22, { ceiling: userVoiceConversionEnabled() ? 32 : 42 });
   } else if (stage === "translation" || stage === "text_transform") {
-    setUserProcessingProgress(stage === "translation" ? 40 : 52);
+    setUserProcessingProgress(stage === "translation" ? 40 : 52, {
+      ceiling: userVoiceConversionEnabled() ? (stage === "translation" ? 48 : 58) : 78,
+    });
   } else if (stage === "tts") {
-    setUserProcessingProgress(66);
+    setUserProcessingProgress(66, { ceiling: userVoiceConversionEnabled() ? 70 : 90 });
   } else if (stage === "voice_conversion") {
-    setUserProcessingProgress(78);
+    setUserProcessingProgress(82, { ceiling: 90 });
   } else if (stage === "complete") {
-    setUserProcessingProgress(100);
+    setUserProcessingProgress(baseJobCompleteProgressPercent(), {
+      ceiling: userVoiceConversionEnabled() ? 72 : 100,
+    });
   } else if (job.status === "running") {
-    setUserProcessingProgress(16);
+    setUserProcessingProgress(16, { ceiling: userVoiceConversionEnabled() ? 24 : 36 });
   }
 }
 
 function renderUserVoiceJob(job) {
   setUserStatus("processing");
   if (job.status === "queued") {
-    setUserProcessingProgress(58);
+    setUserProcessingProgress(74, { ceiling: 82 });
   } else if (job.current_stage?.stage === "voice_conversion" || job.status === "running") {
-    setUserProcessingProgress(72);
+    setUserProcessingProgress(82, { ceiling: 90 });
   } else if (job.current_stage?.stage === "complete") {
     setUserProcessingProgress(100);
   }
+}
+
+function baseJobCompleteProgressPercent() {
+  return userVoiceConversionEnabled() ? 70 : 100;
 }
 
 async function renderUserResult(result) {
@@ -1428,7 +1437,9 @@ async function reprocessLatestUserOutput() {
       await runUserTextOutput();
     } else {
       isUserProcessing = true;
-      setUserProcessingProgress(userVoiceConversionEnabled() ? 58 : 92);
+      setUserProcessingProgress(userVoiceConversionEnabled() ? 72 : 92, {
+        ceiling: userVoiceConversionEnabled() ? 82 : 96,
+      });
       await applyUserVoiceModeToBase();
       setUserProcessingProgress(100);
       hideUserProcessing();
@@ -1552,15 +1563,20 @@ function renderUserTextMode() {
   }
 }
 
-function setUserProcessingProgress(percent) {
+function setUserProcessingProgress(percent, options = {}) {
   userProcessingPanel.hidden = false;
   startProcessingLabelAnimation();
   startProcessingProgressAnimation();
   syncUserStatusVisibility();
   const clamped = Math.max(0, Math.min(percent, 100));
+  if (options.ceiling !== undefined) {
+    const requestedCeiling = Math.max(0, Math.min(Number(options.ceiling) || 0, 100));
+    processingProgressCeiling = Math.max(clamped, requestedCeiling);
+  }
   if (clamped >= 100) {
     processingProgressTarget = 100;
     processingProgressDisplayed = 100;
+    processingProgressCeiling = 100;
     renderUserProcessingProgress();
     return;
   }
@@ -1620,6 +1636,7 @@ function stopProcessingProgressAnimation() {
   processingProgressDisplayed = 0;
   processingProgressTarget = 0;
   processingProgressTargetStartedAt = 0;
+  processingProgressCeiling = 96;
   renderUserProcessingProgress();
 }
 
@@ -1631,7 +1648,10 @@ function updateProcessingProgressAnimation() {
   }
   const stageElapsedSeconds = Math.max(0, (performance.now() - processingProgressTargetStartedAt) / 1000);
   const waitingLift = Math.min(24, Math.log1p(stageElapsedSeconds) * 5.2);
-  const desired = Math.min(96, Math.max(processingProgressTarget, processingProgressTarget + waitingLift));
+  const desired = Math.min(
+    processingProgressCeiling,
+    Math.max(processingProgressTarget, processingProgressTarget + waitingLift),
+  );
   const diff = desired - processingProgressDisplayed;
   if (diff > 0) {
     processingProgressDisplayed += Math.max(0.12, Math.min(diff * 0.1, 0.85));
