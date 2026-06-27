@@ -333,6 +333,8 @@ python scripts/runpod_smoke_serverless.py \
 
 Serverless handlerのレスポンスには、通常の `timings_ms` に加えて `serverless_timings_ms` と `serverless` を含める。`serverless_timings_ms.pipeline_load` または `serverless_timings_ms.voice_conversion_service_load` が大きい場合は、worker cold startまたはモデルpreloadが支配的である。`serverless.worker_cold=true` の実行と、同じworker上でのwarm実行を分けて記録する。
 
+RunPod管理画面のendpoint `ready` やWorkersタブの `idle` は、endpointまたはworker recordの状態を示すもので、アプリ内のSeed-VCモデルがresident load済みであることとは別に扱う。UIで `じゅんびOK` と表示する条件は、`/health` でworkerが見えることではなく、`warmup` operationまたはSeed-VC voice conversion jobが成功し、その結果からVC ready状態を短時間だけ確認できることにする。
+
 Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker起動とモデルロードが入る。検証時は `MO_RUNPOD_PRELOAD_ON_START=1` を使い、worker起動時にpipelineを先にロードしてからhandlerを受け付ける。低アクセス本番ではcold startを許容し、録音開始時のwarmup jobやCloudflare Worker側の進行表示で体感を補う。
 
 VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードする。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前にwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。

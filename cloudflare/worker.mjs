@@ -4,6 +4,7 @@ const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
 const AUDIO_HISTORY_INDEX_KV_KEY = "audio-history:index";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
+const RUNPOD_VC_READY_KV_KEY = "runpod:seed-vc-ready";
 const AUDIO_HISTORY_DEFAULT_LIMIT = 10;
 const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 const OPENAI_LANGUAGE_CODES = {
@@ -146,6 +147,8 @@ async function runtimePayload(env) {
   const health = runpodAvailable && env.RUNPOD_RUNTIME_HEALTH_CHECK !== "0"
     ? await runpodHealthSummary(env)
     : { checked: false, warm: false, worker_counts: {} };
+  const warmup = runpodAvailable ? await readRunpodVcReadyState(env) : runpodVcReadyState(false);
+  const seedVcModelResident = Boolean(warmup.ready);
   return {
     provider_mode: "cloudflare",
     providers: {
@@ -217,11 +220,12 @@ async function runtimePayload(env) {
         settings: {
           seed_vc: {
             execution_mode: "resident",
-            model_resident: health.warm || false,
+            model_resident: seedVcModelResident,
             diffusion_steps: numberFromEnv(env.SEED_VC_DIFFUSION_STEPS, 8),
             reference_max_seconds: numberFromEnv(env.SEED_VC_REFERENCE_MAX_SECONDS, 12),
             reference_auto_select: true,
           },
+          warmup,
           health,
         },
       },
@@ -558,6 +562,9 @@ async function createVoiceConversionJob(request, env) {
   }
   const body = await submitRunpodJob(env, payload);
   const snapshot = jobSnapshotFromRunpod(body, "voice_conversion");
+  if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, "voice_conversion")) {
+    await saveRunpodVcReadyState(env, snapshot, "voice_conversion");
+  }
   await saveAudioHistoryEntry(env, "recordings", {
     audio_base64: sourceAudioBase64,
     audio_mime_type: sourceAudioMimeType,
@@ -580,7 +587,11 @@ async function createWarmupJob(env) {
     preload_voice_conversion: env.RUNPOD_WARMUP_PRELOAD_VOICE_CONVERSION !== "0",
   };
   const body = await submitRunpodJob(env, payload);
-  return jobSnapshotFromRunpod(body, "warmup");
+  const snapshot = jobSnapshotFromRunpod(body, "warmup");
+  if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, "warmup")) {
+    await saveRunpodVcReadyState(env, snapshot, "warmup");
+  }
+  return snapshot;
 }
 
 async function getRunpodJobSnapshot(jobId, env, kind) {
@@ -589,10 +600,73 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
   }
   const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
   const snapshot = jobSnapshotFromRunpod(body, kind);
+  if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, kind)) {
+    await saveRunpodVcReadyState(env, snapshot, kind);
+  }
   if (snapshot.status === "succeeded" && snapshot.result?.audio_base64) {
     await saveRunpodOutputHistory(env, jobId, kind, snapshot.result);
   }
   return snapshot;
+}
+
+async function readRunpodVcReadyState(env) {
+  const kv = stateKv(env);
+  if (!kv) {
+    return runpodVcReadyState(false);
+  }
+  const state = await kvGetJson(kv, RUNPOD_VC_READY_KV_KEY, null);
+  if (!state || typeof state !== "object") {
+    return runpodVcReadyState(false);
+  }
+  const expiresAt = Date.parse(String(state.expires_at || ""));
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    await kv.delete(RUNPOD_VC_READY_KV_KEY);
+    return runpodVcReadyState(false);
+  }
+  return runpodVcReadyState(true, state);
+}
+
+async function saveRunpodVcReadyState(env, snapshot, kind) {
+  const kv = stateKv(env);
+  if (!kv) {
+    return;
+  }
+  const ttlSeconds = runpodVcReadyTtlSeconds(env);
+  const state = {
+    ready: true,
+    source: kind,
+    job_id: snapshot.job_id || "",
+    checked_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+    providers: snapshot.result?.providers || {},
+    serverless_timings_ms: snapshot.result?.serverless_timings_ms || {},
+  };
+  await kv.put(RUNPOD_VC_READY_KV_KEY, JSON.stringify(state), { expirationTtl: ttlSeconds });
+}
+
+function isRunpodVcReadyResult(result, kind) {
+  if (!result || typeof result !== "object") {
+    return false;
+  }
+  if (kind === "warmup") {
+    return result.warm === true && result.providers?.voice_conversion === "seed-vc";
+  }
+  if (kind === "voice_conversion") {
+    return Boolean(result.audio_base64);
+  }
+  return false;
+}
+
+function runpodVcReadyState(ready, state = {}) {
+  return {
+    ready: Boolean(ready),
+    source: String(state.source || ""),
+    job_id: String(state.job_id || ""),
+    checked_at: String(state.checked_at || ""),
+    expires_at: String(state.expires_at || ""),
+    providers: state.providers || {},
+    serverless_timings_ms: state.serverless_timings_ms || {},
+  };
 }
 
 async function getTranslationJobSnapshot(jobId, env) {
@@ -1516,6 +1590,10 @@ function audioMimeFromOpenAiFormat(format) {
     wav: "audio/wav",
     pcm: "audio/wav",
   }[format] || "audio/wav";
+}
+
+function runpodVcReadyTtlSeconds(env) {
+  return Math.max(30, numberFromEnv(env.RUNPOD_WARMUP_READY_TTL_SECONDS, 300));
 }
 
 function runpodBaseUrl(env) {

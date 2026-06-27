@@ -304,8 +304,128 @@ test("Cloudflare worker reports RunPod runtime availability and warm health", as
   assert.equal(runpod.available, false);
   assert.equal(runpod.settings.health.warm, true);
   assert.equal(seedVc.available, true);
-  assert.equal(seedVc.settings.seed_vc.model_resident, true);
+  assert.equal(seedVc.settings.seed_vc.model_resident, false);
+  assert.equal(seedVc.settings.warmup.ready, false);
   assert.equal(seedVc.settings.health.warm, true);
+});
+
+test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", async () => {
+  const kv = fakeKv();
+  const calls = [];
+  const env = fakeEnv(
+    async (url, init) => {
+      calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
+      if (url.endsWith("/run")) {
+        return json({ id: "warm-job", status: "IN_QUEUE" });
+      }
+      if (url.endsWith("/status/warm-job")) {
+        return json({
+          id: "warm-job",
+          status: "COMPLETED",
+          output: {
+            warm: true,
+            providers: { voice_conversion: "seed-vc" },
+            serverless_timings_ms: { voice_conversion_service_load: 123.4 },
+          },
+        });
+      }
+      if (url.endsWith("/health")) {
+        return json({ workers: [{ state: "IDLE" }] });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    },
+    { kv },
+  );
+
+  const warmupResponse = await handleRequest(new Request("https://example.com/api/warmup", { method: "POST" }), env);
+  const warmupJob = await warmupResponse.json();
+  const statusResponse = await handleRequest(new Request("https://example.com/api/warmup/warm-job"), env);
+  const statusJob = await statusResponse.json();
+  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtime = await runtimeResponse.json();
+  const seedVc = runtime.voice_conversion_backends[0];
+
+  assert.equal(warmupJob.status, "queued");
+  assert.equal(statusJob.status, "succeeded");
+  assert.equal(calls[0].body.input.preload_voice_conversion, true);
+  assert.equal(seedVc.settings.seed_vc.model_resident, true);
+  assert.equal(seedVc.settings.warmup.ready, true);
+  assert.equal(seedVc.settings.warmup.job_id, "warm-job");
+});
+
+test("Cloudflare worker stores Seed-VC ready state when warmup run completes immediately", async () => {
+  const kv = fakeKv();
+  const env = fakeEnv(
+    async (url) => {
+      if (url.endsWith("/run")) {
+        return json({
+          id: "warm-job",
+          status: "COMPLETED",
+          output: {
+            warm: true,
+            providers: { voice_conversion: "seed-vc" },
+          },
+        });
+      }
+      if (url.endsWith("/health")) {
+        return json({ workers: [{ state: "IDLE" }] });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    },
+    { kv },
+  );
+
+  const warmupResponse = await handleRequest(new Request("https://example.com/api/warmup", { method: "POST" }), env);
+  const warmupJob = await warmupResponse.json();
+  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtime = await runtimeResponse.json();
+  const seedVc = runtime.voice_conversion_backends[0];
+
+  assert.equal(warmupJob.status, "succeeded");
+  assert.equal(seedVc.settings.seed_vc.model_resident, true);
+  assert.equal(seedVc.settings.warmup.ready, true);
+  assert.equal(seedVc.settings.warmup.source, "warmup");
+});
+
+test("Cloudflare worker stores Seed-VC ready state when voice conversion run completes immediately", async () => {
+  const kv = fakeKv();
+  const env = fakeEnv(
+    async (url) => {
+      if (url.endsWith("/run")) {
+        return json({
+          id: "vc-job",
+          status: "COMPLETED",
+          output: {
+            audio_mime_type: "audio/wav",
+            audio_base64: "AAAA",
+          },
+        });
+      }
+      if (url.endsWith("/health")) {
+        return json({ workers: [{ state: "IDLE" }] });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    },
+    { kv },
+  );
+  const form = new FormData();
+  form.append("voice_backend", "seed-vc");
+  form.append("source_audio", new Blob(["source"], { type: "audio/webm" }), "source.webm");
+  form.append("reference_audio", new Blob(["reference"], { type: "audio/webm" }), "reference.webm");
+
+  const vcResponse = await handleRequest(
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const vcJob = await vcResponse.json();
+  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtime = await runtimeResponse.json();
+  const seedVc = runtime.voice_conversion_backends[0];
+
+  assert.equal(vcJob.status, "succeeded");
+  assert.equal(seedVc.settings.seed_vc.model_resident, true);
+  assert.equal(seedVc.settings.warmup.ready, true);
+  assert.equal(seedVc.settings.warmup.source, "voice_conversion");
 });
 
 function fakeEnv(fetchImpl, options = {}) {

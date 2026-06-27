@@ -202,9 +202,9 @@ const userUiTexts = {
     indonesian: "siap",
   },
   warm_cold: {
-    hiragana: "じゅんびちゅう",
-    ruby: "<ruby>準備中<rt>じゅんびちゅう</rt></ruby>",
-    indonesian: "menyiapkan",
+    hiragana: "じゅんびまえ",
+    ruby: "<ruby>準備前<rt>じゅんびまえ</rt></ruby>",
+    indonesian: "belum siap",
   },
   warm_unknown: {
     hiragana: "じゅんびかくにんちゅう",
@@ -1072,7 +1072,6 @@ async function loadUserRuntime() {
     const seedVc = (runtime.voice_conversion_backends || []).find((backend) => backend.id === "seed-vc");
     syncSimilarVoiceAvailability(seedVc);
     syncUserWarmupStatus(seedVc);
-    maybeStartUserWarmup(seedVc);
   } catch (_error) {
     syncUserWarmupStatus(null);
     return;
@@ -1083,8 +1082,8 @@ function maybeStartUserWarmup(runpodBackend) {
   if (!runpodBackend?.available) {
     return;
   }
-  const health = runpodBackend.settings?.health || {};
-  if (health.checked && health.warm) {
+  const warmup = runpodBackend.settings?.warmup || {};
+  if (warmup.ready || runpodBackend.settings?.seed_vc?.model_resident) {
     return;
   }
   if (userWarmupRequestInFlight || userWarmupJobId) {
@@ -1107,7 +1106,11 @@ async function requestUserWarmup() {
   if (job.status === "succeeded") {
     syncUserWarmupStatus({
       available: true,
-      settings: { health: { checked: true, warm: true, worker_counts: {} } },
+      settings: {
+        seed_vc: { model_resident: true },
+        warmup: { ready: true },
+        health: { checked: true, warm: true, worker_counts: {} },
+      },
     });
     return;
   }
@@ -1117,7 +1120,10 @@ async function requestUserWarmup() {
   userWarmupJobId = job.job_id;
   syncUserWarmupStatus({
     available: true,
-    settings: { health: { checked: true, warm: false, worker_counts: {} } },
+    settings: {
+      warmup: { ready: false },
+      health: { checked: true, warm: false, worker_counts: {} },
+    },
   });
   await pollUserWarmupJob(job.job_id);
 }
@@ -1133,7 +1139,11 @@ async function pollUserWarmupJob(jobId) {
     if (job.status === "succeeded") {
       syncUserWarmupStatus({
         available: true,
-        settings: { health: { checked: true, warm: true, worker_counts: {} } },
+        settings: {
+          seed_vc: { model_resident: true },
+          warmup: { ready: true },
+          health: { checked: true, warm: true, worker_counts: {} },
+        },
       });
       userWarmupJobId = "";
       return;
@@ -1156,7 +1166,8 @@ function syncUserWarmupStatus(runpodBackend) {
     return;
   }
   const health = runpodBackend.settings?.health || {};
-  if (health.checked && health.warm) {
+  const warmup = runpodBackend.settings?.warmup || {};
+  if (warmup.ready || runpodBackend.settings?.seed_vc?.model_resident) {
     userWarmupStatusKey = "warm_ready";
   } else if (health.checked) {
     userWarmupStatusKey = "warm_cold";
