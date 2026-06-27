@@ -216,6 +216,35 @@
               <p id="user_joke_pool_empty" class="route-hint">候補がありません。</p>
             </div>
             <div class="field-row">
+              <label for="user_effect_audio_files">効果音ファイル</label>
+              <input id="user_effect_audio_files" name="user_effect_audio_files" type="file" accept="audio/*" multiple />
+              <p class="route-hint">インドネシア語以外の出力時、ジョークONならVC後の音声へこの効果音を挿入します。</p>
+              <ol id="user_effect_audio_preview" class="joke-preview-list"></ol>
+              <p id="user_effect_audio_empty" class="route-hint">効果音ファイルがありません。</p>
+            </div>
+            <div class="field-row">
+              <label for="user_effect_selection">効果音選択</label>
+              <select id="user_effect_selection" name="user_effect_selection">
+                <option value="rotation">ローテーション</option>
+                <option value="random">ランダム</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="user_effect_insert_mode">効果音挿入</label>
+              <select id="user_effect_insert_mode" name="user_effect_insert_mode">
+                <option value="silence_or_tail">無音部分、なければ末尾</option>
+                <option value="tail">末尾のみ</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="user_effect_max_insertions">最大挿入回数</label>
+              <input id="user_effect_max_insertions" name="user_effect_max_insertions" type="number" min="1" max="5" value="1" />
+            </div>
+            <div class="field-row">
+              <label for="user_effect_min_silence_ms">無音判定の最小ms</label>
+              <input id="user_effect_min_silence_ms" name="user_effect_min_silence_ms" type="number" min="100" max="2000" value="300" />
+            </div>
+            <div class="field-row">
               <label for="user_theme">ユーザー画面テーマ</label>
               <select id="user_theme" name="user_theme">
                 <option value="blue">青</option>

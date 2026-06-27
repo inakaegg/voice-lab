@@ -9,6 +9,7 @@
   <body class="user-body">
     <main class="user-stage" aria-label="へんなへんかんアプリ">
       <input id="target_language" name="target_language" type="hidden" value="user-auto" />
+      <input id="similar_voice" type="checkbox" checked hidden />
       <button id="display-mode-button" class="display-mode-button" type="button">🇯🇵 ひらがな</button>
 
       <section class="user-hero" aria-label="ろくおん">
@@ -46,11 +47,6 @@
       </section>
 
       <section class="user-toggles" aria-label="せってい">
-        <label class="toggle-tile">
-          <input id="similar_voice" type="checkbox" checked />
-          <span class="toggle-icon" aria-hidden="true">🎙️</span>
-          <span id="similar-voice-label">にてるこえ</span>
-        </label>
         <label class="toggle-tile">
           <input id="joke_mode" type="checkbox" />
           <span class="toggle-icon" aria-hidden="true">😊</span>

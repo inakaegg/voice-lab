@@ -126,6 +126,49 @@ def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPa
     assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
+def test_runpod_handler_inserts_audio_effect_after_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = FakeVcProvider()
+    captured = {}
+
+    def fake_insert(payload, output_audio_bytes, output_audio_mime_type):
+        captured["payload"] = payload
+        captured["output_audio_bytes"] = output_audio_bytes
+        captured["output_audio_mime_type"] = output_audio_mime_type
+        return runpod_handler.AudioEffectInsertResult(
+            audio_bytes=b"converted with effect",
+            audio_mime_type="audio/wav",
+            timings_ms={"audio_effect_insert": 2.0},
+            warnings=[],
+            inserted_count=1,
+            insertion_points=[0.5],
+        )
+
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([provider]))
+    monkeypatch.setattr(runpod_handler, "_insert_audio_effect_from_payload", fake_insert)
+    event = {
+        "input": {
+            "operation_mode": "voice_conversion",
+            "source_audio_base64": base64.b64encode(b"source audio").decode("ascii"),
+            "reference_audio_base64": base64.b64encode(b"reference audio").decode("ascii"),
+            "audio_effect_audio_base64": base64.b64encode(b"moo").decode("ascii"),
+            "audio_effect_audio_mime_type": "audio/mpeg",
+            "audio_effect_enabled": True,
+            "audio_effect_insert_mode": "silence_or_tail",
+            "audio_effect_max_insertions": 2,
+            "audio_effect_min_silence_ms": 450,
+        }
+    }
+
+    payload = runpod_handler.handler(event)
+
+    assert captured["output_audio_bytes"] == b"fake converted wav"
+    assert payload["audio_base64"] == base64.b64encode(b"converted with effect").decode("ascii")
+    assert payload["providers"]["audio_effect_insert"] == "ffmpeg"
+    assert payload["timings_ms"]["audio_effect_insert"] == 2.0
+    assert payload["audio_effect_inserted_count"] == 1
+    assert payload["audio_effect_insertion_points"] == [0.5]
+
+
 def test_runpod_handler_audio_suffix_ignores_mime_parameters() -> None:
     assert runpod_handler._audio_suffix("audio/webm;codecs=opus") == ".webm"
     assert runpod_handler._audio_suffix("video/webm; codecs=opus") == ".webm"

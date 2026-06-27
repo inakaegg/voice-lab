@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, Thread
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 from .api_audio_history import (
@@ -22,6 +23,7 @@ from .api_serializers import (
     serialize_voice_conversion_result,
     text_preview,
 )
+from .audio_effects import insert_audio_effect
 from .audio_history import AudioHistoryEntry, AudioHistoryStore
 from .pipeline import PipelineProgress, PipelineRequest, SpeechTranslationPipeline
 from .providers.voice import VoiceConversionRequest, VoiceConversionResult, VoiceConversionService
@@ -283,6 +285,12 @@ class VoiceConversionJobStore:
                 self._update_progress(job_id, progress)
 
             result: VoiceConversionResult = self.service.convert(request, progress_callback=report_progress)
+            if request.audio_effect_path is not None:
+                self._update_progress(
+                    job_id,
+                    PipelineProgress("audio_effect_insert", "効果音挿入", "ffmpeg"),
+                )
+                result = _insert_audio_effect_for_voice_result(result, request)
             self.audio_history_store.save_output(
                 result.output_audio_bytes,
                 suffix=mime_suffix(result.output_audio_mime_type),
@@ -372,4 +380,44 @@ def planned_voice_conversion_stages(
         {"stage": "source_audio_prepare", "label": "変換元音声準備", "provider": "ffmpeg"},
         {"stage": "reference_audio_prepare", "label": "参照音声準備", "provider": "ffmpeg"},
         {"stage": "voice_conversion", "label": "声質変換", "provider": provider},
+        *(
+            [{"stage": "audio_effect_insert", "label": "効果音挿入", "provider": "ffmpeg"}]
+            if request.audio_effect_path is not None
+            else []
+        ),
     ]
+
+
+def _insert_audio_effect_for_voice_result(
+    result: VoiceConversionResult,
+    request: VoiceConversionRequest,
+) -> VoiceConversionResult:
+    if request.audio_effect_path is None:
+        return result
+    with TemporaryDirectory() as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        main_audio_path = temp_dir / f"voice-output{mime_suffix(result.output_audio_mime_type)}"
+        output_path = temp_dir / "voice-output-with-effect.wav"
+        main_audio_path.write_bytes(result.output_audio_bytes)
+        effect_result = insert_audio_effect(
+            main_audio_path,
+            request.audio_effect_path,
+            output_path,
+            settings=request.audio_effect_settings,
+        )
+    return VoiceConversionResult(
+        output_audio_bytes=effect_result.audio_bytes,
+        output_audio_mime_type=effect_result.audio_mime_type,
+        timings_ms={
+            **result.timings_ms,
+            **effect_result.timings_ms,
+        },
+        providers={
+            **result.providers,
+            "audio_effect_insert": "ffmpeg",
+        },
+        warnings=[
+            *result.warnings,
+            *effect_result.warnings,
+        ],
+    )

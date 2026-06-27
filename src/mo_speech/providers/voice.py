@@ -15,9 +15,12 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from time import perf_counter
 from types import SimpleNamespace
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..pipeline import PipelineProgress, ProgressCallback, TtsOutput
+
+if TYPE_CHECKING:
+    from ..audio_effects import AudioEffectInsertSettings
 
 
 QWEN_HELPER_MODULE = "mo_speech.qwen_tts_synthesize"
@@ -92,6 +95,8 @@ class VoiceConversionRequest:
     reference_audio_path: Path
     backend_id: str
     seed_vc_settings: SeedVcRuntimeSettings = field(default_factory=SeedVcRuntimeSettings)
+    audio_effect_path: Path | None = None
+    audio_effect_settings: AudioEffectInsertSettings | None = None
 
 
 @dataclass(frozen=True)

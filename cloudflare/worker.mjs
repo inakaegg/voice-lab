@@ -29,6 +29,11 @@ const DEFAULT_USER_SETTINGS = {
   joke_variation_count: 0,
   joke_variants: [],
   joke_pool: [],
+  effect_audios: [],
+  effect_selection: "rotation",
+  effect_insert_mode: "silence_or_tail",
+  effect_max_insertions: 1,
+  effect_min_silence_ms: 300,
   theme: "blue",
 };
 
@@ -308,6 +313,7 @@ async function prepareUserSettingsForWrite(payload, env) {
 function coerceUserSettings(payload = {}) {
   const jokeTexts = coerceTextList(payload.joke_texts ?? payload.joke_text);
   const jokeVariants = coerceTextList(payload.joke_variants);
+  const effectAudios = coerceEffectAudios(payload.effect_audios);
   return {
     target_language: supportedValue(payload.target_language, ["ja-JP", "id-ID", "zh-CN", "en-US"], "ja-JP"),
     joke_text: jokeTexts.join("\n"),
@@ -317,6 +323,11 @@ function coerceUserSettings(payload = {}) {
     joke_variation_count: clampInt(payload.joke_variation_count, 0, 5, 0),
     joke_variants: jokeVariants,
     joke_pool: [...jokeTexts, ...jokeVariants],
+    effect_audios: effectAudios,
+    effect_selection: supportedValue(payload.effect_selection, ["rotation", "random"], "rotation"),
+    effect_insert_mode: supportedValue(payload.effect_insert_mode, ["silence_or_tail", "tail"], "silence_or_tail"),
+    effect_max_insertions: clampInt(payload.effect_max_insertions, 1, 5, 1),
+    effect_min_silence_ms: clampInt(payload.effect_min_silence_ms, 100, 2000, 300),
     theme: supportedValue(payload.theme, ["blue", "pop", "mint"], "blue"),
   };
 }
@@ -328,6 +339,30 @@ function coerceTextList(value) {
   return String(value || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function coerceEffectAudios(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const audioBase64 = String(item.audio_base64 || "").trim();
+      if (!audioBase64 || audioBase64.length > 2_000_000) {
+        return null;
+      }
+      return {
+        id: String(item.id || `effect-${index + 1}`).trim() || `effect-${index + 1}`,
+        name: String(item.name || `effect-${index + 1}.wav`).trim().slice(0, 120) || `effect-${index + 1}.wav`,
+        audio_mime_type: normalizeMimeType(item.audio_mime_type || "audio/wav") || "audio/wav",
+        audio_base64: audioBase64,
+      };
+    })
     .filter(Boolean)
     .slice(0, 20);
 }
@@ -486,6 +521,8 @@ async function createVoiceConversionJob(request, env) {
   const referenceAudioBase64 = await blobToBase64(referenceAudio);
   const referenceAudioMimeType = normalizeMimeType(referenceAudio.type || guessAudioMimeType(referenceAudio.name));
   const voiceBackend = stringFormValue(form, "voice_backend", "seed-vc");
+  const audioEffectAudio = optionalBlob(form, "audio_effect_audio");
+  const audioEffectEnabled = optionEnabled(stringFormValue(form, "audio_effect_enabled", "false"));
   const payload = {
     operation_mode: "voice_conversion",
     source_audio_base64: sourceAudioBase64,
@@ -495,6 +532,30 @@ async function createVoiceConversionJob(request, env) {
     voice_backend: voiceBackend,
     ...seedVcPayloadFromForm(form),
   };
+  if (audioEffectEnabled && audioEffectAudio) {
+    payload.audio_effect_enabled = true;
+    payload.audio_effect_audio_base64 = await blobToBase64(audioEffectAudio);
+    payload.audio_effect_audio_mime_type = normalizeMimeType(
+      audioEffectAudio.type || guessAudioMimeType(audioEffectAudio.name),
+    );
+    payload.audio_effect_insert_mode = supportedValue(
+      stringFormValue(form, "audio_effect_insert_mode", "silence_or_tail"),
+      ["silence_or_tail", "tail"],
+      "silence_or_tail",
+    );
+    payload.audio_effect_max_insertions = clampInt(
+      stringFormValue(form, "audio_effect_max_insertions", "1"),
+      1,
+      5,
+      1,
+    );
+    payload.audio_effect_min_silence_ms = clampInt(
+      stringFormValue(form, "audio_effect_min_silence_ms", "300"),
+      100,
+      2000,
+      300,
+    );
+  }
   const body = await submitRunpodJob(env, payload);
   const snapshot = jobSnapshotFromRunpod(body, "voice_conversion");
   await saveAudioHistoryEntry(env, "recordings", {
@@ -1377,6 +1438,14 @@ function requiredBlob(form, key) {
   const value = form.get(key);
   if (!value || typeof value.arrayBuffer !== "function") {
     throw httpError(400, `${key} is required`);
+  }
+  return value;
+}
+
+function optionalBlob(form, key) {
+  const value = form.get(key);
+  if (!value || typeof value.arrayBuffer !== "function") {
+    return null;
   }
   return value;
 }

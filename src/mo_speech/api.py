@@ -37,6 +37,7 @@ from .api_runtime import (
 )
 from .api_serializers import normalize_tts_provider_output as _normalize_tts_provider_output
 from .api_serializers import serialize_pipeline_result as _serialize_pipeline_result
+from .audio_effects import AudioEffectInsertSettings
 from .audio_history import AudioHistoryStore
 from .factory import (
     create_openai_pipeline,
@@ -459,12 +460,17 @@ def create_app(
     async def create_voice_conversion_job(
         source_audio: Annotated[UploadFile, File()],
         reference_audio: Annotated[UploadFile, File()],
+        audio_effect_audio: Annotated[UploadFile | None, File()] = None,
         voice_backend: Annotated[str, Form()] = "seed-vc",
         seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
         seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
+        audio_effect_enabled: Annotated[bool, Form()] = False,
+        audio_effect_insert_mode: Annotated[str, Form()] = "silence_or_tail",
+        audio_effect_max_insertions: Annotated[int, Form()] = 1,
+        audio_effect_min_silence_ms: Annotated[int, Form()] = 300,
     ) -> dict[str, object]:
         source_audio_bytes = await source_audio.read()
         source_suffix = _upload_suffix(source_audio.filename)
@@ -489,6 +495,23 @@ def create_app(
             temp_reference.write(reference_audio_bytes)
             temp_reference.flush()
             reference_audio_path = Path(temp_reference.name)
+        audio_paths = [source_audio_path, reference_audio_path]
+
+        audio_effect_path: Path | None = None
+        audio_effect_settings: AudioEffectInsertSettings | None = None
+        if audio_effect_enabled and audio_effect_audio is not None:
+            audio_effect_bytes = await audio_effect_audio.read()
+            if audio_effect_bytes:
+                with NamedTemporaryFile(suffix=_upload_suffix(audio_effect_audio.filename), delete=False) as temp_effect:
+                    temp_effect.write(audio_effect_bytes)
+                    temp_effect.flush()
+                    audio_effect_path = Path(temp_effect.name)
+                audio_paths.append(audio_effect_path)
+                audio_effect_settings = AudioEffectInsertSettings(
+                    insert_mode=audio_effect_insert_mode,
+                    max_insertions=max(1, min(audio_effect_max_insertions, 5)),
+                    min_silence_ms=max(100, min(audio_effect_min_silence_ms, 2000)),
+                )
 
         request = VoiceConversionRequest(
             source_audio_path=source_audio_path,
@@ -501,8 +524,10 @@ def create_app(
                 reference_max_seconds=seed_vc_reference_max_seconds,
                 reference_auto_select=seed_vc_reference_auto_select,
             ),
+            audio_effect_path=audio_effect_path,
+            audio_effect_settings=audio_effect_settings,
         )
-        return voice_conversion_job_store.start(request, [source_audio_path, reference_audio_path])
+        return voice_conversion_job_store.start(request, audio_paths)
 
     @app.post("/api/seed-vc/reference-preview")
     async def preview_seed_vc_reference(

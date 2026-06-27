@@ -79,6 +79,8 @@ let processingDotCount = 0;
 let userTextEffectsAvailable = false;
 let currentSelectedJokeText = "";
 let currentSelectedJokeSettingsSignature = "";
+let currentSelectedEffectAudio = null;
+let currentSelectedEffectSettingsSignature = "";
 let userTranslationBackend = "openai";
 let userWarmupStatusKey = "";
 let userWarmupJobId = "";
@@ -92,6 +94,11 @@ let userSettings = {
   joke_variation_count: 0,
   joke_variants: [],
   joke_pool: [],
+  effect_audios: [],
+  effect_selection: "rotation",
+  effect_insert_mode: "silence_or_tail",
+  effect_max_insertions: 1,
+  effect_min_silence_ms: 300,
   theme: "blue",
 };
 const userAutoTargetLanguage = "user-auto";
@@ -100,6 +107,7 @@ const userJokeTtsBackend = "openai";
 const userSeedVcDiffusionSteps = "8";
 const userJokeAudioStoragePrefix = "mo:user-joke-audio:";
 const userJokeRotationStoragePrefix = "mo:user-joke-rotation:";
+const userEffectRotationStoragePrefix = "mo:user-effect-rotation:";
 
 const userUiTexts = {
   app_title: {
@@ -390,7 +398,7 @@ async function applyUserVoiceModeToBase() {
   }
   const requestSignature = currentUserRequestSignature();
   const voiceSignature = currentUserVoiceSignature();
-  if (!similarVoiceToggle.checked || !userSeedVcAvailable) {
+  if (!userVoiceConversionEnabled()) {
     await renderUserResult(lastBaseResult);
     lastAppliedUserRequestSignature = requestSignature;
     hasUserOutput = true;
@@ -451,6 +459,7 @@ async function runUserVoiceConversion(baseAudioBlob, sourceStem = "user-base-out
   formData.append("seed_vc_inference_cfg_rate", "0.7");
   formData.append("source_audio", baseAudioBlob, userAudioFileNameForMime(baseAudioBlob.type, sourceStem));
   formData.append("reference_audio", lastUserInputBlob, lastUserInputFileName || "user-recording.webm");
+  appendUserAudioEffectToFormData(formData);
 
   const response = await fetch("/api/voice-conversion-jobs", {
     method: "POST",
@@ -484,12 +493,30 @@ function userTextTransformOptions() {
 }
 
 function currentUserRequestSignature() {
-  const hasJoke = jokeModeToggle.checked && userJokePool().length > 0;
+  const jokeMode = currentUserJokeModeSignature();
   return JSON.stringify({
     voice: currentUserVoiceSignature(),
-    joke_mode: hasJoke,
-    joke_settings: hasJoke ? currentUserJokeSettingsSignature() : "",
+    joke_mode: jokeMode.kind,
+    joke_settings: jokeMode.signature,
   });
+}
+
+function currentUserJokeModeSignature() {
+  if (!jokeModeToggle.checked) {
+    return { kind: "", signature: "" };
+  }
+  if (resolvedUserTargetLanguage() === userJokeTargetLanguage) {
+    const pool = userJokePool();
+    return {
+      kind: pool.length > 0 ? "indonesian_tts" : "",
+      signature: pool.length > 0 ? currentUserJokeSettingsSignature() : "",
+    };
+  }
+  const effectAudio = selectedUserEffectAudioForCurrentOutput();
+  return {
+    kind: effectAudio ? "audio_effect" : "",
+    signature: effectAudio ? currentUserAudioEffectSettingsSignature() : "",
+  };
 }
 
 function currentUserJokeSettingsSignature() {
@@ -503,7 +530,8 @@ function currentUserJokeSettingsSignature() {
 function currentUserVoiceSignature() {
   return JSON.stringify({
     base_text: currentUserBaseTextSignature(),
-    similar_voice: similarVoiceToggle.checked,
+    similar_voice: userVoiceConversionEnabled(),
+    audio_effect: shouldApplyUserAudioEffectToVoiceConversion() ? currentUserAudioEffectSettingsSignature() : "",
   });
 }
 
@@ -523,6 +551,117 @@ function currentUserBaseTextSignature() {
     translation: currentUserTranslationSignature(),
     text_transform_options: userTextTransformOptions(),
   });
+}
+
+function shouldApplyUserAudioEffectToVoiceConversion() {
+  return (
+    jokeModeToggle.checked &&
+    resolvedUserTargetLanguage() !== userJokeTargetLanguage &&
+    userEffectAudioPool().length > 0
+  );
+}
+
+function appendUserAudioEffectToFormData(formData) {
+  if (!shouldApplyUserAudioEffectToVoiceConversion()) {
+    return;
+  }
+  const effectAudio = selectedUserEffectAudioForCurrentOutput();
+  if (!effectAudio) {
+    return;
+  }
+  formData.append("audio_effect_enabled", "true");
+  formData.append("audio_effect_insert_mode", userSettings.effect_insert_mode || "silence_or_tail");
+  formData.append("audio_effect_max_insertions", String(userSettings.effect_max_insertions || 1));
+  formData.append("audio_effect_min_silence_ms", String(userSettings.effect_min_silence_ms || 300));
+  formData.append(
+    "audio_effect_audio",
+    audioBlobFromBase64(effectAudio.audio_base64, effectAudio.audio_mime_type || "audio/wav"),
+    effectAudio.name || "audio-effect.wav",
+  );
+}
+
+function currentUserAudioEffectSettingsSignature() {
+  const effectAudio = selectedUserEffectAudioForCurrentOutput();
+  return JSON.stringify({
+    selected_id: effectAudio?.id || "",
+    selected_name: effectAudio?.name || "",
+    pool: userEffectAudioPool().map((item) => ({
+      id: item.id,
+      name: item.name,
+      mime: item.audio_mime_type,
+      fingerprint: userEffectAudioFingerprint(item),
+    })),
+    selection: userSettings.effect_selection || "rotation",
+    insert_mode: userSettings.effect_insert_mode || "silence_or_tail",
+    max_insertions: userSettings.effect_max_insertions || 1,
+    min_silence_ms: userSettings.effect_min_silence_ms || 300,
+  });
+}
+
+function selectedUserEffectAudioForCurrentOutput() {
+  const pool = userEffectAudioPool();
+  if (pool.length === 0) {
+    currentSelectedEffectAudio = null;
+    currentSelectedEffectSettingsSignature = "";
+    return null;
+  }
+  const settingsSignature = currentUserAudioEffectPoolSignature(pool);
+  if (
+    currentSelectedEffectAudio &&
+    currentSelectedEffectSettingsSignature === settingsSignature &&
+    pool.some((item) => item.id === currentSelectedEffectAudio.id)
+  ) {
+    return currentSelectedEffectAudio;
+  }
+  currentSelectedEffectAudio = selectUserEffectAudio(pool, settingsSignature);
+  currentSelectedEffectSettingsSignature = settingsSignature;
+  return currentSelectedEffectAudio;
+}
+
+function currentUserAudioEffectPoolSignature(pool = userEffectAudioPool()) {
+  return JSON.stringify({
+    pool: pool.map((item) => ({
+      id: item.id,
+      name: item.name,
+      mime: item.audio_mime_type,
+      fingerprint: userEffectAudioFingerprint(item),
+    })),
+    selection: userSettings.effect_selection || "rotation",
+    insert_mode: userSettings.effect_insert_mode || "silence_or_tail",
+    max_insertions: userSettings.effect_max_insertions || 1,
+    min_silence_ms: userSettings.effect_min_silence_ms || 300,
+    recording: userInputCacheVersion,
+  });
+}
+
+function selectUserEffectAudio(pool, settingsSignature) {
+  if ((userSettings.effect_selection || "rotation") === "random") {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  const storageKey = `${userEffectRotationStoragePrefix}${settingsSignature}`;
+  const index = readUserJokeRotationIndex(storageKey);
+  const selected = pool[index % pool.length];
+  writeUserJokeRotationIndex(storageKey, index + 1);
+  return selected;
+}
+
+function userEffectAudioPool() {
+  if (!Array.isArray(userSettings.effect_audios)) {
+    return [];
+  }
+  return userSettings.effect_audios
+    .map((item, index) => ({
+      id: String(item.id || `effect-${index + 1}`),
+      name: String(item.name || `effect-${index + 1}.wav`),
+      audio_mime_type: String(item.audio_mime_type || "audio/wav"),
+      audio_base64: String(item.audio_base64 || "").trim(),
+    }))
+    .filter((item) => item.audio_base64);
+}
+
+function userEffectAudioFingerprint(effectAudio) {
+  const audioBase64 = String(effectAudio?.audio_base64 || "");
+  return `${audioBase64.length}:${audioBase64.slice(0, 24)}:${audioBase64.slice(-24)}`;
 }
 
 function currentUserDisplayTextSignature(text, targetLanguage) {
@@ -666,6 +805,9 @@ async function buildUserPlaybackQueue(mainOutputUrl) {
   if (!jokeModeToggle.checked) {
     return [mainOutputUrl];
   }
+  if (resolvedUserTargetLanguage() !== userJokeTargetLanguage) {
+    return [mainOutputUrl];
+  }
   const jokeText = selectedUserJokeTextForCurrentOutput();
   if (!jokeText) {
     return [mainOutputUrl];
@@ -750,7 +892,7 @@ function writeUserJokeRotationIndex(storageKey, index) {
 
 async function getUserJokeAudioUrl(jokeText) {
   const baseJokeAudio = await getUserJokeBaseAudio(jokeText);
-  if (!similarVoiceToggle.checked || !userSeedVcAvailable || !lastUserInputBlob) {
+  if (!userVoiceConversionEnabled() || !lastUserInputBlob) {
     return baseJokeAudio.url;
   }
   try {
@@ -830,7 +972,11 @@ async function convertUserJokeAudioBlob(jokeBlob) {
 
 function audioBlobFromResult(result) {
   const mimeType = result.audio_mime_type || "audio/wav";
-  const binary = atob(result.audio_base64);
+  return audioBlobFromBase64(result.audio_base64, mimeType);
+}
+
+function audioBlobFromBase64(audioBase64, mimeType = "audio/wav") {
+  const binary = atob(audioBase64);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
@@ -1015,18 +1161,13 @@ function syncUserWarmupStatus(runpodBackend) {
 function syncSimilarVoiceAvailability(seedVcBackend) {
   userSeedVcAvailable = Boolean(seedVcBackend?.available);
   userSeedVcUnavailableReason = userSeedVcAvailable ? "" : seedVcBackend?.reason || "Seed-VCが使えません";
-  const similarVoiceTile = similarVoiceToggle.closest(".toggle-tile");
   similarVoiceToggle.disabled = !userSeedVcAvailable;
-  similarVoiceTile?.classList.toggle("is-disabled", !userSeedVcAvailable);
-  if (userSeedVcAvailable) {
-    similarVoiceTile?.removeAttribute("title");
-  } else if (userSeedVcUnavailableReason) {
-    similarVoiceTile?.setAttribute("title", userSeedVcUnavailableReason);
-  }
-  if (!userSeedVcAvailable) {
-    similarVoiceToggle.checked = false;
-  }
+  similarVoiceToggle.checked = userSeedVcAvailable;
   syncReplayButton();
+}
+
+function userVoiceConversionEnabled() {
+  return Boolean(userSeedVcAvailable && similarVoiceToggle.checked);
 }
 
 function syncJapaneseTextEffectAvailability(targetLanguage) {
@@ -1287,7 +1428,7 @@ async function reprocessLatestUserOutput() {
       await runUserTextOutput();
     } else {
       isUserProcessing = true;
-      setUserProcessingProgress(similarVoiceToggle.checked ? 58 : 92);
+      setUserProcessingProgress(userVoiceConversionEnabled() ? 58 : 92);
       await applyUserVoiceModeToBase();
       setUserProcessingProgress(100);
       hideUserProcessing();
@@ -1362,6 +1503,8 @@ function resetUserOutputCache() {
   clearUserJokeMemoryCache();
   currentSelectedJokeText = "";
   currentSelectedJokeSettingsSignature = "";
+  currentSelectedEffectAudio = null;
+  currentSelectedEffectSettingsSignature = "";
   syncJapaneseTextEffectAvailability("");
   lastAppliedUserRequestSignature = "";
   hasUserOutput = false;
@@ -1561,7 +1704,6 @@ function renderStaticUserTexts() {
     renderUserText(userWarmupStatus, userWarmupStatusKey);
   }
   renderUserText(speakHeading, "speak_heading");
-  renderUserText(similarVoiceLabel, "similar_voice");
   renderUserText(jokeModeLabel, "joke");
   renderUserText(osakaDialectLabel, "osaka");
   renderUserText(variationModeLabel, "variation");
@@ -1577,6 +1719,9 @@ function renderStaticUserTexts() {
 }
 
 function renderUserText(element, key) {
+  if (!element) {
+    return;
+  }
   if (userTextMode === "ruby") {
     element.innerHTML = uiText(key, "ruby");
   } else {

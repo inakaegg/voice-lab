@@ -56,7 +56,8 @@ def test_root_serves_simple_user_ui() -> None:
     assert "user-warmup-status" in response.text
     assert "はなしてください" in response.text
     assert "5びょう いじょう はなしてください" in response.text
-    assert "にてるこえ" in response.text
+    assert "にてるこえ" not in response.text
+    assert "similar_voice" in response.text
     assert "ジョーク" in response.text
     assert "おおさかべん" in response.text
     assert "バリエーション" in response.text
@@ -147,8 +148,15 @@ def test_admin_serves_browser_ui() -> None:
     assert "user_joke_variation_count" in response.text
     assert "user_joke_variants_preview" in response.text
     assert "user_joke_pool_preview" in response.text
+    assert "user_effect_audio_files" in response.text
+    assert "user_effect_audio_preview" in response.text
+    assert "user_effect_selection" in response.text
+    assert "user_effect_insert_mode" in response.text
+    assert "user_effect_max_insertions" in response.text
+    assert "user_effect_min_silence_ms" in response.text
     assert "生成済みバリエーション" in response.text
     assert "実際に使うジョーク候補" in response.text
+    assert "効果音ファイル" in response.text
     assert "user_theme" in response.text
     assert "ローテーション" in response.text
     assert "ランダム" in response.text
@@ -431,6 +439,11 @@ def test_user_settings_api_defaults_to_japanese(tmp_path, monkeypatch) -> None:
         "joke_variation_count": 0,
         "joke_variants": [],
         "joke_pool": [],
+        "effect_audios": [],
+        "effect_selection": "rotation",
+        "effect_insert_mode": "silence_or_tail",
+        "effect_max_insertions": 1,
+        "effect_min_silence_ms": 300,
         "theme": "blue",
     }
 
@@ -447,6 +460,18 @@ def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> Non
             "joke_position": "before",
             "joke_selection": "random",
             "joke_variation_count": 0,
+            "effect_audios": [
+                {
+                    "id": "cow",
+                    "name": "cow.wav",
+                    "audio_mime_type": "audio/wav",
+                    "audio_base64": "UklGRg==",
+                }
+            ],
+            "effect_selection": "random",
+            "effect_insert_mode": "tail",
+            "effect_max_insertions": 2,
+            "effect_min_silence_ms": 450,
             "theme": "pop",
         },
     )
@@ -454,6 +479,11 @@ def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> Non
     assert response.status_code == 200
     assert response.json()["joke_position"] == "before"
     assert response.json()["joke_selection"] == "random"
+    assert response.json()["effect_audios"][0]["id"] == "cow"
+    assert response.json()["effect_selection"] == "random"
+    assert response.json()["effect_insert_mode"] == "tail"
+    assert response.json()["effect_max_insertions"] == 2
+    assert response.json()["effect_min_silence_ms"] == 450
     assert response.json()["theme"] == "pop"
     assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。\nいいこえです。"
     assert client.get("/api/user-settings").json()["joke_pool"] == [

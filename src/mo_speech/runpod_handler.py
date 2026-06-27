@@ -4,10 +4,11 @@ import base64
 import json
 import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from time import perf_counter
 from typing import Any
 
+from .audio_effects import AudioEffectInsertResult, AudioEffectInsertSettings, insert_audio_effect
 from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
 from .pipeline import PipelineRequest, SpeechTranslationPipeline, TtsOutput
 from .providers.text_tts import create_text_tts_providers
@@ -209,13 +210,31 @@ def _handle_voice_conversion(payload: dict[str, object], handler_started: float)
                 )
             )
 
+    effect_result = _insert_audio_effect_from_payload(
+        payload,
+        result.output_audio_bytes,
+        result.output_audio_mime_type,
+    )
+    output_audio_bytes = effect_result.audio_bytes if effect_result is not None else result.output_audio_bytes
+    output_audio_mime_type = effect_result.audio_mime_type if effect_result is not None else result.output_audio_mime_type
+    timings_ms = dict(result.timings_ms)
+    providers = dict(result.providers)
+    warnings = list(result.warnings)
+    if effect_result is not None:
+        timings_ms.update(effect_result.timings_ms)
+        providers["audio_effect_insert"] = "ffmpeg"
+        warnings.extend(effect_result.warnings)
+
     response: dict[str, object] = {
-        "audio_mime_type": result.output_audio_mime_type,
-        "audio_base64": base64.b64encode(result.output_audio_bytes).decode("ascii"),
-        "timings_ms": result.timings_ms,
-        "providers": result.providers,
-        "warnings": result.warnings,
+        "audio_mime_type": output_audio_mime_type,
+        "audio_base64": base64.b64encode(output_audio_bytes).decode("ascii"),
+        "timings_ms": timings_ms,
+        "providers": providers,
+        "warnings": warnings,
     }
+    if effect_result is not None:
+        response["audio_effect_inserted_count"] = effect_result.inserted_count
+        response["audio_effect_insertion_points"] = effect_result.insertion_points
     _attach_serverless_metrics(
         response,
         operation_mode="voice_conversion",
@@ -340,6 +359,16 @@ def _optional_int(value: object) -> int | None:
     return int(value)
 
 
+def _bounded_int(value: object, minimum: int, maximum: int, fallback: int) -> int:
+    if value is None or value == "":
+        return fallback
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, number))
+
+
 def _optional_float(value: object) -> float | None:
     if value is None or value == "":
         return None
@@ -383,6 +412,38 @@ def _normalize_tts_output(output: bytes | TtsOutput, audio_mime_type: str) -> Tt
             warnings=output.warnings,
         )
     return TtsOutput(audio_bytes=output, audio_mime_type=audio_mime_type)
+
+
+def _insert_audio_effect_from_payload(
+    payload: dict[str, object],
+    output_audio_bytes: bytes,
+    output_audio_mime_type: str,
+) -> AudioEffectInsertResult | None:
+    audio_effect_base64 = payload.get("audio_effect_audio_base64")
+    if not isinstance(audio_effect_base64, str) or audio_effect_base64 == "":
+        return None
+    audio_effect_enabled = _optional_bool(payload.get("audio_effect_enabled"))
+    if audio_effect_enabled is False:
+        return None
+
+    effect_audio_bytes = base64.b64decode(audio_effect_base64)
+    with TemporaryDirectory() as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        main_audio_path = temp_dir / f"voice-output{_audio_suffix(output_audio_mime_type)}"
+        effect_audio_path = temp_dir / f"audio-effect{_audio_suffix(payload.get('audio_effect_audio_mime_type'))}"
+        output_path = temp_dir / "voice-output-with-effect.wav"
+        main_audio_path.write_bytes(output_audio_bytes)
+        effect_audio_path.write_bytes(effect_audio_bytes)
+        return insert_audio_effect(
+            main_audio_path,
+            effect_audio_path,
+            output_path,
+            settings=AudioEffectInsertSettings(
+                insert_mode=str(payload.get("audio_effect_insert_mode", "silence_or_tail")),
+                max_insertions=_bounded_int(payload.get("audio_effect_max_insertions"), 1, 5, 1),
+                min_silence_ms=_bounded_int(payload.get("audio_effect_min_silence_ms"), 100, 2000, 300),
+            ),
+        )
 
 
 def _audio_suffix(audio_mime_type: object) -> str:

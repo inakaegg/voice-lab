@@ -11,10 +11,22 @@ DEFAULT_USER_SETTINGS_PATH = "tmp/user-settings.json"
 SUPPORTED_USER_TARGET_LANGUAGES = {"id-ID", "ja-JP", "zh-CN", "en-US"}
 SUPPORTED_JOKE_POSITIONS = {"before", "after"}
 SUPPORTED_JOKE_SELECTIONS = {"rotation", "random"}
+SUPPORTED_EFFECT_SELECTIONS = {"rotation", "random"}
+SUPPORTED_EFFECT_INSERT_MODES = {"silence_or_tail", "tail"}
 SUPPORTED_USER_THEMES = {"blue", "pop", "mint"}
 MAX_JOKE_TEXTS = 20
 MAX_JOKE_VARIATION_COUNT = 5
 MAX_JOKE_VARIANTS = MAX_JOKE_TEXTS * MAX_JOKE_VARIATION_COUNT
+MAX_EFFECT_AUDIOS = 20
+MAX_EFFECT_AUDIO_BASE64_CHARS = 2_000_000
+
+
+@dataclass(frozen=True)
+class UserEffectAudio:
+    id: str
+    name: str
+    audio_mime_type: str
+    audio_base64: str
 
 
 @dataclass(frozen=True)
@@ -26,6 +38,11 @@ class UserExperienceSettings:
     joke_selection: str = "rotation"
     joke_variation_count: int = 0
     joke_variants: tuple[str, ...] = ()
+    effect_audios: tuple[UserEffectAudio, ...] = ()
+    effect_selection: str = "rotation"
+    effect_insert_mode: str = "silence_or_tail"
+    effect_max_insertions: int = 1
+    effect_min_silence_ms: int = 300
     theme: str = "blue"
 
 
@@ -60,6 +77,7 @@ def serialize_user_settings(settings: UserExperienceSettings) -> dict[str, objec
     payload["joke_texts"] = list(settings.joke_texts)
     payload["joke_variants"] = list(settings.joke_variants)
     payload["joke_pool"] = list(joke_pool(settings))
+    payload["effect_audios"] = [asdict(effect_audio) for effect_audio in settings.effect_audios]
     return payload
 
 
@@ -92,6 +110,21 @@ def _coerce_settings(payload: dict[str, object]) -> UserExperienceSettings:
     joke_variation_count = _coerce_joke_variation_count(payload.get("joke_variation_count", 0))
     joke_variants = _coerce_text_list(payload.get("joke_variants"), max_items=MAX_JOKE_VARIANTS) if joke_variation_count > 0 else ()
 
+    effect_audios = _coerce_effect_audios(payload.get("effect_audios"))
+    effect_selection = str(payload.get("effect_selection", "rotation"))
+    if effect_selection not in SUPPORTED_EFFECT_SELECTIONS:
+        raise ValueError(f"unsupported effect_selection: {effect_selection}")
+    effect_insert_mode = str(payload.get("effect_insert_mode", "silence_or_tail"))
+    if effect_insert_mode not in SUPPORTED_EFFECT_INSERT_MODES:
+        raise ValueError(f"unsupported effect_insert_mode: {effect_insert_mode}")
+    effect_max_insertions = _coerce_int_range(payload.get("effect_max_insertions", 1), 1, 5, "effect_max_insertions")
+    effect_min_silence_ms = _coerce_int_range(
+        payload.get("effect_min_silence_ms", 300),
+        100,
+        2000,
+        "effect_min_silence_ms",
+    )
+
     theme = str(payload.get("theme", "blue"))
     if theme not in SUPPORTED_USER_THEMES:
         raise ValueError(f"unsupported theme: {theme}")
@@ -104,6 +137,11 @@ def _coerce_settings(payload: dict[str, object]) -> UserExperienceSettings:
         joke_selection=joke_selection,
         joke_variation_count=joke_variation_count,
         joke_variants=joke_variants,
+        effect_audios=effect_audios,
+        effect_selection=effect_selection,
+        effect_insert_mode=effect_insert_mode,
+        effect_max_insertions=effect_max_insertions,
+        effect_min_silence_ms=effect_min_silence_ms,
         theme=theme,
     )
 
@@ -141,6 +179,41 @@ def _coerce_joke_variation_count(value: object) -> int:
     if count < 0 or count > MAX_JOKE_VARIATION_COUNT:
         raise ValueError(f"unsupported joke_variation_count: {count}")
     return count
+
+
+def _coerce_int_range(value: object, minimum: int, maximum: int, field_name: str) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"unsupported {field_name}: {value}") from None
+    if number < minimum or number > maximum:
+        raise ValueError(f"unsupported {field_name}: {number}")
+    return number
+
+
+def _coerce_effect_audios(value: object) -> tuple[UserEffectAudio, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    effect_audios: list[UserEffectAudio] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        audio_base64 = str(item.get("audio_base64", "")).strip()
+        if not audio_base64 or len(audio_base64) > MAX_EFFECT_AUDIO_BASE64_CHARS:
+            continue
+        name = str(item.get("name", "")).strip() or f"effect-{index + 1}.wav"
+        audio_mime_type = str(item.get("audio_mime_type", "")).split(";", 1)[0].strip().lower() or "audio/wav"
+        effect_audios.append(
+            UserEffectAudio(
+                id=str(item.get("id", "")).strip() or f"effect-{index + 1}",
+                name=name[:120],
+                audio_mime_type=audio_mime_type,
+                audio_base64=audio_base64,
+            )
+        )
+        if len(effect_audios) >= MAX_EFFECT_AUDIOS:
+            break
+    return tuple(effect_audios)
 
 
 def _generate_joke_variants_with_openai(joke_texts: tuple[str, ...], variation_count: int) -> tuple[str, ...]:

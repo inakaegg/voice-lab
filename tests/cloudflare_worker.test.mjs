@@ -74,6 +74,11 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   form.append("voice_backend", "seed-vc");
   form.append("source_audio", new Blob(["source"], { type: "audio/webm;codecs=opus" }), "source.webm");
   form.append("reference_audio", new Blob(["reference"], { type: "audio/webm;codecs=opus" }), "reference.webm");
+  form.append("audio_effect_audio", new Blob(["moo"], { type: "audio/mpeg" }), "cow.mp3");
+  form.append("audio_effect_enabled", "true");
+  form.append("audio_effect_insert_mode", "silence_or_tail");
+  form.append("audio_effect_max_insertions", "2");
+  form.append("audio_effect_min_silence_ms", "450");
 
   const response = await handleRequest(
     new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
@@ -86,6 +91,11 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   assert.equal(calls[0].body.input.operation_mode, "voice_conversion");
   assert.equal(calls[0].body.input.source_audio_mime_type, "audio/webm");
   assert.equal(calls[0].body.input.reference_audio_mime_type, "audio/webm");
+  assert.equal(calls[0].body.input.audio_effect_audio_mime_type, "audio/mpeg");
+  assert.equal(calls[0].body.input.audio_effect_audio_base64, Buffer.from("moo").toString("base64"));
+  assert.equal(calls[0].body.input.audio_effect_insert_mode, "silence_or_tail");
+  assert.equal(calls[0].body.input.audio_effect_max_insertions, 2);
+  assert.equal(calls[0].body.input.audio_effect_min_silence_ms, 450);
 });
 
 test("Cloudflare worker saves voice conversion source audio to KV history", async () => {
@@ -199,6 +209,18 @@ test("Cloudflare worker persists user settings in KV and generates joke variatio
         joke_position: "after",
         joke_selection: "rotation",
         joke_variation_count: 1,
+        effect_audios: [
+          {
+            id: "cow",
+            name: "cow.wav",
+            audio_mime_type: "audio/wav",
+            audio_base64: Buffer.from("moo").toString("base64"),
+          },
+        ],
+        effect_selection: "random",
+        effect_insert_mode: "tail",
+        effect_max_insertions: 2,
+        effect_min_silence_ms: 450,
         theme: "pop",
       }),
     }),
@@ -211,8 +233,14 @@ test("Cloudflare worker persists user settings in KV and generates joke variatio
   assert.equal(saveResponse.status, 200);
   assert.deepEqual(saved.joke_variants, ["A1", "B1"]);
   assert.deepEqual(saved.joke_pool, ["A", "B", "A1", "B1"]);
+  assert.equal(saved.effect_audios[0].id, "cow");
+  assert.equal(saved.effect_selection, "random");
+  assert.equal(saved.effect_insert_mode, "tail");
+  assert.equal(saved.effect_max_insertions, 2);
+  assert.equal(saved.effect_min_silence_ms, 450);
   assert.equal(saved.theme, "pop");
   assert.deepEqual(loaded.joke_pool, saved.joke_pool);
+  assert.deepEqual(loaded.effect_audios, saved.effect_audios);
   assert.equal(calls[0].url, "https://api.openai.com/v1/responses");
 });
 
