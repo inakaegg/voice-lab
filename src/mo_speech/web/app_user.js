@@ -84,8 +84,6 @@ let currentSelectedEffectAudio = null;
 let currentSelectedEffectSettingsSignature = "";
 let userTranslationBackend = "openai";
 let userWarmupStatusKey = "";
-let userWarmupJobId = "";
-let userWarmupRequestInFlight = false;
 let userSettings = {
   target_language: "ja-JP",
   joke_text: "",
@@ -1077,120 +1075,10 @@ async function loadUserRuntime() {
     const seedVc = (runtime.voice_conversion_backends || []).find((backend) => backend.id === "seed-vc");
     syncSimilarVoiceAvailability(seedVc);
     syncUserWarmupStatus(seedVc);
-    maybeStartUserWarmup(seedVc);
   } catch (_error) {
     syncUserWarmupStatus(null);
     return;
   }
-}
-
-function maybeStartUserWarmup(runpodBackend) {
-  if (!runpodBackend?.available) {
-    return;
-  }
-  const warmup = runpodBackend.settings?.warmup || {};
-  if (warmup.ready || runpodBackend.settings?.seed_vc?.model_resident) {
-    return;
-  }
-  if (warmup.auto_on_user_page_load === false) {
-    return;
-  }
-  if (userWarmupRequestInFlight || userWarmupJobId) {
-    return;
-  }
-  userWarmupRequestInFlight = true;
-  syncUserWarmupStatus({
-    available: true,
-    settings: {
-      ...runpodBackend.settings,
-      warmup: { ...warmup, ready: false, pending: true },
-    },
-  });
-  requestUserWarmup()
-    .catch(() => {})
-    .finally(() => {
-      userWarmupRequestInFlight = false;
-    });
-}
-
-async function requestUserWarmup() {
-  const response = await fetch("/api/warmup", { method: "POST" });
-  if (!response.ok) {
-    syncUserWarmupStatus({
-      available: true,
-      settings: {
-        warmup: { ready: false },
-        health: { checked: true, warm: false, worker_counts: {} },
-      },
-    });
-    return;
-  }
-  const job = await response.json();
-  if (job.status === "succeeded") {
-    syncUserWarmupStatus({
-      available: true,
-      settings: {
-        seed_vc: { model_resident: true },
-        warmup: { ready: true },
-        health: { checked: true, warm: true, worker_counts: {} },
-      },
-    });
-    return;
-  }
-  if (!job.job_id) {
-    return;
-  }
-  userWarmupJobId = job.job_id;
-  syncUserWarmupStatus({
-    available: true,
-    settings: {
-      warmup: { ready: false, pending: true },
-      health: { checked: true, warm: false, worker_counts: {} },
-    },
-  });
-  await pollUserWarmupJob(job.job_id);
-}
-
-async function pollUserWarmupJob(jobId) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const response = await fetch(`/api/warmup/${encodeURIComponent(jobId)}`);
-    if (!response.ok) {
-      return;
-    }
-    const job = await response.json();
-    if (job.status === "succeeded") {
-      syncUserWarmupStatus({
-        available: true,
-        settings: {
-          seed_vc: { model_resident: true },
-          warmup: { ready: true },
-          health: { checked: true, warm: true, worker_counts: {} },
-        },
-      });
-      userWarmupJobId = "";
-      return;
-    }
-    if (job.status === "failed") {
-      userWarmupJobId = "";
-      syncUserWarmupStatus({
-        available: true,
-        settings: {
-          warmup: { ready: false },
-          health: { checked: true, warm: false, worker_counts: {} },
-        },
-      });
-      return;
-    }
-  }
-  userWarmupJobId = "";
-  syncUserWarmupStatus({
-    available: true,
-    settings: {
-      warmup: { ready: false },
-      health: { checked: true, warm: false, worker_counts: {} },
-    },
-  });
 }
 
 function syncUserWarmupStatus(runpodBackend) {
@@ -1200,21 +1088,46 @@ function syncUserWarmupStatus(runpodBackend) {
   if (!runpodBackend?.available) {
     userWarmupStatusKey = "";
     userWarmupStatus.hidden = true;
+    userWarmupStatus.textContent = "";
+    userWarmupStatus.removeAttribute("data-state");
     return;
   }
   const health = runpodBackend.settings?.health || {};
   const warmup = runpodBackend.settings?.warmup || {};
   if (warmup.ready || runpodBackend.settings?.seed_vc?.model_resident) {
     userWarmupStatusKey = "warm_ready";
-  } else if (warmup.pending || userWarmupRequestInFlight || userWarmupJobId) {
+  } else if (warmup.pending) {
     userWarmupStatusKey = "warm_warming";
   } else if (health.checked) {
     userWarmupStatusKey = "warm_cold";
   } else {
     userWarmupStatusKey = "warm_unknown";
   }
+  applyUserWarmupStatusDot(userWarmupStatusKey);
+}
+
+function applyUserWarmupStatusDot(key) {
+  if (!userWarmupStatus || !key) {
+    return;
+  }
+  const labels = {
+    warm_ready: "準備OK",
+    warm_cold: "未準備",
+    warm_warming: "準備中",
+    warm_unknown: "準備確認中",
+  };
+  const states = {
+    warm_ready: "ready",
+    warm_cold: "cold",
+    warm_warming: "warming",
+    warm_unknown: "unknown",
+  };
+  const label = labels[key] || "準備状態";
   userWarmupStatus.hidden = false;
-  renderUserText(userWarmupStatus, userWarmupStatusKey);
+  userWarmupStatus.textContent = "";
+  userWarmupStatus.dataset.state = states[key] || "unknown";
+  userWarmupStatus.setAttribute("aria-label", label);
+  userWarmupStatus.title = label;
 }
 
 function syncSimilarVoiceAvailability(seedVcBackend) {
@@ -1778,7 +1691,7 @@ function renderStaticUserTexts() {
   displayModeButton.textContent = uiText("display_mode", userTextMode);
   renderUserText(userLanguageLabel, "app_title");
   if (userWarmupStatusKey) {
-    renderUserText(userWarmupStatus, userWarmupStatusKey);
+    applyUserWarmupStatusDot(userWarmupStatusKey);
   }
   renderUserText(speakHeading, "speak_heading");
   renderUserText(jokeModeLabel, "joke");

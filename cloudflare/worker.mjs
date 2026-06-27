@@ -149,7 +149,7 @@ async function runtimePayload(env) {
     : { checked: false, warm: false, worker_counts: {} };
   const warmup = {
     ...(runpodAvailable ? await readRunpodVcReadyState(env) : runpodVcReadyState(false)),
-    auto_on_user_page_load: Boolean(runpodAvailable && env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD !== "0"),
+    auto_on_user_page_load: Boolean(runpodAvailable && env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD === "1"),
   };
   const seedVcModelResident = Boolean(warmup.ready);
   return {

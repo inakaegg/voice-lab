@@ -45,6 +45,9 @@ form.target_language.addEventListener("change", syncVoiceModeHint);
 ttsTargetLanguageSelect.addEventListener("change", syncTtsBackendAvailability);
 seedVcPresetSelect.addEventListener("change", applySeedVcPreset);
 seedVcReferencePreviewButton.addEventListener("click", previewSeedVcReferenceAudio);
+if (runpodWarmupButton) {
+  runpodWarmupButton.addEventListener("click", startRunpodWarmup);
+}
 [seedVcDiffusionStepsInput, seedVcReferenceMaxSecondsInput, seedVcLengthAdjustInput, seedVcInferenceCfgRateInput].forEach(
   (input) => input.addEventListener("input", syncSeedVcPresetSelection),
 );
@@ -519,9 +522,11 @@ async function loadRuntime() {
     supportedVoiceModes = ["default"];
     translationBackends = [];
     textTtsBackends = [];
+    voiceConversionBackends = [];
     syncTranslationBackendAvailability();
     syncVoiceProcessingAvailability();
     syncTtsBackendAvailability();
+    syncRunpodWarmupStatusFromRuntime();
   }
 }
 
@@ -543,6 +548,7 @@ function renderRuntime(payload) {
   syncSeedVcSettingsDefaults();
   syncSeedVcSettingsVisibility();
   syncRuntimeNote();
+  syncRunpodWarmupStatusFromRuntime();
   if (runtimeProviders) {
     runtimeProviders.replaceChildren();
     Object.entries(payload.providers || {}).forEach(([key, value]) => {
@@ -564,6 +570,119 @@ function renderKeyValueList(list, entries, formatValue) {
     description.textContent = formatValue(value);
     list.append(term, description);
   });
+}
+
+function seedVcBackendInfo() {
+  return voiceConversionBackends.find((backend) => backend.id === "seed-vc");
+}
+
+function syncRunpodWarmupStatusFromRuntime() {
+  if (!runpodWarmupButton || !runpodWarmupStatus) {
+    return;
+  }
+  if (runpodWarmupInFlight || runpodWarmupJobId) {
+    setRunpodWarmupStatus("準備中", "warming");
+    runpodWarmupButton.disabled = true;
+    return;
+  }
+  const backend = seedVcBackendInfo();
+  if (!backend?.available) {
+    setRunpodWarmupStatus(backend?.reason || "Seed-VCは利用できません", "failed");
+    runpodWarmupButton.disabled = true;
+    runpodWarmupButton.textContent = "RunPodを準備";
+    return;
+  }
+  const warmup = backend.settings?.warmup || {};
+  const modelResident = Boolean(warmup.ready || backend.settings?.seed_vc?.model_resident);
+  if (modelResident) {
+    setRunpodWarmupStatus("準備OK", "ready");
+    runpodWarmupButton.disabled = false;
+    runpodWarmupButton.textContent = "再準備";
+    return;
+  }
+  setRunpodWarmupStatus("未準備", "cold");
+  runpodWarmupButton.disabled = false;
+  runpodWarmupButton.textContent = "RunPodを準備";
+}
+
+function setRunpodWarmupStatus(message, state = "unknown") {
+  if (!runpodWarmupStatus) {
+    return;
+  }
+  runpodWarmupStatus.textContent = message;
+  runpodWarmupStatus.dataset.state = state;
+}
+
+async function startRunpodWarmup() {
+  if (runpodWarmupInFlight) {
+    return;
+  }
+  runpodWarmupInFlight = true;
+  runpodWarmupJobId = "";
+  runpodWarmupButton.disabled = true;
+  setRunpodWarmupStatus("準備中", "warming");
+  let shouldRefreshRuntime = false;
+  let shouldSyncFromRuntime = true;
+  try {
+    const response = await fetch("/api/warmup", { method: "POST" });
+    if (!response.ok) {
+      throw new Error(await runpodWarmupErrorMessage(response));
+    }
+    const job = await response.json();
+    if (job.status === "succeeded") {
+      setRunpodWarmupStatus("準備OK", "ready");
+      shouldRefreshRuntime = true;
+      return;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "warmupに失敗しました");
+    }
+    if (!job.job_id) {
+      throw new Error("warmup job IDを取得できませんでした");
+    }
+    runpodWarmupJobId = job.job_id;
+    setRunpodWarmupStatus("準備中", "warming");
+    const completedJob = await pollRunpodWarmupJob(job.job_id);
+    if (completedJob.status !== "succeeded") {
+      throw new Error(completedJob.error || "warmupに失敗しました");
+    }
+    setRunpodWarmupStatus("準備OK", "ready");
+    shouldRefreshRuntime = true;
+  } catch (error) {
+    setRunpodWarmupStatus(error.message || "準備失敗", "failed");
+    shouldSyncFromRuntime = false;
+  } finally {
+    runpodWarmupInFlight = false;
+    runpodWarmupJobId = "";
+    if (shouldRefreshRuntime) {
+      await loadRuntime();
+    } else if (shouldSyncFromRuntime) {
+      syncRunpodWarmupStatusFromRuntime();
+    } else {
+      runpodWarmupButton.disabled = false;
+    }
+  }
+}
+
+async function pollRunpodWarmupJob(jobId) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const response = await fetch(`/api/warmup/${encodeURIComponent(jobId)}`);
+    if (!response.ok) {
+      throw new Error(await runpodWarmupErrorMessage(response));
+    }
+    const job = await response.json();
+    if (job.status === "succeeded" || job.status === "failed") {
+      return job;
+    }
+    setRunpodWarmupStatus("準備中", "warming");
+  }
+  return { status: "failed", error: "warmupがタイムアウトしました" };
+}
+
+async function runpodWarmupErrorMessage(response) {
+  const payload = await response.json().catch(() => ({}));
+  return payload.detail || payload.error || `warmup request failed (${response.status})`;
 }
 
 function setText(selector, value) {

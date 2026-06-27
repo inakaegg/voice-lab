@@ -21,3 +21,5 @@ let voiceConversionBackends = [];
 let runtimeProviderMode = "fake";
 let realtimeStreamingSession = null;
 let userSelectedTranslationBackend = false;
+let runpodWarmupJobId = "";
+let runpodWarmupInFlight = false;

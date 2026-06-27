@@ -171,6 +171,17 @@
             </div>
           </fieldset>
 
+          <fieldset id="runpod-warmup-panel" class="suffix-panel">
+            <legend>RunPod手動準備</legend>
+            <p class="route-hint">
+              デモ前にSeed-VC workerを起動し、モデルロードを前倒しします。押すとRunPod jobが作成され、起動中とidle timeout中は課金対象になり得ます。
+            </p>
+            <div class="warmup-admin-row">
+              <button type="button" id="runpod-warmup-button" class="secondary-button">RunPodを準備</button>
+              <p id="runpod-warmup-status" class="route-hint warmup-admin-status" data-state="unknown">未確認</p>
+            </div>
+          </fieldset>
+
           <fieldset id="user-settings-panel" class="suffix-panel">
             <legend>ユーザー画面設定</legend>
             <div class="field-row">

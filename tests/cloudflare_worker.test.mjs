@@ -306,8 +306,19 @@ test("Cloudflare worker reports RunPod runtime availability and warm health", as
   assert.equal(seedVc.available, true);
   assert.equal(seedVc.settings.seed_vc.model_resident, false);
   assert.equal(seedVc.settings.warmup.ready, false);
-  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, true);
+  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, false);
   assert.equal(seedVc.settings.health.warm, true);
+});
+
+test("Cloudflare worker only enables user-page warmup when explicitly opted in", async () => {
+  const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
+  env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "1";
+
+  const response = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const payload = await response.json();
+  const seedVc = payload.voice_conversion_backends[0];
+
+  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, true);
 });
 
 test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", async () => {

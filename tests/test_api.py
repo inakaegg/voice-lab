@@ -54,6 +54,7 @@ def test_root_serves_simple_user_ui() -> None:
     assert "へんな へんかん アプリ" in response.text
     assert "display-mode-button" in response.text
     assert "user-warmup-status" in response.text
+    assert "じゅんびかくにんちゅう" not in response.text
     assert "はなしてください" in response.text
     assert "5びょう いじょう はなしてください" in response.text
     assert "にてるこえ" not in response.text
@@ -134,6 +135,9 @@ def test_admin_serves_browser_ui() -> None:
     assert "音声翻訳（OpenAI Realtime）" in response.text
     assert "音声翻訳（OpenAI Realtime streaming）" in response.text
     assert "音声翻訳（RunPod Serverless）" in response.text
+    assert "runpod-warmup-button" in response.text
+    assert "runpod-warmup-status" in response.text
+    assert "RunPod手動準備" in response.text
     assert response.text.index('value="openai"') < response.text.index('value="qwen"')
     assert "realtime-streaming-panel" in response.text
     assert "接続開始後に話す" in response.text

@@ -63,3 +63,5 @@ const historyStorage = document.querySelector("#history-storage");
 const useOutputAsInputButton = document.querySelector("#use-output-as-input");
 const useOutputAsReferenceButton = document.querySelector("#use-output-as-reference");
 const textResultActionButtons = [...document.querySelectorAll(".text-result-action")];
+const runpodWarmupButton = document.querySelector("#runpod-warmup-button");
+const runpodWarmupStatus = document.querySelector("#runpod-warmup-status");
