@@ -75,6 +75,8 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
 | `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `600`。 |
 | `RUNPOD_WORKERS_MIN` | 最小worker数。デモ用途では待機課金を避けるため `0` を既定にする。 |
+| `MO_PRELOAD_MODELS` | FastAPI通常pipelineの起動時preload。30GB最小デモでは `0` にし、VCだけを別途preloadする。 |
+| `MO_VC_BACKENDS` | UI/VC比較で使うVC backend。RunPod単体デモでは `seed-vc` に絞る。 |
 | `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー |
 
 課金リソースを作らずにコマンドだけ確認する場合は、各CLIスクリプトに `RUNPOD_DRY_RUN=1` を付ける。
@@ -332,7 +334,7 @@ Serverless handlerのレスポンスには、通常の `timings_ms` に加えて
 
 Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker起動とモデルロードが入る。検証時は `MO_RUNPOD_PRELOAD_ON_START=1` を使い、worker起動時にpipelineを先にロードしてからhandlerを受け付ける。低アクセス本番ではcold startを許容し、録音開始時のwarmup jobやCloudflare Worker側の進行表示で体感を補う。
 
-VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前にwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=600` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードする。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前にwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=600` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。
 
 スマホから見るデモでは、ローカルMacのFastAPIをUI/gatewayにしない。Cloudflare gatewayを置く前の暫定運用では、同じRunPod imageをGPU Podとして起動し、`CMD` のFastAPI/Uvicornを `8000/http` で公開する。`MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` の場合、Webサーバー起動時にVC preloadが完了してから画面を返せるため、cold start後に `/` が表示されたことを「Webプロセスと常駐VC providerの初期化が完了した」シグナルとして扱える。
 
