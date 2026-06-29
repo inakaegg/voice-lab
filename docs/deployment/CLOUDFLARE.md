@@ -68,6 +68,8 @@ KVは簡易デモ向けの保存先であり、大きい音声や長期保存に
 
 `POST /api/warmup` はRunPod Serverlessへ `operation_mode=warmup` を投げる。これはRunPod jobを作成するため、`workers-min=0` の場合でもworker起動、image/container準備、Seed-VC preloadが起こり得る。つまりデモ前にcold startとモデルロードを前倒しできる一方で、実行中とidle timeoutまでのGPU課金対象になり得る。
 
+RunPod endpointはFlashBootを有効にしてcontainer cold start短縮を狙う。ただしFlashBootはSeed-VCの実推論や初回モデルロードそのものを必ず消す機能ではないため、体感が遅い場合はwarmup job、`serverless_timings_ms`、`timings_ms.voice_conversion` を分けて確認する。
+
 ユーザー画面は既定ではページロード後に `POST /api/warmup` を投げない。ユーザー画面の準備状態は小さい状態ドットだけにし、未準備でも録音送信時の実変換jobでRunPodが起動する。デモ前にcold startとSeed-VC preloadを前倒ししたい場合は、管理者用画面 `/admin` の手動準備ボタンから `POST /api/warmup` を実行する。検証用途などでユーザー画面ロード時の自動warmupを戻したい場合だけ、`RUNPOD_AUTO_WARMUP_ON_USER_LOAD=1` を明示設定する。
 
 warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上で `providers.voice_conversion=seed-vc` またはVC出力が確認できた場合だけ、Cloudflare KVへ短時間のVC ready状態を保存する。ready状態は `RUNPOD_ENDPOINT_ID` ごとに分けて保存し、GPUやendpointを切り替えた後に旧endpointのready状態を流用しない。既定TTLは `RUNPOD_WARMUP_READY_TTL_SECONDS` または300秒とし、期限切れ後は `/api/runtime` がworkerを見つけても `model_resident=false` として返す。
