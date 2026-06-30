@@ -102,12 +102,24 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "practice-native-transcript" in response.text
     assert "practice-pinyin-toggle" in response.text
     assert "record-level-meter" in response.text
-    assert "practice-speed-select" in response.text
+    assert "practice-speed-slider" in response.text
+    assert 'min="0.25"' in response.text
+    assert 'max="2"' in response.text
+    assert 'step="0.25"' in response.text
     assert "practice-repeat-audio-button" in response.text
     assert "practice-compare-button" in response.text
-    assert 'value="0.75"' in response.text
-    assert 'value="1.25"' in response.text
     assert "/static/app_practice.js" in response.text
+
+
+def test_practice_admin_serves_practice_history_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/practice/admin")
+
+    assert response.status_code == 200
+    assert "発音練習履歴" in response.text
+    assert "/api/practice-history" not in response.text
+    assert "/static/app_practice_history.js" in response.text
 
 
 def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
@@ -155,6 +167,58 @@ def test_practice_attempt_api_scores_repeat_audio() -> None:
     assert payload["similarity"] >= 0.85
     assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(payload["diff"][0])
     assert payload["providers"]["asr"] == "fake-asr"
+
+
+def test_practice_attempt_api_uses_target_language_for_asr() -> None:
+    captured = {}
+
+    class CapturingAsr(FakeAsrProvider):
+        def transcribe(self, audio_path, source_language):
+            captured["source_language"] = source_language
+            return "绿茶和咖啡，哪一种的咖啡因含量更多呢？"
+
+    pipeline = SpeechTranslationPipeline(
+        asr=CapturingAsr({"zh-CN": "unused"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempts",
+        data={"target_language": "zh-CN", "target_text": "绿茶和咖啡，哪一种的咖啡因含量更多呢？"},
+        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"source_language": "zh-CN"}
+
+
+def test_audio_history_excludes_practice_entries_and_practice_history_lists_them(tmp_path) -> None:
+    from mo_speech.audio_history import AudioHistoryStore
+
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    history_store.save_recording(
+        b"practice input",
+        suffix=".wav",
+        metadata={"endpoint": "practice-prompts", "target_language": "zh-CN"},
+    )
+    history_store.save_output(
+        b"normal output",
+        suffix=".wav",
+        metadata={"endpoint": "translate-speech", "target_language": "ja-JP", "text_preview": "通常履歴"},
+    )
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    normal_history = client.get("/api/audio-history").json()
+    practice_history = client.get("/api/practice-history").json()
+
+    assert len(normal_history["recordings"]) == 0
+    assert len(normal_history["outputs"]) == 1
+    assert normal_history["outputs"][0]["metadata"]["endpoint"] == "translate-speech"
+    assert len(practice_history["recordings"]) == 1
+    assert practice_history["recordings"][0]["metadata"]["endpoint"] == "practice-prompts"
+    assert len(practice_history["outputs"]) == 0
 
 
 def test_admin_serves_browser_ui() -> None:

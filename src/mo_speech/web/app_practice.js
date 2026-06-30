@@ -14,7 +14,8 @@ const targetText = document.querySelector("#practice-target-text");
 const targetSubtext = document.querySelector("#practice-target-subtext");
 const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
-const speedSelect = document.querySelector("#practice-speed-select");
+const speedSlider = document.querySelector("#practice-speed-slider");
+const speedValue = document.querySelector("#practice-speed-value");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
@@ -91,7 +92,7 @@ targetLanguageButtons.forEach((button) => {
 nativeRecordButton.addEventListener("click", () => toggleRecording("native"));
 repeatRecordButton.addEventListener("click", () => toggleRecording("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
-speedSelect.addEventListener("change", syncModelAudioSpeed);
+speedSlider.addEventListener("input", handleSpeedChange);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
 compareButton.addEventListener("click", playComparisonAudios);
 repeatAudioButton.addEventListener("click", playRepeatAudio);
@@ -192,7 +193,7 @@ async function submitPrompt(blob) {
   resultPanel.hidden = true;
   const form = new FormData();
   form.append("target_language", selectedTargetLanguage);
-  form.append("include_pinyin", selectedTargetLanguage === "zh-CN" && pinyinToggle.checked ? "true" : "false");
+  form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
   form.append("audio", blob, `native.${extensionForMimeType(blob.type)}`);
   const payload = await postPracticeForm("/api/practice/prompts", form);
   detectedNativeLanguage = normalizePracticeLanguage(payload.detected_source_language || "");
@@ -328,7 +329,15 @@ function syncPlayButton() {
 }
 
 function syncModelAudioSpeed() {
-  modelAudio.playbackRate = Number.parseFloat(speedSelect.value || "1") || 1;
+  const speed = normalizedPlaybackSpeed(speedSlider.value);
+  speedSlider.value = String(speed);
+  speedValue.textContent = formatPlaybackSpeed(speed);
+  modelAudio.playbackRate = speed;
+}
+
+function handleSpeedChange() {
+  syncModelAudioSpeed();
+  savePracticeSettings();
 }
 
 function handlePinyinSettingChange() {
@@ -353,11 +362,29 @@ async function playRepeatAudio() {
 }
 
 async function playComparisonAudios() {
-  if (modelAudio.src) {
-    await playAudioElementToEnd(modelAudio);
+  if (!modelAudio.src || !repeatAudio.src) {
+    if (modelAudio.src) {
+      await playAudioElementToEnd(modelAudio);
+    }
+    if (repeatAudio.src) {
+      await playAudioElementToEnd(repeatAudio);
+    }
+    return;
   }
-  if (repeatAudio.src) {
+  await Promise.all([ensureAudioMetadata(modelAudio), ensureAudioMetadata(repeatAudio)]);
+  const sentences = splitPracticeSentences(currentTargetText);
+  if (sentences.length <= 1 || !Number.isFinite(modelAudio.duration) || !Number.isFinite(repeatAudio.duration)) {
+    await playAudioElementToEnd(modelAudio);
     await playAudioElementToEnd(repeatAudio);
+    return;
+  }
+  const modelRanges = sentenceAudioRanges(sentences, modelAudio.duration);
+  const repeatRanges = sentenceAudioRanges(sentences, repeatAudio.duration);
+  for (let index = 0; index < sentences.length; index += 1) {
+    await playAudioSegmentToEnd(modelAudio, modelRanges[index].start, modelRanges[index].end);
+    await sleep(180);
+    await playAudioSegmentToEnd(repeatAudio, repeatRanges[index].start, repeatRanges[index].end);
+    await sleep(240);
   }
 }
 
@@ -374,6 +401,82 @@ function playAudioElementToEnd(audio) {
     audio.addEventListener("error", done, { once: true });
     audio.play().catch(done);
   });
+}
+
+function ensureAudioMetadata(audio) {
+  if (Number.isFinite(audio.duration) && audio.duration > 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      audio.removeEventListener("loadedmetadata", done);
+      audio.removeEventListener("durationchange", done);
+      audio.removeEventListener("error", done);
+      resolve();
+    };
+    audio.addEventListener("loadedmetadata", done, { once: true });
+    audio.addEventListener("durationchange", done, { once: true });
+    audio.addEventListener("error", done, { once: true });
+    audio.load();
+    window.setTimeout(done, 800);
+  });
+}
+
+function playAudioSegmentToEnd(audio, start, end) {
+  return new Promise((resolve) => {
+    const duration = Number.isFinite(audio.duration) ? audio.duration : end;
+    const segmentStart = Math.max(0, Math.min(start, duration));
+    const segmentEnd = Math.max(segmentStart, Math.min(end, duration));
+    let frame = 0;
+    const done = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      audio.removeEventListener("ended", done);
+      audio.removeEventListener("error", done);
+      audio.pause();
+      resolve();
+    };
+    const watch = () => {
+      if (audio.currentTime >= segmentEnd - 0.03 || audio.ended) {
+        done();
+        return;
+      }
+      frame = requestAnimationFrame(watch);
+    };
+    audio.pause();
+    audio.currentTime = segmentStart;
+    audio.addEventListener("ended", done, { once: true });
+    audio.addEventListener("error", done, { once: true });
+    audio.play().then(watch).catch(done);
+  });
+}
+
+function splitPracticeSentences(text) {
+  const normalized = String(text || "").replace(/\r/g, "\n").trim();
+  if (!normalized) {
+    return [];
+  }
+  const matches = normalized.match(/[^。！？!?.\n]+[。！？!?.]?/g) || [];
+  const sentences = matches.map((value) => value.trim()).filter(Boolean);
+  return sentences.length ? sentences : [normalized];
+}
+
+function sentenceAudioRanges(sentences, duration) {
+  const safeDuration = Math.max(0, Number(duration) || 0);
+  const weights = sentences.map((sentence) => Math.max(1, Array.from(sentence).filter((char) => !/\s/u.test(char)).length));
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0) || 1;
+  let cursor = 0;
+  return weights.map((weight, index) => {
+    const start = cursor;
+    cursor = index === weights.length - 1 ? safeDuration : cursor + (safeDuration * weight) / totalWeight;
+    return { start, end: cursor };
+  });
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function setBusy(busy, message, target = 100, kind = processingKind) {
@@ -546,6 +649,21 @@ function extensionForMimeType(mimeType) {
   return "webm";
 }
 
+function normalizedPlaybackSpeed(value) {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.max(0.25, Math.min(2, Math.round(parsed / 0.25) * 0.25));
+}
+
+function formatPlaybackSpeed(speed) {
+  if (Number.isInteger(speed)) {
+    return `${speed.toFixed(1)}x`;
+  }
+  return `${speed.toFixed(2).replace(/0$/, "")}x`;
+}
+
 function base64ToBlob(base64, mimeType) {
   const binary = atob(base64 || "");
   const bytes = new Uint8Array(binary.length);
@@ -573,12 +691,14 @@ function loadPracticeSettings() {
   const settings = readPracticeSettings();
   selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
   pinyinToggle.checked = settings.show_pinyin !== false;
+  speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageButtons.forEach((button) => {
     const selected = button.dataset.language === selectedTargetLanguage;
     button.classList.toggle("is-selected", selected);
     button.setAttribute("aria-checked", selected ? "true" : "false");
   });
   syncPinyinSettingVisibility();
+  syncModelAudioSpeed();
 }
 
 function readPracticeSettings() {
@@ -596,6 +716,7 @@ function savePracticeSettings() {
       JSON.stringify({
         target_language: selectedTargetLanguage,
         show_pinyin: Boolean(pinyinToggle.checked),
+        speed: normalizedPlaybackSpeed(speedSlider.value),
       }),
     );
   } catch (_error) {
@@ -630,7 +751,7 @@ function renderRecognizedDiff(payload) {
   const recognized = payload.recognized_text || "";
   const diff = Array.isArray(payload.diff) ? payload.diff : [];
   const map = normalizedOriginalMap(recognized, payload.target_language || selectedTargetLanguage);
-  const mismatchRanges = diff
+  let mismatchRanges = diff
     .filter((entry) => entry.type !== "equal" && Number.isInteger(entry.recognized_start))
     .map((entry) => originalRangeForNormalizedRange(map, entry.recognized_start, entry.recognized_end))
     .filter((range) => range.end > range.start);
@@ -638,6 +759,9 @@ function renderRecognizedDiff(payload) {
   if (!recognized) {
     recognizedText.textContent = "（聞き取れませんでした）";
     return;
+  }
+  if (!mismatchRanges.length && (payload.grade || "retry") !== "ok") {
+    mismatchRanges = [{ start: 0, end: recognized.length }];
   }
   let cursor = 0;
   for (const range of mergeRanges(mismatchRanges)) {

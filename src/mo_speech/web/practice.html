@@ -77,6 +77,24 @@
             <p id="practice-target-text" class="practice-target-text"></p>
             <p id="practice-target-subtext" class="practice-target-subtext" hidden></p>
           </div>
+          <div id="practice-result-panel" class="practice-result-inline" hidden>
+            <p id="practice-recognized-label" class="practice-section-label">聞こえた言葉</p>
+            <p id="practice-recognized-text" class="practice-recognized-text"></p>
+            <div class="practice-result-summary">
+              <div id="practice-grade-badge" class="practice-grade-badge">--</div>
+              <p id="practice-score" class="practice-score"></p>
+            </div>
+            <div class="practice-score-bar" aria-hidden="true">
+              <span id="practice-score-fill"></span>
+            </div>
+            <div class="practice-actions">
+              <button id="practice-compare-button" class="practice-small-button" type="button">比較再生</button>
+              <button id="practice-repeat-audio-button" class="practice-small-button practice-small-button-muted" type="button">自分の録音</button>
+              <button id="practice-retry-button" class="practice-small-button" type="button">もう一度</button>
+              <button id="practice-next-button" class="practice-small-button practice-small-button-muted" type="button">次へ</button>
+            </div>
+            <audio id="practice-repeat-audio" hidden></audio>
+          </div>
           <div class="practice-model-controls">
             <button id="practice-play-model-button" class="practice-play-button" type="button">
               <span aria-hidden="true">▶</span>
@@ -84,11 +102,8 @@
             </button>
             <label class="practice-speed-control">
               <span>速度</span>
-              <select id="practice-speed-select">
-                <option value="0.75">0.75x</option>
-                <option value="1" selected>1.0x</option>
-                <option value="1.25">1.25x</option>
-              </select>
+              <input id="practice-speed-slider" type="range" min="0.25" max="2" step="0.25" value="1" />
+              <output id="practice-speed-value" for="practice-speed-slider">1.0x</output>
             </label>
           </div>
           <audio id="practice-model-audio" hidden></audio>
@@ -116,23 +131,6 @@
             <span class="record-timer" aria-hidden="true">REC</span>
           </button>
           <p id="practice-repeat-action-label" class="practice-orb-caption">まねする / Repeat / 模仿</p>
-        </article>
-
-        <article id="practice-result-panel" class="practice-card practice-result-card" hidden>
-          <div id="practice-grade-badge" class="practice-grade-badge">--</div>
-          <p id="practice-score" class="practice-score"></p>
-          <div class="practice-score-bar" aria-hidden="true">
-            <span id="practice-score-fill"></span>
-          </div>
-          <p id="practice-recognized-label" class="practice-section-label">聞こえた言葉</p>
-          <p id="practice-recognized-text" class="practice-recognized-text"></p>
-          <div class="practice-actions">
-            <button id="practice-compare-button" class="practice-small-button" type="button">比較再生</button>
-            <button id="practice-repeat-audio-button" class="practice-small-button practice-small-button-muted" type="button">自分の録音</button>
-            <button id="practice-retry-button" class="practice-small-button" type="button">もう一度</button>
-            <button id="practice-next-button" class="practice-small-button practice-small-button-muted" type="button">次へ</button>
-          </div>
-          <audio id="practice-repeat-audio" hidden></audio>
         </article>
       </section>
 

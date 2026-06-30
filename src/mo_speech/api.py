@@ -149,6 +149,24 @@ def _practice_pinyin_text(text: str) -> str:
     return str(output_text if output_text is not None else response).strip()
 
 
+def _is_practice_history_entry(entry: object) -> bool:
+    metadata = getattr(entry, "metadata", None) or {}
+    return str(metadata.get("endpoint") or "").startswith("practice-")
+
+
+def _serialized_audio_history_entries(
+    store: AudioHistoryStore,
+    kind: str,
+    *,
+    practice: bool,
+) -> list[dict[str, object]]:
+    return [
+        _serialize_audio_history_entry(kind, entry)
+        for entry in store.list_entries(kind)
+        if _is_practice_history_entry(entry) is practice
+    ]
+
+
 def create_app(
     pipeline: SpeechTranslationPipeline | None = None,
     openai_pipeline: SpeechTranslationPipeline | None = None,
@@ -190,6 +208,10 @@ def create_app(
     @app.get("/practice")
     def practice() -> FileResponse:
         return FileResponse(WEB_DIR / "practice.html")
+
+    @app.get("/practice/admin")
+    def practice_admin() -> FileResponse:
+        return FileResponse(WEB_DIR / "practice_admin.html")
 
     @app.get("/admin")
     def admin() -> FileResponse:
@@ -406,7 +428,11 @@ def create_app(
             "transformed_text": target_text,
             "target_language": practice_target_language,
             "target_language_label": PRACTICE_TARGET_LANGUAGES[practice_target_language]["label"],
-            "display_text": _practice_display_text(target_text, practice_target_language, include_pinyin=include_pinyin),
+            "display_text": _practice_display_text(
+                target_text,
+                practice_target_language,
+                include_pinyin=practice_target_language == "zh-CN" and include_pinyin,
+            ),
             "audio_mime_type": tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
             "audio_base64": base64.b64encode(tts_output.audio_bytes).decode("ascii"),
             "timings_ms": timings_ms,
@@ -790,14 +816,16 @@ def create_app(
     def get_audio_history() -> dict[str, object]:
         return {
             "settings": _serialize_audio_history_settings(active_audio_history_store),
-            "recordings": [
-                _serialize_audio_history_entry("recordings", entry)
-                for entry in active_audio_history_store.list_entries("recordings")
-            ],
-            "outputs": [
-                _serialize_audio_history_entry("outputs", entry)
-                for entry in active_audio_history_store.list_entries("outputs")
-            ],
+            "recordings": _serialized_audio_history_entries(active_audio_history_store, "recordings", practice=False),
+            "outputs": _serialized_audio_history_entries(active_audio_history_store, "outputs", practice=False),
+        }
+
+    @app.get("/api/practice-history")
+    def get_practice_history() -> dict[str, object]:
+        return {
+            "settings": _serialize_audio_history_settings(active_audio_history_store),
+            "recordings": _serialized_audio_history_entries(active_audio_history_store, "recordings", practice=True),
+            "outputs": _serialized_audio_history_entries(active_audio_history_store, "outputs", practice=True),
         }
 
     @app.post("/api/audio-history/outputs")

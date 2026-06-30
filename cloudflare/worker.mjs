@@ -83,6 +83,9 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "GET" && url.pathname === "/api/audio-history") {
       return jsonResponse(await listAudioHistory(env));
     }
+    if (request.method === "GET" && url.pathname === "/api/practice-history") {
+      return jsonResponse(await listPracticeHistory(env));
+    }
     if (request.method === "POST" && url.pathname === "/api/audio-history/outputs") {
       return jsonResponse(await saveUploadedAudioHistoryOutput(request, env));
     }
@@ -144,6 +147,8 @@ async function serveAsset(request, env, url) {
     assetUrl.pathname = "/user.html";
   } else if (url.pathname === "/practice") {
     assetUrl.pathname = "/practice.html";
+  } else if (url.pathname === "/practice/admin") {
+    assetUrl.pathname = "/practice_admin.html";
   } else if (url.pathname === "/admin") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {
@@ -897,7 +902,7 @@ async function createPracticePrompt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
-  const includePinyin = optionEnabled(stringFormValue(form, "include_pinyin", "false"));
+  const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -1063,10 +1068,21 @@ async function createChinesePinyinText(text, env) {
 
 async function listAudioHistory(env) {
   const kv = stateKv(env);
+  const index = kv ? await readAudioHistoryIndex(env) : { recordings: [], outputs: [] };
   return {
     settings: audioHistorySettings(env),
-    recordings: kv ? (await readAudioHistoryIndex(env)).recordings.map(serializeAudioHistoryEntry) : [],
-    outputs: kv ? (await readAudioHistoryIndex(env)).outputs.map(serializeAudioHistoryEntry) : [],
+    recordings: index.recordings.filter((entry) => !isPracticeHistoryEntry(entry)).map(serializeAudioHistoryEntry),
+    outputs: index.outputs.filter((entry) => !isPracticeHistoryEntry(entry)).map(serializeAudioHistoryEntry),
+  };
+}
+
+async function listPracticeHistory(env) {
+  const kv = stateKv(env);
+  const index = kv ? await readAudioHistoryIndex(env) : { recordings: [], outputs: [] };
+  return {
+    settings: audioHistorySettings(env),
+    recordings: index.recordings.filter(isPracticeHistoryEntry).map(serializeAudioHistoryEntry),
+    outputs: index.outputs.filter(isPracticeHistoryEntry).map(serializeAudioHistoryEntry),
   };
 }
 
@@ -1471,6 +1487,10 @@ function normalizeMetadata(metadata) {
     normalized[key] = typeof value === "string" ? value : String(value);
   }
   return normalized;
+}
+
+function isPracticeHistoryEntry(entry) {
+  return String(entry?.metadata?.endpoint || "").startsWith("practice-");
 }
 
 function validateAudioHistoryPath(kind, filename) {
