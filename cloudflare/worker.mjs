@@ -897,6 +897,7 @@ async function createPracticePrompt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
+  const includePinyin = optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -938,7 +939,9 @@ async function createPracticePrompt(request, env) {
     transformed_text: translation.translated_text,
     target_language: targetLanguage,
     target_language_label: PRACTICE_TARGET_LANGUAGES[targetLanguage].label,
-    display_text: await createPracticeDisplayText(translation.translated_text, targetLanguage, env),
+    display_text: await createPracticeDisplayText(translation.translated_text, targetLanguage, env, {
+      includePinyin,
+    }),
     audio_mime_type: tts.audio_mime_type,
     audio_base64: tts.audio_base64,
     timings_ms: {
@@ -1013,7 +1016,17 @@ async function createPracticeAttempt(request, env) {
   };
 }
 
-async function createPracticeDisplayText(text, targetLanguage, env) {
+async function createPracticeDisplayText(text, targetLanguage, env, { includePinyin = false } = {}) {
+  if (targetLanguage === "zh-CN") {
+    return {
+      mode: "plain",
+      primary_text: text,
+      secondary_text: "",
+      kanji_text: text,
+      hiragana_text: "",
+      pinyin_text: includePinyin ? await createChinesePinyinText(text, env) : "",
+    };
+  }
   if (targetLanguage !== "ja-JP") {
     return {
       mode: "plain",
@@ -1021,6 +1034,7 @@ async function createPracticeDisplayText(text, targetLanguage, env) {
       secondary_text: "",
       kanji_text: text,
       hiragana_text: "",
+      pinyin_text: "",
     };
   }
   const display = await createUserDisplayText({ text, target_language: targetLanguage }, env);
@@ -1032,7 +1046,19 @@ async function createPracticeDisplayText(text, targetLanguage, env) {
     secondary_text: hiraganaText && hiraganaText !== kanjiText ? kanjiText : "",
     kanji_text: kanjiText,
     hiragana_text: hiraganaText,
+    pinyin_text: "",
   };
+}
+
+async function createChinesePinyinText(text, env) {
+  return (
+    await openAiText(env, {
+      model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+      instructions:
+        "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. Return only the pinyin text, with spaces between words or syllables. Do not add notes.",
+      input: text,
+    })
+  ).trim();
 }
 
 async function listAudioHistory(env) {
@@ -1871,16 +1897,75 @@ function practiceGrade(similarity) {
 }
 
 function practiceDiff(normalizedTarget, normalizedRecognized) {
-  if (normalizedTarget === normalizedRecognized) {
-    return [{ type: "equal", target: normalizedTarget, recognized: normalizedRecognized }];
+  const rows = normalizedTarget.length + 1;
+  const cols = normalizedRecognized.length + 1;
+  const lcs = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (let targetIndex = normalizedTarget.length - 1; targetIndex >= 0; targetIndex -= 1) {
+    for (let recognizedIndex = normalizedRecognized.length - 1; recognizedIndex >= 0; recognizedIndex -= 1) {
+      if (normalizedTarget[targetIndex] === normalizedRecognized[recognizedIndex]) {
+        lcs[targetIndex][recognizedIndex] = lcs[targetIndex + 1][recognizedIndex + 1] + 1;
+      } else {
+        lcs[targetIndex][recognizedIndex] = Math.max(
+          lcs[targetIndex + 1][recognizedIndex],
+          lcs[targetIndex][recognizedIndex + 1],
+        );
+      }
+    }
   }
-  return [
-    {
-      type: "compare",
-      target: normalizedTarget,
-      recognized: normalizedRecognized,
-    },
-  ];
+  const entries = [];
+  let targetIndex = 0;
+  let recognizedIndex = 0;
+  while (targetIndex < normalizedTarget.length || recognizedIndex < normalizedRecognized.length) {
+    const targetStart = targetIndex;
+    const recognizedStart = recognizedIndex;
+    let type;
+    if (
+      targetIndex < normalizedTarget.length &&
+      recognizedIndex < normalizedRecognized.length &&
+      normalizedTarget[targetIndex] === normalizedRecognized[recognizedIndex]
+    ) {
+      type = "equal";
+      targetIndex += 1;
+      recognizedIndex += 1;
+    } else if (
+      recognizedIndex < normalizedRecognized.length &&
+      (targetIndex >= normalizedTarget.length || lcs[targetIndex][recognizedIndex + 1] >= lcs[targetIndex + 1][recognizedIndex])
+    ) {
+      type = "insert";
+      recognizedIndex += 1;
+    } else {
+      type = "delete";
+      targetIndex += 1;
+    }
+    const previous = entries[entries.length - 1];
+    if (previous && previous.type === type && previous.target_end === targetStart && previous.recognized_end === recognizedStart) {
+      previous.target_end = targetIndex;
+      previous.recognized_end = recognizedIndex;
+      previous.target = normalizedTarget.slice(previous.target_start, previous.target_end);
+      previous.recognized = normalizedRecognized.slice(previous.recognized_start, previous.recognized_end);
+    } else {
+      entries.push({
+        type,
+        target: normalizedTarget.slice(targetStart, targetIndex),
+        recognized: normalizedRecognized.slice(recognizedStart, recognizedIndex),
+        target_start: targetStart,
+        target_end: targetIndex,
+        recognized_start: recognizedStart,
+        recognized_end: recognizedIndex,
+      });
+    }
+  }
+  return entries.length > 0
+    ? entries
+    : [{
+        type: "equal",
+        target: "",
+        recognized: "",
+        target_start: 0,
+        target_end: 0,
+        recognized_start: 0,
+        recognized_end: 0,
+      }];
 }
 
 function levenshteinDistance(left, right) {

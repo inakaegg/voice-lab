@@ -25,22 +25,56 @@ const progress = document.querySelector("#practice-progress");
 const progressFill = document.querySelector("#practice-progress-fill");
 const statusText = document.querySelector("#practice-status");
 const errorText = document.querySelector("#practice-error");
+const pinyinSetting = document.querySelector("#practice-pinyin-setting");
+const pinyinToggle = document.querySelector("#practice-pinyin-toggle");
+const nativeTranscriptPanel = document.querySelector("#practice-native-transcript-panel");
+const nativeTranscriptLabel = document.querySelector("#practice-native-transcript-label");
+const nativeTranscript = document.querySelector("#practice-native-transcript");
+const recognizedLabel = document.querySelector("#practice-recognized-label");
+const compareButton = document.querySelector("#practice-compare-button");
+const repeatAudioButton = document.querySelector("#practice-repeat-audio-button");
+const repeatAudio = document.querySelector("#practice-repeat-audio");
 
 const languageLabels = {
   "ja-JP": "日本語",
   "zh-CN": "中文",
   "en-US": "English",
 };
+const nativeUiLabels = {
+  "ja-JP": {
+    transcript: "言ったこと",
+    recognized: "聞こえた言葉",
+    compare: "比較再生",
+    repeatAudio: "自分の録音",
+  },
+  "zh-CN": {
+    transcript: "你说的话",
+    recognized: "识别结果",
+    compare: "对比播放",
+    repeatAudio: "我的录音",
+  },
+  "en-US": {
+    transcript: "What you said",
+    recognized: "Recognized",
+    compare: "Compare",
+    repeatAudio: "My recording",
+  },
+};
+const practiceSettingsStorageKey = "mo:practice-settings";
 
 let selectedTargetLanguage = "ja-JP";
+let detectedNativeLanguage = "";
 let mediaRecorder = null;
 let recordingStream = null;
 let recordingKind = "";
 let recordingChunks = [];
 let isBusy = false;
 let modelAudioUrl = "";
+let repeatAudioUrl = "";
 let currentTargetText = "";
 let currentTargetDisplayText = "";
+let currentTargetSecondaryText = "";
+let currentTargetPinyinText = "";
 let currentAudioContext = null;
 let currentAnalyser = null;
 let currentLevelFrame = null;
@@ -58,6 +92,9 @@ nativeRecordButton.addEventListener("click", () => toggleRecording("native"));
 repeatRecordButton.addEventListener("click", () => toggleRecording("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSelect.addEventListener("change", syncModelAudioSpeed);
+pinyinToggle.addEventListener("change", handlePinyinSettingChange);
+compareButton.addEventListener("click", playComparisonAudios);
+repeatAudioButton.addEventListener("click", playRepeatAudio);
 retryButton.addEventListener("click", () => toggleRecording("repeat"));
 nextButton.addEventListener("click", resetPractice);
 modelAudio.addEventListener("ended", syncPlayButton);
@@ -74,6 +111,8 @@ function selectTargetLanguage(language) {
     button.classList.toggle("is-selected", selected);
     button.setAttribute("aria-checked", selected ? "true" : "false");
   });
+  syncPinyinSettingVisibility();
+  savePracticeSettings();
   resetPractice();
 }
 
@@ -153,15 +192,20 @@ async function submitPrompt(blob) {
   resultPanel.hidden = true;
   const form = new FormData();
   form.append("target_language", selectedTargetLanguage);
+  form.append("include_pinyin", selectedTargetLanguage === "zh-CN" && pinyinToggle.checked ? "true" : "false");
   form.append("audio", blob, `native.${extensionForMimeType(blob.type)}`);
   const payload = await postPracticeForm("/api/practice/prompts", form);
+  detectedNativeLanguage = normalizePracticeLanguage(payload.detected_source_language || "");
+  renderNativeLabels();
   currentTargetText = payload.target_text || "";
   currentTargetDisplayText = payload.display_text?.primary_text || currentTargetText;
   targetLabel.textContent = `${languageLabels[payload.target_language] || ""} のお手本`;
   targetText.textContent = currentTargetDisplayText;
-  const secondaryText = payload.display_text?.secondary_text || "";
-  targetSubtext.hidden = !secondaryText;
-  targetSubtext.textContent = secondaryText;
+  currentTargetSecondaryText = payload.display_text?.secondary_text || "";
+  currentTargetPinyinText = payload.display_text?.pinyin_text || "";
+  renderTargetSubtext();
+  nativeTranscript.textContent = payload.transcript || "";
+  nativeTranscriptPanel.hidden = !payload.transcript;
   setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
   nativePanel.hidden = true;
   promptPanel.hidden = false;
@@ -174,6 +218,7 @@ async function submitPrompt(blob) {
 async function submitAttempt(blob) {
   setBusy(true, "聞き取っています。", 88, "repeat");
   resultPanel.hidden = true;
+  setRepeatAudio(blob);
   const form = new FormData();
   form.append("target_language", selectedTargetLanguage);
   form.append("target_text", currentTargetText);
@@ -205,7 +250,7 @@ function renderAttemptResult(payload) {
   const percent = Math.round(Number(payload.similarity || 0) * 100);
   scoreText.textContent = `${percent}%`;
   scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  recognizedText.textContent = payload.recognized_text || "（聞き取れませんでした）";
+  renderRecognizedDiff(payload);
   resultPanel.hidden = false;
 }
 
@@ -213,13 +258,20 @@ function resetPractice() {
   stopModelAudio();
   currentTargetText = "";
   currentTargetDisplayText = "";
+  currentTargetSecondaryText = "";
+  currentTargetPinyinText = "";
+  detectedNativeLanguage = "";
   nativePanel.hidden = false;
   promptPanel.hidden = true;
   repeatPanel.hidden = true;
   resultPanel.hidden = true;
+  nativeTranscriptPanel.hidden = true;
+  nativeTranscript.textContent = "";
+  recognizedText.textContent = "";
+  stopRepeatAudio();
+  renderNativeLabels();
   targetText.textContent = "";
-  targetSubtext.textContent = "";
-  targetSubtext.hidden = true;
+  renderTargetSubtext();
   setStatus("言いたいことを話す / 说出想说的话 / Say what you want");
   clearError();
 }
@@ -230,6 +282,12 @@ function setModelAudio(audioBase64, mimeType) {
   modelAudioUrl = URL.createObjectURL(blob);
   modelAudio.src = modelAudioUrl;
   syncModelAudioSpeed();
+}
+
+function setRepeatAudio(blob) {
+  stopRepeatAudio();
+  repeatAudioUrl = URL.createObjectURL(blob);
+  repeatAudio.src = repeatAudioUrl;
 }
 
 function toggleModelAudio() {
@@ -254,6 +312,16 @@ function stopModelAudio() {
   syncPlayButton();
 }
 
+function stopRepeatAudio() {
+  if (repeatAudioUrl) {
+    URL.revokeObjectURL(repeatAudioUrl);
+    repeatAudioUrl = "";
+  }
+  repeatAudio.pause();
+  repeatAudio.removeAttribute("src");
+  repeatAudio.load();
+}
+
 function syncPlayButton() {
   playModelButton.classList.toggle("is-playing", !modelAudio.paused);
   playModelButton.querySelector("span:last-child").textContent = modelAudio.paused ? "再生" : "停止";
@@ -261,6 +329,51 @@ function syncPlayButton() {
 
 function syncModelAudioSpeed() {
   modelAudio.playbackRate = Number.parseFloat(speedSelect.value || "1") || 1;
+}
+
+function handlePinyinSettingChange() {
+  savePracticeSettings();
+  renderTargetSubtext();
+}
+
+function renderTargetSubtext() {
+  const secondaryText = selectedTargetLanguage === "zh-CN" && pinyinToggle.checked
+    ? currentTargetPinyinText
+    : currentTargetSecondaryText;
+  targetSubtext.hidden = !secondaryText;
+  targetSubtext.textContent = secondaryText || "";
+}
+
+async function playRepeatAudio() {
+  if (!repeatAudio.src) {
+    return;
+  }
+  repeatAudio.currentTime = 0;
+  await repeatAudio.play().catch((error) => showError(error.message));
+}
+
+async function playComparisonAudios() {
+  if (modelAudio.src) {
+    await playAudioElementToEnd(modelAudio);
+  }
+  if (repeatAudio.src) {
+    await playAudioElementToEnd(repeatAudio);
+  }
+}
+
+function playAudioElementToEnd(audio) {
+  return new Promise((resolve) => {
+    const done = () => {
+      audio.removeEventListener("ended", done);
+      audio.removeEventListener("error", done);
+      resolve();
+    };
+    audio.pause();
+    audio.currentTime = 0;
+    audio.addEventListener("ended", done, { once: true });
+    audio.addEventListener("error", done, { once: true });
+    audio.play().catch(done);
+  });
 }
 
 function setBusy(busy, message, target = 100, kind = processingKind) {
@@ -456,4 +569,146 @@ function clearError() {
   errorText.textContent = "";
 }
 
+function loadPracticeSettings() {
+  const settings = readPracticeSettings();
+  selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
+  pinyinToggle.checked = settings.show_pinyin !== false;
+  targetLanguageButtons.forEach((button) => {
+    const selected = button.dataset.language === selectedTargetLanguage;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-checked", selected ? "true" : "false");
+  });
+  syncPinyinSettingVisibility();
+}
+
+function readPracticeSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(practiceSettingsStorageKey) || "{}");
+  } catch (_error) {
+    return {};
+  }
+}
+
+function savePracticeSettings() {
+  try {
+    localStorage.setItem(
+      practiceSettingsStorageKey,
+      JSON.stringify({
+        target_language: selectedTargetLanguage,
+        show_pinyin: Boolean(pinyinToggle.checked),
+      }),
+    );
+  } catch (_error) {
+    // localStorageが使えないブラウザでは、現在の画面内状態だけで動かす。
+  }
+}
+
+function syncPinyinSettingVisibility() {
+  pinyinSetting.hidden = selectedTargetLanguage !== "zh-CN";
+}
+
+function normalizePracticeLanguage(language) {
+  if (languageLabels[language]) {
+    return language;
+  }
+  const lower = String(language || "").toLowerCase();
+  if (lower.startsWith("ja")) return "ja-JP";
+  if (lower.startsWith("zh")) return "zh-CN";
+  if (lower.startsWith("en")) return "en-US";
+  return "";
+}
+
+function renderNativeLabels() {
+  const labels = nativeUiLabels[detectedNativeLanguage] || nativeUiLabels["ja-JP"];
+  nativeTranscriptLabel.textContent = labels.transcript;
+  recognizedLabel.textContent = labels.recognized;
+  compareButton.textContent = labels.compare;
+  repeatAudioButton.textContent = labels.repeatAudio;
+}
+
+function renderRecognizedDiff(payload) {
+  const recognized = payload.recognized_text || "";
+  const diff = Array.isArray(payload.diff) ? payload.diff : [];
+  const map = normalizedOriginalMap(recognized, payload.target_language || selectedTargetLanguage);
+  const mismatchRanges = diff
+    .filter((entry) => entry.type !== "equal" && Number.isInteger(entry.recognized_start))
+    .map((entry) => originalRangeForNormalizedRange(map, entry.recognized_start, entry.recognized_end))
+    .filter((range) => range.end > range.start);
+  recognizedText.innerHTML = "";
+  if (!recognized) {
+    recognizedText.textContent = "（聞き取れませんでした）";
+    return;
+  }
+  let cursor = 0;
+  for (const range of mergeRanges(mismatchRanges)) {
+    if (cursor < range.start) {
+      recognizedText.append(document.createTextNode(recognized.slice(cursor, range.start)));
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "practice-diff-mismatch";
+    button.textContent = recognized.slice(range.start, range.end);
+    button.title = "比較再生";
+    button.addEventListener("click", playComparisonAudios);
+    recognizedText.append(button);
+    cursor = range.end;
+  }
+  if (cursor < recognized.length) {
+    recognizedText.append(document.createTextNode(recognized.slice(cursor)));
+  }
+}
+
+function normalizedOriginalMap(text, language) {
+  const chars = Array.from(text || "");
+  const normalizedChars = [];
+  const originalIndexes = [];
+  chars.forEach((char, originalIndex) => {
+    const normalized = normalizePracticeChar(char, language);
+    for (const normalizedChar of Array.from(normalized)) {
+      if (!/[\p{P}\p{Z}\p{S}]/u.test(normalizedChar)) {
+        normalizedChars.push(normalizedChar);
+        originalIndexes.push(originalIndex);
+      }
+    }
+  });
+  return { chars, normalizedChars, originalIndexes };
+}
+
+function normalizePracticeChar(char, language) {
+  let normalized = String(char || "").normalize("NFKC").toLowerCase();
+  if (language === "ja-JP") {
+    normalized = normalized.replace(/[\u30a1-\u30f6]/g, (value) =>
+      String.fromCharCode(value.charCodeAt(0) - 0x60)
+    );
+  }
+  return normalized;
+}
+
+function originalRangeForNormalizedRange(map, start, end) {
+  if (end <= start || map.originalIndexes.length === 0) {
+    return { start: 0, end: 0 };
+  }
+  const first = map.originalIndexes[Math.min(start, map.originalIndexes.length - 1)];
+  const last = map.originalIndexes[Math.min(Math.max(end - 1, start), map.originalIndexes.length - 1)];
+  if (!Number.isInteger(first) || !Number.isInteger(last)) {
+    return { start: 0, end: 0 };
+  }
+  return { start: first, end: last + 1 };
+}
+
+function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((left, right) => left.start - right.start);
+  const merged = [];
+  for (const range of sorted) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
+}
+
+loadPracticeSettings();
 resetPractice();

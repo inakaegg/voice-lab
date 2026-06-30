@@ -71,7 +71,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       return new Response("コーヒーがほしいです", { status: 200 });
     }
-    if (url === "https://api.openai.com/v1/responses") {
+    if (url === "https://api.openai.com/v1/responses" && calls.filter((call) => call.url === url).length === 1) {
       return json({
         output_text: JSON.stringify({
           source_language: "ja-JP",
@@ -79,6 +79,9 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
           translated_text: "我想要咖啡。",
         }),
       });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({ output_text: "wǒ xiǎng yào kā fēi" });
     }
     if (url === "https://api.openai.com/v1/audio/speech") {
       return new Response(new Uint8Array([10, 11, 12]), { status: 200 });
@@ -88,6 +91,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   const form = new FormData();
   form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
   form.append("target_language", "zh-CN");
+  form.append("include_pinyin", "true");
 
   const response = await handleRequest(
     new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
@@ -102,9 +106,11 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(payload.target_text, "我想要咖啡。");
   assert.equal(payload.audio_base64, Buffer.from([10, 11, 12]).toString("base64"));
   assert.equal(payload.display_text.primary_text, "我想要咖啡。");
+  assert.equal(payload.display_text.pinyin_text, "wǒ xiǎng yào kā fēi");
   assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");
+  assert.equal(calls[3].url, "https://api.openai.com/v1/responses");
   assert.equal(history.recordings[0].metadata.endpoint, "practice-prompts");
   assert.equal(history.outputs[0].metadata.endpoint, "practice-prompts");
 });
@@ -134,6 +140,7 @@ test("Cloudflare worker scores a pronunciation practice attempt", async () => {
   assert.equal(payload.normalized_target, "iwantacoffee");
   assert.equal(payload.normalized_recognized, "iwantcoffee");
   assert.ok(Array.isArray(payload.diff));
+  assert.ok(payload.diff.every((entry) => Number.isInteger(entry.recognized_start)));
 });
 
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {

@@ -54,6 +54,11 @@
 - 発音練習用画面の固定文言は、ひらがなのみの日本語にはしない。ユーザーの母国語がまだ分からない初回ロード時は、日本語、中国語、英語を併記して「言いたいことを話す / 说出想说的话 / Say what you want」のように表示する。
 - 発音練習用画面では模範音声の再生速度を `0.75x`、`1.0x`、`1.25x` から選べる。速度変更は既に生成済みの音声をブラウザ再生速度で変えるだけで、TTS再生成はしない。
 - 発音練習用画面は、高速に練習を回すため、PC/スマホともにできるだけ1画面内へ収める。言語選択、録音、模範文、再生速度、復唱、判定を過度な説明文や大きいカードで縦に伸ばさない。
+- 発音練習用画面は、前回選んだ学習対象言語と、中国語のピンイン表示ON/OFFをブラウザ側のlocalStorageなどへ保存し、次回ロード時の既定値にする。
+- 発音練習用画面では、母国語入力のASR結果も表示する。ユーザーが「自分が何と言ったと認識されたか」を確認できるようにする。
+- 学習対象言語が `zh-CN` の場合、お手本には中国語本文に加えてピンインを表示できる。ピンイン表示は設定でON/OFFでき、ONの場合だけ `POST /api/practice/prompts` でピンイン生成を要求する。
+- 復唱後の `recognized_text` は、母国語が分かっている場合は母国語1つのラベルで表示する。初回や不明時のみ多言語または汎用ラベルへ戻す。
+- 復唱結果は、お手本文と同程度の大きさで表示し、目標文との差分で不一致と判断した部分を赤字で目立たせる。初期実装では正確な単語単位音声切り出しは行わず、差分箇所のクリックや比較ボタンでお手本音声全体とユーザー復唱録音全体を再生できるようにする。将来はタイムスタンプ付きASRを使い、該当部分だけの比較再生へ発展させる。
 - RunPod Serverless backendが利用可能な環境では、ユーザー用画面の音声翻訳は `runpod_serverless` を優先する。未設定または利用不可の場合は従来どおり `OpenAI API` を使う。RunPod利用時もブラウザへRunPod API keyを出さず、ローカルFastAPIまたは将来のgatewayがRunPod APIを呼び出す。
 - ユーザー用画面では `にてるこえ` トグルを表示しない。Seed-VCが利用可能な場合は、翻訳/テキスト加工/TTSで作ったベース音声を既定でSeed-VCへ渡して声質変換する。Seed-VCの参照音声は入力音声自身、`seed_vc_reference_auto_select=true` 固定とする。runtime APIで直接VC backendの `seed-vc` が利用不可の場合は、本文音声の生成までは完了させる。
 - RunPod Serverless backendのwarm状態は `/api/runtime` の `runpod_serverless` backend情報に含める。ユーザー用画面では、RunPod backendが選ばれている場合だけ画面右上付近に小さい状態ドットを出し、文字で `じゅんびまえ` などの操作を妨げる表示は出さない。ユーザー用画面のページロードでは既定で `POST /api/warmup` を実行しない。デモ前にwarmupしたい場合は管理者用画面 `/admin` の手動準備ボタンから `POST /api/warmup` を実行する。録音送信やSeed-VC実変換を行った場合もRunPod jobが作られるため、cold状態ならその時点でworker起動とモデルロードが入る。`/api/runtime` 自体は読み取り専用で、RunPod `/health` の `IDLE` や `READY` はworker存在の参考情報にとどめる。Seed-VC ready表示はwarmupまたはSeed-VC job成功によって短時間保存されたready状態だけを根拠にする。
@@ -261,12 +266,13 @@ OpenAI Realtime翻訳の扱い:
 
 - `audio`: 利用者が母国語で話した音声ファイル。
 - `target_language`: `ja-JP`、`zh-CN`、`en-US`。
+- `include_pinyin`: `target_language=zh-CN` のとき、ピンイン表示を生成するかどうか。
 
 レスポンス:
 
 - `transcript`: 母国語入力のASR結果。
 - `target_text`: 学習対象言語へ変換した目標文。
-- `display_text`: 画面表示用テキスト。日本語ではひらがな表示を含められる。
+- `display_text`: 画面表示用テキスト。日本語ではひらがな表示を含められ、中国語では要求時に `pinyin_text` を含める。
 - `audio_mime_type` / `audio_base64`: 模範音声。
 - `providers` / `timings_ms`: 利用したproviderと処理時間。
 
@@ -284,7 +290,7 @@ OpenAI Realtime翻訳の扱い:
 - `similarity`: 0.0から1.0の類似度。
 - `grade`: `ok`、`almost`、`retry`。
 - `grade_label`: 画面表示用の短い判定文。
-- `diff`: 目標文とASR結果の比較表示用データ。
+- `diff`: 目標文とASR結果の比較表示用データ。UIで認識結果の不一致部分を赤字表示できるよう、正規化後文字列の範囲情報を含める。
 - `providers` / `timings_ms`: 利用したproviderと処理時間。
 
 `POST /api/text-to-speech-jobs`

@@ -32,6 +32,10 @@
             <strong>English</strong>
           </button>
         </div>
+        <label id="practice-pinyin-setting" class="practice-inline-setting" hidden>
+          <input id="practice-pinyin-toggle" type="checkbox" checked />
+          <span>ピンインを表示 / Show pinyin / 显示拼音</span>
+        </label>
       </section>
 
       <section class="practice-flow" aria-label="れんしゅう">
@@ -64,6 +68,10 @@
           <div class="practice-card-copy">
             <h2>お手本</h2>
             <p id="practice-target-label">Listen and repeat / 听一听，然后模仿</p>
+          </div>
+          <div id="practice-native-transcript-panel" class="practice-native-transcript-panel" hidden>
+            <p id="practice-native-transcript-label" class="practice-mini-label">言ったこと</p>
+            <p id="practice-native-transcript" class="practice-native-transcript"></p>
           </div>
           <div class="practice-target-text-box">
             <p id="practice-target-text" class="practice-target-text"></p>
@@ -116,12 +124,15 @@
           <div class="practice-score-bar" aria-hidden="true">
             <span id="practice-score-fill"></span>
           </div>
-          <p class="practice-section-label">聞こえた言葉 / Recognized / 识别结果</p>
+          <p id="practice-recognized-label" class="practice-section-label">聞こえた言葉</p>
           <p id="practice-recognized-text" class="practice-recognized-text"></p>
           <div class="practice-actions">
+            <button id="practice-compare-button" class="practice-small-button" type="button">比較再生</button>
+            <button id="practice-repeat-audio-button" class="practice-small-button practice-small-button-muted" type="button">自分の録音</button>
             <button id="practice-retry-button" class="practice-small-button" type="button">もう一度</button>
             <button id="practice-next-button" class="practice-small-button practice-small-button-muted" type="button">次へ</button>
           </div>
+          <audio id="practice-repeat-audio" hidden></audio>
         </article>
       </section>
 

@@ -85,6 +85,10 @@ def practice_diff(normalized_target: str, normalized_recognized: str) -> list[di
                 "type": tag,
                 "target": normalized_target[target_start:target_end],
                 "recognized": normalized_recognized[recognized_start:recognized_end],
+                "target_start": target_start,
+                "target_end": target_end,
+                "recognized_start": recognized_start,
+                "recognized_end": recognized_end,
             }
         )
     return diff

@@ -17,3 +17,4 @@ def test_practice_attempt_grades_similarity() -> None:
     assert retry["grade"] == "retry"
     assert 0 <= retry["similarity"] < almost["similarity"] < ok["similarity"] <= 1
     assert ok["diff"]
+    assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(ok["diff"][0])

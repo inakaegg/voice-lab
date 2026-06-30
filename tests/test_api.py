@@ -99,8 +99,12 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert 'value="en-US"' in response.text
     assert "practice-native-record-button" in response.text
     assert "practice-repeat-record-button" in response.text
+    assert "practice-native-transcript" in response.text
+    assert "practice-pinyin-toggle" in response.text
     assert "record-level-meter" in response.text
     assert "practice-speed-select" in response.text
+    assert "practice-repeat-audio-button" in response.text
+    assert "practice-compare-button" in response.text
     assert 'value="0.75"' in response.text
     assert 'value="1.25"' in response.text
     assert "/static/app_practice.js" in response.text
@@ -125,6 +129,7 @@ def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
     assert payload["transcript"] == "コーヒーがほしいです"
     assert payload["target_text"] == "我想要咖啡。"
     assert payload["target_language"] == "zh-CN"
+    assert payload["display_text"]["pinyin_text"] == ""
     assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:我想要咖啡。".encode()).decode()
     assert payload["providers"]["asr"] == "fake-asr"
 
@@ -148,6 +153,7 @@ def test_practice_attempt_api_scores_repeat_audio() -> None:
     assert payload["recognized_text"] == "I want coffee"
     assert payload["grade"] == "ok"
     assert payload["similarity"] >= 0.85
+    assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(payload["diff"][0])
     assert payload["providers"]["asr"] == "fake-asr"
 
 
