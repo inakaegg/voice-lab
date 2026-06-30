@@ -42,6 +42,15 @@ const languageLabels = {
   "zh-CN": "中文",
   "en-US": "English",
 };
+const hanCodePointRanges = [
+  [0x3400, 0x4DBF],
+  [0x4E00, 0x9FFF],
+  [0x20000, 0x2A6DF],
+  [0x2A700, 0x2B73F],
+  [0x2B740, 0x2B81F],
+  [0x2B820, 0x2CEAF],
+];
+const pinyinTrimCharacters = "，。！？；：、,.!?;:\"'“”‘’（）()[]【】《》<>";
 const zhTraditionalToSimplified = {
   後: "后",
   裏: "里",
@@ -177,8 +186,9 @@ repeatAudioButton.addEventListener("click", playRepeatAudio);
 retryButton.addEventListener("click", () => toggleRecording("repeat"));
 nextButton.addEventListener("click", resetPractice);
 modelAudio.addEventListener("ended", syncPlayButton);
+modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
-modelAudio.addEventListener("play", syncPlayButton);
+modelAudio.addEventListener("play", handleModelAudioPlay);
 
 function selectTargetLanguage(language) {
   if (isBusy || mediaRecorder) {
@@ -285,11 +295,10 @@ async function submitPrompt(blob) {
   currentTargetText = payload.target_text || "";
   currentTargetDisplayText = payload.display_text?.primary_text || currentTargetText;
   targetLabel.textContent = `${languageLabels[payload.target_language] || ""} のお手本`;
-  targetText.textContent = currentTargetDisplayText;
   currentTargetSecondaryText = payload.display_text?.secondary_text || "";
   currentTargetPinyinText = payload.display_text?.pinyin_text || "";
   currentTargetPinyinStatus = payload.display_text?.pinyin_status || (currentTargetPinyinText ? "ready" : "unavailable");
-  renderTargetSubtext();
+  renderTargetDisplay();
   nativeTranscript.textContent = payload.transcript || "";
   nativeTranscriptPanel.hidden = !payload.transcript;
   setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
@@ -297,6 +306,7 @@ async function submitPrompt(blob) {
   promptPanel.hidden = false;
   repeatPanel.hidden = false;
   setBusy(false, "お手本を聞いて、まねして話してください。");
+  syncModelAudioSpeed();
   await modelAudio.play().catch(() => {});
   syncPlayButton();
 }
@@ -357,8 +367,7 @@ function resetPractice() {
   recognizedText.textContent = "";
   stopRepeatAudio();
   renderNativeLabels();
-  targetText.textContent = "";
-  renderTargetSubtext();
+  renderTargetDisplay();
   setStatus("言いたいことを話す / 说出想说的话 / Say what you want");
   clearError();
 }
@@ -382,6 +391,7 @@ function toggleModelAudio() {
     return;
   }
   if (modelAudio.paused) {
+    syncModelAudioSpeed();
     modelAudio.play().catch((error) => showError(error.message));
   } else {
     modelAudio.pause();
@@ -418,7 +428,13 @@ function syncModelAudioSpeed() {
   const speed = normalizedPlaybackSpeed(speedSlider.value);
   speedSlider.value = String(speed);
   speedValue.textContent = formatPlaybackSpeed(speed);
+  modelAudio.defaultPlaybackRate = speed;
   modelAudio.playbackRate = speed;
+}
+
+function handleModelAudioPlay() {
+  syncModelAudioSpeed();
+  syncPlayButton();
 }
 
 function handleSpeedChange() {
@@ -428,18 +444,78 @@ function handleSpeedChange() {
 
 function handlePinyinSettingChange() {
   savePracticeSettings();
-  renderTargetSubtext();
+  renderTargetDisplay();
 }
 
-function renderTargetSubtext() {
+function renderTargetDisplay() {
+  const displayText = currentTargetDisplayText || currentTargetText || "";
+  const pinyinRuby = selectedTargetLanguage === "zh-CN" && pinyinToggle.checked
+    ? createPinyinRubyFragment(displayText, currentTargetPinyinText)
+    : null;
+  targetText.replaceChildren();
+  targetText.classList.toggle("has-ruby", Boolean(pinyinRuby));
+  if (pinyinRuby) {
+    targetText.append(pinyinRuby);
+  } else {
+    targetText.textContent = displayText;
+  }
+  renderTargetSubtext(Boolean(pinyinRuby));
+}
+
+function renderTargetSubtext(hasPinyinRuby = false) {
   let secondaryText = currentTargetSecondaryText;
   if (selectedTargetLanguage === "zh-CN" && pinyinToggle.checked) {
-    secondaryText = currentTargetPinyinText || (
+    secondaryText = hasPinyinRuby ? "" : currentTargetPinyinText || (
       currentTargetPinyinStatus === "unavailable" ? "ピンインを生成できませんでした" : ""
     );
   }
   targetSubtext.hidden = !secondaryText;
   targetSubtext.textContent = secondaryText || "";
+}
+
+function createPinyinRubyFragment(text, pinyinText) {
+  const chars = Array.from(text || "");
+  const pinyinTokens = String(pinyinText || "")
+    .split(/\s+/u)
+    .map((token) => trimPinyinToken(token))
+    .filter(Boolean);
+  const hanCount = chars.filter((char) => isHanCharacter(char)).length;
+  if (!hanCount || pinyinTokens.length < hanCount) {
+    return null;
+  }
+
+  const fragment = document.createDocumentFragment();
+  let pinyinIndex = 0;
+  chars.forEach((char) => {
+    if (!isHanCharacter(char)) {
+      fragment.append(document.createTextNode(char));
+      return;
+    }
+    const ruby = document.createElement("ruby");
+    const rt = document.createElement("rt");
+    ruby.append(document.createTextNode(char));
+    rt.textContent = pinyinTokens[pinyinIndex] || "";
+    ruby.append(rt);
+    fragment.append(ruby);
+    pinyinIndex += 1;
+  });
+  return fragment;
+}
+
+function trimPinyinToken(token) {
+  const chars = Array.from(String(token || "").trim());
+  while (chars.length && pinyinTrimCharacters.includes(chars[0])) {
+    chars.shift();
+  }
+  while (chars.length && pinyinTrimCharacters.includes(chars[chars.length - 1])) {
+    chars.pop();
+  }
+  return chars.join("");
+}
+
+function isHanCharacter(char) {
+  const codePoint = char.codePointAt(0);
+  return hanCodePointRanges.some(([start, end]) => codePoint >= start && codePoint <= end);
 }
 
 async function playRepeatAudio() {
@@ -486,6 +562,9 @@ function playAudioElementToEnd(audio) {
     };
     audio.pause();
     audio.currentTime = 0;
+    if (audio === modelAudio) {
+      syncModelAudioSpeed();
+    }
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
     audio.play().catch(done);
@@ -536,6 +615,9 @@ function playAudioSegmentToEnd(audio, start, end) {
     };
     audio.pause();
     audio.currentTime = segmentStart;
+    if (audio === modelAudio) {
+      syncModelAudioSpeed();
+    }
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
     audio.play().then(watch).catch(done);

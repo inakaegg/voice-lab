@@ -167,6 +167,30 @@ def test_practice_prompt_api_includes_local_pinyin_when_requested(monkeypatch) -
     assert payload["display_text"]["pinyin_status"] == "ready"
 
 
+def test_practice_prompt_api_omits_non_chinese_tokens_from_local_pinyin(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "外付けSSDを買いました"}),
+        translator=FakeTranslationProvider(
+            {("auto", "zh-CN", "外付けSSDを買いました"): "我买了一个外接 SSD，容量有 1TB。"}
+        ),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/prompts",
+        data={"target_language": "zh-CN", "include_pinyin": "true"},
+        files={"audio": ("native.webm", b"native audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["display_text"]["pinyin_text"] == "wǒ mǎi le yí gè wài jiē róng liàng yǒu"
+    assert "SSD" not in payload["display_text"]["pinyin_text"]
+    assert "1TB" not in payload["display_text"]["pinyin_text"]
+
+
 def test_practice_attempt_api_scores_repeat_audio() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"en-US": "I want coffee"}),

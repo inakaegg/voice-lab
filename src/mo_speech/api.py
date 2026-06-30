@@ -163,7 +163,7 @@ def _practice_pinyin_text_local(text: str) -> str:
         text,
         style=Style.TONE,
         neutral_tone_with_five=False,
-        errors="default",
+        errors="ignore",
     )
     return _normalize_practice_pinyin_tokens(tokens)
 
@@ -200,7 +200,8 @@ def _practice_pinyin_text_openai(text: str) -> str:
             model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.5")),
             instructions=(
                 "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. "
-                "Return only the pinyin text, with spaces between words or syllables. Do not add notes."
+                "Return one pinyin syllable per Chinese character, separated by spaces. "
+                "Omit punctuation, Latin letters, numbers, and notes."
             ),
             input=text,
         )

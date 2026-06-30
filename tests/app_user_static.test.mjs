@@ -56,6 +56,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /min="0\.25"/);
   assert.match(practiceHtml, /max="2"/);
   assert.match(practiceHtml, /step="0\.25"/);
+  assert.equal((practiceHtml.match(/id="practice-result-panel"/g) || []).length, 1);
   assert.match(practiceHtml, /id="practice-segment-mode"/);
   assert.match(practiceHtml, /value="sentence"/);
   assert.match(practiceHtml, /value="punctuation"/);
@@ -70,10 +71,16 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /segment_mode:/);
   assert.match(practiceSource, /include_pinyin/);
   assert.match(practiceSource, /currentTargetPinyinStatus/);
+  assert.match(practiceSource, /renderTargetDisplay/);
+  assert.match(practiceSource, /createPinyinRubyFragment/);
+  assert.match(practiceSource, /document\.createElement\("ruby"\)/);
+  assert.match(practiceSource, /document\.createElement\("rt"\)/);
   assert.match(practiceSource, /ピンインを生成できませんでした/);
   assert.match(practiceSource, /selectedTargetLanguage === "zh-CN" \? true : settings\.show_pinyin !== false/);
   assert.match(practiceSource, /pinyinToggle\.checked = true/);
   assert.match(practiceSource, /modelAudio\.playbackRate/);
+  assert.match(practiceSource, /modelAudio\.defaultPlaybackRate/);
+  assert.match(practiceSource, /loadedmetadata/);
   assert.match(practiceSource, /renderRecognizedDiff/);
   assert.match(practiceSource, /renderMissingTargetDiff/);
   assert.match(practiceSource, /practice-diff-mismatch/);
@@ -84,6 +91,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(styles, /\.practice-shell\s*\{[^}]*min-height:\s*100svh/s);
   assert.match(styles, /\.practice-language-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3/s);
   assert.match(styles, /\.practice-recognized-text\s*\{[^}]*font-size:\s*clamp\(22px,\s*5\.8vw,\s*40px\)/s);
+  assert.match(styles, /\.practice-target-text\.has-ruby/s);
+  assert.match(styles, /\.practice-target-text rt/s);
   assert.match(styles, /\.practice-diff-mismatch/);
   assert.match(styles, /\.practice-diff-missing/);
   assert.match(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);

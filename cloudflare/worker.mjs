@@ -1140,7 +1140,7 @@ async function createChinesePinyinText(text, env) {
       await openAiText(env, {
         model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
         instructions:
-          "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. Return only the pinyin text, with spaces between words or syllables. Do not add notes.",
+          "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. Return one pinyin syllable per Chinese character, separated by spaces. Omit punctuation, Latin letters, numbers, and notes.",
         input: text,
       })
     ).trim();

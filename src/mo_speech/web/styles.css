@@ -1696,6 +1696,22 @@ audio {
   overflow-wrap: anywhere;
 }
 
+.practice-target-text.has-ruby {
+  line-height: 1.85;
+}
+
+.practice-target-text ruby {
+  ruby-position: over;
+}
+
+.practice-target-text rt {
+  color: #456278;
+  font-size: 0.42em;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+}
+
 .practice-target-subtext {
   color: #5d6f82;
   font-size: 14px;
