@@ -52,6 +52,10 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /id="practice-pinyin-toggle"/);
   assert.match(practiceHtml, /class="record-orb practice-record-orb"/);
   assert.match(practiceHtml, /class="record-level-meter"/);
+  assert.match(practiceHtml, /id="practice-asr-model"/);
+  assert.match(practiceHtml, /value="gpt-4o-transcribe"/);
+  assert.match(practiceHtml, /value="gpt-4o-mini-transcribe"/);
+  assert.match(practiceHtml, /value="whisper-1"/);
   assert.match(practiceHtml, /id="practice-speed-slider"/);
   assert.match(practiceHtml, /min="0\.5"/);
   assert.match(practiceHtml, /max="2"/);
@@ -71,6 +75,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /localStorage\.setItem/);
   assert.match(practiceSource, /speed:/);
   assert.match(practiceSource, /segment_mode:/);
+  assert.match(practiceSource, /asr_model:/);
+  assert.match(practiceSource, /asr_timestamps/);
   assert.match(practiceSource, /include_pinyin/);
   assert.match(practiceSource, /currentTargetPinyinStatus/);
   assert.match(practiceSource, /renderTargetDisplay/);

@@ -102,6 +102,10 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "practice-native-transcript" in response.text
     assert "practice-pinyin-toggle" in response.text
     assert "record-level-meter" in response.text
+    assert "practice-asr-model" in response.text
+    assert 'value="gpt-4o-transcribe"' in response.text
+    assert 'value="gpt-4o-mini-transcribe"' in response.text
+    assert 'value="whisper-1"' in response.text
     assert "practice-speed-slider" in response.text
     assert 'min="0.5"' in response.text
     assert 'max="2"' in response.text
@@ -111,6 +115,24 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "practice-retry-button" not in response.text
     assert "practice-next-button" not in response.text
     assert "/static/app_practice.js" in response.text
+
+
+def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"en-US": "I want coffee"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempts",
+        data={"target_language": "en-US", "target_text": "I want a coffee.", "asr_model": "unknown-asr"},
+        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+    )
+
+    assert response.status_code == 400
+    assert "unsupported practice ASR model" in response.json()["detail"]
 
 
 def test_practice_admin_serves_practice_history_ui() -> None:

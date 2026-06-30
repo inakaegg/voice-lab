@@ -8,7 +8,7 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   const env = fakeEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return new Response("Halo Jepang", { status: 200 });
+      return json({ text: "Halo Jepang" });
     }
     if (url === "https://api.openai.com/v1/responses") {
       if (calls.filter((call) => call.url === url).length === 1) {
@@ -62,6 +62,7 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   assert.equal(history.recordings[0].metadata.original_content_type, "audio/webm;codecs=opus");
   assert.equal(history.outputs.length, 1);
   assert.equal(history.outputs[0].metadata.endpoint, "translate-speech-jobs");
+  assert.equal(calls[0].init.body.get("response_format"), "json");
 });
 
 test("Cloudflare worker creates a pronunciation practice prompt", async () => {
@@ -69,7 +70,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   const env = fakeEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return new Response("コーヒーがほしいです", { status: 200 });
+      return json({ text: "コーヒーがほしいです" });
     }
     if (url === "https://api.openai.com/v1/responses" && calls.filter((call) => call.url === url).length === 1) {
       return json({
@@ -107,6 +108,8 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(payload.display_text.pinyin_text, "wǒ xiǎng yào kā fēi");
   assert.equal(payload.display_text.pinyin_status, "ready");
   assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
+  assert.equal(calls[0].init.body.get("model"), "gpt-4o-transcribe");
+  assert.equal(calls[0].init.body.get("response_format"), "json");
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");
   assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/responses").length, 1);
@@ -116,12 +119,47 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(practiceHistory.outputs[0].metadata.endpoint, "practice-prompts");
 });
 
+test("Cloudflare worker requests whisper timestamps for pronunciation practice", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url, init) => {
+    calls.push({ url, init });
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return json({
+        text: "I want coffee.",
+        words: [{ word: "I", start: 0.1, end: 0.2 }, { word: "coffee", start: 0.6, end: 1.1 }],
+        segments: [{ text: "I want coffee.", start: 0.1, end: 1.1 }],
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("target_language", "en-US");
+  form.append("target_text", "I want a coffee.");
+  form.append("asr_model", "whisper-1");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempts", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(calls[0].init.body.get("model"), "whisper-1");
+  assert.equal(calls[0].init.body.get("response_format"), "verbose_json");
+  assert.deepEqual(calls[0].init.body.getAll("timestamp_granularities[]"), ["word", "segment"]);
+  assert.equal(payload.recognized_text, "I want coffee.");
+  assert.equal(payload.asr_timestamps.available, true);
+  assert.equal(payload.asr_timestamps.words[0].text, "I");
+  assert.equal(payload.providers.asr, "openai-asr-whisper-1");
+});
+
 test("Cloudflare worker creates practice pinyin without Latin or numeric tokens", async () => {
   const calls = [];
   const env = fakeEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return new Response("外付けSSDを買いました", { status: 200 });
+      return json({ text: "外付けSSDを買いました" });
     }
     if (url === "https://api.openai.com/v1/responses") {
       return json({
@@ -159,7 +197,7 @@ test("Cloudflare worker scores a pronunciation practice attempt", async () => {
   const env = fakeEnv(async (url, init) => {
     calls.push({ url, language: init.body?.get?.("language") || "" });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return new Response("I want coffee", { status: 200 });
+      return json({ text: "I want coffee" });
     }
     throw new Error(`unexpected url: ${url}`);
   });
@@ -190,7 +228,7 @@ test("Cloudflare worker forces Chinese practice attempts to Chinese ASR", async 
   const env = fakeEnv(async (url, init) => {
     calls.push({ url, language: init.body?.get?.("language") || "" });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return new Response("你好，你最近怎麼樣?", { status: 200 });
+      return json({ text: "你好，你最近怎麼樣?" });
     }
     throw new Error(`unexpected url: ${url}`);
   });

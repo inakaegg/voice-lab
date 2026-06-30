@@ -1562,6 +1562,16 @@ audio {
   accent-color: #2f80ed;
 }
 
+.practice-inline-setting select {
+  background: #ffffff;
+  border: 1px solid #c9d8e8;
+  border-radius: 999px;
+  color: #14213d;
+  font: inherit;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
 .practice-flow {
   display: grid;
   gap: 10px;

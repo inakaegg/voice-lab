@@ -22,6 +22,9 @@ const OPENAI_LANGUAGE_NAMES = {
   "zh-CN": "Chinese",
   "en-US": "English",
 };
+const OPENAI_PRACTICE_ASR_MODELS = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"]);
+const OPENAI_TIMESTAMP_ASR_MODELS = new Set(["whisper-1"]);
+const OPENAI_JSON_ONLY_ASR_MODELS = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]);
 const PRACTICE_TARGET_LANGUAGES = {
   "ja-JP": { label: "日本語", speech_name: "Japanese" },
   "zh-CN": { label: "中文", speech_name: "Mandarin Chinese" },
@@ -979,6 +982,7 @@ async function createPracticePrompt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
+  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", "gpt-4o-transcribe"));
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
@@ -990,6 +994,7 @@ async function createPracticePrompt(request, env) {
     metadata: {
       endpoint: "practice-prompts",
       target_language: targetLanguage,
+      asr_model: asrModel,
       filename: audio.name || "",
       content_type: audio.type || audioMimeType,
     },
@@ -997,12 +1002,15 @@ async function createPracticePrompt(request, env) {
 
   const totalStarted = Date.now();
   const asrStarted = Date.now();
-  const transcript = await openAiTranscribe(env, {
+  const transcription = await openAiTranscribeDetail(env, {
     audioBytes,
     audioMimeType,
     sourceLanguage: "auto",
     filename: audio.name || `native.${extensionForMimeType(audioMimeType)}`,
+    model: asrModel,
+    includeTimestamps: true,
   });
+  const transcript = transcription.text;
   const asrMs = Date.now() - asrStarted;
 
   const translationStarted = Date.now();
@@ -1026,6 +1034,8 @@ async function createPracticePrompt(request, env) {
     }),
     audio_mime_type: tts.audio_mime_type,
     audio_base64: tts.audio_base64,
+    asr_model: asrModel,
+    asr_timestamps: serializeAsrTimestamps(transcription),
     timings_ms: {
       asr: asrMs,
       translation: translationMs,
@@ -1033,7 +1043,7 @@ async function createPracticePrompt(request, env) {
       total: Date.now() - totalStarted,
     },
     providers: {
-      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+      asr: `openai-asr-${asrModel}`,
       translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
@@ -1044,6 +1054,7 @@ async function createPracticePrompt(request, env) {
     translation_backend: "openai",
     source_language: translation.source_language || "auto",
     target_language: targetLanguage,
+    asr_model: asrModel,
     voice_mode: "default",
   });
   return result;
@@ -1053,6 +1064,7 @@ async function createPracticeAttempt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
+  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", "gpt-4o-transcribe"));
   const targetText = stringFormValue(form, "target_text", "").trim();
   if (!targetText) {
     throw httpError(400, "target_text is required");
@@ -1067,6 +1079,7 @@ async function createPracticeAttempt(request, env) {
     metadata: {
       endpoint: "practice-attempts",
       target_language: targetLanguage,
+      asr_model: asrModel,
       filename: audio.name || "",
       content_type: audio.type || audioMimeType,
     },
@@ -1074,18 +1087,23 @@ async function createPracticeAttempt(request, env) {
 
   const totalStarted = Date.now();
   const asrStarted = Date.now();
-  const recognizedText = await openAiTranscribe(env, {
+  const transcription = await openAiTranscribeDetail(env, {
     audioBytes,
     audioMimeType,
     sourceLanguage: targetLanguage,
     filename: audio.name || `repeat.${extensionForMimeType(audioMimeType)}`,
+    model: asrModel,
+    includeTimestamps: true,
   });
+  const recognizedText = transcription.text;
   const asrMs = Date.now() - asrStarted;
   const evaluation = evaluatePracticeAttempt(targetText, recognizedText, targetLanguage);
   return {
     target_language: targetLanguage,
     target_text: targetText,
     recognized_text: recognizedText,
+    asr_model: asrModel,
+    asr_timestamps: serializeAsrTimestamps(transcription),
     ...evaluation,
     timings_ms: {
       asr: asrMs,
@@ -1093,7 +1111,7 @@ async function createPracticeAttempt(request, env) {
       total: Date.now() - totalStarted,
     },
     providers: {
-      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+      asr: `openai-asr-${asrModel}`,
     },
   };
 }
@@ -1259,10 +1277,37 @@ async function saveRunpodOutputHistory(env, jobId, kind, result) {
 }
 
 async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage, filename }) {
+  const transcription = await openAiTranscribeDetail(env, {
+    audioBytes,
+    audioMimeType,
+    sourceLanguage,
+    filename,
+    model: env.OPENAI_ASR_MODEL || "gpt-4o-transcribe",
+    includeTimestamps: false,
+  });
+  return transcription.text;
+}
+
+async function openAiTranscribeDetail(env, {
+  audioBytes,
+  audioMimeType,
+  sourceLanguage,
+  filename,
+  model,
+  includeTimestamps = false,
+}) {
   requireEnv(env, "OPENAI_API_KEY");
+  const requestedModel = String(model || env.OPENAI_ASR_MODEL || "gpt-4o-transcribe").trim() || "gpt-4o-transcribe";
+  const asrModel = includeTimestamps ? supportedPracticeAsrModel(requestedModel) : requestedModel;
+  const useTimestamps = includeTimestamps && OPENAI_TIMESTAMP_ASR_MODELS.has(asrModel);
+  const responseFormat = useTimestamps ? "verbose_json" : openAiAsrResponseFormat(asrModel);
   const form = new FormData();
-  form.append("model", env.OPENAI_ASR_MODEL || "gpt-4o-transcribe");
-  form.append("response_format", "text");
+  form.append("model", asrModel);
+  form.append("response_format", responseFormat);
+  if (useTimestamps) {
+    form.append("timestamp_granularities[]", "word");
+    form.append("timestamp_granularities[]", "segment");
+  }
   const language = OPENAI_LANGUAGE_CODES[sourceLanguage] || "";
   if (language) {
     form.append("language", language);
@@ -1283,7 +1328,69 @@ async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage
   if (!response.ok) {
     throw httpError(response.status, `OpenAI ASR failed: ${text}`);
   }
-  return text.trim();
+  if (responseFormat === "text") {
+    return {
+      text: text.trim(),
+      model: asrModel,
+      timestamp_granularities: [],
+      words: [],
+      segments: [],
+    };
+  }
+  return transcriptionFromOpenAiJson(text, asrModel, useTimestamps ? ["word", "segment"] : []);
+}
+
+function openAiAsrResponseFormat(model) {
+  return OPENAI_JSON_ONLY_ASR_MODELS.has(model) ? "json" : "text";
+}
+
+function transcriptionFromOpenAiJson(text, model, timestampGranularities) {
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch (_error) {
+    return {
+      text: String(text || "").trim(),
+      model,
+      timestamp_granularities: [],
+      words: [],
+      segments: [],
+    };
+  }
+  return {
+    text: String(payload.text || "").trim(),
+    model,
+    timestamp_granularities: timestampGranularities,
+    words: normalizedAsrTimingRows(payload.words, "word"),
+    segments: normalizedAsrTimingRows(payload.segments, "text"),
+  };
+}
+
+function normalizedAsrTimingRows(rows, textKey) {
+  return (rows || []).flatMap((row) => {
+    const start = Number(row?.start);
+    const end = Number(row?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      return [];
+    }
+    return [{
+      text: String(row?.[textKey] ?? row?.text ?? row?.word ?? ""),
+      start,
+      end,
+    }];
+  });
+}
+
+function serializeAsrTimestamps(transcription) {
+  const words = transcription?.words || [];
+  const segments = transcription?.segments || [];
+  return {
+    available: Boolean(words.length || segments.length),
+    model: transcription?.model || "",
+    timestamp_granularities: transcription?.timestamp_granularities || [],
+    words,
+    segments,
+  };
 }
 
 async function translateTranscript(env, { transcript, sourceLanguage, targetLanguage }) {
@@ -1944,6 +2051,14 @@ function supportedPracticeTargetLanguage(value) {
     throw httpError(400, `unsupported practice target language: ${language}`);
   }
   return language;
+}
+
+function supportedPracticeAsrModel(value) {
+  const model = String(value || "gpt-4o-transcribe").trim() || "gpt-4o-transcribe";
+  if (!OPENAI_PRACTICE_ASR_MODELS.has(model)) {
+    throw httpError(400, `unsupported practice ASR model: ${model}`);
+  }
+  return model;
 }
 
 function evaluatePracticeAttempt(targetText, recognizedText, targetLanguage) {

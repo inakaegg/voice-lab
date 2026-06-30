@@ -55,7 +55,10 @@ from .practice import (
     supported_practice_target_language,
 )
 from .providers.openai_api import (
+    AsrTranscription,
+    OpenAiAsrProvider,
     create_openai_realtime_translation_client_secret,
+    supported_openai_practice_asr_model,
 )
 from .providers.text_tts import create_text_tts_providers, text_tts_backend_statuses
 from .providers.voice import (
@@ -103,6 +106,32 @@ _configure_logging()
 
 def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
+
+
+def _practice_asr_provider(pipeline: SpeechTranslationPipeline, asr_model: str):
+    if isinstance(pipeline.asr, OpenAiAsrProvider):
+        return OpenAiAsrProvider(model=asr_model)
+    return pipeline.asr
+
+
+def _transcribe_practice_audio(asr_provider, audio_path: Path, source_language: str) -> AsrTranscription:
+    transcribe_detail = getattr(asr_provider, "transcribe_detail", None)
+    if callable(transcribe_detail):
+        return transcribe_detail(audio_path, source_language, include_timestamps=True)
+    return AsrTranscription(
+        text=asr_provider.transcribe(audio_path, source_language),
+        model=getattr(asr_provider, "name", "asr"),
+    )
+
+
+def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
+    return {
+        "available": result.has_timestamps,
+        "model": result.model,
+        "timestamp_granularities": result.timestamp_granularities,
+        "words": result.words,
+        "segments": result.segments,
+    }
 
 
 def _practice_display_text(text: str, target_language: str, *, include_pinyin: bool = False) -> dict[str, str]:
@@ -434,9 +463,11 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         target_language: Annotated[str, Form()] = "ja-JP",
         include_pinyin: Annotated[bool, Form()] = False,
+        asr_model: Annotated[str, Form()] = "gpt-4o-transcribe",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
+            practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -448,6 +479,7 @@ def create_app(
             metadata={
                 "endpoint": "practice-prompts",
                 "target_language": practice_target_language,
+                "asr_model": practice_asr_model,
                 "filename": audio.filename or "",
                 "content_type": audio.content_type or "",
             },
@@ -455,12 +487,14 @@ def create_app(
 
         timings_ms: dict[str, float] = {}
         total_started = perf_counter()
+        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
             try:
                 started = perf_counter()
-                transcript = active_openai_pipeline.asr.transcribe(Path(temp_audio.name), "auto")
+                asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), "auto")
+                transcript = asr_result.text
                 timings_ms["asr"] = _elapsed_ms(started)
 
                 started = perf_counter()
@@ -499,8 +533,10 @@ def create_app(
             "audio_mime_type": tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
             "audio_base64": base64.b64encode(tts_output.audio_bytes).decode("ascii"),
             "timings_ms": timings_ms,
+            "asr_model": practice_asr_model,
+            "asr_timestamps": _serialize_asr_timestamps(asr_result),
             "providers": {
-                "asr": active_openai_pipeline.asr.name,
+                "asr": asr_provider.name,
                 "translation": active_openai_pipeline.translator.name,
                 "tts": active_openai_pipeline.tts.name,
             },
@@ -512,6 +548,7 @@ def create_app(
                 "endpoint": "practice-prompts",
                 "translation_backend": "openai",
                 "target_language": practice_target_language,
+                "asr_model": practice_asr_model,
                 "audio_mime_type": result["audio_mime_type"],
                 "transcript_preview": transcript[:80],
                 "translated_text_preview": target_text[:80],
@@ -526,9 +563,11 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         target_language: Annotated[str, Form()],
         target_text: Annotated[str, Form()],
+        asr_model: Annotated[str, Form()] = "gpt-4o-transcribe",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
+            practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not target_text.strip():
@@ -542,18 +581,21 @@ def create_app(
             metadata={
                 "endpoint": "practice-attempts",
                 "target_language": practice_target_language,
+                "asr_model": practice_asr_model,
                 "filename": audio.filename or "",
                 "content_type": audio.content_type or "",
             },
         )
 
         total_started = perf_counter()
+        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
             try:
                 asr_started = perf_counter()
-                recognized_text = active_openai_pipeline.asr.transcribe(Path(temp_audio.name), practice_target_language)
+                asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
+                recognized_text = asr_result.text
                 asr_ms = _elapsed_ms(asr_started)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -565,6 +607,8 @@ def create_app(
             "target_language": practice_target_language,
             "target_text": target_text,
             "recognized_text": recognized_text,
+            "asr_model": practice_asr_model,
+            "asr_timestamps": _serialize_asr_timestamps(asr_result),
             **evaluation,
             "timings_ms": {
                 "asr": asr_ms,
@@ -572,7 +616,7 @@ def create_app(
                 "total": _elapsed_ms(total_started),
             },
             "providers": {
-                "asr": active_openai_pipeline.asr.name,
+                "asr": asr_provider.name,
             },
         }
 

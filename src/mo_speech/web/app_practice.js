@@ -17,6 +17,7 @@ const playModelButton = document.querySelector("#practice-play-model-button");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
 const segmentModeSelect = document.querySelector("#practice-segment-mode");
+const asrModelSelect = document.querySelector("#practice-asr-model");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
@@ -38,6 +39,7 @@ const languageLabels = {
   "zh-CN": "中文",
   "en-US": "English",
 };
+const practiceAsrModels = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"]);
 const hanCodePointRanges = [
   [0x3400, 0x4DBF],
   [0x4E00, 0x9FFF],
@@ -152,6 +154,8 @@ let currentTargetDisplayText = "";
 let currentTargetSecondaryText = "";
 let currentTargetPinyinText = "";
 let currentTargetPinyinStatus = "disabled";
+let currentRecognizedText = "";
+let currentAttemptAsrTimestamps = null;
 let currentAudioContext = null;
 let currentAnalyser = null;
 let currentLevelFrame = null;
@@ -172,6 +176,7 @@ repeatRecordButton.addEventListener("click", () => toggleRecording("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 segmentModeSelect.addEventListener("change", savePracticeSettings);
+asrModelSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
@@ -276,6 +281,7 @@ async function submitPrompt(blob) {
   }
   form.append("target_language", selectedTargetLanguage);
   form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
+  form.append("asr_model", practiceAsrModel());
   form.append("audio", blob, `native.${extensionForMimeType(blob.type)}`);
   const payload = await postPracticeForm("/api/practice/prompts", form);
   detectedNativeLanguage = normalizePracticeLanguage(payload.detected_source_language || "");
@@ -307,6 +313,7 @@ async function submitAttempt(blob) {
   const form = new FormData();
   form.append("target_language", selectedTargetLanguage);
   form.append("target_text", currentTargetText);
+  form.append("asr_model", practiceAsrModel());
   form.append("audio", blob, `repeat.${extensionForMimeType(blob.type)}`);
   const payload = await postPracticeForm("/api/practice/attempts", form);
   renderAttemptResult(payload);
@@ -336,6 +343,8 @@ function renderAttemptResult(payload) {
   const percent = Math.round(Number(payload.similarity || 0) * 100);
   scoreText.textContent = `${percent}%`;
   scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  currentRecognizedText = payload.recognized_text || "";
+  currentAttemptAsrTimestamps = payload.asr_timestamps || null;
   renderRecognizedDiff(payload);
   nativePanel.hidden = false;
   resultPanel.hidden = false;
@@ -350,6 +359,8 @@ function resetPractice() {
   currentTargetSecondaryText = "";
   currentTargetPinyinText = "";
   currentTargetPinyinStatus = "disabled";
+  currentRecognizedText = "";
+  currentAttemptAsrTimestamps = null;
   detectedNativeLanguage = "";
   nativePanel.hidden = false;
   promptPanel.hidden = true;
@@ -576,7 +587,13 @@ async function playComparisonAudios() {
       return;
     }
     const modelRanges = sentenceAudioRanges(sentences, modelAudio.duration);
-    const repeatRanges = sentenceAudioRanges(sentences, repeatAudio.duration);
+    const repeatRanges = timestampAudioRangesForSentences(
+      sentences,
+      currentRecognizedText,
+      currentAttemptAsrTimestamps,
+      repeatAudio.duration,
+      practiceSegmentMode(),
+    ) || sentenceAudioRanges(sentences, repeatAudio.duration);
     for (let index = 0; index < sentences.length; index += 1) {
       if (!isActiveComparisonPlayback(token)) {
         return;
@@ -690,6 +707,10 @@ function playAudioSegmentToEnd(audio, start, end, token) {
 }
 
 function splitPracticeSentences(text, mode = "punctuation") {
+  return splitPracticeSentencesWithRanges(text, mode).map((sentence) => sentence.text);
+}
+
+function splitPracticeSentencesWithRanges(text, mode = "punctuation") {
   const normalized = String(text || "").replace(/\r/g, "\n").trim();
   if (!normalized) {
     return [];
@@ -697,9 +718,17 @@ function splitPracticeSentences(text, mode = "punctuation") {
   const separatorPattern = mode === "sentence"
     ? /[^。！？!?.\n]+[。！？!?.]?/g
     : /[^。！？!?.,，、；;：:\n]+[。！？!?.,，、；;：:]?/g;
-  const matches = normalized.match(separatorPattern) || [];
-  const sentences = matches.map((value) => value.trim()).filter(Boolean);
-  return sentences.length ? sentences : [normalized];
+  const sentences = [];
+  for (const match of normalized.matchAll(separatorPattern)) {
+    const raw = match[0] || "";
+    const leading = raw.search(/\S/u);
+    const textStart = (match.index || 0) + Math.max(0, leading);
+    const sentenceText = raw.trim();
+    if (sentenceText) {
+      sentences.push({ text: sentenceText, start: textStart, end: textStart + sentenceText.length });
+    }
+  }
+  return sentences.length ? sentences : [{ text: normalized, start: 0, end: normalized.length }];
 }
 
 function practiceSegmentMode() {
@@ -716,6 +745,98 @@ function sentenceAudioRanges(sentences, duration) {
     cursor = index === weights.length - 1 ? safeDuration : cursor + (safeDuration * weight) / totalWeight;
     return { start, end: cursor };
   });
+}
+
+function timestampAudioRangesForSentences(sentences, recognized, timestamps, duration, mode) {
+  if (!timestamps?.available) {
+    return null;
+  }
+  const fallbackRanges = sentenceAudioRanges(sentences, duration);
+  const recognizedSentences = splitPracticeSentencesWithRanges(recognized, mode);
+  if (!recognizedSentences.length) {
+    return null;
+  }
+  const wordRanges = timestampRangesFromWords(recognizedSentences, timestamps.words || []);
+  const segmentRanges = timestampRangesFromSegments(recognizedSentences, timestamps.segments || []);
+  const preferredRanges = wordRanges.length ? wordRanges : segmentRanges;
+  if (!preferredRanges.length) {
+    return null;
+  }
+  let used = false;
+  const ranges = fallbackRanges.map((fallback, index) => {
+    const range = preferredRanges[index];
+    if (range && Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start) {
+      used = true;
+      return {
+        start: Math.max(0, range.start),
+        end: Math.min(Number(duration) || range.end, range.end),
+      };
+    }
+    return fallback;
+  });
+  return used ? ranges : null;
+}
+
+function timestampRangesFromWords(recognizedSentences, words) {
+  const timedWords = [];
+  let cursor = 0;
+  for (const word of words || []) {
+    const text = normalizedTimestampText(word.text || word.word || "");
+    if (!text) {
+      continue;
+    }
+    const start = Number(word.start);
+    const end = Number(word.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      continue;
+    }
+    const textStart = cursor;
+    cursor += text.length;
+    timedWords.push({ textStart, textEnd: cursor, start, end });
+  }
+  if (!timedWords.length) {
+    return [];
+  }
+  const sentenceRanges = normalizedSentenceTextRanges(recognizedSentences);
+  return sentenceRanges.map((sentence) => {
+    const overlapping = timedWords.filter((word) => word.textEnd > sentence.start && word.textStart < sentence.end);
+    if (!overlapping.length) {
+      return null;
+    }
+    return { start: overlapping[0].start, end: overlapping[overlapping.length - 1].end };
+  });
+}
+
+function timestampRangesFromSegments(recognizedSentences, segments) {
+  const usableSegments = (segments || []).filter((segment) => {
+    const start = Number(segment.start);
+    const end = Number(segment.end);
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start;
+  });
+  if (!usableSegments.length || usableSegments.length < recognizedSentences.length) {
+    return [];
+  }
+  return recognizedSentences.map((_sentence, index) => ({
+    start: Number(usableSegments[index].start),
+    end: Number(usableSegments[index].end),
+  }));
+}
+
+function normalizedSentenceTextRanges(sentences) {
+  let cursor = 0;
+  return sentences.map((sentence) => {
+    const text = normalizedTimestampText(sentence.text);
+    const start = cursor;
+    cursor += Math.max(0, text.length);
+    return { start, end: cursor };
+  });
+}
+
+function normalizedTimestampText(text) {
+  return Array.from(text || "")
+    .map((char) => normalizePracticeChar(char, selectedTargetLanguage))
+    .join("")
+    .replace(/[\p{P}\p{Z}\p{S}]/gu, "");
 }
 
 function sleep(milliseconds) {
@@ -934,6 +1055,7 @@ function loadPracticeSettings() {
   const settings = readPracticeSettings();
   selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
+  asrModelSelect.value = practiceAsrModels.has(settings.asr_model) ? settings.asr_model : "gpt-4o-transcribe";
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   segmentModeSelect.value = settings.segment_mode === "sentence" ? "sentence" : "punctuation";
   targetLanguageButtons.forEach((button) => {
@@ -960,6 +1082,7 @@ function savePracticeSettings() {
       JSON.stringify({
         target_language: selectedTargetLanguage,
         show_pinyin: Boolean(pinyinToggle.checked),
+        asr_model: practiceAsrModel(),
         speed: normalizedPlaybackSpeed(speedSlider.value),
         segment_mode: practiceSegmentMode(),
       }),
@@ -967,6 +1090,10 @@ function savePracticeSettings() {
   } catch (_error) {
     // localStorageが使えないブラウザでは、現在の画面内状態だけで動かす。
   }
+}
+
+function practiceAsrModel() {
+  return practiceAsrModels.has(asrModelSelect.value) ? asrModelSelect.value : "gpt-4o-transcribe";
 }
 
 function syncPinyinSettingVisibility() {

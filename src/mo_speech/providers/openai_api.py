@@ -115,6 +115,36 @@ OPENAI_TTS_MIME_TYPES = {
     "pcm": "audio/wav",
 }
 
+OPENAI_PRACTICE_ASR_MODELS = ("gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1")
+OPENAI_TIMESTAMP_ASR_MODELS = {"whisper-1"}
+OPENAI_JSON_ONLY_ASR_MODELS = {"gpt-4o-transcribe", "gpt-4o-mini-transcribe"}
+
+
+@dataclass(frozen=True)
+class AsrTranscription:
+    text: str
+    model: str
+    words: list[dict[str, object]] = field(default_factory=list)
+    segments: list[dict[str, object]] = field(default_factory=list)
+    timestamp_granularities: list[str] = field(default_factory=list)
+
+    @property
+    def has_timestamps(self) -> bool:
+        return bool(self.words or self.segments)
+
+
+def supported_openai_practice_asr_model(value: str | None) -> str:
+    model = str(value or "gpt-4o-transcribe").strip() or "gpt-4o-transcribe"
+    if model not in OPENAI_PRACTICE_ASR_MODELS:
+        raise ValueError(f"unsupported practice ASR model: {model}")
+    return model
+
+
+def _openai_asr_response_format(model: str, requested: str) -> str:
+    if model in OPENAI_JSON_ONLY_ASR_MODELS:
+        return "json"
+    return requested
+
 
 @dataclass
 class OpenAiAsrProvider:
@@ -127,14 +157,41 @@ class OpenAiAsrProvider:
         return f"openai-asr-{self.model}"
 
     def transcribe(self, audio_path: Path, source_language: str) -> str:
+        return self._transcribe(
+            audio_path,
+            source_language,
+            response_format=_openai_asr_response_format(self.model, self.response_format),
+        ).text
+
+    def transcribe_detail(self, audio_path: Path, source_language: str, *, include_timestamps: bool = False) -> AsrTranscription:
+        use_timestamps = include_timestamps and self.model in OPENAI_TIMESTAMP_ASR_MODELS
+        response_format = "verbose_json" if use_timestamps else _openai_asr_response_format(self.model, self.response_format)
+        granularities = ["word", "segment"] if use_timestamps else []
+        return self._transcribe(
+            audio_path,
+            source_language,
+            response_format=response_format,
+            timestamp_granularities=granularities,
+        )
+
+    def _transcribe(
+        self,
+        audio_path: Path,
+        source_language: str,
+        *,
+        response_format: str,
+        timestamp_granularities: list[str] | None = None,
+    ) -> AsrTranscription:
         if source_language not in OPENAI_LANGUAGE_CODES:
             raise ValueError(f"OpenAI ASR language is not configured for {source_language}")
         client = self._load_client()
         kwargs = {
             "model": self.model,
             "file": None,
-            "response_format": self.response_format,
+            "response_format": response_format,
         }
+        if timestamp_granularities:
+            kwargs["timestamp_granularities"] = timestamp_granularities
         if OPENAI_LANGUAGE_CODES[source_language]:
             kwargs["language"] = OPENAI_LANGUAGE_CODES[source_language]
         with audio_path.open("rb") as audio_file:
@@ -144,13 +201,18 @@ class OpenAiAsrProvider:
             except Exception as exc:
                 if not _should_retry_asr_with_http(exc):
                     raise
-                return _transcribe_audio_with_http(
+                response = _transcribe_audio_with_http(
                     audio_path,
                     model=self.model,
-                    response_format=self.response_format,
+                    response_format=response_format,
                     language=OPENAI_LANGUAGE_CODES[source_language],
+                    timestamp_granularities=timestamp_granularities or [],
                 )
-        return _text_from_response(response)
+        return _asr_transcription_from_response(
+            response,
+            model=self.model,
+            timestamp_granularities=timestamp_granularities or [],
+        )
 
     def _load_client(self) -> Any:
         if self._client is None:
@@ -583,7 +645,8 @@ def _transcribe_audio_with_http(
     model: str,
     response_format: str,
     language: str,
-) -> str:
+    timestamp_granularities: list[str] | None = None,
+) -> Any:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for OpenAI ASR backend.")
@@ -594,6 +657,8 @@ def _transcribe_audio_with_http(
     }
     if language:
         fields["language"] = language
+    if timestamp_granularities:
+        fields["timestamp_granularities[]"] = timestamp_granularities
 
     body, content_type = _multipart_form_body(fields, audio_path)
     request = Request(
@@ -614,10 +679,10 @@ def _transcribe_audio_with_http(
         raise RuntimeError(f"OpenAI ASR HTTP request failed: {detail}") from exc
     if response_format == "text":
         return raw.decode("utf-8").strip()
-    return _text_from_response(json.loads(raw.decode("utf-8")))
+    return json.loads(raw.decode("utf-8"))
 
 
-def _multipart_form_body(fields: dict[str, str], audio_path: Path) -> tuple[bytes, str]:
+def _multipart_form_body(fields: dict[str, str | list[str]], audio_path: Path) -> tuple[bytes, str]:
     boundary = f"mo-speech-{token_hex(16)}"
     content_type = f"multipart/form-data; boundary={boundary}"
     chunks: list[bytes] = []
@@ -626,9 +691,11 @@ def _multipart_form_body(fields: dict[str, str], audio_path: Path) -> tuple[byte
         chunks.append(value.encode("utf-8"))
 
     for name, value in fields.items():
-        add(f"--{boundary}\r\n")
-        add(f'Content-Disposition: form-data; name="{name}"\r\n\r\n')
-        add(f"{value}\r\n")
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            add(f"--{boundary}\r\n")
+            add(f'Content-Disposition: form-data; name="{name}"\r\n\r\n')
+            add(f"{item}\r\n")
 
     mime_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
     add(f"--{boundary}\r\n")
@@ -640,9 +707,57 @@ def _multipart_form_body(fields: dict[str, str], audio_path: Path) -> tuple[byte
     return b"".join(chunks), content_type
 
 
+def _asr_transcription_from_response(
+    response: Any,
+    *,
+    model: str,
+    timestamp_granularities: list[str],
+) -> AsrTranscription:
+    return AsrTranscription(
+        text=_text_from_response(response),
+        model=model,
+        words=_normalized_asr_timing_rows(_response_field(response, "words"), text_key="word"),
+        segments=_normalized_asr_timing_rows(_response_field(response, "segments"), text_key="text"),
+        timestamp_granularities=list(timestamp_granularities),
+    )
+
+
+def _response_field(response: Any, name: str) -> Any:
+    if isinstance(response, dict):
+        return response.get(name)
+    return getattr(response, name, None)
+
+
+def _normalized_asr_timing_rows(rows: Any, *, text_key: str) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    for row in rows or []:
+        text = _row_field(row, text_key)
+        if text is None and text_key == "word":
+            text = _row_field(row, "text")
+        start = _row_field(row, "start")
+        end = _row_field(row, "end")
+        try:
+            start_f = float(start)
+            end_f = float(end)
+        except (TypeError, ValueError):
+            continue
+        if end_f < start_f:
+            continue
+        normalized.append({"text": str(text or ""), "start": start_f, "end": end_f})
+    return normalized
+
+
+def _row_field(row: Any, name: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(name)
+    return getattr(row, name, None)
+
+
 def _text_from_response(response: Any) -> str:
     if isinstance(response, str):
         return response.strip()
+    if isinstance(response, dict) and response.get("text") is not None:
+        return str(response["text"]).strip()
     output_text = getattr(response, "output_text", None)
     if output_text is not None:
         return str(output_text).strip()

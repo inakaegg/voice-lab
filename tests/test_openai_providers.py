@@ -36,7 +36,7 @@ def test_openai_asr_uses_transcription_api(tmp_path: Path, monkeypatch) -> None:
     assert provider.transcribe(audio_path, "id-ID") == "Selamat pagi."
     assert captured["model"] == "gpt-4o-transcribe"
     assert captured["language"] == "id"
-    assert captured["response_format"] == "text"
+    assert captured["response_format"] == "json"
 
 
 def test_openai_asr_omits_language_for_auto_detection(tmp_path: Path, monkeypatch) -> None:
@@ -60,6 +60,64 @@ def test_openai_asr_omits_language_for_auto_detection(tmp_path: Path, monkeypatc
     assert "language" not in captured
 
 
+def test_openai_asr_detail_requests_whisper_timestamps(tmp_path: Path, monkeypatch) -> None:
+    audio_path = tmp_path / "speech.webm"
+    audio_path.write_bytes(b"audio")
+    captured: dict[str, object] = {}
+
+    class Transcriptions:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return {
+                "text": "I want coffee.",
+                "words": [{"word": "I", "start": 0.1, "end": 0.2}, {"word": "coffee", "start": 0.6, "end": 1.1}],
+                "segments": [{"text": "I want coffee.", "start": 0.1, "end": 1.1}],
+            }
+
+    client = SimpleNamespace(audio=SimpleNamespace(transcriptions=Transcriptions()))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: client))
+
+    provider = OpenAiAsrProvider(model="whisper-1")
+    result = provider.transcribe_detail(audio_path, "en-US", include_timestamps=True)
+
+    assert result.text == "I want coffee."
+    assert result.words[0]["text"] == "I"
+    assert result.words[0]["start"] == 0.1
+    assert result.segments[0]["text"] == "I want coffee."
+    assert captured["model"] == "whisper-1"
+    assert captured["response_format"] == "verbose_json"
+    assert captured["timestamp_granularities"] == ["word", "segment"]
+    assert captured["language"] == "en"
+
+
+def test_openai_asr_detail_does_not_request_timestamps_for_gpt4o(tmp_path: Path, monkeypatch) -> None:
+    audio_path = tmp_path / "speech.webm"
+    audio_path.write_bytes(b"audio")
+    captured: dict[str, object] = {}
+
+    class Transcriptions:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return {"text": "I want coffee."}
+
+    client = SimpleNamespace(audio=SimpleNamespace(transcriptions=Transcriptions()))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: client))
+
+    provider = OpenAiAsrProvider(model="gpt-4o-transcribe")
+    result = provider.transcribe_detail(audio_path, "en-US", include_timestamps=True)
+
+    assert result.text == "I want coffee."
+    assert result.words == []
+    assert result.segments == []
+    assert captured["model"] == "gpt-4o-transcribe"
+    assert captured["response_format"] == "json"
+    assert "timestamp_granularities" not in captured
+
+
 def test_openai_asr_retries_unsupported_format_with_http(tmp_path: Path, monkeypatch) -> None:
     audio_path = tmp_path / "speech.m4a"
     audio_path.write_bytes(b"audio")
@@ -80,7 +138,7 @@ def test_openai_asr_retries_unsupported_format_with_http(tmp_path: Path, monkeyp
 
         @staticmethod
         def read():
-            return b"Selamat pagi."
+            return b'{"text":"Selamat pagi."}'
 
     def fake_urlopen(request, timeout):
         captured["url"] = request.full_url
@@ -101,6 +159,7 @@ def test_openai_asr_retries_unsupported_format_with_http(tmp_path: Path, monkeyp
     assert captured["headers"]["Authorization"] == "Bearer test-key"
     assert captured["timeout"] == 90.0
     assert b'name="model"\r\n\r\ngpt-4o-transcribe' in captured["data"]
+    assert b'name="response_format"\r\n\r\njson' in captured["data"]
     assert b'name="language"\r\n\r\nid' in captured["data"]
     assert b'filename="speech.m4a"' in captured["data"]
 
