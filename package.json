@@ -1,0 +1,12 @@
+{
+  "name": "mo-speech",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:worker": "node --test tests/*.mjs"
+  },
+  "dependencies": {
+    "pinyin-pro": "^3.28.1"
+  }
+}

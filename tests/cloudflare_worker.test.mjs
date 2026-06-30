@@ -80,9 +80,6 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
         }),
       });
     }
-    if (url === "https://api.openai.com/v1/responses") {
-      return json({ output_text: "wǒ xiǎng yào kā fēi" });
-    }
     if (url === "https://api.openai.com/v1/audio/speech") {
       return new Response(new Uint8Array([10, 11, 12]), { status: 200 });
     }
@@ -112,11 +109,49 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");
-  assert.equal(calls[3].url, "https://api.openai.com/v1/responses");
+  assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/responses").length, 1);
   assert.equal(history.recordings.length, 0);
   assert.equal(history.outputs.length, 0);
   assert.equal(practiceHistory.recordings[0].metadata.endpoint, "practice-prompts");
   assert.equal(practiceHistory.outputs[0].metadata.endpoint, "practice-prompts");
+});
+
+test("Cloudflare worker creates practice pinyin without Latin or numeric tokens", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url, init) => {
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return new Response("外付けSSDを買いました", { status: 200 });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          source_language: "ja-JP",
+          target_language: "zh-CN",
+          translated_text: "我买了一个外接 SSD，容量有 1TB。",
+        }),
+      });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([10, 11, 12]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+  form.append("target_language", "zh-CN");
+  form.append("include_pinyin", "true");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.display_text.pinyin_text, "wǒ mǎi le yí gè wài jiē róng liàng yǒu");
+  assert.doesNotMatch(payload.display_text.pinyin_text, /SSD|1TB/);
+  assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/responses").length, 1);
 });
 
 test("Cloudflare worker scores a pronunciation practice attempt", async () => {

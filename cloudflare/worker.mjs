@@ -1,3 +1,5 @@
+import { pinyin } from "pinyin-pro";
+
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
@@ -1098,7 +1100,7 @@ async function createPracticeAttempt(request, env) {
 
 async function createPracticeDisplayText(text, targetLanguage, env, { includePinyin = false } = {}) {
   if (targetLanguage === "zh-CN") {
-    const pinyinText = includePinyin ? await createChinesePinyinText(text, env) : "";
+    const pinyinText = includePinyin ? createChinesePinyinText(text) : "";
     return {
       mode: "plain",
       primary_text: text,
@@ -1134,16 +1136,17 @@ async function createPracticeDisplayText(text, targetLanguage, env, { includePin
   };
 }
 
-async function createChinesePinyinText(text, env) {
+function createChinesePinyinText(text) {
   try {
-    return (
-      await openAiText(env, {
-        model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
-        instructions:
-          "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. Return one pinyin syllable per Chinese character, separated by spaces. Omit punctuation, Latin letters, numbers, and notes.",
-        input: text,
-      })
-    ).trim();
+    return pinyin(text, {
+      nonZh: "removed",
+      toneType: "symbol",
+      type: "array",
+    })
+      .map((token) => String(token || "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
   } catch (error) {
     console.warn("practice pinyin generation failed", error);
     return "";
