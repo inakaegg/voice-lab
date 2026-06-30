@@ -53,9 +53,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /class="record-orb practice-record-orb"/);
   assert.match(practiceHtml, /class="record-level-meter"/);
   assert.match(practiceHtml, /id="practice-speed-slider"/);
-  assert.match(practiceHtml, /min="0\.25"/);
+  assert.match(practiceHtml, /min="0\.5"/);
   assert.match(practiceHtml, /max="2"/);
-  assert.match(practiceHtml, /step="0\.25"/);
+  assert.match(practiceHtml, /step="0\.5"/);
   assert.equal((practiceHtml.match(/id="practice-result-panel"/g) || []).length, 1);
   assert.match(practiceHtml, /id="practice-segment-mode"/);
   assert.match(practiceHtml, /value="sentence"/);

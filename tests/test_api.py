@@ -103,9 +103,9 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "practice-pinyin-toggle" in response.text
     assert "record-level-meter" in response.text
     assert "practice-speed-slider" in response.text
-    assert 'min="0.25"' in response.text
+    assert 'min="0.5"' in response.text
     assert 'max="2"' in response.text
-    assert 'step="0.25"' in response.text
+    assert 'step="0.5"' in response.text
     assert "practice-repeat-audio-button" not in response.text
     assert "practice-compare-button" not in response.text
     assert "practice-retry-button" not in response.text
