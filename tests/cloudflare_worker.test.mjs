@@ -108,6 +108,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(payload.audio_base64, Buffer.from([10, 11, 12]).toString("base64"));
   assert.equal(payload.display_text.primary_text, "我想要咖啡。");
   assert.equal(payload.display_text.pinyin_text, "wǒ xiǎng yào kā fēi");
+  assert.equal(payload.display_text.pinyin_status, "ready");
   assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");

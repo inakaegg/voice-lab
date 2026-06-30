@@ -146,6 +146,27 @@ def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
     assert payload["providers"]["asr"] == "fake-asr"
 
 
+def test_practice_prompt_api_includes_local_pinyin_when_requested(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "コーヒーがほしいです"}),
+        translator=FakeTranslationProvider({("auto", "zh-CN", "コーヒーがほしいです"): "我想要咖啡。"}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/prompts",
+        data={"target_language": "zh-CN", "include_pinyin": "true"},
+        files={"audio": ("native.webm", b"native audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["display_text"]["pinyin_text"] == "wǒ xiǎng yào kā fēi"
+    assert payload["display_text"]["pinyin_status"] == "ready"
+
+
 def test_practice_attempt_api_scores_repeat_audio() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"en-US": "I want coffee"}),

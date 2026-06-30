@@ -275,6 +275,7 @@ OpenAI Realtime翻訳の扱い:
 - `transcript`: 母国語入力のASR結果。
 - `target_text`: 学習対象言語へ変換した目標文。
 - `display_text`: 画面表示用テキスト。日本語ではひらがな表示を含められ、中国語では要求時に `pinyin_text` を含める。
+  - `pinyin_status`: 中国語ピンイン表示の状態。`ready`、`disabled`、`unavailable` のいずれか。UIは `unavailable` を空欄として隠さず、生成できなかったことを表示する。
 - `audio_mime_type` / `audio_base64`: 模範音声。
 - `providers` / `timings_ms`: 利用したproviderと処理時間。
 

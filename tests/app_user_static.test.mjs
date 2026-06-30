@@ -69,6 +69,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /speed:/);
   assert.match(practiceSource, /segment_mode:/);
   assert.match(practiceSource, /include_pinyin/);
+  assert.match(practiceSource, /currentTargetPinyinStatus/);
+  assert.match(practiceSource, /ピンインを生成できませんでした/);
   assert.match(practiceSource, /selectedTargetLanguage === "zh-CN" \? true : settings\.show_pinyin !== false/);
   assert.match(practiceSource, /pinyinToggle\.checked = true/);
   assert.match(practiceSource, /modelAudio\.playbackRate/);

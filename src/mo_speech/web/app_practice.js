@@ -152,6 +152,7 @@ let currentTargetText = "";
 let currentTargetDisplayText = "";
 let currentTargetSecondaryText = "";
 let currentTargetPinyinText = "";
+let currentTargetPinyinStatus = "disabled";
 let currentAudioContext = null;
 let currentAnalyser = null;
 let currentLevelFrame = null;
@@ -287,6 +288,7 @@ async function submitPrompt(blob) {
   targetText.textContent = currentTargetDisplayText;
   currentTargetSecondaryText = payload.display_text?.secondary_text || "";
   currentTargetPinyinText = payload.display_text?.pinyin_text || "";
+  currentTargetPinyinStatus = payload.display_text?.pinyin_status || (currentTargetPinyinText ? "ready" : "unavailable");
   renderTargetSubtext();
   nativeTranscript.textContent = payload.transcript || "";
   nativeTranscriptPanel.hidden = !payload.transcript;
@@ -344,6 +346,7 @@ function resetPractice() {
   currentTargetDisplayText = "";
   currentTargetSecondaryText = "";
   currentTargetPinyinText = "";
+  currentTargetPinyinStatus = "disabled";
   detectedNativeLanguage = "";
   nativePanel.hidden = false;
   promptPanel.hidden = true;
@@ -429,9 +432,12 @@ function handlePinyinSettingChange() {
 }
 
 function renderTargetSubtext() {
-  const secondaryText = selectedTargetLanguage === "zh-CN" && pinyinToggle.checked
-    ? currentTargetPinyinText
-    : currentTargetSecondaryText;
+  let secondaryText = currentTargetSecondaryText;
+  if (selectedTargetLanguage === "zh-CN" && pinyinToggle.checked) {
+    secondaryText = currentTargetPinyinText || (
+      currentTargetPinyinStatus === "unavailable" ? "ピンインを生成できませんでした" : ""
+    );
+  }
   targetSubtext.hidden = !secondaryText;
   targetSubtext.textContent = secondaryText || "";
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import perf_counter
@@ -74,6 +75,16 @@ from .user_settings import (
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
 LOGGER = logging.getLogger("mo_speech")
+_HAN_CODEPOINT_RANGES = (
+    (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF),
+    (0x20000, 0x2A6DF),
+    (0x2A700, 0x2B73F),
+    (0x2B740, 0x2B81F),
+    (0x2B820, 0x2CEAF),
+)
+_PINYIN_OMITTED_PUNCTUATION = "，。！？；：、,.!?;:\"'“”‘’（）()[]【】《》<>"
+_PINYIN_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _configure_logging() -> None:
@@ -96,13 +107,15 @@ def _elapsed_ms(started: float) -> float:
 
 def _practice_display_text(text: str, target_language: str, *, include_pinyin: bool = False) -> dict[str, str]:
     if target_language == "zh-CN":
+        pinyin_text = _practice_pinyin_text(text) if include_pinyin else ""
         return {
             "mode": "plain",
             "primary_text": text,
             "secondary_text": "",
             "kanji_text": text,
             "hiragana_text": "",
-            "pinyin_text": _practice_pinyin_text(text) if include_pinyin else "",
+            "pinyin_text": pinyin_text,
+            "pinyin_status": "ready" if pinyin_text else ("unavailable" if include_pinyin else "disabled"),
         }
     if target_language != "ja-JP":
         return {
@@ -112,6 +125,7 @@ def _practice_display_text(text: str, target_language: str, *, include_pinyin: b
             "kanji_text": text,
             "hiragana_text": "",
             "pinyin_text": "",
+            "pinyin_status": "disabled",
         }
     try:
         display = create_user_display_text(text, target_language)
@@ -126,10 +140,54 @@ def _practice_display_text(text: str, target_language: str, *, include_pinyin: b
         "kanji_text": kanji_text,
         "hiragana_text": hiragana_text,
         "pinyin_text": "",
+        "pinyin_status": "disabled",
     }
 
 
 def _practice_pinyin_text(text: str) -> str:
+    local_text = _practice_pinyin_text_local(text)
+    if local_text:
+        return local_text
+    return _practice_pinyin_text_openai(text)
+
+
+def _practice_pinyin_text_local(text: str) -> str:
+    if not _contains_han_text(text):
+        return ""
+    try:
+        from pypinyin import Style, lazy_pinyin
+    except ImportError:
+        return ""
+
+    tokens = lazy_pinyin(
+        text,
+        style=Style.TONE,
+        neutral_tone_with_five=False,
+        errors="default",
+    )
+    return _normalize_practice_pinyin_tokens(tokens)
+
+
+def _contains_han_text(text: str) -> bool:
+    return any(
+        start <= ord(char) <= end
+        for char in text
+        for start, end in _HAN_CODEPOINT_RANGES
+    )
+
+
+def _normalize_practice_pinyin_tokens(tokens: list[str]) -> str:
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        normalized = _PINYIN_WHITESPACE_RE.sub(" ", str(token)).strip()
+        normalized = normalized.strip(_PINYIN_OMITTED_PUNCTUATION)
+        if not normalized:
+            continue
+        normalized_tokens.extend(part for part in normalized.split(" ") if part)
+    return " ".join(normalized_tokens).strip()
+
+
+def _practice_pinyin_text_openai(text: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         return ""
     try:
@@ -137,14 +195,18 @@ def _practice_pinyin_text(text: str) -> str:
     except ImportError:
         return ""
 
-    response = OpenAI().responses.create(
-        model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.5")),
-        instructions=(
-            "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. "
-            "Return only the pinyin text, with spaces between words or syllables. Do not add notes."
-        ),
-        input=text,
-    )
+    try:
+        response = OpenAI().responses.create(
+            model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.5")),
+            instructions=(
+                "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. "
+                "Return only the pinyin text, with spaces between words or syllables. Do not add notes."
+            ),
+            input=text,
+        )
+    except Exception as exc:
+        LOGGER.warning("practice pinyin generation failed: %s", exc)
+        return ""
     output_text = getattr(response, "output_text", None)
     return str(output_text if output_text is not None else response).strip()
 

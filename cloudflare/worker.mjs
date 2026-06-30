@@ -1098,13 +1098,15 @@ async function createPracticeAttempt(request, env) {
 
 async function createPracticeDisplayText(text, targetLanguage, env, { includePinyin = false } = {}) {
   if (targetLanguage === "zh-CN") {
+    const pinyinText = includePinyin ? await createChinesePinyinText(text, env) : "";
     return {
       mode: "plain",
       primary_text: text,
       secondary_text: "",
       kanji_text: text,
       hiragana_text: "",
-      pinyin_text: includePinyin ? await createChinesePinyinText(text, env) : "",
+      pinyin_text: pinyinText,
+      pinyin_status: pinyinText ? "ready" : (includePinyin ? "unavailable" : "disabled"),
     };
   }
   if (targetLanguage !== "ja-JP") {
@@ -1115,6 +1117,7 @@ async function createPracticeDisplayText(text, targetLanguage, env, { includePin
       kanji_text: text,
       hiragana_text: "",
       pinyin_text: "",
+      pinyin_status: "disabled",
     };
   }
   const display = await createUserDisplayText({ text, target_language: targetLanguage }, env);
@@ -1127,18 +1130,24 @@ async function createPracticeDisplayText(text, targetLanguage, env, { includePin
     kanji_text: kanjiText,
     hiragana_text: hiraganaText,
     pinyin_text: "",
+    pinyin_status: "disabled",
   };
 }
 
 async function createChinesePinyinText(text, env) {
-  return (
-    await openAiText(env, {
-      model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
-      instructions:
-        "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. Return only the pinyin text, with spaces between words or syllables. Do not add notes.",
-      input: text,
-    })
-  ).trim();
+  try {
+    return (
+      await openAiText(env, {
+        model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+        instructions:
+          "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. Return only the pinyin text, with spaces between words or syllables. Do not add notes.",
+        input: text,
+      })
+    ).trim();
+  } catch (error) {
+    console.warn("practice pinyin generation failed", error);
+    return "";
+  }
 }
 
 async function listAudioHistory(env) {
