@@ -196,6 +196,51 @@ def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> N
     assert payload["serverless_timings_ms"]["text_tts_provider_load"] >= 0
 
 
+def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options):
+            assert script_text == "Speaker 1: 你好。"
+            assert len(voice_paths) == 1
+            assert voice_paths[0].read_bytes() == b"voice"
+            assert options.inference_steps == 2
+            return type(
+                "FakeVibeVoiceResult",
+                (),
+                {
+                    "audio_bytes": b"vv audio",
+                    "audio_mime_type": "audio/wav",
+                    "normalized_script": script_text,
+                    "timings_ms": {"vibevoice": 1.0},
+                    "providers": {"vibevoice": "fake-vibevoice"},
+                    "diagnostics": {},
+                },
+            )()
+
+    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    event = {
+        "input": {
+            "operation_mode": "vibevoice",
+            "script": "Speaker 1: 你好。",
+            "voices": [
+                {
+                    "filename": "voice.wav",
+                    "audio_mime_type": "audio/wav",
+                    "audio_base64": base64.b64encode(b"voice").decode("ascii"),
+                }
+            ],
+            "generation": {"inference_steps": 2},
+        }
+    }
+
+    payload = runpod_handler.handler(event)
+
+    assert payload["audio_mime_type"] == "audio/wav"
+    assert base64.b64decode(payload["audio_base64"]) == b"vv audio"
+    assert payload["normalized_script"] == "Speaker 1: 你好。"
+    assert payload["providers"]["vibevoice"] == "fake-vibevoice"
+    assert payload["serverless"]["operation_mode"] == "vibevoice"
+
+
 def test_runpod_handler_warms_translation_and_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 

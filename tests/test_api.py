@@ -209,6 +209,42 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert service.calls[0][2].line_by_line is True
 
 
+def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFrunpod"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "runpod_handler_total": 20.0, "total": 20.0}
+        diagnostics = {}
+        providers = {"vibevoice": "runpod-serverless-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+
+        def status(self):
+            return {"available": True, "provider": "fake-runpod"}
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            return FakeVibeVoiceResult()
+
+    runpod_service = FakeVibeVoiceService()
+    client = TestClient(create_app(runpod_vibevoice_service=runpod_service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={"script": "你好。", "backend": "runpod_serverless"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["providers"]["vibevoice"] == "runpod-serverless-vibevoice"
+    assert payload["audio_base64"] == base64.b64encode(b"RIFrunpod").decode("ascii")
+    assert len(runpod_service.calls) == 1
+
+
 def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"auto": "コーヒーがほしいです"}),

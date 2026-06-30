@@ -75,7 +75,9 @@ from .user_settings import (
     serialize_user_settings,
 )
 from .vibevoice import (
+    RunpodServerlessVibeVoiceService,
     VibeVoiceError,
+    VibeVoiceGenerator,
     VibeVoiceGenerationOptions,
     VibeVoiceService,
 )
@@ -359,6 +361,7 @@ def create_app(
     text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     vibevoice_service: VibeVoiceService | None = None,
+    runpod_vibevoice_service: VibeVoiceGenerator | None = None,
     audio_history_store: AudioHistoryStore | None = None,
     user_settings_store: UserSettingsStore | None = None,
 ) -> FastAPI:
@@ -376,6 +379,7 @@ def create_app(
     active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     active_vibevoice_service = vibevoice_service or VibeVoiceService.from_env()
+    active_runpod_vibevoice_service = runpod_vibevoice_service or RunpodServerlessVibeVoiceService.from_env()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
@@ -429,7 +433,14 @@ def create_app(
 
     @app.get("/api/vibevoice/status")
     def vibevoice_status() -> dict[str, object]:
-        return active_vibevoice_service.status()
+        local_status = active_vibevoice_service.status()
+        return {
+            **local_status,
+            "backends": {
+                "local": local_status,
+                "runpod_serverless": active_runpod_vibevoice_service.status(),
+            },
+        }
 
     @app.get("/api/user-settings")
     def user_settings() -> dict[str, object]:
@@ -578,6 +589,7 @@ def create_app(
         max_voice_seconds: Annotated[str, Form()] = "5",
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
+        backend: Annotated[str, Form()] = "local",
     ) -> dict[str, object]:
         try:
             script_text = await _read_vibevoice_script(script, script_file)
@@ -598,7 +610,12 @@ def create_app(
                     [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
                     Path(temp_dir),
                 )
-                vibevoice_result = active_vibevoice_service.generate(
+                generator = (
+                    active_runpod_vibevoice_service
+                    if backend in {"runpod", "runpod_serverless"}
+                    else active_vibevoice_service
+                )
+                vibevoice_result = generator.generate(
                     script_text=script_text,
                     voice_paths=voice_paths,
                     options=options,

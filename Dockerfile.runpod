@@ -1,5 +1,9 @@
 ARG BASE_IMAGE=runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+ARG COMFYUI_VIBEVOICE_REPO=https://github.com/wildminder/ComfyUI-VibeVoice
+ARG COMFYUI_VIBEVOICE_REF=7e90aea333d2079ae622f049739baffddfd9d124
 FROM ${BASE_IMAGE}
+ARG COMFYUI_VIBEVOICE_REPO
+ARG COMFYUI_VIBEVOICE_REF
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -17,7 +21,12 @@ COPY src /app/src
 COPY scripts /app/scripts
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install ".[local,voice,deploy,openai]"
+    && python -m pip install ".[local,voice,vibevoice,deploy,openai]"
+
+RUN git clone "${COMFYUI_VIBEVOICE_REPO}" /app/ComfyUI-VibeVoice \
+    && cd /app/ComfyUI-VibeVoice \
+    && git checkout "${COMFYUI_VIBEVOICE_REF}" \
+    && python -m pip install -r requirements.txt
 
 ENV MO_PROVIDER_MODE=local
 ENV MO_ASR_PROVIDER=faster-whisper
@@ -42,6 +51,10 @@ ENV HF_HOME=/runpod-volume/huggingface
 ENV HF_HUB_CACHE=/runpod-volume/huggingface/hub
 ENV FASTER_WHISPER_CACHE_DIR=/runpod-volume/models/faster-whisper
 ENV SEED_VC_WORK_DIR=/runpod-volume/work/seed-vc
+ENV MO_VIBEVOICE_HOME=/runpod-volume/models/vibevoice/huggingface/hub
+ENV COMFYUI_VIBEVOICE_PATH=/app/ComfyUI-VibeVoice
+ENV MO_VIBEVOICE_CLI=/app/src/mo_speech/vibevoice_cli.py
+ENV MO_VIBEVOICE_TIMEOUT_SECONDS=1800
 
 ENV FASTER_WHISPER_MODEL=mobiuslabsgmbh/faster-whisper-large-v3-turbo
 ENV FASTER_WHISPER_DEVICE=cuda
@@ -67,6 +80,7 @@ ENV SEED_VC_LENGTH_ADJUST=1.0
 ENV SEED_VC_INFERENCE_CFG_RATE=0.7
 
 RUN mkdir -p /runpod-volume/models /runpod-volume/huggingface/hub /runpod-volume/work/seed-vc
+RUN mkdir -p /runpod-volume/models/vibevoice/huggingface/hub
 
 EXPOSE 8000
 

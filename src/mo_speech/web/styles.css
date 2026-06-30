@@ -2259,7 +2259,8 @@ audio {
   gap: 6px;
 }
 
-.vibevoice-settings-grid input {
+.vibevoice-settings-grid input,
+.vibevoice-settings-grid select {
   border: 1px solid #cbd9ea;
   border-radius: 8px;
   box-sizing: border-box;

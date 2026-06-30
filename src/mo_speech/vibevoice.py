@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import mimetypes
 import os
 import subprocess
 import sys
@@ -7,12 +9,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Callable, Sequence
+from typing import Callable, Protocol, Sequence
 
 
-DEFAULT_VIBEVOICE_HOME = Path("/Volumes/KIOXIA_1T/pj/ComfyUI/models/vibevoice")
-DEFAULT_VIBEVOICE_CLI = Path("/Users/manabu/pj/liby/lib/liby/vibevoice.py")
-DEFAULT_COMFYUI_VIBEVOICE_PATH = Path("/Volumes/KIOXIA_1T/pj/ComfyUI/custom_nodes/ComfyUI-VibeVoice")
+LOCAL_SHARED_VIBEVOICE_ROOT = Path("/Volumes/KIOXIA_1T/pj/models/vibevoice")
+LEGACY_COMFYUI_ROOT = Path("/Volumes/KIOXIA_1T/pj/ComfyUI")
+DEFAULT_VIBEVOICE_HOME = LOCAL_SHARED_VIBEVOICE_ROOT / "huggingface" / "hub"
+LEGACY_VIBEVOICE_HOME = LEGACY_COMFYUI_ROOT / "models" / "vibevoice"
+DEFAULT_VIBEVOICE_CLI = Path(__file__).with_name("vibevoice_cli.py")
+DEFAULT_COMFYUI_VIBEVOICE_PATH = LOCAL_SHARED_VIBEVOICE_ROOT / "ComfyUI-VibeVoice"
+LEGACY_COMFYUI_VIBEVOICE_PATH = LEGACY_COMFYUI_ROOT / "custom_nodes" / "ComfyUI-VibeVoice"
 DEFAULT_COMFYUI_PYTHON = Path("/Volumes/KIOXIA_1T/pj/ComfyUI/.venv/bin/python")
 DEFAULT_VIBEVOICE_TIMEOUT_SECONDS = 900.0
 VIBEVOICE_SAMPLE_RATE = 24_000
@@ -47,6 +53,18 @@ class VibeVoiceError(RuntimeError):
 
 
 SubprocessRun = Callable[..., subprocess.CompletedProcess[str]]
+
+
+class VibeVoiceGenerator(Protocol):
+    def status(self) -> dict[str, object]: ...
+
+    def generate(
+        self,
+        *,
+        script_text: str,
+        voice_paths: Sequence[Path],
+        options: VibeVoiceGenerationOptions | None = None,
+    ) -> VibeVoiceResult: ...
 
 
 def normalize_vibevoice_script(text: str, *, max_bytes: int = 200_000) -> str:
@@ -99,18 +117,16 @@ class VibeVoiceService:
     ) -> None:
         self.python = python or os.getenv("MO_VIBEVOICE_PYTHON") or _default_vibevoice_python()
         self.cli_path = Path(cli_path or os.getenv("MO_VIBEVOICE_CLI") or DEFAULT_VIBEVOICE_CLI).expanduser()
-        self.vibevoice_home = Path(
-            vibevoice_home
-            or os.getenv("MO_VIBEVOICE_HOME")
-            or os.getenv("VIBEVOICE_HOME")
-            or DEFAULT_VIBEVOICE_HOME
-        ).expanduser()
-        self.comfyui_vibevoice_path = Path(
-            comfyui_vibevoice_path
-            or os.getenv("MO_COMFYUI_VIBEVOICE_PATH")
-            or os.getenv("COMFYUI_VIBEVOICE_PATH")
-            or DEFAULT_COMFYUI_VIBEVOICE_PATH
-        ).expanduser()
+        self.vibevoice_home = _resolve_path_setting(
+            explicit=vibevoice_home,
+            env_names=("MO_VIBEVOICE_HOME", "VIBEVOICE_HOME"),
+            candidates=_default_vibevoice_home_candidates(),
+        )
+        self.comfyui_vibevoice_path = _resolve_path_setting(
+            explicit=comfyui_vibevoice_path,
+            env_names=("MO_COMFYUI_VIBEVOICE_PATH", "COMFYUI_VIBEVOICE_PATH"),
+            candidates=_default_comfyui_vibevoice_candidates(),
+        )
         self.timeout_seconds = float(
             timeout_seconds
             if timeout_seconds is not None
@@ -317,6 +333,65 @@ class VibeVoiceService:
         return matches[0] if matches else None
 
 
+class RunpodServerlessVibeVoiceService:
+    name = "runpod-serverless-vibevoice"
+
+    def __init__(self, *, client=None) -> None:
+        if client is None:
+            from .providers.runpod_serverless import RunpodServerlessClient
+
+            client = RunpodServerlessClient.from_env()
+        self.client = client
+
+    @classmethod
+    def from_env(cls) -> "RunpodServerlessVibeVoiceService":
+        return cls()
+
+    def status(self) -> dict[str, object]:
+        configured = bool(getattr(self.client, "configured", False))
+        return {
+            "available": configured,
+            "provider": self.name,
+            "configured": configured,
+            "endpoint_id": getattr(self.client, "endpoint_id", ""),
+            "request_mode": getattr(self.client, "request_mode", ""),
+            "reason": "" if configured else "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。",
+        }
+
+    def generate(
+        self,
+        *,
+        script_text: str,
+        voice_paths: Sequence[Path],
+        options: VibeVoiceGenerationOptions | None = None,
+    ) -> VibeVoiceResult:
+        if not voice_paths:
+            raise ValueError("voice sample is required")
+        normalized_script = normalize_vibevoice_script(script_text)
+        generation_options = options or VibeVoiceGenerationOptions()
+        started = perf_counter()
+        output = self.client.submit(
+            {
+                "operation_mode": "vibevoice",
+                "script": normalized_script,
+                "voices": [
+                    {
+                        "filename": Path(path).name,
+                        "audio_mime_type": _audio_mime_type(path),
+                        "audio_base64": base64.b64encode(Path(path).read_bytes()).decode("ascii"),
+                    }
+                    for path in voice_paths
+                ],
+                "generation": _options_payload(generation_options),
+            }
+        )
+        return _vibevoice_result_from_output(
+            output,
+            normalized_script=normalized_script,
+            fallback_elapsed_ms=_elapsed_ms(started),
+        )
+
+
 def _format_number(value: float) -> str:
     return f"{float(value):g}"
 
@@ -325,6 +400,40 @@ def _default_vibevoice_python() -> str:
     if DEFAULT_COMFYUI_PYTHON.is_file():
         return str(DEFAULT_COMFYUI_PYTHON)
     return sys.executable
+
+
+def _resolve_path_setting(
+    *,
+    explicit: str | Path | None,
+    env_names: Sequence[str],
+    candidates: Sequence[Path],
+) -> Path:
+    if explicit is not None:
+        return Path(explicit).expanduser()
+    for env_name in env_names:
+        env_value = os.getenv(env_name)
+        if env_value:
+            return Path(env_value).expanduser()
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.expanduser()
+    return candidates[0].expanduser()
+
+
+def _default_vibevoice_home_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    if model_cache_dir := os.getenv("MODEL_CACHE_DIR"):
+        candidates.append(Path(model_cache_dir).expanduser() / "vibevoice" / "huggingface" / "hub")
+    candidates.extend([DEFAULT_VIBEVOICE_HOME, LEGACY_VIBEVOICE_HOME])
+    return candidates
+
+
+def _default_comfyui_vibevoice_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    if model_cache_dir := os.getenv("MODEL_CACHE_DIR"):
+        candidates.append(Path(model_cache_dir).expanduser() / "vibevoice" / "ComfyUI-VibeVoice")
+    candidates.extend([DEFAULT_COMFYUI_VIBEVOICE_PATH, LEGACY_COMFYUI_VIBEVOICE_PATH])
+    return candidates
 
 
 def _elapsed_ms(started: float) -> float:
@@ -340,3 +449,61 @@ def _tail_text(text: str | None, *, max_chars: int = 4000) -> str:
 
 def _redacted_command(command: Sequence[str]) -> list[str]:
     return [str(item) for item in command]
+
+
+def _options_payload(options: VibeVoiceGenerationOptions) -> dict[str, object]:
+    return {
+        "cfg_scale": options.cfg_scale,
+        "inference_steps": options.inference_steps,
+        "seed": options.seed,
+        "do_sample": options.do_sample,
+        "temperature": options.temperature,
+        "top_p": options.top_p,
+        "top_k": options.top_k,
+        "max_voice_seconds": options.max_voice_seconds,
+        "line_by_line": options.line_by_line,
+        "line_gap": options.line_gap,
+    }
+
+
+def _vibevoice_result_from_output(
+    output: dict[str, object],
+    *,
+    normalized_script: str,
+    fallback_elapsed_ms: float,
+) -> VibeVoiceResult:
+    audio_base64 = output.get("audio_base64")
+    if not isinstance(audio_base64, str) or not audio_base64:
+        raise VibeVoiceError("VibeVoice output did not include audio_base64")
+    timings_ms = _float_dict(output.get("timings_ms"))
+    for key, value in _float_dict(output.get("serverless_timings_ms")).items():
+        timings_ms[f"runpod_{key}"] = value
+    timings_ms.setdefault("total", fallback_elapsed_ms)
+    return VibeVoiceResult(
+        audio_bytes=base64.b64decode(audio_base64),
+        audio_mime_type=str(output.get("audio_mime_type", "audio/wav")),
+        normalized_script=str(output.get("normalized_script") or normalized_script),
+        providers=_dict_or_empty(output.get("providers")),
+        timings_ms=timings_ms,
+        diagnostics=_dict_or_empty(output.get("diagnostics")),
+    )
+
+
+def _audio_mime_type(path: Path) -> str:
+    return mimetypes.guess_type(path.name)[0] or "audio/wav"
+
+
+def _dict_or_empty(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _float_dict(value: object) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, float] = {}
+    for key, item in value.items():
+        try:
+            result[str(key)] = float(item)
+        except (TypeError, ValueError):
+            continue
+    return result

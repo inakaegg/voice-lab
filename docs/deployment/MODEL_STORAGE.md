@@ -59,6 +59,7 @@ RunPodで最初に使うモデル配置:
 | 翻訳 | `Qwen/Qwen3-4B` | `/runpod-volume/huggingface/hub` |
 | TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | `/runpod-volume/huggingface/hub` |
 | 声質変換 | Seed-VC checkpoint | `/runpod-volume/huggingface/hub` または `SEED_VC_CHECKPOINT` で指定したpath |
+| スキットTTS | VibeVoice 1.5B + Qwen tokenizer + ComfyUI-VibeVoice拡張 | `/runpod-volume/models/vibevoice` または `MO_VIBEVOICE_HOME` / `COMFYUI_VIBEVOICE_PATH` |
 
 初回取得後は、モデル更新による挙動差を避けるため、必要に応じて `FASTER_WHISPER_LOCAL_FILES_ONLY=1` と `QWEN_TRANSLATION_LOCAL_FILES_ONLY=1` に切り替える。
 

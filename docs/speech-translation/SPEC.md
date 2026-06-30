@@ -66,8 +66,10 @@
 - 復唱結果は、お手本文の直下に同程度の大きさで表示し、目標文との差分で不一致と判断した部分を赤字で目立たせる。差分箇所はクリック可能にする。復唱で抜け落ちた目標文側の語句は、認識結果内に存在しないため赤い欠落マーカーとして挿入表示する。比較再生では、複数文の場合に「1文目のお手本→1文目の復唱、2文目のお手本→2文目の復唱」の順で再生する。初期実装では精密なタイムスタンプ付き切り出しではなく、文の文字量から音声全体を概算分割する。将来はタイムスタンプ付きASRを使い、該当部分だけの比較再生へ発展させる。
 - `自分の録音`、`もう一度`、`次へ` の専用小ボタンは置かない。自分の録音単体再生は初期UIでは提供せず、もう一度練習する場合は学習対象言語の録音ボタン、次の内容へ進む場合は母国語の録音ボタンを使う。
 - 復唱用マイクは、お手本や判定が表示された後も画面上部の録音カード位置に置く。練習ループ中にマイクが下へ移動して、録音開始位置を探し直す状態を避ける。
-- VibeVoiceスキット生成画面は、`zhskit` のRunPod Web UI相当のローカル版として、台本テキストまたは台本ファイル、最大4つの音声/動画参照ファイル、CFG scale、inference steps、seed、temperature、top_p、top_k、line-by-line結合を指定できるようにする。台本は `Speaker 1: ...` 形式を正とし、話者タグがない入力は各非空行を `Speaker 1:` として補う。参照音声は可能なら `ffmpeg` で24kHz mono WAVに正規化してからVibeVoiceへ渡す。初期実装ではURL入力やクラウドアップロードは扱わない。
-- VibeVoiceスキット生成はローカル外部プロセスとしてVibeVoice CLIを呼び出す。既定のVibeVoice CLIは `/Users/manabu/pj/liby/lib/liby/vibevoice.py`、既定のモデルキャッシュは `/Volumes/KIOXIA_1T/pj/ComfyUI/models/vibevoice`、既定のComfyUI-VibeVoice拡張パスは `/Volumes/KIOXIA_1T/pj/ComfyUI/custom_nodes/ComfyUI-VibeVoice` とする。`/Volumes/KIOXIA_1T/pj/ComfyUI/.venv/bin/python` が存在する場合は、VibeVoice CLI起動Pythonとして優先する。`MO_VIBEVOICE_CLI`、`MO_VIBEVOICE_HOME`、`VIBEVOICE_HOME`、`MO_COMFYUI_VIBEVOICE_PATH`、`COMFYUI_VIBEVOICE_PATH`、`MO_VIBEVOICE_PYTHON` で上書きできる。モデルファイル、参照音声、生成音声はgit管理しない。
+- VibeVoiceスキット生成画面は、`zhskit` のRunPod Web UI相当として、台本テキストまたは台本ファイル、最大4つの音声/動画参照ファイル、CFG scale、inference steps、seed、temperature、top_p、top_k、line-by-line結合を指定できるようにする。テキストファイルを選んだ場合は内容を台本テキストエリアへ読み込み、送信前に編集できるようにする。台本は `Speaker 1: ...` 形式を正とし、話者タグがない入力は各非空行を `Speaker 1:` として補う。参照音声は可能なら `ffmpeg` で24kHz mono WAVに正規化してからVibeVoiceへ渡す。初期実装ではURL入力やクラウドアップロードは扱わない。
+- VibeVoiceスキット生成は、ローカル実行とRunPod Serverless実行を選べる。ローカル実行は外部プロセスとしてVibeVoice CLIを呼び出す。RunPod実行はFastAPIがRunPod Serverless jobへ `operation_mode=vibevoice` を投げ、RunPod handler内の同じVibeVoice serviceで生成する。ブラウザへRunPod API keyは渡さない。
+- VibeVoiceの既定モデル配置は、将来の共通モデルルートへ移行する。`MO_VIBEVOICE_HOME`、`VIBEVOICE_HOME`、`MO_COMFYUI_VIBEVOICE_PATH`、`COMFYUI_VIBEVOICE_PATH`、`MO_VIBEVOICE_CLI`、`MO_VIBEVOICE_PYTHON` を優先し、未指定時だけ現在のローカル検証用パスを使う。共通モデルルート案は [VIBEVOICE.md](VIBEVOICE.md) に残す。モデルファイル、参照音声、生成音声はgit管理しない。
+- VibeVoiceの読み上げ品質では、漢字の読み誤り、参照音声言語と出力言語の不一致による不自然さ、途中ノイズが発生し得る。日本語台本で読みを安定させたい場合は、暫定的にひらがなまたは読み付きテキストを使う。将来は日本語/中国語の台本正規化、読み指定、参照音声と言語の対応検証を追加する。
 - RunPod Serverless backendが利用可能な環境では、ユーザー用画面の音声翻訳は `runpod_serverless` を優先する。未設定または利用不可の場合は従来どおり `OpenAI API` を使う。RunPod利用時もブラウザへRunPod API keyを出さず、ローカルFastAPIまたは将来のgatewayがRunPod APIを呼び出す。
 - ユーザー用画面では `にてるこえ` トグルを表示しない。Seed-VCが利用可能な場合は、翻訳/テキスト加工/TTSで作ったベース音声を既定でSeed-VCへ渡して声質変換する。Seed-VCの参照音声は入力音声自身、`seed_vc_reference_auto_select=true` 固定とする。runtime APIで直接VC backendの `seed-vc` が利用不可の場合は、本文音声の生成までは完了させる。
 - RunPod Serverless backendのwarm状態は `/api/runtime` の `runpod_serverless` backend情報に含める。ユーザー用画面では、RunPod backendが選ばれている場合だけ画面右上付近に小さい状態ドットを出し、文字で `じゅんびまえ` などの操作を妨げる表示は出さない。ユーザー用画面のページロードでは既定で `POST /api/warmup` を実行しない。デモ前にwarmupしたい場合は管理者用画面 `/admin` の手動準備ボタンから `POST /api/warmup` を実行する。録音送信やSeed-VC実変換を行った場合もRunPod jobが作られるため、cold状態ならその時点でworker起動とモデルロードが入る。`/api/runtime` 自体は読み取り専用で、RunPod `/health` の `IDLE` や `READY` はworker存在の参考情報にとどめる。Seed-VC ready表示はwarmupまたはSeed-VC job成功によって短時間保存されたready状態だけを根拠にする。
@@ -288,6 +290,7 @@ OpenAI Realtime翻訳の扱い:
 - `script`: 台本テキスト。`script_file` がない場合に使う。
 - `script_file`: UTF-8の台本ファイル。指定された場合は `script` より優先する。
 - `voice_file_1` から `voice_file_4`: 参照音声または動画ファイル。少なくとも1つ必要。
+- `backend`: `local` または `runpod_serverless`。未指定時は `local`。
 - `cfg_scale`、`inference_steps`、`seed`、`temperature`、`top_p`、`top_k`、`do_sample`、`max_voice_seconds`: VibeVoice CLIへ渡す生成パラメータ。
 - `line_by_line`: `true` の場合、VibeVoice CLIのline-by-line concatモードを使う。
 - `line_gap`: line-by-line concat時の行間無音秒数。

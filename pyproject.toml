@@ -24,6 +24,20 @@ voice = [
   "qwen-tts==0.1.1",
   "seed-vc==0.4.3",
 ]
+vibevoice = [
+  "bitsandbytes",
+  "conformer",
+  "diffusers",
+  "einops",
+  "huggingface_hub",
+  "librosa",
+  "packaging",
+  "s3tokenizer",
+  "safetensors",
+  "soundfile",
+  "tokenizers",
+  "tqdm",
+]
 vc-compare = [
   "chatterbox-tts>=0.1.7",
 ]

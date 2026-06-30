@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from mo_speech.vibevoice import (
+    RunpodServerlessVibeVoiceService,
     VibeVoiceGenerationOptions,
     VibeVoiceService,
     normalize_vibevoice_script,
@@ -80,3 +81,41 @@ def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None
     assert status["comfyui_vibevoice_exists"] is False
     assert status["model_cache_found"] is False
     assert status["tokenizer_found"] is False
+
+
+def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> None:
+    class FakeClient:
+        configured = True
+        endpoint_id = "endpoint"
+        request_mode = "async"
+
+        def __init__(self):
+            self.payload = None
+
+        def submit(self, payload):
+            self.payload = payload
+            return {
+                "audio_mime_type": "audio/wav",
+                "audio_base64": "UklGRg==",
+                "normalized_script": "Speaker 1: 你好。",
+                "timings_ms": {"vibevoice": 3.0},
+                "providers": {"vibevoice": "runpod-serverless-vibevoice"},
+            }
+
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+    client = FakeClient()
+    service = RunpodServerlessVibeVoiceService(client=client)
+
+    result = service.generate(
+        script_text="你好。",
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(inference_steps=2, do_sample=False),
+    )
+
+    assert result.audio_bytes == b"RIFF"
+    assert client.payload["operation_mode"] == "vibevoice"
+    assert client.payload["script"] == "Speaker 1: 你好。"
+    assert client.payload["generation"]["inference_steps"] == 2
+    assert client.payload["generation"]["do_sample"] is False
+    assert client.payload["voices"][0]["audio_base64"] != ""

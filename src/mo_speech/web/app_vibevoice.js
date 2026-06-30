@@ -8,10 +8,13 @@ const audio = document.querySelector("#vibevoice-audio");
 const downloadLink = document.querySelector("#vibevoice-download");
 const normalizedScript = document.querySelector("#vibevoice-normalized-script");
 const diagnostics = document.querySelector("#vibevoice-diagnostics");
+const scriptInput = document.querySelector("#vibevoice-script");
+const scriptFileInput = document.querySelector("#vibevoice-script-file");
 
 let currentAudioUrl = "";
 
 form.addEventListener("submit", handleGenerate);
+scriptFileInput.addEventListener("change", handleScriptFileChange);
 loadStatus();
 
 async function loadStatus() {
@@ -30,19 +33,22 @@ async function loadStatus() {
 }
 
 function renderStatus(status) {
-  runtimeStatus.dataset.state = status.available ? "ready" : "missing";
-  runtimeStatus.textContent = status.available ? "利用できます" : "モデルまたはCLIが見つかりません";
+  const localStatus = status.backends?.local || status;
+  const runpodStatus = status.backends?.runpod_serverless || {};
+  runtimeStatus.dataset.state = localStatus.available ? "ready" : "missing";
+  runtimeStatus.textContent = localStatus.available ? "ローカル実行できます" : "ローカルモデルまたはCLIが見つかりません";
   runtimeDetails.replaceChildren(
-    detailItem("CLI", status.cli_exists ? status.cli_path : `${status.cli_path} (missing)`),
+    detailItem("Local CLI", localStatus.cli_exists ? localStatus.cli_path : `${localStatus.cli_path} (missing)`),
     detailItem(
-      "Module",
-      status.comfyui_vibevoice_exists
-        ? status.comfyui_vibevoice_path
-        : `${status.comfyui_vibevoice_path} (missing)`,
+      "Local Module",
+      localStatus.comfyui_vibevoice_exists
+        ? localStatus.comfyui_vibevoice_path
+        : `${localStatus.comfyui_vibevoice_path} (missing)`,
     ),
-    detailItem("Model", status.model_cache_found ? status.model_cache_path : "missing"),
-    detailItem("Tokenizer", status.tokenizer_found ? status.tokenizer_path : "missing"),
-    detailItem("Timeout", `${status.timeout_seconds}s`),
+    detailItem("Local Model", localStatus.model_cache_found ? localStatus.model_cache_path : "missing"),
+    detailItem("Local Tokenizer", localStatus.tokenizer_found ? localStatus.tokenizer_path : "missing"),
+    detailItem("RunPod", runpodStatus.available ? `configured (${runpodStatus.request_mode})` : runpodStatus.reason || "not configured"),
+    detailItem("Timeout", `${localStatus.timeout_seconds}s`),
   );
 }
 
@@ -78,6 +84,21 @@ async function handleGenerate(event) {
     setBusy(false, "");
     message.textContent = String(error.message || error);
     message.dataset.state = "error";
+  }
+}
+
+async function handleScriptFileChange() {
+  const file = scriptFileInput.files?.[0];
+  if (!file) {
+    return;
+  }
+  try {
+    scriptInput.value = await file.text();
+    message.dataset.state = "ready";
+    message.textContent = `${file.name} を台本へ読み込みました。`;
+  } catch (error) {
+    message.dataset.state = "error";
+    message.textContent = `テキストファイルを読み込めませんでした: ${error.message || error}`;
   }
 }
 
