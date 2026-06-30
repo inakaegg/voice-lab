@@ -1018,7 +1018,8 @@ function normalizedPlaybackSpeed(value) {
   if (!Number.isFinite(parsed)) {
     return 1;
   }
-  return Math.max(0.5, Math.min(2, Math.round(parsed / 0.5) * 0.5));
+  const rounded = Math.round(parsed / 0.25) * 0.25;
+  return Math.max(0.25, Math.min(2, Number(rounded.toFixed(2))));
 }
 
 function formatPlaybackSpeed(speed) {
