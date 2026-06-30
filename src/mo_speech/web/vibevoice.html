@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VibeVoice スキット生成</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="vibevoice-body">
+    <main class="vibevoice-shell" aria-label="VibeVoice スキット生成">
+      <header class="vibevoice-header">
+        <div>
+          <p class="vibevoice-kicker">Local VibeVoice</p>
+          <h1>VibeVoice スキット生成</h1>
+          <p>台本と最大4つの参照音声から、ローカルのVibeVoiceモデルでWAVを生成します。</p>
+        </div>
+        <nav class="vibevoice-nav" aria-label="関連画面">
+          <a href="/">ユーザー画面</a>
+          <a href="/admin">管理画面</a>
+          <a href="/practice">発音練習</a>
+        </nav>
+      </header>
+
+      <section class="vibevoice-status-card" aria-label="VibeVoice実行環境">
+        <div>
+          <p class="vibevoice-section-label">実行環境</p>
+          <p id="vibevoice-runtime-status" class="vibevoice-runtime-status" role="status" aria-live="polite">確認中...</p>
+        </div>
+        <dl id="vibevoice-runtime-details" class="vibevoice-runtime-details"></dl>
+      </section>
+
+      <form id="vibevoice-form" class="vibevoice-form">
+        <section class="vibevoice-panel vibevoice-script-panel" aria-label="台本">
+          <div class="vibevoice-panel-header">
+            <div>
+              <p class="vibevoice-section-label">Script</p>
+              <h2>台本</h2>
+            </div>
+            <label class="vibevoice-file-button">
+              <span>テキストファイル</span>
+              <input type="file" name="script_file" accept=".txt,text/plain" />
+            </label>
+          </div>
+          <textarea
+            id="vibevoice-script"
+            name="script"
+            rows="9"
+            placeholder="Speaker 1: こんにちは。&#10;Speaker 2: 今日はどこへ行きますか？"
+          ></textarea>
+          <p class="vibevoice-help">Speakerタグがない行は自動で Speaker 1 として扱います。</p>
+        </section>
+
+        <section class="vibevoice-panel" aria-label="参照音声">
+          <div class="vibevoice-panel-header">
+            <div>
+              <p class="vibevoice-section-label">Voices</p>
+              <h2>参照音声</h2>
+            </div>
+          </div>
+          <div class="vibevoice-voice-grid">
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">1</span>
+              <strong>Speaker 1</strong>
+              <input type="file" name="voice_file_1" accept="audio/*,video/*" required />
+            </label>
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">2</span>
+              <strong>Speaker 2</strong>
+              <input type="file" name="voice_file_2" accept="audio/*,video/*" />
+            </label>
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">3</span>
+              <strong>Speaker 3</strong>
+              <input type="file" name="voice_file_3" accept="audio/*,video/*" />
+            </label>
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">4</span>
+              <strong>Speaker 4</strong>
+              <input type="file" name="voice_file_4" accept="audio/*,video/*" />
+            </label>
+          </div>
+        </section>
+
+        <section class="vibevoice-panel" aria-label="生成設定">
+          <div class="vibevoice-panel-header">
+            <div>
+              <p class="vibevoice-section-label">Parameters</p>
+              <h2>生成設定</h2>
+            </div>
+          </div>
+          <div class="vibevoice-settings-grid">
+            <label>
+              CFG
+              <input name="cfg_scale" type="number" min="0" step="0.1" value="1.3" />
+            </label>
+            <label>
+              Steps
+              <input name="inference_steps" type="number" min="1" step="1" value="10" />
+            </label>
+            <label>
+              Seed
+              <input name="seed" type="number" step="1" value="42" />
+            </label>
+            <label>
+              Temperature
+              <input name="temperature" type="number" min="0" step="0.05" value="0.95" />
+            </label>
+            <label>
+              Top P
+              <input name="top_p" type="number" min="0" max="1" step="0.05" value="0.95" />
+            </label>
+            <label>
+              Top K
+              <input name="top_k" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
+              参照音声秒数
+              <input name="max_voice_seconds" type="number" min="0" step="0.5" value="5" />
+            </label>
+            <label>
+              行間秒数
+              <input name="line_gap" type="number" min="0" step="0.1" value="1" />
+            </label>
+          </div>
+          <div class="vibevoice-switch-row">
+            <label class="vibevoice-switch">
+              <input name="do_sample" type="checkbox" checked />
+              <span>Sampling</span>
+            </label>
+            <label class="vibevoice-switch">
+              <input id="vibevoice-line-by-line" name="line_by_line" type="checkbox" />
+              <span>行ごと生成して結合</span>
+            </label>
+          </div>
+        </section>
+
+        <div class="vibevoice-actions">
+          <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
+          <p id="vibevoice-message" class="vibevoice-message" role="status" aria-live="polite"></p>
+        </div>
+      </form>
+
+      <section id="vibevoice-result" class="vibevoice-result" aria-label="生成結果" hidden>
+        <div class="vibevoice-panel-header">
+          <div>
+            <p class="vibevoice-section-label">Result</p>
+            <h2>生成結果</h2>
+          </div>
+          <a id="vibevoice-download" class="vibevoice-download" href="#" download="vibevoice-output.wav">WAVを保存</a>
+        </div>
+        <audio id="vibevoice-audio" controls></audio>
+        <div class="vibevoice-result-grid">
+          <article>
+            <h3>正規化後の台本</h3>
+            <pre id="vibevoice-normalized-script"></pre>
+          </article>
+          <article>
+            <h3>診断</h3>
+            <pre id="vibevoice-diagnostics"></pre>
+          </article>
+        </div>
+      </section>
+    </main>
+    <script src="/static/app_vibevoice.js" defer></script>
+  </body>
+</html>

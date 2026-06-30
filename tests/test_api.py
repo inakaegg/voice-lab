@@ -146,6 +146,69 @@ def test_practice_admin_serves_practice_history_ui() -> None:
     assert "/static/app_practice_history.js" in response.text
 
 
+def test_vibevoice_serves_local_skit_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/vibevoice")
+
+    assert response.status_code == 200
+    assert "VibeVoice" in response.text
+    assert "vibevoice-script" in response.text
+    assert "voice_file_1" in response.text
+    assert "/static/app_vibevoice.js" in response.text
+
+
+def test_vibevoice_status_api_uses_service() -> None:
+    class FakeVibeVoiceService:
+        def status(self):
+            return {"available": True, "provider": "fake-vibevoice"}
+
+    client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
+
+    response = client.get("/api/vibevoice/status")
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["provider"] == "fake-vibevoice"
+
+
+def test_vibevoice_generate_api_returns_audio() -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {"stdout_tail": "ok", "stderr_tail": ""}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            return FakeVibeVoiceResult()
+
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={"script": "你好。", "inference_steps": "3", "line_by_line": "true"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["audio_mime_type"] == "audio/wav"
+    assert payload["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
+    assert payload["normalized_script"] == "Speaker 1: 你好。"
+    assert payload["providers"]["vibevoice"] == "fake-vibevoice"
+    assert len(service.calls) == 1
+    assert service.calls[0][2].inference_steps == 3
+    assert service.calls[0][2].line_by_line is True
+
+
 def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"auto": "コーヒーがほしいです"}),

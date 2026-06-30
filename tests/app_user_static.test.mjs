@@ -8,6 +8,8 @@ const practiceHtml = await readFile(new URL("../src/mo_speech/web/practice.html"
 const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
 const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_admin.html", import.meta.url), "utf8");
 const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_practice_history.js", import.meta.url), "utf8");
+const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
+const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
@@ -121,4 +123,21 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
+});
+
+test("vibevoice page provides local skit generation controls", () => {
+  assert.match(vibevoiceHtml, /VibeVoice/);
+  assert.match(vibevoiceHtml, /id="vibevoice-script"/);
+  assert.match(vibevoiceHtml, /name="script_file"/);
+  assert.match(vibevoiceHtml, /name="voice_file_1"/);
+  assert.match(vibevoiceHtml, /name="voice_file_4"/);
+  assert.match(vibevoiceHtml, /name="cfg_scale"/);
+  assert.match(vibevoiceHtml, /name="inference_steps"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-generate-button"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-audio"/);
+  assert.match(vibevoiceHtml, /\/static\/app_vibevoice\.js/);
+  assert.match(vibevoiceSource, /\/api\/vibevoice\/status/);
+  assert.match(vibevoiceSource, /\/api\/vibevoice\/generate/);
+  assert.match(vibevoiceSource, /audio_base64/);
+  assert.match(styles, /\.vibevoice-shell/);
 });
