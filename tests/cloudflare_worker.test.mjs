@@ -64,6 +64,78 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   assert.equal(history.outputs[0].metadata.endpoint, "translate-speech-jobs");
 });
 
+test("Cloudflare worker creates a pronunciation practice prompt", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url, init) => {
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return new Response("コーヒーがほしいです", { status: 200 });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          source_language: "ja-JP",
+          target_language: "zh-CN",
+          translated_text: "我想要咖啡。",
+        }),
+      });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([10, 11, 12]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+  form.append("target_language", "zh-CN");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.transcript, "コーヒーがほしいです");
+  assert.equal(payload.target_language, "zh-CN");
+  assert.equal(payload.target_text, "我想要咖啡。");
+  assert.equal(payload.audio_base64, Buffer.from([10, 11, 12]).toString("base64"));
+  assert.equal(payload.display_text.primary_text, "我想要咖啡。");
+  assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
+  assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
+  assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");
+  assert.equal(history.recordings[0].metadata.endpoint, "practice-prompts");
+  assert.equal(history.outputs[0].metadata.endpoint, "practice-prompts");
+});
+
+test("Cloudflare worker scores a pronunciation practice attempt", async () => {
+  const env = fakeEnv(async (url) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return new Response("I want coffee", { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("target_language", "en-US");
+  form.append("target_text", "I want a coffee.");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempts", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.recognized_text, "I want coffee");
+  assert.equal(payload.grade, "ok");
+  assert.ok(payload.similarity >= 0.85);
+  assert.equal(payload.normalized_target, "iwantacoffee");
+  assert.equal(payload.normalized_recognized, "iwantcoffee");
+  assert.ok(Array.isArray(payload.diff));
+});
+
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {
   const calls = [];
   const env = fakeEnv(async (url, init) => {

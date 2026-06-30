@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import perf_counter
 from typing import Annotated
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
@@ -47,6 +48,11 @@ from .factory import (
 )
 from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
+from .practice import (
+    PRACTICE_TARGET_LANGUAGES,
+    evaluate_practice_attempt,
+    supported_practice_target_language,
+)
 from .providers.openai_api import (
     create_openai_realtime_translation_client_secret,
 )
@@ -82,6 +88,34 @@ def _configure_logging() -> None:
 
 
 _configure_logging()
+
+
+def _elapsed_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000
+
+
+def _practice_display_text(text: str, target_language: str) -> dict[str, str]:
+    if target_language != "ja-JP":
+        return {
+            "mode": "plain",
+            "primary_text": text,
+            "secondary_text": "",
+            "kanji_text": text,
+            "hiragana_text": "",
+        }
+    try:
+        display = create_user_display_text(text, target_language)
+    except RuntimeError:
+        display = {"kanji_text": text, "hiragana_text": ""}
+    hiragana_text = str(display.get("hiragana_text") or "").strip()
+    kanji_text = str(display.get("kanji_text") or text).strip()
+    return {
+        "mode": "hiragana" if hiragana_text else "plain",
+        "primary_text": hiragana_text or kanji_text,
+        "secondary_text": kanji_text if hiragana_text and hiragana_text != kanji_text else "",
+        "kanji_text": kanji_text,
+        "hiragana_text": hiragana_text,
+    }
 
 
 def create_app(
@@ -121,6 +155,10 @@ def create_app(
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(WEB_DIR / "user.html")
+
+    @app.get("/practice")
+    def practice() -> FileResponse:
+        return FileResponse(WEB_DIR / "practice.html")
 
     @app.get("/admin")
     def admin() -> FileResponse:
@@ -274,6 +312,148 @@ def create_app(
             },
         )
         return _serialize_pipeline_result(result)
+
+    @app.post("/api/practice/prompts")
+    async def create_practice_prompt(
+        audio: Annotated[UploadFile, File()],
+        target_language: Annotated[str, Form()] = "ja-JP",
+    ) -> dict[str, object]:
+        try:
+            practice_target_language = supported_practice_target_language(target_language)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        audio_bytes = await audio.read()
+        _save_audio_history_recording(
+            active_audio_history_store,
+            audio_bytes,
+            suffix=_upload_suffix(audio.filename),
+            metadata={
+                "endpoint": "practice-prompts",
+                "target_language": practice_target_language,
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
+
+        timings_ms: dict[str, float] = {}
+        total_started = perf_counter()
+        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            try:
+                started = perf_counter()
+                transcript = active_openai_pipeline.asr.transcribe(Path(temp_audio.name), "auto")
+                timings_ms["asr"] = _elapsed_ms(started)
+
+                started = perf_counter()
+                target_text = active_openai_pipeline.translator.translate(
+                    transcript,
+                    "auto",
+                    practice_target_language,
+                )
+                timings_ms["translation"] = _elapsed_ms(started)
+
+                started = perf_counter()
+                tts_output = _normalize_tts_provider_output(
+                    active_openai_pipeline.tts.synthesize(target_text, practice_target_language),
+                    active_openai_pipeline.tts.audio_mime_type,
+                )
+                timings_ms.update(tts_output.timings_ms)
+                timings_ms.setdefault("tts", _elapsed_ms(started))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        timings_ms["total"] = _elapsed_ms(total_started)
+        result = {
+            "transcript": transcript,
+            "target_text": target_text,
+            "translated_text": target_text,
+            "transformed_text": target_text,
+            "target_language": practice_target_language,
+            "target_language_label": PRACTICE_TARGET_LANGUAGES[practice_target_language]["label"],
+            "display_text": _practice_display_text(target_text, practice_target_language),
+            "audio_mime_type": tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
+            "audio_base64": base64.b64encode(tts_output.audio_bytes).decode("ascii"),
+            "timings_ms": timings_ms,
+            "providers": {
+                "asr": active_openai_pipeline.asr.name,
+                "translation": active_openai_pipeline.translator.name,
+                "tts": active_openai_pipeline.tts.name,
+            },
+        }
+        active_audio_history_store.save_output(
+            tts_output.audio_bytes,
+            suffix=_mime_suffix(result["audio_mime_type"]),
+            metadata={
+                "endpoint": "practice-prompts",
+                "translation_backend": "openai",
+                "target_language": practice_target_language,
+                "audio_mime_type": result["audio_mime_type"],
+                "transcript_preview": transcript[:80],
+                "translated_text_preview": target_text[:80],
+                "tts_text": target_text,
+                "text_preview": target_text[:80],
+            },
+        )
+        return result
+
+    @app.post("/api/practice/attempts")
+    async def create_practice_attempt(
+        audio: Annotated[UploadFile, File()],
+        target_language: Annotated[str, Form()],
+        target_text: Annotated[str, Form()],
+    ) -> dict[str, object]:
+        try:
+            practice_target_language = supported_practice_target_language(target_language)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not target_text.strip():
+            raise HTTPException(status_code=400, detail="target_text is required")
+
+        audio_bytes = await audio.read()
+        _save_audio_history_recording(
+            active_audio_history_store,
+            audio_bytes,
+            suffix=_upload_suffix(audio.filename),
+            metadata={
+                "endpoint": "practice-attempts",
+                "target_language": practice_target_language,
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
+
+        total_started = perf_counter()
+        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            try:
+                asr_started = perf_counter()
+                recognized_text = active_openai_pipeline.asr.transcribe(Path(temp_audio.name), practice_target_language)
+                asr_ms = _elapsed_ms(asr_started)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
+        return {
+            "target_language": practice_target_language,
+            "target_text": target_text,
+            "recognized_text": recognized_text,
+            **evaluation,
+            "timings_ms": {
+                "asr": asr_ms,
+                "compare": max(0.0, _elapsed_ms(total_started) - asr_ms),
+                "total": _elapsed_ms(total_started),
+            },
+            "providers": {
+                "asr": active_openai_pipeline.asr.name,
+            },
+        }
 
     @app.post("/api/translate-speech")
     async def translate_speech(

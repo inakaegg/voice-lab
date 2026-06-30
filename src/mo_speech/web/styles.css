@@ -1427,3 +1427,407 @@ audio {
   }
 
 }
+
+.practice-body {
+  background:
+    radial-gradient(circle at 20% 8%, rgba(255, 214, 102, 0.28), transparent 32%),
+    linear-gradient(135deg, #f7fbff 0%, #eef6ff 48%, #fff7f1 100%);
+  color: #14213d;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.practice-shell {
+  box-sizing: border-box;
+  display: grid;
+  gap: 18px;
+  margin: 0 auto;
+  max-width: 860px;
+  min-height: 100vh;
+  padding: 22px clamp(16px, 4vw, 34px) 32px;
+}
+
+.practice-header {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.practice-back-link {
+  align-items: center;
+  background: #ffffff;
+  border: 2px solid #d5e5ff;
+  border-radius: 50%;
+  box-shadow: 0 8px 18px rgba(38, 99, 190, 0.13);
+  color: #174ea6;
+  display: inline-flex;
+  font-size: 24px;
+  font-weight: 900;
+  height: 44px;
+  justify-content: center;
+  text-decoration: none;
+  width: 44px;
+}
+
+.practice-kicker,
+.practice-section-label {
+  color: #52677f;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 4px;
+}
+
+.practice-header h1 {
+  font-size: clamp(30px, 8vw, 56px);
+  letter-spacing: 0;
+  line-height: 1;
+  margin: 0;
+}
+
+.practice-target-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.practice-language-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.practice-language-button {
+  align-items: center;
+  background: #ffffff;
+  border: 2px solid #dbe8f7;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(20, 33, 61, 0.08);
+  color: #162033;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 58px;
+  padding: 10px;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.practice-language-button span {
+  font-size: 22px;
+}
+
+.practice-language-button:hover {
+  box-shadow: 0 14px 26px rgba(24, 91, 184, 0.14);
+  transform: translateY(-1px);
+}
+
+.practice-language-button.is-selected {
+  background: #eaf3ff;
+  border-color: #2f80ed;
+  box-shadow: inset 0 3px 8px rgba(15, 85, 185, 0.18);
+  color: #0f4da2;
+  transform: translateY(1px);
+}
+
+.practice-flow {
+  display: grid;
+  gap: 14px;
+}
+
+.practice-card {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(161, 186, 214, 0.55);
+  border-radius: 14px;
+  box-shadow: 0 16px 34px rgba(20, 33, 61, 0.09);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto 1fr auto;
+  padding: 16px;
+}
+
+.practice-step-number {
+  align-items: center;
+  background: #143d72;
+  border-radius: 50%;
+  color: #ffffff;
+  display: inline-flex;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.practice-card-copy h2 {
+  font-size: clamp(21px, 5vw, 30px);
+  letter-spacing: 0;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.practice-card-copy p {
+  color: #5c6b7c;
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+
+.practice-record-button,
+.practice-play-button,
+.practice-small-button {
+  align-items: center;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 900;
+  justify-content: center;
+}
+
+.practice-record-button {
+  background: linear-gradient(135deg, #ff3b30, #ff7a45);
+  border-radius: 999px;
+  box-shadow: 0 14px 28px rgba(255, 88, 72, 0.3);
+  color: #ffffff;
+  gap: 10px;
+  min-height: 64px;
+  min-width: 126px;
+  padding: 0 22px;
+}
+
+.practice-record-button-secondary {
+  background: linear-gradient(135deg, #2f80ed, #20c997);
+  box-shadow: 0 14px 28px rgba(47, 128, 237, 0.27);
+}
+
+.practice-record-button.is-recording {
+  animation: practice-recording-glow 1s ease-in-out infinite alternate;
+  background: linear-gradient(135deg, #c1121f, #ffb703);
+}
+
+.practice-record-button:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.practice-record-icon {
+  background: #ffffff;
+  border-radius: 10px 10px 12px 12px;
+  display: inline-block;
+  height: 24px;
+  position: relative;
+  width: 16px;
+}
+
+.practice-record-icon::after {
+  background: #ffffff;
+  border-radius: 999px;
+  bottom: -9px;
+  content: "";
+  height: 3px;
+  left: -5px;
+  position: absolute;
+  width: 26px;
+}
+
+.practice-level-meter {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  grid-column: 1 / -1;
+  height: 20px;
+  opacity: 0.2;
+}
+
+.practice-level-meter.is-active {
+  opacity: 1;
+}
+
+.practice-level-meter span {
+  background: #2f80ed;
+  border-radius: 999px;
+  display: block;
+  flex: 1;
+  height: 100%;
+  transform: scaleY(0.18);
+  transform-origin: center;
+}
+
+.practice-target-text-box {
+  background: #f6f9ff;
+  border: 1px solid #d9e7fb;
+  border-radius: 10px;
+  grid-column: 1 / -1;
+  padding: 14px;
+}
+
+.practice-target-text {
+  font-size: clamp(28px, 7vw, 48px);
+  font-weight: 900;
+  line-height: 1.24;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.practice-target-subtext {
+  color: #5d6f82;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+  margin: 10px 0 0;
+}
+
+.practice-play-button {
+  background: #143d72;
+  border-radius: 999px;
+  color: #ffffff;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 18px;
+}
+
+.practice-play-button.is-playing {
+  background: #6f42c1;
+}
+
+.practice-result-card {
+  grid-template-columns: auto 1fr;
+}
+
+.practice-grade-badge {
+  background: #eafaf2;
+  border: 2px solid #2fbf71;
+  border-radius: 999px;
+  color: #117342;
+  font-size: 20px;
+  font-weight: 900;
+  padding: 10px 16px;
+}
+
+.practice-grade-badge[data-grade="almost"] {
+  background: #fff8df;
+  border-color: #f2b705;
+  color: #7b5900;
+}
+
+.practice-grade-badge[data-grade="retry"] {
+  background: #fff0f0;
+  border-color: #ef6351;
+  color: #9d2b20;
+}
+
+.practice-score {
+  font-size: 28px;
+  font-weight: 900;
+  margin: 0;
+}
+
+.practice-score-bar,
+.practice-progress {
+  background: #dce8f7;
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.practice-score-bar {
+  grid-column: 1 / -1;
+}
+
+.practice-score-bar span,
+.practice-progress span {
+  background: linear-gradient(90deg, #2f80ed, #20c997, #ffd166);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 220ms ease;
+  width: 0;
+}
+
+.practice-recognized-text {
+  background: #ffffff;
+  border: 1px solid #dbe8f7;
+  border-radius: 10px;
+  font-size: 19px;
+  font-weight: 800;
+  grid-column: 1 / -1;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.practice-actions {
+  display: flex;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.practice-small-button {
+  background: #2f80ed;
+  border-radius: 999px;
+  color: #ffffff;
+  min-height: 46px;
+  padding: 0 18px;
+}
+
+.practice-small-button-muted {
+  background: #e9eef6;
+  color: #22344d;
+}
+
+.practice-status,
+.practice-error {
+  border-radius: 10px;
+  font-weight: 800;
+  line-height: 1.5;
+  margin: 0;
+  padding: 12px 14px;
+  text-align: center;
+}
+
+.practice-status {
+  background: rgba(255, 255, 255, 0.78);
+  color: #31445c;
+}
+
+.practice-error {
+  background: #fff1f0;
+  border: 1px solid #e9aaa2;
+  color: #8a1f11;
+}
+
+@keyframes practice-recording-glow {
+  from {
+    box-shadow: 0 14px 28px rgba(255, 88, 72, 0.3);
+    transform: scale(1);
+  }
+
+  to {
+    box-shadow: 0 18px 38px rgba(255, 183, 3, 0.5);
+    transform: scale(1.025);
+  }
+}
+
+@media (max-width: 720px) {
+  .practice-shell {
+    padding: 16px 14px 24px;
+  }
+
+  .practice-language-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .practice-card {
+    grid-template-columns: auto 1fr;
+  }
+
+  .practice-record-button,
+  .practice-play-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .practice-card-copy p {
+    font-size: 14px;
+  }
+}

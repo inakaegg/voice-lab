@@ -20,6 +20,16 @@ const OPENAI_LANGUAGE_NAMES = {
   "zh-CN": "Chinese",
   "en-US": "English",
 };
+const PRACTICE_TARGET_LANGUAGES = {
+  "ja-JP": { label: "日本語", speech_name: "Japanese" },
+  "zh-CN": { label: "中文", speech_name: "Mandarin Chinese" },
+  "en-US": { label: "English", speech_name: "English" },
+};
+const PRACTICE_GRADE_LABELS = {
+  ok: "いいかんじ",
+  almost: "もうすこし",
+  retry: "ちがうかも",
+};
 
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
@@ -92,6 +102,12 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "POST" && url.pathname === "/api/user-joke-output") {
       return jsonResponse(await createUserJokeOutput(await request.json(), env));
     }
+    if (request.method === "POST" && url.pathname === "/api/practice/prompts") {
+      return jsonResponse(await createPracticePrompt(request, env));
+    }
+    if (request.method === "POST" && url.pathname === "/api/practice/attempts") {
+      return jsonResponse(await createPracticeAttempt(request, env));
+    }
     if (request.method === "POST" && url.pathname === "/api/translate-speech-jobs") {
       return jsonResponse(await createTranslationJob(request, env));
     }
@@ -126,6 +142,8 @@ async function serveAsset(request, env, url) {
   const assetUrl = new URL(request.url);
   if (url.pathname === "/") {
     assetUrl.pathname = "/user.html";
+  } else if (url.pathname === "/practice") {
+    assetUrl.pathname = "/practice.html";
   } else if (url.pathname === "/admin") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {
@@ -873,6 +891,148 @@ async function createUserJokeOutput(payload, env) {
     voice_mode: "default",
   });
   return result;
+}
+
+async function createPracticePrompt(request, env) {
+  const form = await request.formData();
+  const audio = requiredBlob(form, "audio");
+  const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
+  const audioBytes = await audio.arrayBuffer();
+  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
+
+  await saveAudioHistoryEntry(env, "recordings", {
+    audio_base64: arrayBufferToBase64(audioBytes),
+    audio_mime_type: audioMimeType,
+    filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-native.${extensionForMimeType(audioMimeType)}`,
+    metadata: {
+      endpoint: "practice-prompts",
+      target_language: targetLanguage,
+      filename: audio.name || "",
+      content_type: audio.type || audioMimeType,
+    },
+  });
+
+  const totalStarted = Date.now();
+  const asrStarted = Date.now();
+  const transcript = await openAiTranscribe(env, {
+    audioBytes,
+    audioMimeType,
+    sourceLanguage: "auto",
+    filename: audio.name || `native.${extensionForMimeType(audioMimeType)}`,
+  });
+  const asrMs = Date.now() - asrStarted;
+
+  const translationStarted = Date.now();
+  const translation = await translateTranscript(env, {
+    transcript,
+    sourceLanguage: "auto",
+    targetLanguage,
+  });
+  const translationMs = Date.now() - translationStarted;
+
+  const tts = await openAiSpeech(env, translation.translated_text);
+  const result = {
+    transcript,
+    target_text: translation.translated_text,
+    translated_text: translation.translated_text,
+    transformed_text: translation.translated_text,
+    target_language: targetLanguage,
+    target_language_label: PRACTICE_TARGET_LANGUAGES[targetLanguage].label,
+    display_text: await createPracticeDisplayText(translation.translated_text, targetLanguage, env),
+    audio_mime_type: tts.audio_mime_type,
+    audio_base64: tts.audio_base64,
+    timings_ms: {
+      asr: asrMs,
+      translation: translationMs,
+      ...(tts.timings_ms || {}),
+      total: Date.now() - totalStarted,
+    },
+    providers: {
+      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
+    },
+    detected_source_language: translation.source_language,
+  };
+  await savePipelineOutputHistory(env, result, {
+    endpoint: "practice-prompts",
+    translation_backend: "openai",
+    source_language: translation.source_language || "auto",
+    target_language: targetLanguage,
+    voice_mode: "default",
+  });
+  return result;
+}
+
+async function createPracticeAttempt(request, env) {
+  const form = await request.formData();
+  const audio = requiredBlob(form, "audio");
+  const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
+  const targetText = stringFormValue(form, "target_text", "").trim();
+  if (!targetText) {
+    throw httpError(400, "target_text is required");
+  }
+  const audioBytes = await audio.arrayBuffer();
+  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
+
+  await saveAudioHistoryEntry(env, "recordings", {
+    audio_base64: arrayBufferToBase64(audioBytes),
+    audio_mime_type: audioMimeType,
+    filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-repeat.${extensionForMimeType(audioMimeType)}`,
+    metadata: {
+      endpoint: "practice-attempts",
+      target_language: targetLanguage,
+      filename: audio.name || "",
+      content_type: audio.type || audioMimeType,
+    },
+  });
+
+  const totalStarted = Date.now();
+  const asrStarted = Date.now();
+  const recognizedText = await openAiTranscribe(env, {
+    audioBytes,
+    audioMimeType,
+    sourceLanguage: targetLanguage,
+    filename: audio.name || `repeat.${extensionForMimeType(audioMimeType)}`,
+  });
+  const asrMs = Date.now() - asrStarted;
+  const evaluation = evaluatePracticeAttempt(targetText, recognizedText, targetLanguage);
+  return {
+    target_language: targetLanguage,
+    target_text: targetText,
+    recognized_text: recognizedText,
+    ...evaluation,
+    timings_ms: {
+      asr: asrMs,
+      compare: Math.max(0, Date.now() - totalStarted - asrMs),
+      total: Date.now() - totalStarted,
+    },
+    providers: {
+      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
+    },
+  };
+}
+
+async function createPracticeDisplayText(text, targetLanguage, env) {
+  if (targetLanguage !== "ja-JP") {
+    return {
+      mode: "plain",
+      primary_text: text,
+      secondary_text: "",
+      kanji_text: text,
+      hiragana_text: "",
+    };
+  }
+  const display = await createUserDisplayText({ text, target_language: targetLanguage }, env);
+  const hiraganaText = String(display.hiragana_text || "").trim();
+  const kanjiText = String(display.kanji_text || text).trim();
+  return {
+    mode: hiraganaText ? "hiragana" : "plain",
+    primary_text: hiraganaText || kanjiText,
+    secondary_text: hiraganaText && hiraganaText !== kanjiText ? kanjiText : "",
+    kanji_text: kanjiText,
+    hiragana_text: hiraganaText,
+  };
 }
 
 async function listAudioHistory(env) {
@@ -1643,6 +1803,101 @@ function errorMessage(error) {
 
 function supportedValue(value, supported, fallback) {
   return supported.includes(String(value)) ? String(value) : fallback;
+}
+
+function supportedPracticeTargetLanguage(value) {
+  const language = String(value || "ja-JP");
+  if (!Object.prototype.hasOwnProperty.call(PRACTICE_TARGET_LANGUAGES, language)) {
+    throw httpError(400, `unsupported practice target language: ${language}`);
+  }
+  return language;
+}
+
+function evaluatePracticeAttempt(targetText, recognizedText, targetLanguage) {
+  const normalizedTarget = normalizePracticeText(targetText, targetLanguage);
+  const normalizedRecognized = normalizePracticeText(recognizedText, targetLanguage);
+  const similarity = practiceSimilarity(normalizedTarget, normalizedRecognized);
+  const grade = practiceGrade(similarity);
+  return {
+    normalized_target: normalizedTarget,
+    normalized_recognized: normalizedRecognized,
+    similarity: Math.round(similarity * 1000) / 1000,
+    grade,
+    grade_label: PRACTICE_GRADE_LABELS[grade],
+    diff: practiceDiff(normalizedTarget, normalizedRecognized),
+  };
+}
+
+function normalizePracticeText(text, targetLanguage) {
+  let normalized = String(text || "").normalize("NFKC").trim().toLowerCase();
+  if (targetLanguage === "ja-JP") {
+    normalized = normalized.replace(/[\u30a1-\u30f6]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0x60)
+    );
+  }
+  return Array.from(normalized)
+    .filter((char) => !/[\p{P}\p{Z}\p{S}]/u.test(char))
+    .join("");
+}
+
+function practiceSimilarity(normalizedTarget, normalizedRecognized) {
+  if (!normalizedTarget && !normalizedRecognized) {
+    return 1;
+  }
+  if (!normalizedTarget || !normalizedRecognized) {
+    return 0;
+  }
+  if (normalizedTarget === normalizedRecognized) {
+    return 1;
+  }
+  const distance = levenshteinDistance(normalizedTarget, normalizedRecognized);
+  const sequenceScore = 1 - distance / Math.max(normalizedTarget.length, normalizedRecognized.length);
+  const containmentScore =
+    normalizedTarget.includes(normalizedRecognized) || normalizedRecognized.includes(normalizedTarget)
+      ? Math.min(normalizedTarget.length, normalizedRecognized.length) /
+        Math.max(normalizedTarget.length, normalizedRecognized.length)
+      : 0;
+  return Math.max(0, Math.min(1, Math.max(sequenceScore, containmentScore)));
+}
+
+function practiceGrade(similarity) {
+  if (similarity >= 0.82) {
+    return "ok";
+  }
+  if (similarity >= 0.45) {
+    return "almost";
+  }
+  return "retry";
+}
+
+function practiceDiff(normalizedTarget, normalizedRecognized) {
+  if (normalizedTarget === normalizedRecognized) {
+    return [{ type: "equal", target: normalizedTarget, recognized: normalizedRecognized }];
+  }
+  return [
+    {
+      type: "compare",
+      target: normalizedTarget,
+      recognized: normalizedRecognized,
+    },
+  ];
+}
+
+function levenshteinDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    const current = [leftIndex + 1];
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+      const cost = left[leftIndex] === right[rightIndex] ? 0 : 1;
+      current[rightIndex + 1] = Math.min(
+        current[rightIndex] + 1,
+        previous[rightIndex + 1] + 1,
+        previous[rightIndex] + cost,
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
 }
 
 function clampInt(value, min, max, fallback) {

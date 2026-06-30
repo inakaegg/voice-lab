@@ -82,6 +82,67 @@ def test_root_serves_simple_user_ui() -> None:
     assert response.text.index("user-toggles") < response.text.index("user-replay-button")
 
 
+def test_practice_serves_pronunciation_practice_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/practice")
+
+    assert response.status_code == 200
+    assert "はつおん れんしゅう" in response.text
+    assert "practice-target-language" in response.text
+    assert 'value="ja-JP"' in response.text
+    assert 'value="zh-CN"' in response.text
+    assert 'value="en-US"' in response.text
+    assert "practice-native-record-button" in response.text
+    assert "practice-repeat-record-button" in response.text
+    assert "/static/app_practice.js" in response.text
+
+
+def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "コーヒーがほしいです"}),
+        translator=FakeTranslationProvider({("auto", "zh-CN", "コーヒーがほしいです"): "我想要咖啡。"}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/prompts",
+        data={"target_language": "zh-CN"},
+        files={"audio": ("native.webm", b"native audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["transcript"] == "コーヒーがほしいです"
+    assert payload["target_text"] == "我想要咖啡。"
+    assert payload["target_language"] == "zh-CN"
+    assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:我想要咖啡。".encode()).decode()
+    assert payload["providers"]["asr"] == "fake-asr"
+
+
+def test_practice_attempt_api_scores_repeat_audio() -> None:
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"en-US": "I want coffee"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempts",
+        data={"target_language": "en-US", "target_text": "I want a coffee."},
+        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recognized_text"] == "I want coffee"
+    assert payload["grade"] == "ok"
+    assert payload["similarity"] >= 0.85
+    assert payload["providers"]["asr"] == "fake-asr"
+
+
 def test_admin_serves_browser_ui() -> None:
     client = TestClient(create_app())
 
@@ -207,6 +268,7 @@ def test_static_assets_are_served() -> None:
         "app.js",
         "app_admin_settings.js",
         "app_user.js",
+        "app_practice.js",
     ]
     js_responses = [client.get(f"/static/{name}") for name in js_asset_names]
     js_text = "\n".join(response.text for response in js_responses)

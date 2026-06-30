@@ -4,6 +4,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("../src/mo_speech/web/app_user.js", import.meta.url), "utf8");
 const userHtml = await readFile(new URL("../src/mo_speech/web/user.html", import.meta.url), "utf8");
+const practiceHtml = await readFile(new URL("../src/mo_speech/web/practice.html", import.meta.url), "utf8");
+const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
@@ -30,4 +32,18 @@ test("admin page can start RunPod warmup manually", () => {
   assert.match(adminSource, /runpodWarmupButton\.addEventListener\("click", startRunpodWarmup\)/);
   assert.match(adminSource, /fetch\("\/api\/warmup", \{ method: "POST" \}\)/);
   assert.match(adminSource, /fetch\(`\/api\/warmup\/\$\{encodeURIComponent\(jobId\)\}`\)/);
+});
+
+test("practice page keeps pronunciation training separate from conversion demo", () => {
+  assert.match(practiceHtml, /はつおん れんしゅう/);
+  assert.match(practiceHtml, /id="practice-target-language"/);
+  assert.match(practiceHtml, /value="ja-JP"/);
+  assert.match(practiceHtml, /value="zh-CN"/);
+  assert.match(practiceHtml, /value="en-US"/);
+  assert.match(practiceHtml, /id="practice-native-record-button"/);
+  assert.match(practiceHtml, /id="practice-repeat-record-button"/);
+  assert.match(practiceHtml, /\/static\/app_practice\.js/);
+  assert.match(practiceSource, /\/api\/practice\/prompts/);
+  assert.match(practiceSource, /\/api\/practice\/attempts/);
+  assert.doesNotMatch(practiceHtml, /joke_mode|similar_voice|osaka_dialect|variation_mode/);
 });

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>はつおん れんしゅう</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="practice-body">
+    <main class="practice-shell" aria-label="はつおん れんしゅう">
+      <header class="practice-header">
+        <a class="practice-back-link" href="/" aria-label="へんなへんかんアプリへ">←</a>
+        <div>
+          <p class="practice-kicker">まねして はなす</p>
+          <h1>はつおん れんしゅう</h1>
+        </div>
+      </header>
+
+      <section class="practice-target-panel" aria-label="れんしゅうすることば">
+        <p class="practice-section-label">れんしゅうする ことば</p>
+        <div id="practice-target-language" class="practice-language-grid" role="radiogroup" aria-label="学習対象言語">
+          <button type="button" class="practice-language-button is-selected" data-language="ja-JP" value="ja-JP" role="radio" aria-checked="true">
+            <span aria-hidden="true">🇯🇵</span>
+            <strong>日本語</strong>
+          </button>
+          <button type="button" class="practice-language-button" data-language="zh-CN" value="zh-CN" role="radio" aria-checked="false">
+            <span aria-hidden="true">🇨🇳</span>
+            <strong>中文</strong>
+          </button>
+          <button type="button" class="practice-language-button" data-language="en-US" value="en-US" role="radio" aria-checked="false">
+            <span aria-hidden="true">🇺🇸</span>
+            <strong>English</strong>
+          </button>
+        </div>
+      </section>
+
+      <section class="practice-flow" aria-label="れんしゅう">
+        <article class="practice-card practice-card-primary">
+          <div class="practice-step-number">1</div>
+          <div class="practice-card-copy">
+            <h2>いいたいことを はなす</h2>
+            <p>いつものことばで はなすと、おてほんのこえができます。</p>
+          </div>
+          <button id="practice-native-record-button" class="practice-record-button" type="button">
+            <span class="practice-record-icon" aria-hidden="true"></span>
+            <span class="practice-button-text">はなす</span>
+          </button>
+          <div id="practice-native-level" class="practice-level-meter" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </article>
+
+        <article id="practice-prompt-panel" class="practice-card practice-prompt-card" hidden>
+          <div class="practice-step-number">2</div>
+          <div class="practice-card-copy">
+            <h2>おてほん</h2>
+            <p id="practice-target-label">よくきいて、まねしてください。</p>
+          </div>
+          <div class="practice-target-text-box">
+            <p id="practice-target-text" class="practice-target-text"></p>
+            <p id="practice-target-subtext" class="practice-target-subtext" hidden></p>
+          </div>
+          <button id="practice-play-model-button" class="practice-play-button" type="button">
+            <span aria-hidden="true">▶</span>
+            <span>きく</span>
+          </button>
+          <audio id="practice-model-audio" hidden></audio>
+        </article>
+
+        <article id="practice-repeat-panel" class="practice-card practice-repeat-card" hidden>
+          <div class="practice-step-number">3</div>
+          <div class="practice-card-copy">
+            <h2>まねして はなす</h2>
+            <p>おてほんに ちかく きこえたかを みます。</p>
+          </div>
+          <button id="practice-repeat-record-button" class="practice-record-button practice-record-button-secondary" type="button">
+            <span class="practice-record-icon" aria-hidden="true"></span>
+            <span class="practice-button-text">まねする</span>
+          </button>
+          <div id="practice-repeat-level" class="practice-level-meter" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </article>
+
+        <article id="practice-result-panel" class="practice-card practice-result-card" hidden>
+          <div id="practice-grade-badge" class="practice-grade-badge">--</div>
+          <p id="practice-score" class="practice-score"></p>
+          <div class="practice-score-bar" aria-hidden="true">
+            <span id="practice-score-fill"></span>
+          </div>
+          <p class="practice-section-label">きこえた ことば</p>
+          <p id="practice-recognized-text" class="practice-recognized-text"></p>
+          <div class="practice-actions">
+            <button id="practice-retry-button" class="practice-small-button" type="button">もういちど</button>
+            <button id="practice-next-button" class="practice-small-button practice-small-button-muted" type="button">つぎへ</button>
+          </div>
+        </article>
+      </section>
+
+      <div id="practice-progress" class="practice-progress" hidden>
+        <span id="practice-progress-fill"></span>
+      </div>
+      <p id="practice-status" class="practice-status" role="status" aria-live="polite">まず、れんしゅうすることばを えらんでください。</p>
+      <p id="practice-error" class="practice-error" hidden></p>
+    </main>
+    <script src="/static/app_practice.js" defer></script>
+  </body>
+</html>
