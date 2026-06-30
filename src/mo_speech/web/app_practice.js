@@ -21,8 +21,6 @@ const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
 const recognizedText = document.querySelector("#practice-recognized-text");
-const retryButton = document.querySelector("#practice-retry-button");
-const nextButton = document.querySelector("#practice-next-button");
 const progress = document.querySelector("#practice-progress");
 const progressFill = document.querySelector("#practice-progress-fill");
 const statusText = document.querySelector("#practice-status");
@@ -33,8 +31,6 @@ const nativeTranscriptPanel = document.querySelector("#practice-native-transcrip
 const nativeTranscriptLabel = document.querySelector("#practice-native-transcript-label");
 const nativeTranscript = document.querySelector("#practice-native-transcript");
 const recognizedLabel = document.querySelector("#practice-recognized-label");
-const compareButton = document.querySelector("#practice-compare-button");
-const repeatAudioButton = document.querySelector("#practice-repeat-audio-button");
 const repeatAudio = document.querySelector("#practice-repeat-audio");
 
 const languageLabels = {
@@ -130,20 +126,14 @@ const nativeUiLabels = {
   "ja-JP": {
     transcript: "言ったこと",
     recognized: "聞こえた言葉",
-    compare: "比較再生",
-    repeatAudio: "自分の録音",
   },
   "zh-CN": {
     transcript: "你说的话",
     recognized: "识别结果",
-    compare: "对比播放",
-    repeatAudio: "我的录音",
   },
   "en-US": {
     transcript: "What you said",
     recognized: "Recognized",
-    compare: "Compare",
-    repeatAudio: "My recording",
   },
 };
 const practiceSettingsStorageKey = "mo:practice-settings";
@@ -171,6 +161,8 @@ let processingKind = "";
 let progressTimer = null;
 let progressDisplayed = 0;
 let progressTarget = 0;
+let isComparisonPlaying = false;
+let comparisonPlaybackToken = 0;
 
 targetLanguageButtons.forEach((button) => {
   button.addEventListener("click", () => selectTargetLanguage(button.dataset.language || "ja-JP"));
@@ -181,10 +173,6 @@ playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 segmentModeSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
-compareButton.addEventListener("click", playComparisonAudios);
-repeatAudioButton.addEventListener("click", playRepeatAudio);
-retryButton.addEventListener("click", () => toggleRecording("repeat"));
-nextButton.addEventListener("click", resetPractice);
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
@@ -306,6 +294,7 @@ async function submitPrompt(blob) {
   promptPanel.hidden = false;
   repeatPanel.hidden = false;
   setBusy(false, "お手本を聞いて、まねして話してください。");
+  await ensureAudioMetadata(modelAudio);
   syncModelAudioSpeed();
   await modelAudio.play().catch(() => {});
   syncPlayButton();
@@ -340,6 +329,7 @@ async function postPracticeForm(url, form) {
 }
 
 function renderAttemptResult(payload) {
+  stopComparisonPlayback();
   const grade = payload.grade || "retry";
   gradeBadge.textContent = payload.grade_label || grade;
   gradeBadge.dataset.grade = grade;
@@ -347,10 +337,13 @@ function renderAttemptResult(payload) {
   scoreText.textContent = `${percent}%`;
   scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   renderRecognizedDiff(payload);
+  nativePanel.hidden = false;
   resultPanel.hidden = false;
+  syncPlayButton();
 }
 
 function resetPractice() {
+  stopComparisonPlayback();
   stopModelAudio();
   currentTargetText = "";
   currentTargetDisplayText = "";
@@ -377,16 +370,26 @@ function setModelAudio(audioBase64, mimeType) {
   const blob = base64ToBlob(audioBase64, mimeType);
   modelAudioUrl = URL.createObjectURL(blob);
   modelAudio.src = modelAudioUrl;
+  modelAudio.load();
   syncModelAudioSpeed();
 }
 
 function setRepeatAudio(blob) {
+  stopComparisonPlayback();
   stopRepeatAudio();
   repeatAudioUrl = URL.createObjectURL(blob);
   repeatAudio.src = repeatAudioUrl;
 }
 
 function toggleModelAudio() {
+  if (isComparisonPlaying) {
+    stopComparisonPlayback();
+    return;
+  }
+  if (shouldUseComparisonPlayback()) {
+    playComparisonAudios().catch((error) => showError(error.message));
+    return;
+  }
   if (!modelAudio.src) {
     return;
   }
@@ -399,6 +402,7 @@ function toggleModelAudio() {
 }
 
 function stopModelAudio() {
+  stopComparisonPlayback();
   if (modelAudioUrl) {
     URL.revokeObjectURL(modelAudioUrl);
     modelAudioUrl = "";
@@ -420,8 +424,12 @@ function stopRepeatAudio() {
 }
 
 function syncPlayButton() {
-  playModelButton.classList.toggle("is-playing", !modelAudio.paused);
-  playModelButton.querySelector("span:last-child").textContent = modelAudio.paused ? "再生" : "停止";
+  const isModelOnlyPlaying = !modelAudio.paused && !isComparisonPlaying;
+  const isPlaying = isComparisonPlaying || isModelOnlyPlaying;
+  playModelButton.classList.toggle("is-playing", isPlaying);
+  playModelButton.querySelector("span:last-child").textContent = isPlaying
+    ? "停止"
+    : (shouldUseComparisonPlayback() ? "比較再生" : "再生");
 }
 
 function syncModelAudioSpeed() {
@@ -518,47 +526,104 @@ function isHanCharacter(char) {
   return hanCodePointRanges.some(([start, end]) => codePoint >= start && codePoint <= end);
 }
 
-async function playRepeatAudio() {
-  if (!repeatAudio.src) {
+function shouldUseComparisonPlayback() {
+  return Boolean(modelAudio.src && repeatAudio.src && !resultPanel.hidden);
+}
+
+function stopComparisonPlayback() {
+  if (!isComparisonPlaying) {
     return;
   }
-  repeatAudio.currentTime = 0;
-  await repeatAudio.play().catch((error) => showError(error.message));
+  comparisonPlaybackToken += 1;
+  isComparisonPlaying = false;
+  modelAudio.pause();
+  repeatAudio.pause();
+  syncPlayButton();
+}
+
+function isActiveComparisonPlayback(token) {
+  return isComparisonPlaying && comparisonPlaybackToken === token;
 }
 
 async function playComparisonAudios() {
+  if (isComparisonPlaying) {
+    stopComparisonPlayback();
+    return;
+  }
   if (!modelAudio.src || !repeatAudio.src) {
     if (modelAudio.src) {
-      await playAudioElementToEnd(modelAudio);
-    }
-    if (repeatAudio.src) {
-      await playAudioElementToEnd(repeatAudio);
+      await playModelAudioOnce();
     }
     return;
   }
-  await Promise.all([ensureAudioMetadata(modelAudio), ensureAudioMetadata(repeatAudio)]);
-  const sentences = splitPracticeSentences(currentTargetText, practiceSegmentMode());
-  if (sentences.length <= 1 || !Number.isFinite(modelAudio.duration) || !Number.isFinite(repeatAudio.duration)) {
-    await playAudioElementToEnd(modelAudio);
-    await playAudioElementToEnd(repeatAudio);
-    return;
-  }
-  const modelRanges = sentenceAudioRanges(sentences, modelAudio.duration);
-  const repeatRanges = sentenceAudioRanges(sentences, repeatAudio.duration);
-  for (let index = 0; index < sentences.length; index += 1) {
-    await playAudioSegmentToEnd(modelAudio, modelRanges[index].start, modelRanges[index].end);
-    await sleep(180);
-    await playAudioSegmentToEnd(repeatAudio, repeatRanges[index].start, repeatRanges[index].end);
-    await sleep(240);
+
+  const token = comparisonPlaybackToken + 1;
+  comparisonPlaybackToken = token;
+  isComparisonPlaying = true;
+  syncPlayButton();
+  try {
+    await Promise.all([ensureAudioMetadata(modelAudio), ensureAudioMetadata(repeatAudio)]);
+    if (!isActiveComparisonPlayback(token)) {
+      return;
+    }
+    const sentences = splitPracticeSentences(currentTargetText, practiceSegmentMode());
+    if (sentences.length <= 1 || !Number.isFinite(modelAudio.duration) || !Number.isFinite(repeatAudio.duration)) {
+      await playAudioElementToEnd(modelAudio, token);
+      if (!isActiveComparisonPlayback(token)) {
+        return;
+      }
+      await playAudioElementToEnd(repeatAudio, token);
+      return;
+    }
+    const modelRanges = sentenceAudioRanges(sentences, modelAudio.duration);
+    const repeatRanges = sentenceAudioRanges(sentences, repeatAudio.duration);
+    for (let index = 0; index < sentences.length; index += 1) {
+      if (!isActiveComparisonPlayback(token)) {
+        return;
+      }
+      await playAudioSegmentToEnd(modelAudio, modelRanges[index].start, modelRanges[index].end, token);
+      await sleep(180);
+      if (!isActiveComparisonPlayback(token)) {
+        return;
+      }
+      await playAudioSegmentToEnd(repeatAudio, repeatRanges[index].start, repeatRanges[index].end, token);
+      await sleep(240);
+    }
+  } finally {
+    if (comparisonPlaybackToken === token) {
+      isComparisonPlaying = false;
+      modelAudio.pause();
+      repeatAudio.pause();
+      syncPlayButton();
+    }
   }
 }
 
-function playAudioElementToEnd(audio) {
+async function playModelAudioOnce() {
+  syncModelAudioSpeed();
+  await ensureAudioMetadata(modelAudio);
+  syncModelAudioSpeed();
+  await modelAudio.play();
+}
+
+function playAudioElementToEnd(audio, token) {
   return new Promise((resolve) => {
+    let frame = 0;
     const done = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
       audio.removeEventListener("ended", done);
       audio.removeEventListener("error", done);
       resolve();
+    };
+    const watch = () => {
+      if (!isActiveComparisonPlayback(token) || audio.ended) {
+        done();
+        return;
+      }
+      frame = requestAnimationFrame(watch);
     };
     audio.pause();
     audio.currentTime = 0;
@@ -567,7 +632,7 @@ function playAudioElementToEnd(audio) {
     }
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
-    audio.play().catch(done);
+    audio.play().then(watch).catch(done);
   });
 }
 
@@ -590,7 +655,7 @@ function ensureAudioMetadata(audio) {
   });
 }
 
-function playAudioSegmentToEnd(audio, start, end) {
+function playAudioSegmentToEnd(audio, start, end, token) {
   return new Promise((resolve) => {
     const duration = Number.isFinite(audio.duration) ? audio.duration : end;
     const segmentStart = Math.max(0, Math.min(start, duration));
@@ -607,7 +672,7 @@ function playAudioSegmentToEnd(audio, start, end) {
       resolve();
     };
     const watch = () => {
-      if (audio.currentTime >= segmentEnd - 0.03 || audio.ended) {
+      if (!isActiveComparisonPlayback(token) || audio.currentTime >= segmentEnd - 0.03 || audio.ended) {
         done();
         return;
       }
@@ -923,8 +988,6 @@ function renderNativeLabels() {
   const labels = nativeUiLabels[detectedNativeLanguage] || nativeUiLabels["ja-JP"];
   nativeTranscriptLabel.textContent = labels.transcript;
   recognizedLabel.textContent = labels.recognized;
-  compareButton.textContent = labels.compare;
-  repeatAudioButton.textContent = labels.repeatAudio;
 }
 
 function renderRecognizedDiff(payload) {

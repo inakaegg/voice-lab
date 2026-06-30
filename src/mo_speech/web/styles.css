@@ -1607,8 +1607,7 @@ audio {
   margin: 3px 0 0;
 }
 
-.practice-play-button,
-.practice-small-button {
+.practice-play-button {
   align-items: center;
   border: 0;
   cursor: pointer;
@@ -1901,26 +1900,6 @@ audio {
   text-underline-offset: 0.12em;
 }
 
-.practice-actions {
-  display: grid;
-  gap: 10px;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.practice-small-button {
-  background: #2f80ed;
-  border-radius: 999px;
-  color: #ffffff;
-  min-height: 46px;
-  padding: 0 18px;
-}
-
-.practice-small-button-muted {
-  background: #e9eef6;
-  color: #22344d;
-}
-
 .practice-status,
 .practice-error {
   border-radius: 10px;
@@ -2038,7 +2017,4 @@ audio {
     grid-column: 1 / -1;
   }
 
-  .practice-actions {
-    grid-template-columns: 1fr 1fr;
-  }
 }

@@ -60,8 +60,10 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /id="practice-segment-mode"/);
   assert.match(practiceHtml, /value="sentence"/);
   assert.match(practiceHtml, /value="punctuation"/);
-  assert.match(practiceHtml, /id="practice-repeat-audio-button"/);
-  assert.match(practiceHtml, /id="practice-compare-button"/);
+  assert.doesNotMatch(practiceHtml, /id="practice-repeat-audio-button"/);
+  assert.doesNotMatch(practiceHtml, /id="practice-compare-button"/);
+  assert.doesNotMatch(practiceHtml, /id="practice-retry-button"/);
+  assert.doesNotMatch(practiceHtml, /id="practice-next-button"/);
   assert.match(practiceHtml, /\/static\/app_practice\.js/);
   assert.match(practiceSource, /\/api\/practice\/prompts/);
   assert.match(practiceSource, /\/api\/practice\/attempts/);
@@ -81,6 +83,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /modelAudio\.playbackRate/);
   assert.match(practiceSource, /modelAudio\.defaultPlaybackRate/);
   assert.match(practiceSource, /loadedmetadata/);
+  assert.match(practiceSource, /isComparisonPlaying/);
+  assert.match(practiceSource, /stopComparisonPlayback/);
+  assert.match(practiceSource, /比較再生/);
   assert.match(practiceSource, /renderRecognizedDiff/);
   assert.match(practiceSource, /renderMissingTargetDiff/);
   assert.match(practiceSource, /practice-diff-mismatch/);
@@ -96,6 +101,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(styles, /\.practice-diff-mismatch/);
   assert.match(styles, /\.practice-diff-missing/);
   assert.match(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);
+  assert.doesNotMatch(styles, /\.practice-actions/);
   assert.doesNotMatch(styles, /\.practice-target-text-box\s*\{[^}]*overflow:\s*auto/s);
   assert.doesNotMatch(practiceHtml, /joke_mode|similar_voice|osaka_dialect|variation_mode/);
 });
