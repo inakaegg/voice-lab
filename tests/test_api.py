@@ -88,13 +88,21 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     response = client.get("/practice")
 
     assert response.status_code == 200
-    assert "はつおん れんしゅう" in response.text
+    assert "発音練習" in response.text
+    assert "Pronunciation Practice" in response.text
+    assert "发音练习" in response.text
+    assert "言いたいことを話す" in response.text
+    assert "Say what you want" in response.text
     assert "practice-target-language" in response.text
     assert 'value="ja-JP"' in response.text
     assert 'value="zh-CN"' in response.text
     assert 'value="en-US"' in response.text
     assert "practice-native-record-button" in response.text
     assert "practice-repeat-record-button" in response.text
+    assert "record-level-meter" in response.text
+    assert "practice-speed-select" in response.text
+    assert 'value="0.75"' in response.text
+    assert 'value="1.25"' in response.text
     assert "/static/app_practice.js" in response.text
 
 

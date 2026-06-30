@@ -35,15 +35,27 @@ test("admin page can start RunPod warmup manually", () => {
 });
 
 test("practice page keeps pronunciation training separate from conversion demo", () => {
-  assert.match(practiceHtml, /はつおん れんしゅう/);
+  assert.match(practiceHtml, /発音練習/);
+  assert.match(practiceHtml, /Pronunciation Practice/);
+  assert.match(practiceHtml, /发音练习/);
+  assert.match(practiceHtml, /言いたいことを話す/);
+  assert.match(practiceHtml, /Say what you want/);
   assert.match(practiceHtml, /id="practice-target-language"/);
   assert.match(practiceHtml, /value="ja-JP"/);
   assert.match(practiceHtml, /value="zh-CN"/);
   assert.match(practiceHtml, /value="en-US"/);
   assert.match(practiceHtml, /id="practice-native-record-button"/);
   assert.match(practiceHtml, /id="practice-repeat-record-button"/);
+  assert.match(practiceHtml, /class="record-orb practice-record-orb"/);
+  assert.match(practiceHtml, /class="record-level-meter"/);
+  assert.match(practiceHtml, /id="practice-speed-select"/);
+  assert.match(practiceHtml, /value="0.75"/);
+  assert.match(practiceHtml, /value="1.25"/);
   assert.match(practiceHtml, /\/static\/app_practice\.js/);
   assert.match(practiceSource, /\/api\/practice\/prompts/);
   assert.match(practiceSource, /\/api\/practice\/attempts/);
+  assert.match(practiceSource, /modelAudio\.playbackRate/);
+  assert.match(styles, /\.practice-shell\s*\{[^}]*min-height:\s*100svh/s);
+  assert.match(styles, /\.practice-language-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3/s);
   assert.doesNotMatch(practiceHtml, /joke_mode|similar_voice|osaka_dialect|variation_mode/);
 });

@@ -1,8 +1,11 @@
 const targetLanguageButtons = Array.from(document.querySelectorAll(".practice-language-button"));
+const nativePanel = document.querySelector(".practice-card-primary");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
 const repeatRecordButton = document.querySelector("#practice-repeat-record-button");
 const nativeLevel = document.querySelector("#practice-native-level");
 const repeatLevel = document.querySelector("#practice-repeat-level");
+const nativeActionLabel = document.querySelector("#practice-native-action-label");
+const repeatActionLabel = document.querySelector("#practice-repeat-action-label");
 const promptPanel = document.querySelector("#practice-prompt-panel");
 const repeatPanel = document.querySelector("#practice-repeat-panel");
 const resultPanel = document.querySelector("#practice-result-panel");
@@ -11,6 +14,7 @@ const targetText = document.querySelector("#practice-target-text");
 const targetSubtext = document.querySelector("#practice-target-subtext");
 const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
+const speedSelect = document.querySelector("#practice-speed-select");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
@@ -40,6 +44,9 @@ let currentTargetDisplayText = "";
 let currentAudioContext = null;
 let currentAnalyser = null;
 let currentLevelFrame = null;
+let recordTimerId = null;
+let recordingStartedAt = 0;
+let processingKind = "";
 let progressTimer = null;
 let progressDisplayed = 0;
 let progressTarget = 0;
@@ -50,6 +57,7 @@ targetLanguageButtons.forEach((button) => {
 nativeRecordButton.addEventListener("click", () => toggleRecording("native"));
 repeatRecordButton.addEventListener("click", () => toggleRecording("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
+speedSelect.addEventListener("change", syncModelAudioSpeed);
 retryButton.addEventListener("click", () => toggleRecording("repeat"));
 nextButton.addEventListener("click", resetPractice);
 modelAudio.addEventListener("ended", syncPlayButton);
@@ -113,7 +121,11 @@ async function startRecording(kind) {
   mediaRecorder.start();
   startLevelMeter(stream, kind === "native" ? nativeLevel : repeatLevel);
   setRecordingVisual(kind, true);
-  setStatus(kind === "native" ? "いつものことばで はなしてください。" : "おてほんを まねして はなしてください。");
+  setStatus(
+    kind === "native"
+      ? "言いたいことを話してください / Speak / 说"
+      : "お手本をまねして話してください / Repeat / 跟读",
+  );
 }
 
 async function handleRecordingStopped() {
@@ -122,6 +134,7 @@ async function handleRecordingStopped() {
   const blob = new Blob(recordingChunks, { type });
   cleanupRecording();
   setRecordingVisual(kind, false);
+  processingKind = kind;
   if (!blob.size) {
     showError("録音できませんでした。");
     return;
@@ -134,7 +147,7 @@ async function handleRecordingStopped() {
 }
 
 async function submitPrompt(blob) {
-  setBusy(true, "おてほんを つくっています。", 72);
+  setBusy(true, "お手本を作っています。", 72, "native");
   promptPanel.hidden = true;
   repeatPanel.hidden = true;
   resultPanel.hidden = true;
@@ -144,21 +157,22 @@ async function submitPrompt(blob) {
   const payload = await postPracticeForm("/api/practice/prompts", form);
   currentTargetText = payload.target_text || "";
   currentTargetDisplayText = payload.display_text?.primary_text || currentTargetText;
-  targetLabel.textContent = `${languageLabels[payload.target_language] || ""} の おてほん`;
+  targetLabel.textContent = `${languageLabels[payload.target_language] || ""} のお手本`;
   targetText.textContent = currentTargetDisplayText;
   const secondaryText = payload.display_text?.secondary_text || "";
   targetSubtext.hidden = !secondaryText;
   targetSubtext.textContent = secondaryText;
   setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
+  nativePanel.hidden = true;
   promptPanel.hidden = false;
   repeatPanel.hidden = false;
-  setBusy(false, "おてほんを きいて、まねして はなしてください。");
+  setBusy(false, "お手本を聞いて、まねして話してください。");
   await modelAudio.play().catch(() => {});
   syncPlayButton();
 }
 
 async function submitAttempt(blob) {
-  setBusy(true, "ききとっています。", 88);
+  setBusy(true, "聞き取っています。", 88, "repeat");
   resultPanel.hidden = true;
   const form = new FormData();
   form.append("target_language", selectedTargetLanguage);
@@ -166,7 +180,7 @@ async function submitAttempt(blob) {
   form.append("audio", blob, `repeat.${extensionForMimeType(blob.type)}`);
   const payload = await postPracticeForm("/api/practice/attempts", form);
   renderAttemptResult(payload);
-  setBusy(false, "なんどでも れんしゅうできます。");
+  setBusy(false, "何度でも練習できます。");
 }
 
 async function postPracticeForm(url, form) {
@@ -191,7 +205,7 @@ function renderAttemptResult(payload) {
   const percent = Math.round(Number(payload.similarity || 0) * 100);
   scoreText.textContent = `${percent}%`;
   scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  recognizedText.textContent = payload.recognized_text || "（ききとれませんでした）";
+  recognizedText.textContent = payload.recognized_text || "（聞き取れませんでした）";
   resultPanel.hidden = false;
 }
 
@@ -199,13 +213,14 @@ function resetPractice() {
   stopModelAudio();
   currentTargetText = "";
   currentTargetDisplayText = "";
+  nativePanel.hidden = false;
   promptPanel.hidden = true;
   repeatPanel.hidden = true;
   resultPanel.hidden = true;
   targetText.textContent = "";
   targetSubtext.textContent = "";
   targetSubtext.hidden = true;
-  setStatus("いいたいことを いつものことばで はなしてください。");
+  setStatus("言いたいことを話す / 说出想说的话 / Say what you want");
   clearError();
 }
 
@@ -214,6 +229,7 @@ function setModelAudio(audioBase64, mimeType) {
   const blob = base64ToBlob(audioBase64, mimeType);
   modelAudioUrl = URL.createObjectURL(blob);
   modelAudio.src = modelAudioUrl;
+  syncModelAudioSpeed();
 }
 
 function toggleModelAudio() {
@@ -240,19 +256,28 @@ function stopModelAudio() {
 
 function syncPlayButton() {
   playModelButton.classList.toggle("is-playing", !modelAudio.paused);
-  playModelButton.querySelector("span:last-child").textContent = modelAudio.paused ? "きく" : "とめる";
+  playModelButton.querySelector("span:last-child").textContent = modelAudio.paused ? "再生" : "停止";
 }
 
-function setBusy(busy, message, target = 100) {
+function syncModelAudioSpeed() {
+  modelAudio.playbackRate = Number.parseFloat(speedSelect.value || "1") || 1;
+}
+
+function setBusy(busy, message, target = 100, kind = processingKind) {
   isBusy = busy;
   nativeRecordButton.disabled = busy;
   repeatRecordButton.disabled = busy || !currentTargetText;
+  const processingButton = kind === "repeat" ? repeatRecordButton : nativeRecordButton;
   progress.hidden = !busy;
   if (busy) {
+    processingButton.classList.add("is-processing");
     progressDisplayed = Math.min(progressDisplayed, 20);
     progressTarget = target;
     startProgressTimer();
   } else {
+    nativeRecordButton.classList.remove("is-processing");
+    repeatRecordButton.classList.remove("is-processing");
+    processingKind = "";
     progressTarget = 100;
     progressDisplayed = 100;
     updateProgress();
@@ -293,12 +318,19 @@ function updateProgress() {
 
 function setRecordingVisual(kind, recording) {
   const button = kind === "native" ? nativeRecordButton : repeatRecordButton;
+  const label = kind === "native" ? nativeActionLabel : repeatActionLabel;
   button.classList.toggle("is-recording", recording);
-  button.querySelector(".practice-button-text").textContent = recording
-    ? "とめる"
-    : kind === "native"
-      ? "はなす"
-      : "まねする";
+  button.classList.remove("is-processing");
+  if (recording) {
+    recordingStartedAt = performance.now();
+    button.setAttribute("aria-label", kind === "native" ? "録音中" : "まねして録音中");
+    label.textContent = "停止 / Stop / 停止";
+    startRecordTimer(button);
+  } else {
+    stopRecordTimer(button);
+    button.setAttribute("aria-label", kind === "native" ? "言いたいことを録音" : "まねして録音");
+    label.textContent = kind === "native" ? "話す / Speak / 说" : "まねする / Repeat / 模仿";
+  }
 }
 
 function startLevelMeter(stream, container) {
@@ -313,13 +345,17 @@ function startLevelMeter(stream, container) {
   currentAnalyser.fftSize = 256;
   source.connect(currentAnalyser);
   const data = new Uint8Array(currentAnalyser.frequencyBinCount);
-  const bars = Array.from(container.querySelectorAll("span"));
+  const bars = Array.from(container.querySelectorAll(".record-level-bar"));
   const draw = () => {
     currentAnalyser.getByteFrequencyData(data);
     const average = data.reduce((sum, value) => sum + value, 0) / data.length / 255;
+    const now = performance.now();
     bars.forEach((bar, index) => {
-      const level = Math.max(0.1, Math.min(1, average * (1.2 + index * 0.12)));
-      bar.style.transform = `scaleY(${level})`;
+      const center = 1 - Math.abs(index - (bars.length - 1) / 2) / ((bars.length + 1) / 2);
+      const movement = average > 0.03 ? Math.sin(now / 95 + index * 0.88) * 0.08 : 0;
+      const level = Math.max(0.14, Math.min(1, average * (0.72 + center) + movement));
+      bar.style.opacity = String(Math.max(0.46, Math.min(1, 0.52 + average * 0.58)));
+      bar.style.transform = `scaleY(${level.toFixed(3)})`;
     });
     currentLevelFrame = requestAnimationFrame(draw);
   };
@@ -339,10 +375,40 @@ function stopLevelMeter() {
   currentAnalyser = null;
   [nativeLevel, repeatLevel].forEach((container) => {
     container.classList.remove("is-active");
-    container.querySelectorAll("span").forEach((bar) => {
+    container.querySelectorAll(".record-level-bar").forEach((bar) => {
       bar.style.transform = "scaleY(0.18)";
+      bar.style.opacity = "";
     });
   });
+}
+
+function startRecordTimer(button) {
+  stopRecordTimer(button);
+  updateRecordTimer(button);
+  recordTimerId = window.setInterval(() => updateRecordTimer(button), 100);
+}
+
+function stopRecordTimer(button) {
+  if (recordTimerId !== null) {
+    window.clearInterval(recordTimerId);
+  }
+  recordTimerId = null;
+  const targetButton = button || nativeRecordButton;
+  targetButton.style.setProperty("--record-progress", "0deg");
+  const timer = targetButton.querySelector(".record-timer");
+  if (timer) {
+    timer.textContent = "REC";
+  }
+}
+
+function updateRecordTimer(button) {
+  const elapsedMs = performance.now() - recordingStartedAt;
+  const progress = (elapsedMs % 3000) / 3000;
+  button.style.setProperty("--record-progress", `${Math.round(progress * 360)}deg`);
+  const timer = button.querySelector(".record-timer");
+  if (timer) {
+    timer.textContent = `${Math.max(1, Math.floor(elapsedMs / 1000))}s`;
+  }
 }
 
 function cleanupRecording() {

@@ -1429,6 +1429,11 @@ audio {
 }
 
 .practice-body {
+  --user-recording: #e68a2e;
+  --user-ready: #0a84ff;
+  --user-processing: #5b7cfa;
+  --user-progress-start: #0a84ff;
+  --user-progress-end: #49c7ff;
   background:
     radial-gradient(circle at 20% 8%, rgba(255, 214, 102, 0.28), transparent 32%),
     linear-gradient(135deg, #f7fbff 0%, #eef6ff 48%, #fff7f1 100%);
@@ -1441,11 +1446,11 @@ audio {
 .practice-shell {
   box-sizing: border-box;
   display: grid;
-  gap: 18px;
+  gap: clamp(8px, 1.8svh, 16px);
   margin: 0 auto;
   max-width: 860px;
-  min-height: 100vh;
-  padding: 22px clamp(16px, 4vw, 34px) 32px;
+  min-height: 100svh;
+  padding: clamp(10px, 2.2svh, 18px) clamp(12px, 3vw, 28px) clamp(12px, 2.4svh, 22px);
 }
 
 .practice-header {
@@ -1473,27 +1478,35 @@ audio {
 .practice-kicker,
 .practice-section-label {
   color: #52677f;
-  font-size: 13px;
+  font-size: clamp(11px, 2.5vw, 13px);
   font-weight: 800;
   letter-spacing: 0;
   margin: 0 0 4px;
 }
 
 .practice-header h1 {
-  font-size: clamp(30px, 8vw, 56px);
+  font-size: clamp(24px, 6vw, 46px);
   letter-spacing: 0;
-  line-height: 1;
+  line-height: 1.05;
   margin: 0;
+}
+
+.practice-header h1 span {
+  color: #51657e;
+  display: inline-block;
+  font-size: 0.42em;
+  margin-left: 0.35em;
+  vertical-align: middle;
 }
 
 .practice-target-panel {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .practice-language-grid {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -1508,13 +1521,13 @@ audio {
   display: flex;
   gap: 8px;
   justify-content: center;
-  min-height: 58px;
-  padding: 10px;
+  min-height: clamp(42px, 8svh, 56px);
+  padding: 8px;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
 .practice-language-button span {
-  font-size: 22px;
+  font-size: clamp(18px, 4vw, 22px);
 }
 
 .practice-language-button:hover {
@@ -1532,7 +1545,8 @@ audio {
 
 .practice-flow {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .practice-card {
@@ -1542,9 +1556,10 @@ audio {
   border-radius: 14px;
   box-shadow: 0 16px 34px rgba(20, 33, 61, 0.09);
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: auto 1fr auto;
-  padding: 16px;
+  min-width: 0;
+  padding: clamp(10px, 2svh, 14px);
 }
 
 .practice-step-number {
@@ -1554,13 +1569,13 @@ audio {
   color: #ffffff;
   display: inline-flex;
   font-weight: 900;
-  height: 34px;
+  height: 30px;
   justify-content: center;
-  width: 34px;
+  width: 30px;
 }
 
 .practice-card-copy h2 {
-  font-size: clamp(21px, 5vw, 30px);
+  font-size: clamp(18px, 4.8vw, 27px);
   letter-spacing: 0;
   line-height: 1.1;
   margin: 0;
@@ -1568,11 +1583,11 @@ audio {
 
 .practice-card-copy p {
   color: #5c6b7c;
+  font-size: clamp(12px, 2.8vw, 14px);
   line-height: 1.45;
-  margin: 6px 0 0;
+  margin: 3px 0 0;
 }
 
-.practice-record-button,
 .practice-play-button,
 .practice-small-button {
   align-items: center;
@@ -1583,73 +1598,39 @@ audio {
   justify-content: center;
 }
 
-.practice-record-button {
-  background: linear-gradient(135deg, #ff3b30, #ff7a45);
-  border-radius: 999px;
-  box-shadow: 0 14px 28px rgba(255, 88, 72, 0.3);
-  color: #ffffff;
-  gap: 10px;
-  min-height: 64px;
-  min-width: 126px;
-  padding: 0 22px;
+.practice-record-orb {
+  grid-column: 3;
+  width: clamp(84px, 18vw, 132px);
 }
 
-.practice-record-button-secondary {
-  background: linear-gradient(135deg, #2f80ed, #20c997);
-  box-shadow: 0 14px 28px rgba(47, 128, 237, 0.27);
+.practice-record-orb .record-icon {
+  transform: scale(0.7);
 }
 
-.practice-record-button.is-recording {
-  animation: practice-recording-glow 1s ease-in-out infinite alternate;
-  background: linear-gradient(135deg, #c1121f, #ffb703);
+.practice-record-orb .record-timer {
+  bottom: 8px;
+  font-size: 12px;
+  min-width: 32px;
+  padding: 3px 6px;
 }
 
-.practice-record-button:disabled {
+.practice-record-orb .record-level-meter {
+  width: min(58%, 84px);
+}
+
+.practice-record-orb:disabled {
   cursor: wait;
   opacity: 0.64;
 }
 
-.practice-record-icon {
-  background: #ffffff;
-  border-radius: 10px 10px 12px 12px;
-  display: inline-block;
-  height: 24px;
-  position: relative;
-  width: 16px;
-}
-
-.practice-record-icon::after {
-  background: #ffffff;
-  border-radius: 999px;
-  bottom: -9px;
-  content: "";
-  height: 3px;
-  left: -5px;
-  position: absolute;
-  width: 26px;
-}
-
-.practice-level-meter {
-  align-items: center;
-  display: flex;
-  gap: 4px;
-  grid-column: 1 / -1;
-  height: 20px;
-  opacity: 0.2;
-}
-
-.practice-level-meter.is-active {
-  opacity: 1;
-}
-
-.practice-level-meter span {
-  background: #2f80ed;
-  border-radius: 999px;
-  display: block;
-  flex: 1;
-  height: 100%;
-  transform: scaleY(0.18);
-  transform-origin: center;
+.practice-orb-caption {
+  color: #174ea6;
+  font-size: 12px;
+  font-weight: 900;
+  grid-column: 3;
+  line-height: 1.2;
+  margin: -4px 0 0;
+  text-align: center;
 }
 
 .practice-target-text-box {
@@ -1657,11 +1638,13 @@ audio {
   border: 1px solid #d9e7fb;
   border-radius: 10px;
   grid-column: 1 / -1;
-  padding: 14px;
+  max-height: 20svh;
+  overflow: auto;
+  padding: 10px;
 }
 
 .practice-target-text {
-  font-size: clamp(28px, 7vw, 48px);
+  font-size: clamp(22px, 5.8vw, 40px);
   font-weight: 900;
   line-height: 1.24;
   margin: 0;
@@ -1670,10 +1653,18 @@ audio {
 
 .practice-target-subtext {
   color: #5d6f82;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.5;
   margin: 10px 0 0;
+}
+
+.practice-model-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
 }
 
 .practice-play-button {
@@ -1681,8 +1672,8 @@ audio {
   border-radius: 999px;
   color: #ffffff;
   gap: 8px;
-  min-height: 48px;
-  padding: 0 18px;
+  min-height: 42px;
+  padding: 0 16px;
 }
 
 .practice-play-button.is-playing {
@@ -1693,12 +1684,41 @@ audio {
   grid-template-columns: auto 1fr;
 }
 
+.practice-result-card,
+.practice-prompt-card {
+  grid-column: span 2;
+}
+
+.practice-speed-control {
+  align-items: center;
+  background: #eef5ff;
+  border: 1px solid #d9e7fb;
+  border-radius: 999px;
+  color: #24435f;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px 0 14px;
+}
+
+.practice-speed-control select {
+  background: #ffffff;
+  border: 1px solid #c9d8e8;
+  border-radius: 999px;
+  color: #14213d;
+  font: inherit;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
 .practice-grade-badge {
   background: #eafaf2;
   border: 2px solid #2fbf71;
   border-radius: 999px;
   color: #117342;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
   padding: 10px 16px;
 }
@@ -1716,7 +1736,7 @@ audio {
 }
 
 .practice-score {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 900;
   margin: 0;
 }
@@ -1747,7 +1767,7 @@ audio {
   background: #ffffff;
   border: 1px solid #dbe8f7;
   border-radius: 10px;
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 800;
   grid-column: 1 / -1;
   line-height: 1.5;
@@ -1781,7 +1801,7 @@ audio {
   font-weight: 800;
   line-height: 1.5;
   margin: 0;
-  padding: 12px 14px;
+  padding: 9px 12px;
   text-align: center;
 }
 
@@ -1796,38 +1816,50 @@ audio {
   color: #8a1f11;
 }
 
-@keyframes practice-recording-glow {
-  from {
-    box-shadow: 0 14px 28px rgba(255, 88, 72, 0.3);
-    transform: scale(1);
-  }
-
-  to {
-    box-shadow: 0 18px 38px rgba(255, 183, 3, 0.5);
-    transform: scale(1.025);
-  }
-}
-
 @media (max-width: 720px) {
   .practice-shell {
-    padding: 16px 14px 24px;
+    padding: 10px 10px 14px;
   }
 
-  .practice-language-grid {
+  .practice-flow {
     grid-template-columns: 1fr;
   }
 
   .practice-card {
-    grid-template-columns: auto 1fr;
-  }
-
-  .practice-record-button,
-  .practice-play-button {
-    grid-column: 1 / -1;
-    width: 100%;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .practice-card-copy p {
-    font-size: 14px;
+    font-size: 11px;
+  }
+
+  .practice-language-button {
+    flex-direction: column;
+    gap: 3px;
+    min-height: 54px;
+  }
+
+  .practice-language-button strong {
+    font-size: 12px;
+  }
+
+  .practice-record-orb {
+    width: clamp(76px, 24vw, 104px);
+  }
+
+  .practice-result-card,
+  .practice-repeat-card,
+  .practice-card-primary,
+  .practice-prompt-card {
+    grid-column: 1 / -1;
+  }
+
+  .practice-target-text-box {
+    max-height: 18svh;
+  }
+
+  .practice-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 }
