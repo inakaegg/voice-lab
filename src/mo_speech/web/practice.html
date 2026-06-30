@@ -105,12 +105,19 @@
               <input id="practice-speed-slider" type="range" min="0.25" max="2" step="0.25" value="1" />
               <output id="practice-speed-value" for="practice-speed-slider">1.0x</output>
             </label>
+            <label class="practice-speed-control">
+              <span>分割</span>
+              <select id="practice-segment-mode">
+                <option value="punctuation" selected>句読点</option>
+                <option value="sentence">句点</option>
+              </select>
+            </label>
           </div>
           <audio id="practice-model-audio" hidden></audio>
         </article>
 
         <article id="practice-repeat-panel" class="practice-card practice-repeat-card" hidden>
-          <div class="practice-step-number">3</div>
+          <div class="practice-step-number">1</div>
           <div class="practice-card-copy">
             <h2>まねして話す</h2>
             <p>Repeat / 跟着说</p>

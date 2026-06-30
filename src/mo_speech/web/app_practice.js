@@ -16,6 +16,7 @@ const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
+const segmentModeSelect = document.querySelector("#practice-segment-mode");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
@@ -40,6 +41,81 @@ const languageLabels = {
   "ja-JP": "日本語",
   "zh-CN": "中文",
   "en-US": "English",
+};
+const zhTraditionalToSimplified = {
+  後: "后",
+  裏: "里",
+  裡: "里",
+  著: "着",
+  麼: "么",
+  麽: "么",
+  樣: "样",
+  嗎: "吗",
+  妳: "你",
+  們: "们",
+  個: "个",
+  這: "这",
+  會: "会",
+  說: "说",
+  話: "话",
+  語: "语",
+  學: "学",
+  習: "习",
+  聽: "听",
+  問: "问",
+  題: "题",
+  現: "现",
+  開: "开",
+  關: "关",
+  見: "见",
+  歡: "欢",
+  愛: "爱",
+  買: "买",
+  賣: "卖",
+  車: "车",
+  輛: "辆",
+  價: "价",
+  還: "还",
+  貴: "贵",
+  綠: "绿",
+  種: "种",
+  點: "点",
+  氣: "气",
+  電: "电",
+  腦: "脑",
+  網: "网",
+  寫: "写",
+  讀: "读",
+  書: "书",
+  時: "时",
+  間: "间",
+  國: "国",
+  東: "东",
+  風: "风",
+  來: "来",
+  過: "过",
+  長: "长",
+  門: "门",
+  無: "无",
+  實: "实",
+  體: "体",
+  應: "应",
+  讓: "让",
+  給: "给",
+  對: "对",
+  從: "从",
+  為: "为",
+  發: "发",
+  聲: "声",
+  區: "区",
+  別: "别",
+  當: "当",
+  幾: "几",
+  難: "难",
+  簡: "简",
+  漢: "汉",
+  雖: "虽",
+  舊: "旧",
 };
 const nativeUiLabels = {
   "ja-JP": {
@@ -93,6 +169,7 @@ nativeRecordButton.addEventListener("click", () => toggleRecording("native"));
 repeatRecordButton.addEventListener("click", () => toggleRecording("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
+segmentModeSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
 compareButton.addEventListener("click", playComparisonAudios);
 repeatAudioButton.addEventListener("click", playRepeatAudio);
@@ -112,6 +189,9 @@ function selectTargetLanguage(language) {
     button.classList.toggle("is-selected", selected);
     button.setAttribute("aria-checked", selected ? "true" : "false");
   });
+  if (selectedTargetLanguage === "zh-CN") {
+    pinyinToggle.checked = true;
+  }
   syncPinyinSettingVisibility();
   savePracticeSettings();
   resetPractice();
@@ -192,6 +272,9 @@ async function submitPrompt(blob) {
   repeatPanel.hidden = true;
   resultPanel.hidden = true;
   const form = new FormData();
+  if (selectedTargetLanguage === "zh-CN") {
+    pinyinToggle.checked = true;
+  }
   form.append("target_language", selectedTargetLanguage);
   form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
   form.append("audio", blob, `native.${extensionForMimeType(blob.type)}`);
@@ -372,7 +455,7 @@ async function playComparisonAudios() {
     return;
   }
   await Promise.all([ensureAudioMetadata(modelAudio), ensureAudioMetadata(repeatAudio)]);
-  const sentences = splitPracticeSentences(currentTargetText);
+  const sentences = splitPracticeSentences(currentTargetText, practiceSegmentMode());
   if (sentences.length <= 1 || !Number.isFinite(modelAudio.duration) || !Number.isFinite(repeatAudio.duration)) {
     await playAudioElementToEnd(modelAudio);
     await playAudioElementToEnd(repeatAudio);
@@ -453,14 +536,21 @@ function playAudioSegmentToEnd(audio, start, end) {
   });
 }
 
-function splitPracticeSentences(text) {
+function splitPracticeSentences(text, mode = "punctuation") {
   const normalized = String(text || "").replace(/\r/g, "\n").trim();
   if (!normalized) {
     return [];
   }
-  const matches = normalized.match(/[^。！？!?.\n]+[。！？!?.]?/g) || [];
+  const separatorPattern = mode === "sentence"
+    ? /[^。！？!?.\n]+[。！？!?.]?/g
+    : /[^。！？!?.,，、；;：:\n]+[。！？!?.,，、；;：:]?/g;
+  const matches = normalized.match(separatorPattern) || [];
   const sentences = matches.map((value) => value.trim()).filter(Boolean);
   return sentences.length ? sentences : [normalized];
+}
+
+function practiceSegmentMode() {
+  return segmentModeSelect.value === "sentence" ? "sentence" : "punctuation";
 }
 
 function sentenceAudioRanges(sentences, duration) {
@@ -690,8 +780,9 @@ function clearError() {
 function loadPracticeSettings() {
   const settings = readPracticeSettings();
   selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
-  pinyinToggle.checked = settings.show_pinyin !== false;
+  pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
+  segmentModeSelect.value = settings.segment_mode === "sentence" ? "sentence" : "punctuation";
   targetLanguageButtons.forEach((button) => {
     const selected = button.dataset.language === selectedTargetLanguage;
     button.classList.toggle("is-selected", selected);
@@ -717,6 +808,7 @@ function savePracticeSettings() {
         target_language: selectedTargetLanguage,
         show_pinyin: Boolean(pinyinToggle.checked),
         speed: normalizedPlaybackSpeed(speedSlider.value),
+        segment_mode: practiceSegmentMode(),
       }),
     );
   } catch (_error) {
@@ -750,36 +842,71 @@ function renderNativeLabels() {
 function renderRecognizedDiff(payload) {
   const recognized = payload.recognized_text || "";
   const diff = Array.isArray(payload.diff) ? payload.diff : [];
-  const map = normalizedOriginalMap(recognized, payload.target_language || selectedTargetLanguage);
+  const language = payload.target_language || selectedTargetLanguage;
+  const map = normalizedOriginalMap(recognized, language);
+  const targetMap = normalizedOriginalMap(currentTargetText, language);
   let mismatchRanges = diff
     .filter((entry) => entry.type !== "equal" && Number.isInteger(entry.recognized_start))
     .map((entry) => originalRangeForNormalizedRange(map, entry.recognized_start, entry.recognized_end))
     .filter((range) => range.end > range.start);
+  const missingMarkers = diff
+    .filter((entry) => entry.type === "delete" && Number.isInteger(entry.target_start))
+    .map((entry) => ({
+      start: insertionIndexForNormalizedIndex(map, entry.recognized_start),
+      text: originalTextForNormalizedRange(targetMap, entry.target_start, entry.target_end),
+    }))
+    .filter((marker) => marker.text);
   recognizedText.innerHTML = "";
   if (!recognized) {
-    recognizedText.textContent = "（聞き取れませんでした）";
+    if (missingMarkers.length) {
+      missingMarkers.forEach((marker) => recognizedText.append(renderMissingTargetDiff(marker.text)));
+    } else {
+      recognizedText.textContent = "（聞き取れませんでした）";
+    }
     return;
   }
-  if (!mismatchRanges.length && (payload.grade || "retry") !== "ok") {
+  if (!mismatchRanges.length && !missingMarkers.length && (payload.grade || "retry") !== "ok") {
     mismatchRanges = [{ start: 0, end: recognized.length }];
   }
   let cursor = 0;
-  for (const range of mergeRanges(mismatchRanges)) {
-    if (cursor < range.start) {
-      recognizedText.append(document.createTextNode(recognized.slice(cursor, range.start)));
+  const decorations = [
+    ...mergeRanges(mismatchRanges).map((range) => ({ kind: "mismatch", ...range })),
+    ...missingMarkers.map((marker) => ({ kind: "missing", start: marker.start, end: marker.start, text: marker.text })),
+  ].sort((left, right) => left.start - right.start || (left.kind === "missing" ? -1 : 1));
+  for (const decoration of decorations) {
+    if (cursor < decoration.start) {
+      recognizedText.append(document.createTextNode(recognized.slice(cursor, decoration.start)));
     }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "practice-diff-mismatch";
-    button.textContent = recognized.slice(range.start, range.end);
-    button.title = "比較再生";
-    button.addEventListener("click", playComparisonAudios);
-    recognizedText.append(button);
-    cursor = range.end;
+    if (decoration.kind === "missing") {
+      recognizedText.append(renderMissingTargetDiff(decoration.text));
+      continue;
+    }
+    recognizedText.append(renderRecognizedMismatchDiff(recognized.slice(decoration.start, decoration.end)));
+    cursor = decoration.end;
   }
   if (cursor < recognized.length) {
     recognizedText.append(document.createTextNode(recognized.slice(cursor)));
   }
+}
+
+function renderRecognizedMismatchDiff(text) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "practice-diff-mismatch";
+  button.textContent = text;
+  button.title = "比較再生";
+  button.addEventListener("click", playComparisonAudios);
+  return button;
+}
+
+function renderMissingTargetDiff(text) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "practice-diff-missing";
+  button.textContent = `抜け: ${text}`;
+  button.title = "抜けた部分を比較再生";
+  button.addEventListener("click", playComparisonAudios);
+  return button;
 }
 
 function normalizedOriginalMap(text, language) {
@@ -805,6 +932,9 @@ function normalizePracticeChar(char, language) {
       String.fromCharCode(value.charCodeAt(0) - 0x60)
     );
   }
+  if (language === "zh-CN") {
+    normalized = Array.from(normalized).map((value) => zhTraditionalToSimplified[value] || value).join("");
+  }
   return normalized;
 }
 
@@ -818,6 +948,27 @@ function originalRangeForNormalizedRange(map, start, end) {
     return { start: 0, end: 0 };
   }
   return { start: first, end: last + 1 };
+}
+
+function originalTextForNormalizedRange(map, start, end) {
+  const range = originalRangeForNormalizedRange(map, start, end);
+  if (range.end <= range.start) {
+    return "";
+  }
+  return map.chars.slice(range.start, range.end).join("");
+}
+
+function insertionIndexForNormalizedIndex(map, index) {
+  if (!Number.isInteger(index) || map.originalIndexes.length === 0) {
+    return map.chars.length;
+  }
+  if (index <= 0) {
+    return 0;
+  }
+  if (index >= map.originalIndexes.length) {
+    return map.chars.length;
+  }
+  return map.originalIndexes[index];
 }
 
 function mergeRanges(ranges) {

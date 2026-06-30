@@ -56,6 +56,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /min="0\.25"/);
   assert.match(practiceHtml, /max="2"/);
   assert.match(practiceHtml, /step="0\.25"/);
+  assert.match(practiceHtml, /id="practice-segment-mode"/);
+  assert.match(practiceHtml, /value="sentence"/);
+  assert.match(practiceHtml, /value="punctuation"/);
   assert.match(practiceHtml, /id="practice-repeat-audio-button"/);
   assert.match(practiceHtml, /id="practice-compare-button"/);
   assert.match(practiceHtml, /\/static\/app_practice\.js/);
@@ -64,10 +67,15 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /localStorage\.getItem/);
   assert.match(practiceSource, /localStorage\.setItem/);
   assert.match(practiceSource, /speed:/);
+  assert.match(practiceSource, /segment_mode:/);
   assert.match(practiceSource, /include_pinyin/);
+  assert.match(practiceSource, /selectedTargetLanguage === "zh-CN" \? true : settings\.show_pinyin !== false/);
+  assert.match(practiceSource, /pinyinToggle\.checked = true/);
   assert.match(practiceSource, /modelAudio\.playbackRate/);
   assert.match(practiceSource, /renderRecognizedDiff/);
+  assert.match(practiceSource, /renderMissingTargetDiff/);
   assert.match(practiceSource, /practice-diff-mismatch/);
+  assert.match(practiceSource, /practice-diff-missing/);
   assert.match(practiceSource, /repeatAudio\.src/);
   assert.match(practiceSource, /splitPracticeSentences/);
   assert.match(practiceSource, /playAudioSegmentToEnd/);
@@ -75,6 +83,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(styles, /\.practice-language-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3/s);
   assert.match(styles, /\.practice-recognized-text\s*\{[^}]*font-size:\s*clamp\(22px,\s*5\.8vw,\s*40px\)/s);
   assert.match(styles, /\.practice-diff-mismatch/);
+  assert.match(styles, /\.practice-diff-missing/);
+  assert.match(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);
   assert.doesNotMatch(styles, /\.practice-target-text-box\s*\{[^}]*overflow:\s*auto/s);
   assert.doesNotMatch(practiceHtml, /joke_mode|similar_voice|osaka_dialect|variation_mode/);
 });

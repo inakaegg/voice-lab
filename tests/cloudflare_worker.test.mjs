@@ -154,22 +154,26 @@ test("Cloudflare worker forces Chinese practice attempts to Chinese ASR", async 
   const env = fakeEnv(async (url, init) => {
     calls.push({ url, language: init.body?.get?.("language") || "" });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return new Response("绿茶和咖啡，哪一种的咖啡因含量更多呢？", { status: 200 });
+      return new Response("你好，你最近怎麼樣?", { status: 200 });
     }
     throw new Error(`unexpected url: ${url}`);
   });
   const form = new FormData();
   form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
   form.append("target_language", "zh-CN");
-  form.append("target_text", "绿茶和咖啡，哪一种的咖啡因含量更多呢？");
+  form.append("target_text", "你好，你最近怎么样？");
 
   const response = await handleRequest(
     new Request("https://example.com/api/practice/attempts", { method: "POST", body: form }),
     env,
   );
+  const payload = await response.json();
 
   assert.equal(response.status, 200);
   assert.equal(calls[0].language, "zh");
+  assert.equal(payload.grade, "ok");
+  assert.equal(payload.similarity, 1);
+  assert.equal(payload.normalized_target, payload.normalized_recognized);
 });
 
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {

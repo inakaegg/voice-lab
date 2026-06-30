@@ -1642,6 +1642,10 @@ audio {
   opacity: 0.64;
 }
 
+.practice-repeat-card {
+  order: -1;
+}
+
 .practice-orb-caption {
   color: #174ea6;
   font-size: 12px;
@@ -1762,9 +1766,23 @@ audio {
   padding: 0 10px 0 14px;
 }
 
+.practice-speed-control span {
+  white-space: nowrap;
+}
+
 .practice-speed-control input[type="range"] {
   accent-color: #2f80ed;
   inline-size: clamp(112px, 28vw, 220px);
+}
+
+.practice-speed-control select {
+  background: #ffffff;
+  border: 1px solid #c9d8e8;
+  border-radius: 999px;
+  color: #14213d;
+  font: inherit;
+  min-height: 30px;
+  padding: 0 8px;
 }
 
 .practice-speed-control output {
@@ -1847,6 +1865,21 @@ audio {
   font: inherit;
   margin: 0 1px;
   padding: 0 3px;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.12em;
+}
+
+.practice-diff-missing {
+  background: #fff0f0;
+  border: 1px dashed #c1121f;
+  border-radius: 6px;
+  color: #c1121f;
+  cursor: pointer;
+  display: inline;
+  font: inherit;
+  margin: 0 2px;
+  padding: 0 4px;
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.12em;
