@@ -118,6 +118,43 @@ docker buildx build --platform linux/amd64 -f Dockerfile.runpod -t "$RUNPOD_IMAG
 
 Mac上のDocker buildは容量を使う。`buildx --push` を使い、最終imageをローカルに保持しない。ローカル容量が厳しい場合は、RunPod上の一時Pod、GitHub Actions、または別マシンでbuildする。
 
+### GitHub Actionsでbuild/pushする
+
+ローカル回線の上りが遅い場合は、GitHub ActionsでRunPod用imageをbuildし、GitHub側からDocker Hubへpushする。ローカルMacから大きいDocker layerをアップロードしないため、個人回線の上り速度に依存しにくい。
+
+このリポジトリでは手動実行用workflowとして `.github/workflows/runpod-image.yml` を使う。通常のpushごとに巨大imageをbuildしないよう、`workflow_dispatch` のみで起動する。
+
+事前にGitHub repository secretsへ以下を登録する。
+
+| Secret | 用途 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hubのユーザー名 |
+| `DOCKERHUB_TOKEN` | Docker Hubのaccess token。パスワードではなくpush権限を持つtokenを使う |
+
+GitHub CLIで登録する場合:
+
+```bash
+gh secret set DOCKERHUB_USERNAME --body "<Docker Hub user>"
+gh secret set DOCKERHUB_TOKEN
+```
+
+実行手順:
+
+```bash
+gh workflow run runpod-image.yml \
+  -f image_name=docker.io/dockerhubfd/mo-speech \
+  -f image_tag=runpod-vibevoice-20260701
+```
+
+Actions実行が成功したら、出力されたimage tagを `.runpod.env` の `RUNPOD_IMAGE` に反映し、Serverless templateを更新する。Docker HubへのpushはGitHub側で完了しているため、ローカルではRunPod APIへの小さいリクエストだけで済む。
+
+Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh` は実行しない。既存Serverless templateはRunPod管理画面またはRunPod APIでimageだけ差し替える。新しいtemplateとして作り直す場合は、`.runpod.env` の `RUNPOD_IMAGE` をActionsでpushしたtagにしてからtemplate作成スクリプトを実行する。
+
+```bash
+# .runpod.env
+RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-20260701
+```
+
 ## モデル配置
 
 モデル本体はDocker imageに焼き込まない。RunPod Network Volumeへ置く。
