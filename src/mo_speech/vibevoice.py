@@ -35,7 +35,17 @@ _VIBEVOICE_TQDM_RE = re.compile(
     r"\[(?P<elapsed>[^<,\]]+)(?:<(?P<remaining>[^,\]]+))?"
 )
 _VIBEVOICE_TOKEN_LIMIT_RE = re.compile(r"VibeVoice生成token上限:\s*(?P<tokens>\d+)")
+_VIBEVOICE_LINE_MODE_START_RE = re.compile(r"行単位モードで音声を生成します。対象行数:\s*(?P<total>\d+)")
+_VIBEVOICE_LINE_START_RE = re.compile(r"行(?P<line>\d+):\s*(?P<action>新規に音声を生成します|キャッシュを使用します)")
+_VIBEVOICE_LINE_COMPLETE_RE = re.compile(r"行単位モード:\s*(?P<total>\d+)件の音声を(?:結合|アーカイブ)")
 LOGGER = logging.getLogger("mo_speech")
+
+
+@dataclass
+class _VibeVoiceCliProgressState:
+    line_mode: bool = False
+    line_total: int = 0
+    current_line: int = 0
 
 
 @dataclass(frozen=True)
@@ -453,6 +463,7 @@ class VibeVoiceService:
         stderr_chars: list[str] = []
         buffers: dict[str, list[str]] = {"stdout": [], "stderr": []}
         last_label = ""
+        progress_state = _VibeVoiceCliProgressState()
 
         process = subprocess.Popen(
             list(command),
@@ -475,7 +486,7 @@ class VibeVoiceService:
 
         def emit_progress_line(line: str) -> None:
             nonlocal last_label
-            label = _progress_label_from_vibevoice_cli_line(line)
+            label = _progress_label_from_vibevoice_cli_line(line, state=progress_state)
             if not label or label == last_label:
                 return
             last_label = label
@@ -704,13 +715,30 @@ def _flush_vibevoice_stream_buffers(
             emit_progress_line(line)
 
 
-def _progress_label_from_vibevoice_cli_line(line: str) -> str | None:
+def _progress_label_from_vibevoice_cli_line(line: str, *, state: _VibeVoiceCliProgressState | None = None) -> str | None:
     normalized = _ANSI_ESCAPE_RE.sub("", line).strip()
     if not normalized:
         return None
+    message = _strip_log_prefix(normalized)
     token_limit_match = _VIBEVOICE_TOKEN_LIMIT_RE.search(normalized)
     if token_limit_match:
         return f"生成準備: 上限 {token_limit_match.group('tokens')} token"
+    line_mode_match = _VIBEVOICE_LINE_MODE_START_RE.search(message)
+    if line_mode_match and state is not None:
+        state.line_mode = True
+        state.line_total = max(1, int(line_mode_match.group("total")))
+        state.current_line = 0
+        return _line_by_line_progress_label(state, 0, "")
+    line_start_match = _VIBEVOICE_LINE_START_RE.search(message)
+    if line_start_match and state is not None:
+        state.current_line = max(1, int(line_start_match.group("line")))
+        action = line_start_match.group("action")
+        if state.line_mode and state.line_total > 0:
+            if action == "キャッシュを使用します":
+                overall_percent = state.current_line / state.line_total * 100
+                return _line_by_line_progress_label(state, overall_percent, "キャッシュ使用")
+            overall_percent = (state.current_line - 1) / state.line_total * 100
+            return _line_by_line_progress_label(state, overall_percent, "行内準備")
     tqdm_match = _VIBEVOICE_TQDM_RE.search(normalized)
     if tqdm_match:
         current = tqdm_match.group("current")
@@ -718,7 +746,17 @@ def _progress_label_from_vibevoice_cli_line(line: str) -> str | None:
         percent = tqdm_match.group("percent")
         remaining = (tqdm_match.group("remaining") or "").strip()
         suffix = f", 残り約{remaining}" if remaining else ""
+        if state is not None and state.line_mode and state.line_total > 0 and state.current_line > 0:
+            line_percent = float(percent)
+            overall_percent = ((state.current_line - 1) + (line_percent / 100)) / state.line_total * 100
+            return _line_by_line_progress_label(state, overall_percent, f"行内 {current}/{total} {percent}%{suffix}")
         return f"生成中 {current}/{total} ({percent}%{suffix})"
+    line_complete_match = _VIBEVOICE_LINE_COMPLETE_RE.search(message)
+    if line_complete_match and state is not None:
+        state.line_mode = True
+        state.line_total = max(1, int(line_complete_match.group("total")))
+        state.current_line = state.line_total
+        return _line_by_line_progress_label(state, 100, "")
     if "VibeVoiceモデルを読み込み中" in normalized:
         return "モデル読み込み中"
     if "モデルの読み込みが完了" in normalized:
@@ -736,6 +774,14 @@ def _progress_label_from_vibevoice_cli_line(line: str) -> str | None:
     if "音声を保存しました" in normalized:
         return "音声保存完了"
     return None
+
+
+def _line_by_line_progress_label(state: _VibeVoiceCliProgressState, overall_percent: float, detail: str) -> str:
+    total = max(1, state.line_total)
+    current_line = min(max(0, state.current_line), total)
+    percent = _format_number(max(0.0, min(100.0, overall_percent)))
+    suffix = f", {detail}" if detail else ""
+    return f"行単位生成 {current_line}/{total} ({percent}%{suffix})"
 
 
 def _strip_log_prefix(line: str) -> str:

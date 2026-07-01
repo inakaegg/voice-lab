@@ -491,15 +491,20 @@ function progressPercentFromPayload(payload) {
     }
   }
   for (const label of labels) {
-    const match = String(label).match(/生成中\s+\d+\/\d+\s+\((\d+(?:\.\d+)?)%/);
-    if (match) {
-      const percent = Number(match[1]);
-      if (Number.isFinite(percent)) {
-        return Math.max(0, Math.min(100, percent));
-      }
+    const percent = progressPercentFromLabel(label);
+    if (Number.isFinite(percent)) {
+      return Math.max(0, Math.min(100, percent));
     }
   }
   return null;
+}
+
+function progressPercentFromLabel(label) {
+  const text = String(label || "");
+  const lineByLineMatch = text.match(/行単位生成\s+\d+\/\d+\s+\((\d+(?:\.\d+)?)%/);
+  const generationMatch = text.match(/生成中\s+\d+\/\d+\s+\((\d+(?:\.\d+)?)%/);
+  const match = lineByLineMatch || generationMatch;
+  return match ? Number(match[1]) : null;
 }
 
 function renderProgressPercent(percent, fallbackProgress = "indeterminate") {

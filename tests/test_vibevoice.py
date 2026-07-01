@@ -308,6 +308,69 @@ def test_vibevoice_service_streams_cli_progress_from_stderr(tmp_path: Path) -> N
     assert "32/32" in result.diagnostics["stderr_tail"]
 
 
+def test_vibevoice_service_streams_line_by_line_overall_progress(tmp_path: Path) -> None:
+    cli = tmp_path / "fake_vibevoice_cli.py"
+    cli.write_text(
+        "\n".join(
+            [
+                "from pathlib import Path",
+                "import sys",
+                "import time",
+                "output = Path(sys.argv[sys.argv.index('--output') + 1])",
+                "sys.stderr.write('2026-07-02 00:00:00,000 - INFO - 行単位モードで音声を生成します。対象行数: 4 (mode=concat)\\n')",
+                "sys.stderr.flush()",
+                "sys.stderr.write('2026-07-02 00:00:00,000 - INFO - 行001: 新規に音声を生成します\\n')",
+                "sys.stderr.flush()",
+                "sys.stderr.write('\\rGenerating (active: 1/1):  50%|###| 16/32 [00:01<00:08, 1.00it/s]')",
+                "sys.stderr.flush()",
+                "time.sleep(0.01)",
+                "sys.stderr.write('\\n2026-07-02 00:00:00,000 - INFO - 行002: 新規に音声を生成します\\n')",
+                "sys.stderr.flush()",
+                "sys.stderr.write('\\rGenerating (active: 1/1): 100%|###| 32/32 [00:01<00:00, 1.00it/s]')",
+                "sys.stderr.flush()",
+                "sys.stderr.write('\\n2026-07-02 00:00:00,000 - INFO - 行単位モード: 4件の音声を結合しました (gap=1.00s)\\n')",
+                "sys.stderr.flush()",
+                "output.write_bytes(b'RIFFfakewav')",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+    service = VibeVoiceService(
+        python=sys.executable,
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        timeout_seconds=5,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+    progress: list[tuple[str, str]] = []
+
+    result = service.generate(
+        script_text="\n".join(
+            [
+                "Speaker 1: こんにちは。",
+                "Speaker 1: 北海道の話です。",
+                "Speaker 1: 温泉があります。",
+                "Speaker 1: 牛の世話をします。",
+            ]
+        ),
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(line_by_line=True),
+        progress_callback=lambda stage, label: progress.append((stage, label)),
+    )
+
+    labels = [label for stage, label in progress if stage == "generation"]
+    assert result.audio_bytes == b"RIFFfakewav"
+    assert any("行単位生成 1/4 (12.5%" in label and "行内 16/32" in label for label in labels)
+    assert any("行単位生成 2/4 (50%" in label and "行内 32/32" in label for label in labels)
+    assert labels[-1] == "行単位生成 4/4 (100%)"
+
+
 def test_vibevoice_model_presets_include_only_skit_verified_candidates() -> None:
     assert set(VIBEVOICE_MODEL_PRESETS) == {
         "vibevoice-1.5b-pinned",

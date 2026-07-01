@@ -21,7 +21,7 @@
 
 台本テキストと生成設定はブラウザの `localStorage` へ保存し、次回の `/vibevoice` 表示時に復元する。保存対象は、台本本文、実行先backend、モデル、`cfg_scale`、`inference_steps`、`seed`、`temperature`、`top_p`、`top_k`、`max_voice_seconds`、`line_gap`、`do_sample`、`line_by_line` とする。台本ファイルを読み込んだ場合も、読み込み後のtextarea内容を保存対象にする。保存は同じブラウザ内の作業再開用であり、履歴管理や別端末同期は今後の生成履歴機能で扱う。
 
-長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。現時点のプログレスバーは処理中であることを示すインジケータであり、VibeVoice CLIの `tqdm` 出力に含まれる実進捗値はまだ反映していない。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
+長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。ローカル実行ではVibeVoice CLIの `tqdm` 出力に含まれる実進捗値を取り込み、プログレスバーを数値進捗へ切り替える。進捗値がまだ取れない初期化や未知ステージだけ、処理中インジケータとしてアニメーション表示する。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
 
 `VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるが、2026-07-01のRunPod検証では現行の非streamingスキット生成CLIで音声生成まで通らなかった。Large repoには `tokenizer.json` がないため `Qwen/Qwen2.5-7B` tokenizerに分ける必要があり、この404は解消できる。しかしその後の生成で、sampling時は `torch.multinomial` のCUDA assert、greedy時は音声波形なしで終了する。これは「Largeが原理的に使えない」という意味ではなく、このアプリが現在固定しているComfyUI-VibeVoice ref、Transformers/Torch組み合わせ、非streamingスキット生成CLIがLargeの推奨生成経路に対応できていないという扱いにする。そのため通常UIのモデル候補には出さない。Largeを扱う場合は、別の実装ref、推奨生成コード、必要GPU/VRAMを再確認してから実験候補として戻す。
 
@@ -76,7 +76,7 @@ ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.m
 
 VibeVoice本体の既定生成長は、テキストだけでなく参照音声promptを含む入力長から決まるため、短い台本でも150 token程度まで生成が続くことがある。アプリ内CLIでは、`max_new_tokens` を台本文字数と行数から見積もって明示的に渡し、短文が20秒級の無関係な音声として伸び続ける回帰を避ける。
 
-ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。Web UIはpollingごとに現在のstage labelと直近ログを表示し、数値進捗が取れた時点でプログレスバーをdeterminate表示へ切り替える。完了まで無変化のアニメーションだけが続く状態にしない。キャンセル要求はこのストリーミング実行中にも監視し、子プロセスを終了する。job API経由でも `MO_VIBEVOICE_TIMEOUT_SECONDS` の上限は有効で、キャンセル監視のためにtimeoutを無効化しない。
+ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。行単位生成では、各行の内部tqdmをそのまま表示すると行ごとに0%へ戻って全体の進み具合が分からないため、`行単位生成 2/11 (18.2%, 行内 16/32 50%)` のように全体行数に対する進捗へ変換して表示する。Web UIはpollingごとに現在のstage labelと直近ログを表示し、数値進捗が取れた時点でプログレスバーをdeterminate表示へ切り替える。完了まで無変化のアニメーションだけが続く状態にしない。キャンセル要求はこのストリーミング実行中にも監視し、子プロセスを終了する。job API経由でも `MO_VIBEVOICE_TIMEOUT_SECONDS` の上限は有効で、キャンセル監視のためにtimeoutを無効化しない。
 
 ```bash
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub
@@ -179,7 +179,7 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 
 ### 7. 実進捗表示
 
-ローカル実行ではVibeVoice CLIがstderrへ `tqdm` 形式の進捗を出すため、これをジョブ状態へ取り込み、UIのプログレスバーへ反映する余地がある。
+ローカル実行ではVibeVoice CLIがstderrへ `tqdm` 形式の進捗を出すため、これをジョブ状態へ取り込み、UIのプログレスバーへ反映する。
 
 - ローカル: `subprocess.Popen` のstderrを逐次読み、`Loading weights`、`Generating`、`line-by-line` の現在値、総数、割合をジョブstoreへ保存する。
 - UI: indeterminate表示は初期化や未知ステージだけに使い、進捗値が取れるステージではバー幅とパーセントを実値へ切り替える。

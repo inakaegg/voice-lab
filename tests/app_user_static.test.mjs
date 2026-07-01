@@ -211,6 +211,8 @@ test("vibevoice progress animation only runs while a job is active", () => {
   assert.match(vibevoiceSource, /jobProgress\.dataset\.state = "complete"/);
   assert.match(vibevoiceSource, /renderProgressPercent/);
   assert.match(vibevoiceSource, /renderProgressPercent\(null,\s*"idle"\)/);
+  assert.match(vibevoiceSource, /progressPercentFromLabel/);
+  assert.match(vibevoiceSource, /行単位生成\\s\+\\d\+\\\/\\d\+/);
   assert.match(vibevoiceSource, /aria-valuenow/);
   assert.match(styles, /\.vibevoice-job-progress\[data-state="complete"\]\s+\.vibevoice-progress-bar\s*\{[^}]*display:\s*none/s);
   assert.match(
