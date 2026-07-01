@@ -19,6 +19,37 @@ def test_normalize_vibevoice_script_adds_speaker_tag_per_plain_line() -> None:
     assert normalize_vibevoice_script("Speaker 2: 你好。") == "Speaker 2: 你好。"
 
 
+def test_normalize_vibevoice_script_accepts_short_speaker_tags() -> None:
+    assert normalize_vibevoice_script(
+        "\n".join(
+            [
+                "1: こんにちは。",
+                "2 今日はどこへ行きますか？",
+                "A: Hello.",
+                "B Good morning.",
+                "タグなし。",
+            ]
+        )
+    ) == "\n".join(
+        [
+            "Speaker 1: こんにちは。",
+            "Speaker 2: 今日はどこへ行きますか？",
+            "Speaker 1: Hello.",
+            "Speaker 2: Good morning.",
+            "Speaker 1: タグなし。",
+        ]
+    )
+
+
+def test_normalize_vibevoice_script_does_not_treat_content_as_short_tag() -> None:
+    assert normalize_vibevoice_script("I want coffee.\n2026 年の話です。") == "\n".join(
+        [
+            "Speaker 1: I want coffee.",
+            "Speaker 1: 2026 年の話です。",
+        ]
+    )
+
+
 def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     calls: list[tuple[list[str], dict[str, str]]] = []
     cli = tmp_path / "vibevoice.py"

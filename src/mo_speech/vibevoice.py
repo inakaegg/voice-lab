@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -19,6 +20,9 @@ DEFAULT_COMFYUI_VIBEVOICE_PATH = DEFAULT_VIBEVOICE_ROOT / "ComfyUI-VibeVoice"
 DEFAULT_VIBEVOICE_TIMEOUT_SECONDS = 900.0
 VIBEVOICE_SAMPLE_RATE = 24_000
 DEFAULT_VIBEVOICE_MODEL_ID = "vibevoice-1.5b-pinned"
+SHORT_SPEAKER_TAG_MIN = 1
+SHORT_SPEAKER_TAG_MAX = 4
+_SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
 
 
 @dataclass(frozen=True)
@@ -159,8 +163,9 @@ def normalize_vibevoice_script(text: str, *, max_bytes: int = 200_000) -> str:
         stripped = line.strip()
         if not stripped:
             continue
-        if _has_speaker_tag(stripped):
-            normalized_lines.append(stripped)
+        normalized = _normalize_speaker_line(stripped)
+        if normalized is not None:
+            normalized_lines.append(normalized)
         else:
             normalized_lines.append(f"Speaker 1: {stripped}")
     if not normalized_lines:
@@ -179,6 +184,29 @@ def _has_speaker_tag(line: str) -> bool:
         return int(normalized_prefix.removeprefix("speaker ").strip()) >= 1
     except ValueError:
         return False
+
+
+def _normalize_speaker_line(line: str) -> str | None:
+    if _has_speaker_tag(line):
+        return line
+    match = _SHORT_SPEAKER_TAG_RE.match(line)
+    if match is None:
+        return None
+    speaker_number = _speaker_number_from_short_tag(match.group(1))
+    if speaker_number is None:
+        return None
+    return f"Speaker {speaker_number}: {match.group(2).strip()}"
+
+
+def _speaker_number_from_short_tag(tag: str) -> int | None:
+    normalized = tag.strip()
+    if normalized.isdigit():
+        number = int(normalized)
+        return number if SHORT_SPEAKER_TAG_MIN <= number <= SHORT_SPEAKER_TAG_MAX else None
+    if len(normalized) == 1 and normalized.isalpha() and normalized.isascii():
+        number = ord(normalized.upper()) - ord("A") + 1
+        return number if SHORT_SPEAKER_TAG_MIN <= number <= SHORT_SPEAKER_TAG_MAX else None
+    return None
 
 
 class VibeVoiceService:
