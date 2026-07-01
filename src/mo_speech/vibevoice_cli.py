@@ -750,6 +750,8 @@ class VibeVoice:
         self,
         script_text: str,
         voice_samples_np: List[np.ndarray],
+        *,
+        speaker_ids_for_prompt: Optional[List[int]] = None,
         cfg_scale: float,
         inference_steps: int,
         do_sample: bool,
@@ -758,7 +760,18 @@ class VibeVoice:
         top_k: int,
     ) -> np.ndarray:
         """Run the VibeVoice model and return waveform as numpy array."""
-        inputs = self.processor(text=[script_text], voice_samples=[voice_samples_np], padding=True, return_tensors="pt", return_attention_mask=True)
+        parsed_lines_0_based, parsed_speaker_ids_1_based = self.parse_script_1_based(script_text)
+        if not parsed_lines_0_based:
+            raise ValueError("スクリプトが空または無効です。'Speaker 1:', 'Speaker 2:' などの形式を使用してください")
+        prompt_speaker_ids = speaker_ids_for_prompt or parsed_speaker_ids_1_based
+        inputs = self.processor(
+            parsed_scripts=[parsed_lines_0_based],
+            voice_samples=[voice_samples_np],
+            speaker_ids_for_prompt=[prompt_speaker_ids],
+            padding=True,
+            return_tensors="pt",
+            return_attention_mask=True,
+        )
 
         for key, value in inputs.items():
             if isinstance(value, torch.Tensor):
@@ -837,6 +850,7 @@ class VibeVoice:
             waveform_np = self._synthesize_script(
                 script_text=full_script,
                 voice_samples_np=voice_samples_np,
+                speaker_ids_for_prompt=speaker_ids_1_based,
                 cfg_scale=cfg_scale,
                 inference_steps=inference_steps,
                 do_sample=do_sample,
@@ -989,6 +1003,7 @@ class VibeVoice:
                 waveform_np = self._synthesize_script(
                     script_text=script_line,
                     voice_samples_np=voice_samples_np,
+                    speaker_ids_for_prompt=speaker_ids_1_based,
                     cfg_scale=cfg_scale,
                     inference_steps=inference_steps,
                     do_sample=do_sample,

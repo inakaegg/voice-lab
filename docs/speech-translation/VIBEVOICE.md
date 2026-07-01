@@ -68,6 +68,8 @@ Transformers 5系では、VibeVoice拡張の `tie_weights()` が `decoder_config
 
 RunPod Network Volumeでは、モデルキャッシュを `/workspace` または `/runpod-volume` 配下に置く。ComfyUI-VibeVoice拡張はDocker image内の `/app/ComfyUI-VibeVoice` に入れる構成を既定とし、別途Volumeへ置く場合だけ環境変数で上書きする。
 
+ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.modules.utils` を参照する一方、実際の `utils.py` は拡張ルート直下の `modules/` にある。そのため、アプリ内CLIはprocessorへraw textを渡さず、CLI側でparse済みの `parsed_scripts` と `speaker_ids_for_prompt` を渡して生成する。
+
 ```bash
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub
 COMFYUI_VIBEVOICE_PATH=/app/ComfyUI-VibeVoice

@@ -333,3 +333,50 @@ def test_vibevoice_cli_rejects_missing_speech_output(tmp_path: Path) -> None:
             top_p=0.95,
             top_k=0,
         )
+
+
+def test_vibevoice_cli_passes_parsed_scripts_to_processor(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+    processor_calls = []
+
+    class FakeProcessor:
+        tokenizer = object()
+
+        def __call__(self, **kwargs):
+            processor_calls.append(kwargs)
+            return {}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, **kwargs):
+            return SimpleNamespace(speech_outputs=[None])
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    with pytest.raises(RuntimeError, match="音声波形を返しませんでした"):
+        service._synthesize_script(
+            script_text="Speaker 2: こんにちは。",
+            voice_samples_np=[],
+            speaker_ids_for_prompt=[1, 2],
+            cfg_scale=1.3,
+            inference_steps=2,
+            do_sample=True,
+            temperature=0.95,
+            top_p=0.95,
+            top_k=0,
+        )
+
+    assert processor_calls
+    assert "text" not in processor_calls[0]
+    assert processor_calls[0]["parsed_scripts"] == [[(1, " こんにちは。")]]
+    assert processor_calls[0]["speaker_ids_for_prompt"] == [[1, 2]]
