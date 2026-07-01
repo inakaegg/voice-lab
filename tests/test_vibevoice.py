@@ -87,7 +87,7 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
         script_text="你好。",
         voice_paths=[voice],
         options=VibeVoiceGenerationOptions(
-            model_id="vibevoice-realtime-0.5b-latest",
+            model_id="vibevoice-large-aoi-pinned",
             inference_steps=3,
             seed=7,
             line_by_line=True,
@@ -109,11 +109,11 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     assert "0.25" in command
     assert env["VIBEVOICE_HOME"] == str(home)
     assert env["COMFYUI_VIBEVOICE_PATH"] == str(module_dir)
-    assert env["VIBEVOICE_MODEL_REPO"] == "microsoft/VibeVoice-Realtime-0.5B"
-    assert env["VIBEVOICE_MODEL_REVISION"] == ""
-    assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-0.5B"
-    assert env["VIBEVOICE_TOKENIZER_REVISION"] == ""
-    assert result.providers["vibevoice_model_id"] == "vibevoice-realtime-0.5b-latest"
+    assert env["VIBEVOICE_MODEL_REPO"] == "aoi-ot/VibeVoice-Large"
+    assert env["VIBEVOICE_MODEL_REVISION"] == "1b81fecc784a076dcd935678db551871f4598ebf"
+    assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-7B"
+    assert env["VIBEVOICE_TOKENIZER_REVISION"] == "d149729398750b98c0af14eb82c78cfe92750796"
+    assert result.providers["vibevoice_model_id"] == "vibevoice-large-aoi-pinned"
 
 
 def test_vibevoice_service_preserves_explicit_speaker_slots(tmp_path: Path) -> None:
@@ -214,25 +214,22 @@ def test_vibevoice_service_disables_timeout_when_cancel_event_controls_job(tmp_p
     assert captured_timeouts == [None]
 
 
-def test_vibevoice_model_presets_include_pinned_latest_and_realtime() -> None:
-    assert set(VIBEVOICE_MODEL_PRESETS) >= {
+def test_vibevoice_model_presets_include_only_skit_verified_candidates() -> None:
+    assert set(VIBEVOICE_MODEL_PRESETS) == {
         "vibevoice-1.5b-pinned",
         "vibevoice-1.5b-latest",
-        "vibevoice-realtime-0.5b-latest",
         "vibevoice-large-aoi-pinned",
     }
     pinned = resolve_vibevoice_model_preset("vibevoice-1.5b-pinned")
     latest = resolve_vibevoice_model_preset("vibevoice-1.5b-latest")
-    realtime = resolve_vibevoice_model_preset("vibevoice-realtime-0.5b-latest")
     large = resolve_vibevoice_model_preset("vibevoice-large-aoi-pinned")
     assert pinned.model_repo == "microsoft/VibeVoice-1.5B"
     assert pinned.model_revision == "1904eae38036e9c780d28e27990c27748984eafe"
     assert latest.model_repo == "microsoft/VibeVoice-1.5B"
     assert latest.model_revision is None
-    assert realtime.model_repo == "microsoft/VibeVoice-Realtime-0.5B"
-    assert realtime.tokenizer_repo == "Qwen/Qwen2.5-0.5B"
     assert large.model_repo == "aoi-ot/VibeVoice-Large"
-    assert large.tokenizer_repo == "aoi-ot/VibeVoice-Large"
+    assert large.tokenizer_repo == "Qwen/Qwen2.5-7B"
+    assert large.tokenizer_revision == "d149729398750b98c0af14eb82c78cfe92750796"
 
 
 def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None:

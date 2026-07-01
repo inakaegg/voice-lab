@@ -64,23 +64,14 @@ VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
         tokenizer_revision=None,
         notes="Hugging Face mainを取得する比較用。将来の更新で挙動が変わる可能性がある。",
     ),
-    "vibevoice-realtime-0.5b-latest": VibeVoiceModelPreset(
-        model_id="vibevoice-realtime-0.5b-latest",
-        label="VibeVoice Realtime 0.5B",
-        model_repo="microsoft/VibeVoice-Realtime-0.5B",
-        model_revision=None,
-        tokenizer_repo="Qwen/Qwen2.5-0.5B",
-        tokenizer_revision=None,
-        notes="軽量・低遅延候補。既存CLIとの互換性と日本語/中国語品質は検証対象。",
-    ),
     "vibevoice-large-aoi-pinned": VibeVoiceModelPreset(
         model_id="vibevoice-large-aoi-pinned",
         label="VibeVoice Large 実験",
         model_repo="aoi-ot/VibeVoice-Large",
         model_revision="1b81fecc784a076dcd935678db551871f4598ebf",
-        tokenizer_repo="aoi-ot/VibeVoice-Large",
-        tokenizer_revision="1b81fecc784a076dcd935678db551871f4598ebf",
-        notes="ModelScope由来のcommunity copy。Microsoft公式HF repoではないため実験扱い。",
+        tokenizer_repo="Qwen/Qwen2.5-7B",
+        tokenizer_revision="d149729398750b98c0af14eb82c78cfe92750796",
+        notes="ModelScope由来のcommunity copy。tokenizerはdecoder configに合わせてQwen2.5-7Bを使う。",
     ),
 }
 
