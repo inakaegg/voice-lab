@@ -22,6 +22,7 @@ import hashlib
 import shutil
 import types
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
@@ -106,6 +107,172 @@ def _install_transformers_qwen2_fast_alias() -> None:
     sys.modules[module_name] = module
 
 
+def _patch_transformers5_tied_weights_mapping(model_class: Any) -> None:
+    tied_weights = getattr(model_class, "_tied_weights_keys", None)
+    if isinstance(tied_weights, list):
+        if tied_weights == ["lm_head.weight"]:
+            model_class._tied_weights_keys = {"lm_head.weight": "model.language_model.embed_tokens.weight"}
+
+
+def _patch_transformers5_tie_weights_signature(model_class: Any) -> None:
+    tie_weights = getattr(model_class, "tie_weights", None)
+    if tie_weights is None or getattr(tie_weights, "_mo_accepts_transformers5_kwargs", False):
+        return
+
+    def wrapped_tie_weights(self, *args, **kwargs):
+        return tie_weights(self)
+
+    wrapped_tie_weights._mo_accepts_transformers5_kwargs = True
+    model_class.tie_weights = wrapped_tie_weights
+
+
+def _patch_transformers5_prepare_generation_config(model_class: Any) -> None:
+    prepare_generation_config = getattr(model_class, "_prepare_generation_config", None)
+    if prepare_generation_config is None or getattr(
+        prepare_generation_config, "_mo_accepts_legacy_kwargs_dict", False
+    ):
+        return
+
+    def wrapped_prepare_generation_config(self, generation_config, kwargs=None, **extra_kwargs):
+        if isinstance(kwargs, dict):
+            extra_kwargs.update(kwargs)
+        elif kwargs is not None:
+            extra_kwargs["_legacy_kwargs"] = kwargs
+        return prepare_generation_config(self, generation_config, **extra_kwargs)
+
+    wrapped_prepare_generation_config._mo_accepts_legacy_kwargs_dict = True
+    model_class._prepare_generation_config = wrapped_prepare_generation_config
+
+
+def _patch_transformers5_update_model_kwargs(model_class: Any) -> None:
+    update_model_kwargs = getattr(model_class, "_update_model_kwargs_for_generation", None)
+    if update_model_kwargs is None or getattr(update_model_kwargs, "_mo_restores_past_key_values", False):
+        return
+
+    def wrapped_update_model_kwargs(self, outputs, model_kwargs, *args, **kwargs):
+        updated_kwargs = update_model_kwargs(self, outputs, model_kwargs, *args, **kwargs)
+        if "past_key_values" not in updated_kwargs:
+            past_key_values = getattr(outputs, "past_key_values", None)
+            if past_key_values is not None:
+                updated_kwargs["past_key_values"] = past_key_values
+        return updated_kwargs
+
+    wrapped_update_model_kwargs._mo_restores_past_key_values = True
+    model_class._update_model_kwargs_for_generation = wrapped_update_model_kwargs
+
+
+def _patch_transformers5_prepare_cache_for_generation(model_class: Any) -> None:
+    prepare_cache = getattr(model_class, "_prepare_cache_for_generation", None)
+    if prepare_cache is None or getattr(prepare_cache, "_mo_accepts_comfyui_legacy_args", False):
+        return
+
+    def _generation_mode_for_config(generation_config):
+        from transformers.generation.configuration_utils import GenerationMode
+
+        return GenerationMode.SAMPLE if getattr(generation_config, "do_sample", False) else GenerationMode.GREEDY_SEARCH
+
+    def wrapped_prepare_cache_for_generation(self, generation_config, model_kwargs, *args, **kwargs):
+        if len(args) == 3:
+            batch_size, max_cache_length, _device = args
+            if isinstance(batch_size, int):
+                return prepare_cache(
+                    self,
+                    generation_config,
+                    model_kwargs,
+                    _generation_mode_for_config(generation_config),
+                    batch_size,
+                    max_cache_length,
+                    **kwargs,
+                )
+        if len(args) == 4:
+            _legacy_model_input_name, batch_size, max_cache_length, _device = args
+            if isinstance(batch_size, int):
+                return prepare_cache(
+                    self,
+                    generation_config,
+                    model_kwargs,
+                    _generation_mode_for_config(generation_config),
+                    batch_size,
+                    max_cache_length,
+                    **kwargs,
+                )
+        return prepare_cache(self, generation_config, model_kwargs, *args, **kwargs)
+
+    wrapped_prepare_cache_for_generation._mo_accepts_comfyui_legacy_args = True
+    model_class._prepare_cache_for_generation = wrapped_prepare_cache_for_generation
+
+
+def _patch_transformers5_build_generate_config_model_kwargs(model_class: Any) -> None:
+    build_model_kwargs = getattr(model_class, "_build_generate_config_model_kwargs", None)
+    if build_model_kwargs is None or getattr(build_model_kwargs, "_mo_ensures_dynamic_cache", False):
+        return
+
+    def wrapped_build_generate_config_model_kwargs(self, *args, **kwargs):
+        result = build_model_kwargs(self, *args, **kwargs)
+        if isinstance(result, tuple) and len(result) >= 2 and isinstance(result[1], dict):
+            model_kwargs = result[1]
+            if model_kwargs.get("use_cache", True) and "past_key_values" not in model_kwargs:
+                from transformers.cache_utils import DynamicCache
+
+                # Keep it lazy/empty. ComfyUI-VibeVoice indexes this cache before
+                # the negative pass has filled it; an empty cache makes that first
+                # adjustment a no-op and lets the model populate layers on forward.
+                model_kwargs["past_key_values"] = DynamicCache()
+        return result
+
+    wrapped_build_generate_config_model_kwargs._mo_ensures_dynamic_cache = True
+    model_class._build_generate_config_model_kwargs = wrapped_build_generate_config_model_kwargs
+
+
+def _patch_transformers5_dynamic_cache_tuple_indexing() -> None:
+    try:
+        from transformers.cache_utils import DynamicCache
+    except Exception:
+        return
+
+    if getattr(DynamicCache, "_mo_supports_tuple_indexing", False):
+        return
+
+    def tuple_indexing_getitem(self, layer_idx):
+        layer = self.layers[layer_idx]
+        return layer.keys, layer.values
+
+    DynamicCache.__getitem__ = tuple_indexing_getitem
+    DynamicCache._mo_supports_tuple_indexing = True
+
+
+@contextmanager
+def _torch_creation_cpu_when_default_device_is_meta():
+    original_linspace = torch.linspace
+    original_tensor = torch.tensor
+
+    def _should_force_cpu(kwargs: dict[str, Any]) -> bool:
+        if "device" not in kwargs and hasattr(torch, "get_default_device"):
+            try:
+                return torch.get_default_device().type == "meta"
+            except Exception:
+                return False
+        return False
+
+    def patched_linspace(*args, **kwargs):
+        if _should_force_cpu(kwargs):
+            kwargs["device"] = "cpu"
+        return original_linspace(*args, **kwargs)
+
+    def patched_tensor(*args, **kwargs):
+        if _should_force_cpu(kwargs):
+            kwargs["device"] = "cpu"
+        return original_tensor(*args, **kwargs)
+
+    torch.linspace = patched_linspace
+    torch.tensor = patched_tensor
+    try:
+        yield
+    finally:
+        torch.linspace = original_linspace
+        torch.tensor = original_tensor
+
+
 def _import_vibevoice_components():
     global _VIBEVOICE_COMPONENTS
     if _VIBEVOICE_COMPONENTS is not None:
@@ -120,6 +287,7 @@ def _import_vibevoice_components():
 
     try:
         from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
+        from vibevoice.modular.modeling_vibevoice import VibeVoiceForConditionalGeneration
         from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
         from vibevoice.processor.vibevoice_tokenizer_processor import VibeVoiceTokenizerProcessor
         from vibevoice.modular.modular_vibevoice_text_tokenizer import VibeVoiceTextTokenizerFast
@@ -130,6 +298,15 @@ def _import_vibevoice_components():
             f" 原因: {type(exc).__name__}: {exc}"
         ) from exc
 
+    _patch_transformers5_tied_weights_mapping(VibeVoiceForConditionalGenerationInference)
+    _patch_transformers5_tied_weights_mapping(VibeVoiceForConditionalGeneration)
+    _patch_transformers5_tie_weights_signature(VibeVoiceForConditionalGenerationInference)
+    _patch_transformers5_tie_weights_signature(VibeVoiceForConditionalGeneration)
+    _patch_transformers5_prepare_generation_config(VibeVoiceForConditionalGenerationInference)
+    _patch_transformers5_update_model_kwargs(VibeVoiceForConditionalGenerationInference)
+    _patch_transformers5_prepare_cache_for_generation(VibeVoiceForConditionalGenerationInference)
+    _patch_transformers5_build_generate_config_model_kwargs(VibeVoiceForConditionalGenerationInference)
+    _patch_transformers5_dynamic_cache_tuple_indexing()
     _VIBEVOICE_COMPONENTS = (
         VibeVoiceForConditionalGenerationInference,
         VibeVoiceProcessor,
@@ -278,12 +455,14 @@ class VibeVoice:
         self.model = None
         self.processor = None
         self.max_voice_seconds = max_voice_seconds
-        # Set device to 'mps' for Apple Silicon, 'cuda' for Nvidia, or 'cpu' as fallback.
-        if torch.backends.mps.is_available():
-            self.device = torch.device("mps")
+        configured_device = os.getenv("VIBEVOICE_DEVICE", "").strip().lower()
+        if configured_device:
+            self.device = torch.device(configured_device)
         elif torch.cuda.is_available():
             self.device = torch.device("cuda")
         else:
+            # MPS currently crashes inside VibeVoice generation on local macOS
+            # for some multi-speaker inputs, so use CPU unless explicitly opted in.
             self.device = torch.device("cpu")
 
     def _resolve_model_path(self, explicit_path: Optional[str] = None) -> str:
@@ -407,10 +586,17 @@ class VibeVoice:
 
         # Load model
         try:
+            should_load_directly_to_device = self.device.type == "cuda"
             from_pretrained_kwargs = {
                 "attn_implementation": attention_mode,
-                "device_map": self.device,
             }
+            if should_load_directly_to_device:
+                from_pretrained_kwargs["device_map"] = self.device
+            else:
+                # The ComfyUI-VibeVoice acoustic tokenizer calls Tensor.item()
+                # during __init__, which is incompatible with Transformers'
+                # meta-tensor low-memory construction path.
+                from_pretrained_kwargs["low_cpu_mem_usage"] = False
 
             # Use the correct dtype argument based on the transformers version (same as ComfyUI)
             if _DTYPE_ARG_SUPPORTED:
@@ -418,7 +604,10 @@ class VibeVoice:
             else:
                 from_pretrained_kwargs["torch_dtype"] = final_load_dtype
 
-            self.model = VibeVoiceForConditionalGenerationInference.from_pretrained(self.model_path, **from_pretrained_kwargs)
+            with _torch_creation_cpu_when_default_device_is_meta():
+                self.model = VibeVoiceForConditionalGenerationInference.from_pretrained(self.model_path, **from_pretrained_kwargs)
+            if not should_load_directly_to_device:
+                self.model.to(self.device)
             self.model.eval()
             _propagate_decoder_config_fields(self.model.config)
             logger.info("モデルの読み込みが完了しました")
@@ -635,6 +824,9 @@ class VibeVoice:
 
         except Exception as e:
             logger.error(f"音声生成中にエラーが発生しました: {e}")
+            import traceback
+
+            logger.error(f"スタックトレース: {traceback.format_exc()}")
             raise
 
     def generate_audio_line_by_line(

@@ -551,19 +551,15 @@ def _resolve_path_setting(
 
 
 def _default_vibevoice_home_candidates() -> list[Path]:
-    candidates: list[Path] = []
     if model_cache_dir := os.getenv("MODEL_CACHE_DIR"):
-        candidates.append(Path(model_cache_dir).expanduser() / "vibevoice" / "huggingface" / "hub")
-    candidates.append(DEFAULT_VIBEVOICE_HOME)
-    return candidates
+        return [Path(model_cache_dir).expanduser() / "vibevoice" / "huggingface" / "hub"]
+    return [DEFAULT_VIBEVOICE_HOME]
 
 
 def _default_comfyui_vibevoice_candidates() -> list[Path]:
-    candidates: list[Path] = []
     if model_cache_dir := os.getenv("MODEL_CACHE_DIR"):
-        candidates.append(Path(model_cache_dir).expanduser() / "vibevoice" / "ComfyUI-VibeVoice")
-    candidates.append(DEFAULT_COMFYUI_VIBEVOICE_PATH)
-    return candidates
+        return [Path(model_cache_dir).expanduser() / "vibevoice" / "ComfyUI-VibeVoice"]
+    return [DEFAULT_COMFYUI_VIBEVOICE_PATH]
 
 
 def _elapsed_ms(started: float) -> float:

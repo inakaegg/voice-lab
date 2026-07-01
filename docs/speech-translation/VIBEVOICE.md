@@ -51,12 +51,16 @@
 ```bash
 export MODEL_CACHE_DIR=/path/to/shared-models
 export MO_VIBEVOICE_HOME=$MODEL_CACHE_DIR/vibevoice/huggingface/hub
+export VIBEVOICE_HOME=$MO_VIBEVOICE_HOME
 export COMFYUI_VIBEVOICE_PATH=$MODEL_CACHE_DIR/vibevoice/ComfyUI-VibeVoice
 export MO_VIBEVOICE_CLI=/path/to/vibevoice.py
 export MO_VIBEVOICE_PYTHON=/path/to/python
+export VIBEVOICE_DEVICE=cpu
 ```
 
-`MODEL_CACHE_DIR` もVibeVoice用環境変数も未指定の場合、ローカル実行は `~/.cache/mo-speech/models/vibevoice` 配下を既定候補にする。旧ComfyUIプロジェクトなど、他プロジェクト固有のパスへはfallbackしない。
+`MO_VIBEVOICE_HOME` はアプリ側サービスが参照する設定で、`vibevoice_cli.py` を直接実行する場合は `VIBEVOICE_HOME` を参照する。そのため、ローカル検証では同じパスを両方へ入れる。`MODEL_CACHE_DIR` を指定した場合はその配下を明示設定として扱い、既に存在する `~/.cache/mo-speech` へ自動fallbackしない。`MODEL_CACHE_DIR` もVibeVoice用環境変数も未指定の場合、ローカル実行は `~/.cache/mo-speech/models/vibevoice` 配下を既定候補にする。旧ComfyUIプロジェクトなど、他プロジェクト固有のパスへはfallbackしない。
+
+ローカルmacOSでは、MPS backendがVibeVoiceの複数話者生成中にMetal側で落ちる場合があるため、既定deviceはCPUにする。MPSを明示的に試す場合だけ `VIBEVOICE_DEVICE=mps` を設定する。RunPodなどCUDA環境ではCUDAを自動利用する。
 
 RunPod Network Volumeでは、モデルキャッシュを `/workspace` または `/runpod-volume` 配下に置く。ComfyUI-VibeVoice拡張はDocker image内の `/app/ComfyUI-VibeVoice` に入れる構成を既定とし、別途Volumeへ置く場合だけ環境変数で上書きする。
 
