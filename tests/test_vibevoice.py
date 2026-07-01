@@ -86,16 +86,20 @@ def test_vibevoice_model_presets_include_pinned_latest_and_realtime() -> None:
         "vibevoice-1.5b-pinned",
         "vibevoice-1.5b-latest",
         "vibevoice-realtime-0.5b-latest",
+        "vibevoice-large-aoi-pinned",
     }
     pinned = resolve_vibevoice_model_preset("vibevoice-1.5b-pinned")
     latest = resolve_vibevoice_model_preset("vibevoice-1.5b-latest")
     realtime = resolve_vibevoice_model_preset("vibevoice-realtime-0.5b-latest")
+    large = resolve_vibevoice_model_preset("vibevoice-large-aoi-pinned")
     assert pinned.model_repo == "microsoft/VibeVoice-1.5B"
     assert pinned.model_revision == "1904eae38036e9c780d28e27990c27748984eafe"
     assert latest.model_repo == "microsoft/VibeVoice-1.5B"
     assert latest.model_revision is None
     assert realtime.model_repo == "microsoft/VibeVoice-Realtime-0.5B"
     assert realtime.tokenizer_repo == "Qwen/Qwen2.5-0.5B"
+    assert large.model_repo == "aoi-ot/VibeVoice-Large"
+    assert large.tokenizer_repo == "aoi-ot/VibeVoice-Large"
 
 
 def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None:

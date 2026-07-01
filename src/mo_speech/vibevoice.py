@@ -68,6 +68,15 @@ VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
         tokenizer_revision=None,
         notes="軽量・低遅延候補。既存CLIとの互換性と日本語/中国語品質は検証対象。",
     ),
+    "vibevoice-large-aoi-pinned": VibeVoiceModelPreset(
+        model_id="vibevoice-large-aoi-pinned",
+        label="VibeVoice Large 実験",
+        model_repo="aoi-ot/VibeVoice-Large",
+        model_revision="1b81fecc784a076dcd935678db551871f4598ebf",
+        tokenizer_repo="aoi-ot/VibeVoice-Large",
+        tokenizer_revision="1b81fecc784a076dcd935678db551871f4598ebf",
+        notes="ModelScope由来のcommunity copy。Microsoft公式HF repoではないため実験扱い。",
+    ),
 }
 
 
