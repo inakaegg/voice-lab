@@ -2037,30 +2037,38 @@ audio {
   margin: 0;
 }
 
+.vibevoice-body *,
+.vibevoice-body *::before,
+.vibevoice-body *::after {
+  box-sizing: border-box;
+}
+
 .vibevoice-shell {
   display: grid;
-  gap: 18px;
+  gap: 12px;
   margin: 0 auto;
-  max-width: 1120px;
-  padding: 24px;
+  max-width: 1280px;
+  padding: 16px;
+  width: 100%;
 }
 
 .vibevoice-header,
-.vibevoice-status-card,
 .vibevoice-panel,
-.vibevoice-result {
+.vibevoice-result,
+.vibevoice-debug-runtime {
   background: #ffffff;
   border: 1px solid #dbe5f2;
   border-radius: 10px;
   box-shadow: 0 12px 34px rgba(33, 64, 116, 0.08);
+  min-width: 0;
 }
 
 .vibevoice-header {
   align-items: start;
   display: flex;
-  gap: 18px;
+  gap: 16px;
   justify-content: space-between;
-  padding: 22px;
+  padding: 16px 18px;
 }
 
 .vibevoice-header h1,
@@ -2073,14 +2081,16 @@ audio {
 }
 
 .vibevoice-header h1 {
-  font-size: clamp(28px, 4vw, 44px);
+  font-size: clamp(24px, 3vw, 34px);
   line-height: 1.1;
 }
 
 .vibevoice-header p {
   color: #53657f;
-  line-height: 1.6;
-  margin-top: 8px;
+  line-height: 1.5;
+  margin-top: 5px;
+  max-width: 680px;
+  overflow-wrap: anywhere;
 }
 
 .vibevoice-kicker,
@@ -2111,19 +2121,13 @@ audio {
   text-decoration: none;
 }
 
-.vibevoice-status-card {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(180px, 0.35fr) minmax(0, 1fr);
-  padding: 16px;
-}
-
 .vibevoice-runtime-status {
   border-radius: 999px;
   display: inline-flex;
+  font-size: 12px;
   font-weight: 900;
-  margin: 8px 0 0;
-  padding: 8px 12px;
+  margin: 0;
+  padding: 5px 9px;
 }
 
 .vibevoice-runtime-status[data-state="ready"] {
@@ -2157,20 +2161,33 @@ audio {
 
 .vibevoice-form {
   display: grid;
-  gap: 18px;
+  gap: 0;
+}
+
+.vibevoice-workspace {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(360px, 0.7fr);
+}
+
+.vibevoice-control-stack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
 }
 
 .vibevoice-panel,
 .vibevoice-result {
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: 10px;
+  padding: 14px;
 }
 
 .vibevoice-panel-header {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: space-between;
 }
 
@@ -2196,7 +2213,7 @@ audio {
   color: #162033;
   font: 15px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   inline-size: 100%;
-  min-height: 230px;
+  min-height: min(52svh, 560px);
   padding: 14px;
   resize: vertical;
 }
@@ -2206,6 +2223,7 @@ audio {
   color: #556984;
   line-height: 1.55;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .vibevoice-message[data-state="error"] {
@@ -2213,22 +2231,45 @@ audio {
   font-weight: 900;
 }
 
+.vibevoice-message {
+  min-width: 0;
+}
+
 .vibevoice-voice-grid,
 .vibevoice-settings-grid,
 .vibevoice-result-grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vibevoice-voice-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .vibevoice-upload-slot {
+  align-items: center;
   background: #f7faff;
   border: 1px dashed #adc5e1;
   border-radius: 10px;
   display: grid;
-  gap: 8px;
-  min-height: 120px;
-  padding: 14px;
+  gap: 4px 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 72px;
+  padding: 10px;
+  position: relative;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.vibevoice-upload-slot:hover,
+.vibevoice-upload-slot:focus-within {
+  background: #edf6ff;
+  border-color: #4f93df;
+  box-shadow: 0 8px 20px rgba(31, 105, 196, 0.14);
+  transform: translateY(-1px);
 }
 
 .vibevoice-upload-index {
@@ -2238,28 +2279,50 @@ audio {
   color: #ffffff;
   display: inline-flex;
   font-weight: 900;
+  grid-row: 1 / 3;
   height: 28px;
   justify-content: center;
   width: 28px;
 }
 
 .vibevoice-upload-slot input {
-  inline-size: 100%;
+  block-size: 1px;
+  inline-size: 1px;
+  opacity: 0;
+  position: absolute;
+}
+
+.vibevoice-upload-action {
+  background: #e5f0ff;
+  border: 1px solid #bed5f5;
+  border-radius: 999px;
+  color: #164c9e;
+  font-size: 12px;
+  font-weight: 900;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  padding: 5px 8px;
+}
+
+.vibevoice-upload-slot strong {
+  min-width: 0;
 }
 
 .vibevoice-saved-voice {
   color: #40546e;
   display: block;
   font-size: 0.78rem;
+  grid-column: 2 / 4;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .vibevoice-settings-grid {
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.vibevoice-settings-grid label {
+.vibevoice-setting-field,
+.vibevoice-range-control {
   color: #40546e;
   display: grid;
   font-size: 13px;
@@ -2267,13 +2330,40 @@ audio {
   gap: 6px;
 }
 
-.vibevoice-settings-grid input,
+.vibevoice-setting-wide {
+  grid-column: 1 / -1;
+}
+
 .vibevoice-settings-grid select {
   border: 1px solid #cbd9ea;
   border-radius: 8px;
   box-sizing: border-box;
   font: inherit;
   padding: 10px;
+  width: 100%;
+}
+
+.vibevoice-range-label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.vibevoice-range-label output {
+  background: #eef5ff;
+  border: 1px solid #d0e0f4;
+  border-radius: 999px;
+  color: #17395f;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  padding: 3px 8px;
+  text-align: right;
+}
+
+.vibevoice-range-control input[type="range"] {
+  accent-color: #1d75dc;
+  margin: 0;
   width: 100%;
 }
 
@@ -2291,14 +2381,19 @@ audio {
   display: inline-flex;
   font-weight: 900;
   gap: 8px;
-  padding: 9px 12px;
+  padding: 8px 11px;
 }
 
 .vibevoice-actions {
   align-items: center;
+  background: #ffffff;
+  border: 1px solid #dbe5f2;
+  border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(33, 64, 116, 0.08);
   display: flex;
-  flex-wrap: wrap;
   gap: 12px;
+  order: -1;
+  padding: 12px 14px;
 }
 
 .vibevoice-generate-button {
@@ -2307,10 +2402,10 @@ audio {
   border-radius: 10px;
   color: #ffffff;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 900;
-  min-width: 160px;
-  padding: 14px 22px;
+  min-width: 136px;
+  padding: 12px 18px;
 }
 
 .vibevoice-generate-button:disabled {
@@ -2331,24 +2426,57 @@ audio {
   border-radius: 8px;
   color: #d8e7ff;
   margin: 8px 0 0;
-  max-height: 360px;
+  max-height: 280px;
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
 }
 
-@media (max-width: 820px) {
+.vibevoice-debug-runtime {
+  padding: 10px 12px;
+}
+
+.vibevoice-debug-runtime summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.vibevoice-debug-runtime[open] .vibevoice-runtime-details {
+  border-top: 1px solid #dbe5f2;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+@media (max-width: 980px) {
   .vibevoice-shell {
     padding: 12px;
   }
 
-  .vibevoice-header,
-  .vibevoice-status-card {
+  .vibevoice-workspace {
     grid-template-columns: 1fr;
   }
 
+  .vibevoice-script-panel textarea {
+    min-height: 300px;
+  }
+}
+
+@media (max-width: 640px) {
   .vibevoice-header {
     display: grid;
+  }
+
+  .vibevoice-panel-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .vibevoice-file-button {
+    justify-content: center;
+    width: 100%;
   }
 
   .vibevoice-nav {
@@ -2359,5 +2487,18 @@ audio {
   .vibevoice-settings-grid,
   .vibevoice-result-grid {
     grid-template-columns: 1fr;
+  }
+
+  .vibevoice-setting-wide {
+    grid-column: auto;
+  }
+
+  .vibevoice-actions {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .vibevoice-generate-button {
+    width: 100%;
   }
 }

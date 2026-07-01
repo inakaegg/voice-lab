@@ -12,6 +12,7 @@ const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
 const savedVoiceLabels = Array.from(document.querySelectorAll("[data-saved-voice-slot]"));
+const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
 const savedVoiceFilesBySlot = new Map();
@@ -23,6 +24,10 @@ form.addEventListener("submit", handleGenerate);
 scriptFileInput.addEventListener("change", handleScriptFileChange);
 voiceFileInputs.forEach((input) => {
   input.addEventListener("change", () => handleVoiceFileChange(input));
+});
+rangeInputs.forEach((input) => {
+  input.addEventListener("input", () => renderRangeValue(input));
+  renderRangeValue(input);
 });
 loadStatus();
 savedVoiceFilesReady = loadSavedVoiceFiles();
@@ -75,6 +80,27 @@ function detailItem(label, value) {
   dd.textContent = String(value || "");
   fragment.append(dt, dd);
   return fragment;
+}
+
+function renderRangeValue(input) {
+  const output = form.querySelector(`[data-vibevoice-range-output="${input.name}"]`);
+  if (!output) {
+    return;
+  }
+  output.textContent = formatRangeValue(input);
+}
+
+function formatRangeValue(input) {
+  const value = Number(input.value || 0);
+  const step = String(input.step || "");
+  if (!Number.isFinite(value)) {
+    return input.value || "";
+  }
+  if (!step.includes(".") || Number.isInteger(value)) {
+    return String(Math.round(value));
+  }
+  const decimals = step.split(".")[1]?.length || 0;
+  return value.toFixed(decimals).replace(/\.?0+$/, "");
 }
 
 async function handleGenerate(event) {

@@ -135,6 +135,14 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /data-saved-voice-slot="1"/);
   assert.match(vibevoiceHtml, /data-saved-voice-slot="4"/);
   assert.match(vibevoiceHtml, /name="cfg_scale"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-workspace"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-control-stack"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-debug-runtime"/);
+  assert.doesNotMatch(vibevoiceHtml, /class="vibevoice-status-card"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-cfg-scale"[^>]*name="cfg_scale"[^>]*type="range"/s);
+  assert.match(vibevoiceHtml, /id="vibevoice-inference-steps"[^>]*name="inference_steps"[^>]*type="range"/s);
+  assert.match(vibevoiceHtml, /data-vibevoice-range-output="cfg_scale"/);
+  assert.match(vibevoiceHtml, /data-vibevoice-range-output="line_gap"/);
   assert.match(vibevoiceHtml, /name="backend"/);
   assert.match(vibevoiceHtml, /value="runpod_serverless"/);
   assert.match(vibevoiceHtml, /name="model_id"/);
@@ -155,6 +163,11 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /savedVoiceFilesBySlot/);
   assert.match(vibevoiceSource, /appendVoiceFiles/);
   assert.match(vibevoiceSource, /body\.set\(input\.name,\s*saved\.blob/s);
+  assert.match(vibevoiceSource, /data-vibevoice-range/);
+  assert.match(vibevoiceSource, /renderRangeValue/);
   assert.match(styles, /\.vibevoice-shell/);
+  assert.match(styles, /\.vibevoice-workspace/);
+  assert.match(styles, /\.vibevoice-range-control/);
+  assert.match(styles, /\.vibevoice-debug-runtime/);
   assert.match(styles, /\.vibevoice-saved-voice/);
 });
