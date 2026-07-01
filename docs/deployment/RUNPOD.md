@@ -124,12 +124,16 @@ Mac上のDocker buildは容量を使う。`buildx --push` を使い、最終imag
 
 このリポジトリでは手動実行用workflowとして `.github/workflows/runpod-image.yml` を使う。通常のpushごとに巨大imageをbuildしないよう、`workflow_dispatch` のみで起動する。
 
+GitHub Actionsの手動実行では、`workflow_dispatch` を持つworkflowファイルがdefault branchに存在している必要がある。新規workflowをfeature branchで追加した直後は、そのbranchをpushするだけではActions画面や `gh workflow run` から見つからない場合がある。初回はworkflowファイルをmainへ入れてから、必要に応じて `--ref <branch>` で対象branchのコードをbuildする。
+
 事前にGitHub repository secretsへ以下を登録する。
 
 | Secret | 用途 |
 | --- | --- |
 | `DOCKERHUB_USERNAME` | Docker Hubのユーザー名 |
 | `DOCKERHUB_TOKEN` | Docker Hubのaccess token。パスワードではなくpush権限を持つtokenを使う |
+
+`DOCKERHUB_USERNAME` と `DOCKERHUB_TOKEN` はGitHub Actions専用の認証情報としてGitHub Secretsへ保存する。`.env` や `.runpod.env` へは書かない。ローカルで `gh secret set` を実行するときも、履歴にtokenが残らない入力方式を使う。
 
 GitHub CLIで登録する場合:
 

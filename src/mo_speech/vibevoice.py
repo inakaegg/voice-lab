@@ -12,14 +12,10 @@ from time import perf_counter
 from typing import Callable, Protocol, Sequence
 
 
-LOCAL_SHARED_VIBEVOICE_ROOT = Path("/Volumes/KIOXIA_1T/pj/models/vibevoice")
-LEGACY_COMFYUI_ROOT = Path("/Volumes/KIOXIA_1T/pj/ComfyUI")
-DEFAULT_VIBEVOICE_HOME = LOCAL_SHARED_VIBEVOICE_ROOT / "huggingface" / "hub"
-LEGACY_VIBEVOICE_HOME = LEGACY_COMFYUI_ROOT / "models" / "vibevoice"
+DEFAULT_VIBEVOICE_ROOT = Path.home() / ".cache" / "mo-speech" / "models" / "vibevoice"
+DEFAULT_VIBEVOICE_HOME = DEFAULT_VIBEVOICE_ROOT / "huggingface" / "hub"
 DEFAULT_VIBEVOICE_CLI = Path(__file__).with_name("vibevoice_cli.py")
-DEFAULT_COMFYUI_VIBEVOICE_PATH = LOCAL_SHARED_VIBEVOICE_ROOT / "ComfyUI-VibeVoice"
-LEGACY_COMFYUI_VIBEVOICE_PATH = LEGACY_COMFYUI_ROOT / "custom_nodes" / "ComfyUI-VibeVoice"
-DEFAULT_COMFYUI_PYTHON = Path("/Volumes/KIOXIA_1T/pj/ComfyUI/.venv/bin/python")
+DEFAULT_COMFYUI_VIBEVOICE_PATH = DEFAULT_VIBEVOICE_ROOT / "ComfyUI-VibeVoice"
 DEFAULT_VIBEVOICE_TIMEOUT_SECONDS = 900.0
 VIBEVOICE_SAMPLE_RATE = 24_000
 
@@ -397,8 +393,6 @@ def _format_number(value: float) -> str:
 
 
 def _default_vibevoice_python() -> str:
-    if DEFAULT_COMFYUI_PYTHON.is_file():
-        return str(DEFAULT_COMFYUI_PYTHON)
     return sys.executable
 
 
@@ -424,7 +418,7 @@ def _default_vibevoice_home_candidates() -> list[Path]:
     candidates: list[Path] = []
     if model_cache_dir := os.getenv("MODEL_CACHE_DIR"):
         candidates.append(Path(model_cache_dir).expanduser() / "vibevoice" / "huggingface" / "hub")
-    candidates.extend([DEFAULT_VIBEVOICE_HOME, LEGACY_VIBEVOICE_HOME])
+    candidates.append(DEFAULT_VIBEVOICE_HOME)
     return candidates
 
 
@@ -432,7 +426,7 @@ def _default_comfyui_vibevoice_candidates() -> list[Path]:
     candidates: list[Path] = []
     if model_cache_dir := os.getenv("MODEL_CACHE_DIR"):
         candidates.append(Path(model_cache_dir).expanduser() / "vibevoice" / "ComfyUI-VibeVoice")
-    candidates.extend([DEFAULT_COMFYUI_VIBEVOICE_PATH, LEGACY_COMFYUI_VIBEVOICE_PATH])
+    candidates.append(DEFAULT_COMFYUI_VIBEVOICE_PATH)
     return candidates
 
 

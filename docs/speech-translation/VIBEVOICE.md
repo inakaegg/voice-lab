@@ -14,12 +14,12 @@
 
 ## モデル配置方針
 
-モデル本体やComfyUI-VibeVoice拡張はリポジトリへ入れない。今後はプロジェクトごとの作業ディレクトリではなく、共有モデルルートへ寄せる。
+モデル本体やComfyUI-VibeVoice拡張はリポジトリへ入れない。プロジェクトごとの作業ディレクトリには依存させず、`MODEL_CACHE_DIR` または明示的なVibeVoice用環境変数で参照先を決める。
 
 推奨するローカル配置:
 
 ```text
-/Volumes/KIOXIA_1T/pj/models/
+<MODEL_CACHE_DIR>/
   vibevoice/
     huggingface/hub/
       models--microsoft--VibeVoice-1.5B/
@@ -30,11 +30,14 @@
 対応する環境変数:
 
 ```bash
-export MO_VIBEVOICE_HOME=/Volumes/KIOXIA_1T/pj/models/vibevoice/huggingface/hub
-export COMFYUI_VIBEVOICE_PATH=/Volumes/KIOXIA_1T/pj/models/vibevoice/ComfyUI-VibeVoice
+export MODEL_CACHE_DIR=/path/to/shared-models
+export MO_VIBEVOICE_HOME=$MODEL_CACHE_DIR/vibevoice/huggingface/hub
+export COMFYUI_VIBEVOICE_PATH=$MODEL_CACHE_DIR/vibevoice/ComfyUI-VibeVoice
 export MO_VIBEVOICE_CLI=/path/to/vibevoice.py
 export MO_VIBEVOICE_PYTHON=/path/to/python
 ```
+
+`MODEL_CACHE_DIR` もVibeVoice用環境変数も未指定の場合、ローカル実行は `~/.cache/mo-speech/models/vibevoice` 配下を既定候補にする。旧ComfyUIプロジェクトなど、他プロジェクト固有のパスへはfallbackしない。
 
 RunPod Network Volumeでは、モデルキャッシュを `/workspace` または `/runpod-volume` 配下に置く。ComfyUI-VibeVoice拡張はDocker image内の `/app/ComfyUI-VibeVoice` に入れる構成を既定とし、別途Volumeへ置く場合だけ環境変数で上書きする。
 

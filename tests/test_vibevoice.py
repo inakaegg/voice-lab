@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from mo_speech.vibevoice import (
@@ -81,6 +82,26 @@ def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None
     assert status["comfyui_vibevoice_exists"] is False
     assert status["model_cache_found"] is False
     assert status["tokenizer_found"] is False
+
+
+def test_vibevoice_service_defaults_do_not_use_legacy_project_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("MO_VIBEVOICE_PYTHON", raising=False)
+    monkeypatch.delenv("MO_VIBEVOICE_CLI", raising=False)
+    monkeypatch.delenv("MO_VIBEVOICE_HOME", raising=False)
+    monkeypatch.delenv("VIBEVOICE_HOME", raising=False)
+    monkeypatch.delenv("MO_COMFYUI_VIBEVOICE_PATH", raising=False)
+    monkeypatch.delenv("COMFYUI_VIBEVOICE_PATH", raising=False)
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path / "models"))
+
+    service = VibeVoiceService()
+
+    assert service.python == sys.executable
+    assert service.vibevoice_home == tmp_path / "models" / "vibevoice" / "huggingface" / "hub"
+    assert service.comfyui_vibevoice_path == tmp_path / "models" / "vibevoice" / "ComfyUI-VibeVoice"
+    assert "/ComfyUI" not in str(service.vibevoice_home)
+    assert "/ComfyUI" not in str(service.comfyui_vibevoice_path.parent)
 
 
 def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> None:
