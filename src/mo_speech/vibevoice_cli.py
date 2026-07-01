@@ -16,6 +16,7 @@ import re
 import argparse
 import logging
 import glob
+import math
 import random
 import json
 import hashlib
@@ -84,6 +85,10 @@ def _resolve_comfyui_vibevoice_path(search_dirs: Optional[List[Path]] = None) ->
 
 
 _VIBEVOICE_COMPONENTS: Optional[Tuple[Any, Any, Any, Any]] = None
+VIBEVOICE_MIN_NEW_TOKENS = 32
+VIBEVOICE_MAX_NEW_TOKENS = 768
+VIBEVOICE_TEXT_CHAR_TOKEN_RATIO = 1.6
+VIBEVOICE_LINE_TOKEN_OVERHEAD = 6
 
 
 def _install_transformers_qwen2_fast_alias() -> None:
@@ -105,6 +110,70 @@ def _install_transformers_qwen2_fast_alias() -> None:
     module = types.ModuleType(module_name)
     module.Qwen2TokenizerFast = Qwen2TokenizerFast
     sys.modules[module_name] = module
+
+
+def _parse_script_1_based(script: str) -> Tuple[List[Tuple[int, str]], List[int]]:
+    """Parse a 1-based speaker script into model-internal 0-based speaker ids."""
+
+    parsed_lines: List[Tuple[int, str]] = []
+    speaker_ids_in_script: List[int] = []
+
+    for line in script.strip().split("\n"):
+        if not (line := line.strip()):
+            continue
+
+        match = re.match(r"^Speaker\s+(\d+)\s*:\s*(.*)$", line, re.IGNORECASE)
+        if match:
+            speaker_id = int(match.group(1))
+            if speaker_id < 1:
+                logger.warning(f"Speaker IDは1以上である必要があります。スキップします: '{line}'")
+                continue
+
+            text = " " + match.group(2).strip()
+            parsed_lines.append((speaker_id - 1, text))
+
+            if speaker_id not in speaker_ids_in_script:
+                speaker_ids_in_script.append(speaker_id)
+        else:
+            logger.warning(f"行をパースできませんでした。スキップします: '{line}'")
+
+    return parsed_lines, sorted(list(set(speaker_ids_in_script)))
+
+
+def _estimate_vibevoice_max_new_tokens(script: str) -> int:
+    """Estimate a speech-token upper bound from script text, not prompt length."""
+
+    parsed_lines, _speaker_ids = _parse_script_1_based(script)
+    if not parsed_lines:
+        return VIBEVOICE_MIN_NEW_TOKENS
+
+    text_char_count = sum(len(text.strip()) for _speaker_id, text in parsed_lines)
+    estimated_tokens = math.ceil(
+        text_char_count * VIBEVOICE_TEXT_CHAR_TOKEN_RATIO
+        + len(parsed_lines) * VIBEVOICE_LINE_TOKEN_OVERHEAD
+    )
+    return max(VIBEVOICE_MIN_NEW_TOKENS, min(VIBEVOICE_MAX_NEW_TOKENS, estimated_tokens))
+
+
+def _install_vibevoice_modules_utils_alias() -> None:
+    """Expose the parser at the legacy relative import path used by VibeVoice."""
+
+    package_name = "vibevoice.modules"
+    module_name = "vibevoice.modules.utils"
+    existing_module = sys.modules.get(module_name)
+    if existing_module is not None and hasattr(existing_module, "parse_script_1_based"):
+        return
+
+    package = sys.modules.get(package_name)
+    if package is None:
+        package = types.ModuleType(package_name)
+        package.__path__ = []
+        sys.modules[package_name] = package
+
+    utils_module = existing_module or types.ModuleType(module_name)
+    utils_module.parse_script_1_based = _parse_script_1_based
+    sys.modules[module_name] = utils_module
+    setattr(package, "utils", utils_module)
 
 
 def _patch_transformers5_tied_weights_mapping(model_class: Any) -> None:
@@ -310,6 +379,7 @@ def _import_vibevoice_components():
         resolved_str = resolved_path.as_posix()
         if resolved_str not in sys.path:
             sys.path.insert(0, resolved_str)
+    _install_vibevoice_modules_utils_alias()
 
     try:
         from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
@@ -652,31 +722,7 @@ class VibeVoice:
 
     def parse_script_1_based(self, script: str) -> Tuple[List[Tuple[int, str]], List[int]]:
         """Parse a 1-based speaker script into (speaker_id, text) tuples"""
-        parsed_lines = []
-        speaker_ids_in_script = []
-
-        for line in script.strip().split("\n"):
-            if not (line := line.strip()):
-                continue
-
-            match = re.match(r"^Speaker\s+(\d+)\s*:\s*(.*)$", line, re.IGNORECASE)
-            if match:
-                speaker_id = int(match.group(1))
-                if speaker_id < 1:
-                    logger.warning(f"Speaker IDは1以上である必要があります。スキップします: '{line}'")
-                    continue
-
-                text = " " + match.group(2).strip()
-                # Convert to 0-based indexing for the model
-                internal_speaker_id = speaker_id - 1
-                parsed_lines.append((internal_speaker_id, text))
-
-                if speaker_id not in speaker_ids_in_script:
-                    speaker_ids_in_script.append(speaker_id)
-            else:
-                logger.warning(f"行をパースできませんでした。スキップします: '{line}'")
-
-        return parsed_lines, sorted(list(set(speaker_ids_in_script)))
+        return _parse_script_1_based(script)
 
     def preprocess_audio(self, audio_path: str, target_sr: int = 24000) -> np.ndarray:
         """Preprocess audio file for VibeVoice"""
@@ -760,14 +806,14 @@ class VibeVoice:
         top_k: int,
     ) -> np.ndarray:
         """Run the VibeVoice model and return waveform as numpy array."""
-        parsed_lines_0_based, parsed_speaker_ids_1_based = self.parse_script_1_based(script_text)
+        parsed_lines_0_based, _speaker_ids_1_based = self.parse_script_1_based(script_text)
         if not parsed_lines_0_based:
             raise ValueError("スクリプトが空または無効です。'Speaker 1:', 'Speaker 2:' などの形式を使用してください")
-        prompt_speaker_ids = speaker_ids_for_prompt or parsed_speaker_ids_1_based
+        max_new_tokens = _estimate_vibevoice_max_new_tokens(script_text)
+        logger.info("VibeVoice生成token上限: %d", max_new_tokens)
         inputs = self.processor(
-            parsed_scripts=[parsed_lines_0_based],
+            text=[script_text],
             voice_samples=[voice_samples_np],
-            speaker_ids_for_prompt=[prompt_speaker_ids],
             padding=True,
             return_tensors="pt",
             return_attention_mask=True,
@@ -791,7 +837,12 @@ class VibeVoice:
 
         with torch.no_grad():
             outputs = self.model.generate(
-                **inputs, max_new_tokens=None, cfg_scale=cfg_scale, tokenizer=self.processor.tokenizer, generation_config=generation_config, verbose=False
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                cfg_scale=cfg_scale,
+                tokenizer=self.processor.tokenizer,
+                generation_config=generation_config,
+                verbose=False,
             )
 
         speech_outputs = getattr(outputs, "speech_outputs", None)
@@ -912,6 +963,7 @@ class VibeVoice:
 
         logger.info("行単位モードで音声を生成します。対象行数: %d (mode=%s)", len(parsed_lines_0_based), combine_mode)
         voice_samples_np = self._build_voice_samples(voice_files, speaker_ids_1_based)
+        voice_samples_by_speaker = dict(zip(speaker_ids_1_based, voice_samples_np))
 
         output_path_obj = Path(output_path).expanduser()
         output_dir = output_path_obj.parent if output_path_obj.parent != Path("") else Path.cwd()
@@ -970,10 +1022,14 @@ class VibeVoice:
                 raise ValueError(f"Speaker {speaker_id}の音声ファイルが指定されていません")
             speaker_text = text.strip()
             script_line = f"Speaker {speaker_id}:{text}"
+            generation_script_line = f"Speaker 1:{text}"
+            generation_voice_samples = [voice_samples_by_speaker[speaker_id]]
 
             voice_path = Path(voice_files[speaker_id]).expanduser()
             payload = {
                 "script": script_line,
+                "generation_script": generation_script_line,
+                "speaker_prompt_mode": "single-line-normalized-v1",
                 "cfg_scale": cfg_scale,
                 "inference_steps": inference_steps,
                 "seed": seed,
@@ -1001,9 +1057,8 @@ class VibeVoice:
                 logger.info("行%03d: 新規に音声を生成します", line_index + 1)
                 self.set_vibevoice_seed(seed)
                 waveform_np = self._synthesize_script(
-                    script_text=script_line,
-                    voice_samples_np=voice_samples_np,
-                    speaker_ids_for_prompt=speaker_ids_1_based,
+                    script_text=generation_script_line,
+                    voice_samples_np=generation_voice_samples,
                     cfg_scale=cfg_scale,
                     inference_steps=inference_steps,
                     do_sample=do_sample,

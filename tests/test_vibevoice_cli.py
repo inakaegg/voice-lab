@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 vibevoice_cli = pytest.importorskip("mo_speech.vibevoice_cli")
@@ -296,6 +298,18 @@ def test_vibevoice_cli_tensor_creation_patch_uses_cpu_under_meta_default_device(
         torch.set_default_device(original_device)
 
 
+def test_vibevoice_cli_installs_vibevoice_modules_utils_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delitem(sys.modules, "vibevoice.modules.utils", raising=False)
+    monkeypatch.delitem(sys.modules, "vibevoice.modules", raising=False)
+
+    vibevoice_cli._install_vibevoice_modules_utils_alias()
+
+    utils_module = sys.modules["vibevoice.modules.utils"]
+    parsed_lines, speaker_ids = utils_module.parse_script_1_based("Speaker 2: こんにちは。")
+    assert parsed_lines == [(1, " こんにちは。")]
+    assert speaker_ids == [2]
+
+
 def test_vibevoice_cli_rejects_missing_speech_output(tmp_path: Path) -> None:
     model_path = tmp_path / "model"
     model_path.mkdir()
@@ -335,7 +349,7 @@ def test_vibevoice_cli_rejects_missing_speech_output(tmp_path: Path) -> None:
         )
 
 
-def test_vibevoice_cli_passes_parsed_scripts_to_processor(tmp_path: Path) -> None:
+def test_vibevoice_cli_uses_raw_text_processor_path(tmp_path: Path) -> None:
     model_path = tmp_path / "model"
     model_path.mkdir()
     tokenizer_path = tmp_path / "tokenizer.json"
@@ -345,6 +359,7 @@ def test_vibevoice_cli_passes_parsed_scripts_to_processor(tmp_path: Path) -> Non
         tokenizer_path=str(tokenizer_path),
     )
     processor_calls = []
+    generate_calls = []
 
     class FakeProcessor:
         tokenizer = object()
@@ -358,6 +373,7 @@ def test_vibevoice_cli_passes_parsed_scripts_to_processor(tmp_path: Path) -> Non
             self.num_steps = num_steps
 
         def generate(self, **kwargs):
+            generate_calls.append(kwargs)
             return SimpleNamespace(speech_outputs=[None])
 
     service.processor = FakeProcessor()
@@ -377,6 +393,69 @@ def test_vibevoice_cli_passes_parsed_scripts_to_processor(tmp_path: Path) -> Non
         )
 
     assert processor_calls
-    assert "text" not in processor_calls[0]
-    assert processor_calls[0]["parsed_scripts"] == [[(1, " こんにちは。")]]
-    assert processor_calls[0]["speaker_ids_for_prompt"] == [[1, 2]]
+    assert processor_calls[0]["text"] == ["Speaker 2: こんにちは。"]
+    assert "parsed_scripts" not in processor_calls[0]
+    assert "speaker_ids_for_prompt" not in processor_calls[0]
+    assert generate_calls[0]["max_new_tokens"] < 150
+
+
+def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
+    short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")
+    long_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens(
+        "\n".join(
+            [
+                "Speaker 1: こんにちは。今日は北海道の暮らしについて話します。",
+                "Speaker 2: 自然が多く、温泉も近くにあって、とても快適です。",
+                "Speaker 1: 仕事は牧場で、牛の世話や搾乳をしています。",
+            ]
+        )
+    )
+
+    assert short_tokens < 150
+    assert long_tokens > short_tokens
+
+
+def test_vibevoice_cli_line_by_line_normalizes_each_segment_to_matching_voice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    script_path = tmp_path / "script.txt"
+    script_path.write_text("Speaker 1: こんにちは。\nSpeaker 2: はい。\n", encoding="utf-8")
+    voice1 = tmp_path / "voice1.wav"
+    voice2 = tmp_path / "voice2.wav"
+    voice1.write_bytes(b"voice1")
+    voice2.write_bytes(b"voice2")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+    service.model = object()
+    service.processor = object()
+    monkeypatch.setattr(vibevoice_cli, "LINE_CACHE_ROOT", tmp_path / "cache")
+    speaker1_voice = np.array([1.0], dtype=np.float32)
+    speaker2_voice = np.array([2.0], dtype=np.float32)
+    monkeypatch.setattr(service, "_build_voice_samples", lambda _voice_files, _speaker_ids: [speaker1_voice, speaker2_voice])
+    synthesize_calls = []
+
+    def fake_synthesize_script(script_text, voice_samples_np, **kwargs):
+        synthesize_calls.append((script_text, voice_samples_np))
+        return np.zeros(vibevoice_cli.SAMPLE_RATE // 100, dtype=np.float32)
+
+    monkeypatch.setattr(service, "_synthesize_script", fake_synthesize_script)
+
+    service.generate_audio_line_by_line(
+        text_file=str(script_path),
+        voice_files={1: str(voice1), 2: str(voice2)},
+        output_path=str(tmp_path / "out.wav"),
+        line_output_dir=str(tmp_path / "segments"),
+        metadata_path=str(tmp_path / "out.wav.json"),
+        force=True,
+    )
+
+    assert synthesize_calls[0][0] == "Speaker 1: こんにちは。"
+    assert synthesize_calls[0][1] == [speaker1_voice]
+    assert synthesize_calls[1][0] == "Speaker 1: はい。"
+    assert synthesize_calls[1][1] == [speaker2_voice]

@@ -70,7 +70,11 @@ Transformers 5系では、VibeVoice拡張の `tie_weights()` が `decoder_config
 
 RunPod Network Volumeでは、モデルキャッシュを `/workspace` または `/runpod-volume` 配下に置く。ComfyUI-VibeVoice拡張はDocker image内の `/app/ComfyUI-VibeVoice` に入れる構成を既定とし、別途Volumeへ置く場合だけ環境変数で上書きする。
 
-ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.modules.utils` を参照する一方、実際の `utils.py` は拡張ルート直下の `modules/` にある。そのため、アプリ内CLIはprocessorへraw textを渡さず、CLI側でparse済みの `parsed_scripts` と `speaker_ids_for_prompt` を渡して生成する。
+ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.modules.utils` を参照する一方、実際の `utils.py` は拡張ルート直下の `modules/` にある。processorのraw text経路を外すと台本条件や参照音声スロットが崩れやすいため、アプリ内CLIはraw textをprocessorへ渡し、`vibevoice.modules.utils.parse_script_1_based` だけを軽量aliasで補う。
+
+行単位生成では、各行を1つの局所的な台本として生成する。元台本上の `Speaker 2` だけを単独でprocessorへ渡すと、processor内部のspeaker正規化と参照音声の並びがずれるため、生成時は各行を `Speaker 1` として渡し、その行の元speakerに対応する参照音声だけを使う。元のspeaker番号、テキスト、出力区間はメタデータに保持する。
+
+VibeVoice本体の既定生成長は、テキストだけでなく参照音声promptを含む入力長から決まるため、短い台本でも150 token程度まで生成が続くことがある。アプリ内CLIでは、`max_new_tokens` を台本文字数と行数から見積もって明示的に渡し、短文が20秒級の無関係な音声として伸び続ける回帰を避ける。
 
 ```bash
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub

@@ -249,9 +249,11 @@ def test_runpod_handler_reports_worker_diagnostics(tmp_path, monkeypatch: pytest
     cli_path.write_text(
         "\n".join(
             [
+                "def _install_vibevoice_modules_utils_alias():",
+                "    pass",
                 "inputs = self.processor(",
-                "    parsed_scripts=[parsed_lines],",
-                "    speaker_ids_for_prompt=[speaker_ids],",
+                "    text=[script_text],",
+                "    voice_samples=[voice_samples_np],",
                 ")",
             ]
         ),
@@ -267,8 +269,9 @@ def test_runpod_handler_reports_worker_diagnostics(tmp_path, monkeypatch: pytest
     assert payload["image"]["tag"] == "docker.io/example/mo-speech:test"
     assert payload["vibevoice_cli"]["path"] == str(cli_path)
     assert payload["vibevoice_cli"]["exists"] is True
-    assert payload["vibevoice_cli"]["uses_parsed_scripts"] is True
-    assert payload["vibevoice_cli"]["uses_raw_text_processor_call"] is False
+    assert payload["vibevoice_cli"]["uses_parsed_scripts"] is False
+    assert payload["vibevoice_cli"]["uses_raw_text_processor_call"] is True
+    assert payload["vibevoice_cli"]["installs_vibevoice_modules_utils_alias"] is True
     assert payload["serverless"]["operation_mode"] == "diagnostics"
 
 

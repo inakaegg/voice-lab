@@ -195,7 +195,7 @@ scripts/runpod_create_serverless_template.sh
 
 返ってきたtemplate IDを `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` に反映し、RunPod管理画面またはREST APIでendpointの `templateId` をそのIDへ更新する。既存workerが残る場合は、一時的に `workersMax=0` へ下げてから `workersMax=1` へ戻すと、旧workerを避けて新templateから起動し直せる。
 
-image更新後は、生成jobを投げる前に軽量なdiagnostics jobでworker内の実行コードを確認する。`runpod-image.yml` はbuild時のGit commit SHAをimage環境変数 `MO_IMAGE_REVISION` に埋め込み、diagnosticsはその値と `/app/src/mo_speech/vibevoice_cli.py` の実装マーカーを返す。VibeVoice確認では `vibevoice_cli.uses_parsed_scripts=true`、`vibevoice_cli.uses_raw_text_processor_call=false`、`image.revision` がbuild対象commitに一致することを先に確認する。
+image更新後は、生成jobを投げる前に軽量なdiagnostics jobでworker内の実行コードを確認する。`runpod-image.yml` はbuild時のGit commit SHAをimage環境変数 `MO_IMAGE_REVISION` に埋め込み、diagnosticsはその値と `/app/src/mo_speech/vibevoice_cli.py` の実装マーカーを返す。VibeVoice確認では `vibevoice_cli.uses_parsed_scripts=false`、`vibevoice_cli.uses_raw_text_processor_call=true`、`vibevoice_cli.installs_vibevoice_modules_utils_alias=true`、`image.revision` がbuild対象commitに一致することを先に確認する。
 
 ```bash
 python scripts/runpod_smoke_serverless.py \
@@ -203,7 +203,7 @@ python scripts/runpod_smoke_serverless.py \
   --request-mode async
 ```
 
-diagnosticsが未対応、または `uses_raw_text_processor_call=true` を返す場合、RunPod endpointは古いimageまたは古いworkerを使っている。Serverless templateのimage更新、endpointのworker入れ替え、またはidle timeout後の再実行を先に行い、VibeVoice生成の成否判断に進まない。
+diagnosticsが未対応、`uses_raw_text_processor_call=false`、または `installs_vibevoice_modules_utils_alias=false` を返す場合、RunPod endpointは古いimageまたは古いworkerを使っている。Serverless templateのimage更新、endpointのworker入れ替え、またはidle timeout後の再実行を先に行い、VibeVoice生成の成否判断に進まない。
 
 diagnosticsが新imageを示した後、VibeVoice単体のServerless smokeを実行する。UIやローカルFastAPIを介さず、RunPod handlerへ直接 `operation_mode=vibevoice` を投げるため、endpoint側のモデルロード、参照音声処理、VibeVoice CLI実行の問題を分けて確認できる。
 

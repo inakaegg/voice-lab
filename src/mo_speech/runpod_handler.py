@@ -364,6 +364,7 @@ def _source_file_diagnostics(path: Path) -> dict[str, object]:
         "sha256": "",
         "uses_parsed_scripts": False,
         "uses_raw_text_processor_call": False,
+        "installs_vibevoice_modules_utils_alias": False,
     }
     if not path.is_file():
         return info
@@ -374,8 +375,8 @@ def _source_file_diagnostics(path: Path) -> dict[str, object]:
             "size_bytes": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
             "uses_parsed_scripts": "parsed_scripts=" in text and "speaker_ids_for_prompt" in text,
-            "uses_raw_text_processor_call": "processor(text=[script_text]" in text
-            or "self.processor(text=[script_text]" in text,
+            "uses_raw_text_processor_call": "text=[script_text]" in text and "voice_samples=[voice_samples_np]" in text,
+            "installs_vibevoice_modules_utils_alias": "_install_vibevoice_modules_utils_alias" in text,
         }
     )
     return info
