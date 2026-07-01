@@ -72,7 +72,7 @@ RunPod Network Volumeでは、モデルキャッシュを `/workspace` または
 
 ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.modules.utils` を参照する一方、実際の `utils.py` は拡張ルート直下の `modules/` にある。processorのraw text経路を外すと台本条件や参照音声スロットが崩れやすいため、アプリ内CLIはraw textをprocessorへ渡し、`vibevoice.modules.utils.parse_script_1_based` だけを軽量aliasで補う。
 
-行単位生成では、各行を1つの局所的な台本として生成する。元台本上の `Speaker 2` だけを単独でprocessorへ渡すと、processor内部のspeaker正規化と参照音声の並びがずれるため、生成時は各行を `Speaker 1` として渡し、その行の元speakerに対応する参照音声だけを使う。元のspeaker番号、テキスト、出力区間はメタデータに保持する。1.5B系では長い複数行台本を一括生成すると同じ行の繰り返しや崩れが出やすいため、4行以上または本文180文字以上の台本は、UI設定が一括生成のままでも自動で行単位生成に切り替える。
+行単位生成では、各行を1つの局所的な台本として生成する。元台本上の `Speaker 2` だけを単独でprocessorへ渡すと、processor内部のspeaker正規化と参照音声の並びがずれるため、生成時は各行を `Speaker 1` として渡し、その行の元speakerに対応する参照音声だけを使う。元のspeaker番号、テキスト、出力区間はメタデータに保持する。1.5B系では長い複数行台本を一括生成すると同じ行の繰り返しや崩れが出やすいため、4行以上または本文180文字以上の台本は、UI設定が一括生成のままでも自動で行単位生成に切り替える。Web UIではこの状態を「行ごとに生成して結合」のチェック済み・無効化として表示し、短い台本へ戻した時はユーザーが保存していた手動設定へ戻す。
 
 VibeVoice本体の既定生成長は、テキストだけでなく参照音声promptを含む入力長から決まるため、短い台本でも150 token程度まで生成が続くことがある。アプリ内CLIでは、`max_new_tokens` を台本文字数と行数から見積もって明示的に渡し、短文が20秒級の無関係な音声として伸び続ける回帰を避ける。
 

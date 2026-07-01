@@ -177,7 +177,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /progress_log/);
   assert.match(vibevoiceSource, /localStorage\.getItem/);
   assert.match(vibevoiceSource, /localStorage\.setItem/);
-  assert.match(vibevoiceSource, /scriptInput\.addEventListener\("input",\s*saveVibeVoiceDraft\)/);
+  assert.match(vibevoiceSource, /scriptInput\.addEventListener\("input"[\s\S]*updateLineByLineAutoState\(\)[\s\S]*saveVibeVoiceDraft\(\)/);
   assert.match(vibevoiceSource, /handleScriptFileChange[\s\S]*saveVibeVoiceDraft\(\)/);
   assert.match(vibevoiceSource, /"backend"/);
   assert.match(vibevoiceSource, /"model_id"/);
@@ -190,6 +190,19 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-progress-bar/);
   assert.match(styles, /\.vibevoice-progress-log/);
   assert.match(styles, /\.vibevoice-saved-voice/);
+});
+
+test("vibevoice auto line-by-line state is reflected in the UI without overwriting the saved preference", () => {
+  assert.match(vibevoiceSource, /const autoLineByLineMinLines = 4/);
+  assert.match(vibevoiceSource, /const autoLineByLineMinChars = 180/);
+  assert.match(vibevoiceSource, /let lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /function updateLineByLineAutoState\(\)/);
+  assert.match(vibevoiceSource, /lineByLineControl\.disabled = autoLineByLine/);
+  assert.match(vibevoiceSource, /lineByLineControl\.checked = autoLineByLine \|\| lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
+  assert.match(vibevoiceHtml, /data-auto-line-by-line/);
+  assert.match(styles, /\.vibevoice-switch\[data-auto-line-by-line="true"\]/);
 });
 
 test("vibevoice progress animation only runs while a job is active", () => {

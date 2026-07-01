@@ -16,12 +16,16 @@ const progressBar = document.querySelector(".vibevoice-progress-bar");
 const progressFill = progressBar?.querySelector("span");
 const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
+const lineByLineControl = form.elements.line_by_line;
+const lineByLineSwitch = lineByLineControl?.closest(".vibevoice-switch");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
 const savedVoiceLabels = Array.from(document.querySelectorAll("[data-saved-voice-slot]"));
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
 const vibevoiceSettingsStorageKey = "mo-speech-vibevoice-draft";
+const autoLineByLineMinLines = 4;
+const autoLineByLineMinChars = 180;
 const persistedFieldNames = [
   "backend",
   "model_id",
@@ -47,12 +51,24 @@ let currentJobId = "";
 let jobPollTimer = 0;
 let elapsedTimer = 0;
 let jobStartedAt = 0;
+let lineByLineUserPreference = lineByLineControl?.checked === true;
 
 form.addEventListener("submit", handleGenerate);
 cancelButton.addEventListener("click", cancelVibeVoiceJob);
-scriptInput.addEventListener("input", saveVibeVoiceDraft);
+scriptInput.addEventListener("input", () => {
+  updateLineByLineAutoState();
+  saveVibeVoiceDraft();
+});
 scriptFileInput.addEventListener("change", handleScriptFileChange);
 persistedControls.forEach((control) => {
+  if (control === lineByLineControl) {
+    control.addEventListener("change", () => {
+      lineByLineUserPreference = control.checked;
+      updateLineByLineAutoState();
+      saveVibeVoiceDraft();
+    });
+    return;
+  }
   const eventName = control.type === "checkbox" || control.tagName === "SELECT" ? "change" : "input";
   control.addEventListener(eventName, saveVibeVoiceDraft);
 });
@@ -60,6 +76,7 @@ voiceFileInputs.forEach((input) => {
   input.addEventListener("change", () => handleVoiceFileChange(input));
 });
 loadVibeVoiceDraft();
+updateLineByLineAutoState();
 rangeInputs.forEach((input) => {
   input.addEventListener("input", () => renderRangeValue(input));
   renderRangeValue(input);
@@ -80,6 +97,10 @@ function loadVibeVoiceDraft() {
     if (!Object.hasOwn(settings, control.name)) {
       continue;
     }
+    if (control === lineByLineControl) {
+      lineByLineUserPreference = checkboxValue(settings[control.name]);
+      continue;
+    }
     restoreControlValue(control, settings[control.name]);
   }
 }
@@ -96,6 +117,10 @@ function readVibeVoiceDraft() {
 function saveVibeVoiceDraft() {
   const settings = {};
   for (const control of persistedControls) {
+    if (control === lineByLineControl) {
+      settings[control.name] = lineByLineUserPreference;
+      continue;
+    }
     settings[control.name] = control.type === "checkbox" ? control.checked : control.value;
   }
   try {
@@ -113,7 +138,7 @@ function saveVibeVoiceDraft() {
 
 function restoreControlValue(control, value) {
   if (control.type === "checkbox") {
-    control.checked = value === true || value === "true";
+    control.checked = checkboxValue(value);
     return;
   }
   const nextValue = String(value);
@@ -121,6 +146,48 @@ function restoreControlValue(control, value) {
     return;
   }
   control.value = nextValue;
+}
+
+function checkboxValue(value) {
+  return value === true || value === "true";
+}
+
+function updateLineByLineAutoState() {
+  if (!lineByLineControl) {
+    return;
+  }
+  const autoLineByLine = shouldAutoLineByLine(scriptInput.value);
+  lineByLineControl.disabled = autoLineByLine;
+  lineByLineControl.checked = autoLineByLine || lineByLineUserPreference;
+  if (lineByLineSwitch) {
+    lineByLineSwitch.dataset.autoLineByLine = autoLineByLine ? "true" : "false";
+  }
+}
+
+function effectiveLineByLineEnabled() {
+  updateLineByLineAutoState();
+  return lineByLineControl?.checked === true;
+}
+
+function shouldAutoLineByLine(script) {
+  const lines = String(script || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length >= autoLineByLineMinLines) {
+    return true;
+  }
+  const textChars = lines.reduce((total, line) => total + speakerTextFromScriptLine(line).length, 0);
+  return textChars >= autoLineByLineMinChars;
+}
+
+function speakerTextFromScriptLine(line) {
+  const shortTag = String(line || "").trim().match(/^([0-9]+|[A-Za-z]):?\s+(.+)$/);
+  if (shortTag) {
+    return shortTag[2].trim();
+  }
+  const speakerTag = String(line || "").trim().match(/^Speaker\s+\d+\s*:\s*(.*)$/i);
+  return speakerTag ? speakerTag[1].trim() : String(line || "").trim();
 }
 
 async function loadStatus() {
@@ -196,6 +263,7 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
+  updateLineByLineAutoState();
   saveVibeVoiceDraft();
   clearResult();
   setBusy(true, "生成中です。初回はモデルロードに時間がかかります。");
@@ -210,7 +278,7 @@ async function handleGenerate(event) {
       throw new Error("参照音声を1つ以上指定してください。");
     }
     body.set("do_sample", form.elements.do_sample.checked ? "true" : "false");
-    body.set("line_by_line", form.elements.line_by_line.checked ? "true" : "false");
+    body.set("line_by_line", effectiveLineByLineEnabled() ? "true" : "false");
     const response = await fetch("/api/vibevoice/jobs", {
       method: "POST",
       body,
@@ -240,6 +308,7 @@ async function handleScriptFileChange() {
   }
   try {
     scriptInput.value = await file.text();
+    updateLineByLineAutoState();
     saveVibeVoiceDraft();
     message.dataset.state = "ready";
     message.textContent = `${file.name} を台本へ読み込みました。`;

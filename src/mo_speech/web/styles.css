@@ -2384,6 +2384,16 @@ audio {
   padding: 8px 11px;
 }
 
+.vibevoice-switch[data-auto-line-by-line="true"] {
+  background: #eef6f1;
+  border-color: #9dcdb0;
+  color: #23543d;
+}
+
+.vibevoice-switch[data-auto-line-by-line="true"] input {
+  cursor: not-allowed;
+}
+
 .vibevoice-actions {
   align-items: center;
   background: #ffffff;
