@@ -2437,13 +2437,20 @@ audio {
 }
 
 .vibevoice-progress-bar span {
-  animation: vibevoice-progress-slide 1.35s ease-in-out infinite;
   background: linear-gradient(90deg, #1d75dc, #46c0ff, #7d5cff);
   border-radius: inherit;
   display: block;
   height: 100%;
   inline-size: 46%;
   position: absolute;
+}
+
+.vibevoice-job-progress[data-state="running"] .vibevoice-progress-bar span {
+  animation: vibevoice-progress-slide 1.35s ease-in-out infinite;
+}
+
+.vibevoice-job-progress[data-state="complete"] .vibevoice-progress-bar {
+  display: none;
 }
 
 .vibevoice-timing {

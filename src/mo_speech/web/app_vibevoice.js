@@ -329,6 +329,7 @@ function slotFromShortTag(tag) {
 
 function startJobProgress(payload) {
   jobStartedAt = performance.now();
+  jobProgress.dataset.state = "running";
   jobProgress.hidden = false;
   renderJobProgress(payload);
   clearInterval(elapsedTimer);
@@ -413,7 +414,11 @@ function stopJobProgress({ keepTiming = false } = {}) {
   jobPollTimer = 0;
   elapsedTimer = 0;
   cancelButton.disabled = false;
-  if (!keepTiming) {
+  if (keepTiming) {
+    jobProgress.dataset.state = "complete";
+    jobProgress.hidden = false;
+  } else {
+    jobProgress.dataset.state = "idle";
     timingLabel.textContent = "";
     jobProgress.hidden = true;
   }
@@ -557,8 +562,10 @@ function setBusy(busy, text) {
   generateButton.textContent = busy ? "生成中..." : "生成";
   cancelButton.hidden = !busy;
   if (busy) {
+    jobProgress.dataset.state = "running";
     jobProgress.hidden = false;
   } else if (!timingLabel.textContent) {
+    jobProgress.dataset.state = "idle";
     jobProgress.hidden = true;
   }
   message.dataset.state = busy ? "busy" : "ready";
