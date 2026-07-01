@@ -20,6 +20,7 @@ import random
 import json
 import hashlib
 import shutil
+import types
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -84,11 +85,33 @@ def _resolve_comfyui_vibevoice_path(search_dirs: Optional[List[Path]] = None) ->
 _VIBEVOICE_COMPONENTS: Optional[Tuple[Any, Any, Any, Any]] = None
 
 
+def _install_transformers_qwen2_fast_alias() -> None:
+    """Provide the legacy qwen2 fast tokenizer module path for newer Transformers."""
+
+    module_name = "transformers.models.qwen2.tokenization_qwen2_fast"
+    if module_name in sys.modules:
+        return
+    try:
+        __import__(module_name)
+        return
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            return
+    try:
+        from transformers import Qwen2TokenizerFast
+    except ImportError:
+        return
+    module = types.ModuleType(module_name)
+    module.Qwen2TokenizerFast = Qwen2TokenizerFast
+    sys.modules[module_name] = module
+
+
 def _import_vibevoice_components():
     global _VIBEVOICE_COMPONENTS
     if _VIBEVOICE_COMPONENTS is not None:
         return _VIBEVOICE_COMPONENTS
 
+    _install_transformers_qwen2_fast_alias()
     resolved_path = _resolve_comfyui_vibevoice_path()
     if resolved_path:
         resolved_str = resolved_path.as_posix()
@@ -104,6 +127,7 @@ def _import_vibevoice_components():
         raise ImportError(
             "VibeVoice拡張モジュールを読み込めません。pip install ComfyUI-VibeVoice でインストールするか、"
             "COMFYUI_VIBEVOICE_PATH でComfyUI-VibeVoiceのディレクトリを指定してください。"
+            f" 原因: {type(exc).__name__}: {exc}"
         ) from exc
 
     _VIBEVOICE_COMPONENTS = (

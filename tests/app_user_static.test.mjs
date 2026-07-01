@@ -132,6 +132,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
   assert.match(vibevoiceHtml, /name="voice_file_1"/);
   assert.match(vibevoiceHtml, /name="voice_file_4"/);
+  assert.match(vibevoiceHtml, /data-saved-voice-slot="1"/);
+  assert.match(vibevoiceHtml, /data-saved-voice-slot="4"/);
   assert.match(vibevoiceHtml, /name="cfg_scale"/);
   assert.match(vibevoiceHtml, /name="backend"/);
   assert.match(vibevoiceHtml, /value="runpod_serverless"/);
@@ -149,5 +151,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /audio_base64/);
   assert.match(vibevoiceSource, /handleScriptFileChange/);
   assert.match(vibevoiceSource, /file\.text\(\)/);
+  assert.match(vibevoiceSource, /indexedDB\.open/);
+  assert.match(vibevoiceSource, /savedVoiceFilesBySlot/);
+  assert.match(vibevoiceSource, /appendVoiceFiles/);
+  assert.match(vibevoiceSource, /body\.set\(input\.name,\s*saved\.blob/s);
   assert.match(styles, /\.vibevoice-shell/);
+  assert.match(styles, /\.vibevoice-saved-voice/);
 });

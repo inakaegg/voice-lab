@@ -2247,6 +2247,14 @@ audio {
   inline-size: 100%;
 }
 
+.vibevoice-saved-voice {
+  color: #40546e;
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .vibevoice-settings-grid {
   grid-template-columns: repeat(4, minmax(130px, 1fr));
 }
