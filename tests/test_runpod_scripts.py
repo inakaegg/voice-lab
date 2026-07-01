@@ -161,3 +161,51 @@ def test_runpod_update_serverless_template_redacts_runpodctl_output(tmp_path: Pa
     assert '"HF_TOKEN": "<redacted>"' in result.stdout
     assert "secret-value" not in result.stdout
     assert "token-value" not in result.stdout
+
+
+def test_runpod_deploy_serverless_image_dry_run_orchestrates_unique_tag(tmp_path: Path) -> None:
+    env_file = tmp_path / ".runpod.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "RUNPOD_IMAGE=docker.io/example/mo-speech:old",
+                "RUNPOD_SERVERLESS_TEMPLATE_NAME=mo-speech-serverless-old",
+                "RUNPOD_SERVERLESS_TEMPLATE_ID=old-template",
+                "RUNPOD_ENDPOINT_ID=endpoint-id",
+                "RUNPOD_API_KEY=secret-key",
+                "OPENAI_API_KEY=secret-openai",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "RUNPOD_DRY_RUN": "1",
+            "RUNPOD_ENV_FILE": str(env_file),
+            "RUNPOD_DEPLOY_REF": "feature/test",
+            "RUNPOD_DEPLOY_SOURCE_SHA": "abcdef1234567890",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/runpod_deploy_serverless_image.sh"],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    output = result.stdout + result.stderr
+
+    assert "runpod-vibevoice-abcdef1" in output
+    assert "gh workflow run runpod-image.yml --ref feature/test" in output
+    assert "-f image_name=docker.io/example/mo-speech" in output
+    assert "-f image_tag=runpod-vibevoice-abcdef1" in output
+    assert "runpodctl template create" in output
+    assert "--image docker.io/example/mo-speech:runpod-vibevoice-abcdef1" in output
+    assert "/v1/endpoints/endpoint-id/update" in output
+    assert "python scripts/runpod_smoke_serverless.py --operation-mode diagnostics" in output
+    assert "secret-key" not in output
+    assert "secret-openai" not in output
+    assert "RUNPOD_IMAGE=docker.io/example/mo-speech:old" in env_file.read_text(encoding="utf-8")

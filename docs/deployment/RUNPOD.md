@@ -145,7 +145,21 @@ gh secret set DOCKERHUB_USERNAME --body "<Docker Hub user>"
 gh secret set DOCKERHUB_TOKEN
 ```
 
-実行手順:
+通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
+
+```bash
+scripts/runpod_deploy_serverless_image.sh
+```
+
+既定のimage tagは `runpod-vibevoice-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
+
+スクリプトは、現在のHEADがupstreamへpush済みであることを確認する。push前のローカルcommitを指定してActionsを起動してもGitHub側ではそのcommitをcheckoutできないため、通常は先にpushする。確認だけしたい場合はdry-runを使う。
+
+```bash
+RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh
+```
+
+個別に手順を実行する場合:
 
 ```bash
 gh workflow run runpod-image.yml \
@@ -154,11 +168,11 @@ gh workflow run runpod-image.yml \
   -f image_tag=runpod-vibevoice-$(git rev-parse --short HEAD)
 ```
 
-Actions実行が成功したら、出力されたimage tagを `.runpod.env` の `RUNPOD_IMAGE` に反映し、Serverless templateを更新する。Docker HubへのpushはGitHub側で完了しているため、ローカルではRunPod APIへの小さいリクエストだけで済む。
+Actions実行が成功したら、出力されたimage tagを `.runpod.env` の `RUNPOD_IMAGE` に反映し、Serverless templateを更新する。Docker HubへのpushはGitHub側で完了しているため、ローカルではRunPod APIへの小さいリクエストだけで済む。deployスクリプトを使う場合、この `.runpod.env` 更新も自動で行う。
 
 `image_tag` はcommitごとに一意にする。固定タグを再利用すると、registry上のdigestが更新されてもRunPod側の既存workerやimage cacheが古いコードを実行し続けるかを切り分けにくい。`image_tag` を空にした場合、workflowは `runpod-<short-sha>` を使う。
 
-Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh` は実行しない。既存Serverless templateはRunPod管理画面またはRunPod APIでimageだけ差し替えられるが、確実な検証では新しいtemplateを作り、endpointの `templateId` 自体を切り替える。`.runpod.env` の `RUNPOD_IMAGE` をActionsでpushしたtagにしてからtemplate作成スクリプトを実行する。
+Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh` は実行しない。既存Serverless templateはRunPod管理画面またはRunPod APIでimageだけ差し替えられるが、確実な検証では新しいtemplateを作り、endpointの `templateId` 自体を切り替える。deployスクリプトはこの新template方式を既定とする。手動で行う場合は、`.runpod.env` の `RUNPOD_IMAGE` をActionsでpushしたtagにしてからtemplate作成スクリプトを実行する。
 
 ```bash
 # .runpod.env

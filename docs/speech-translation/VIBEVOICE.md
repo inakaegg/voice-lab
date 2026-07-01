@@ -23,9 +23,9 @@
 
 長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。現時点のプログレスバーは処理中であることを示すインジケータであり、VibeVoice CLIの `tqdm` 出力に含まれる実進捗値はまだ反映していない。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
 
-`VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるが、2026-07-01のRunPod検証では現行の非streamingスキット生成CLIで音声生成まで通らなかった。Large repoには `tokenizer.json` がないため `Qwen/Qwen2.5-7B` tokenizerに分ける必要があり、この404は解消できる。しかしその後の生成で、sampling時は `torch.multinomial` のCUDA assert、greedy時は音声波形なしで終了する。そのため通常UIのモデル候補には出さない。Largeを扱う場合は、別の実装ref、推奨生成コード、必要GPU/VRAMを再確認してから実験候補として戻す。
+`VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるが、2026-07-01のRunPod検証では現行の非streamingスキット生成CLIで音声生成まで通らなかった。Large repoには `tokenizer.json` がないため `Qwen/Qwen2.5-7B` tokenizerに分ける必要があり、この404は解消できる。しかしその後の生成で、sampling時は `torch.multinomial` のCUDA assert、greedy時は音声波形なしで終了する。これは「Largeが原理的に使えない」という意味ではなく、このアプリが現在固定しているComfyUI-VibeVoice ref、Transformers/Torch組み合わせ、非streamingスキット生成CLIがLargeの推奨生成経路に対応できていないという扱いにする。そのため通常UIのモデル候補には出さない。Largeを扱う場合は、別の実装ref、推奨生成コード、必要GPU/VRAMを再確認してから実験候補として戻す。
 
-`microsoft/VibeVoice-Realtime-0.5B` は `model_type=vibevoice_streaming`、architectureも `VibeVoiceStreaming...` 系で、現在の非streamingスキット生成CLIとは別経路である。RunPod上の通常スキット生成ではCUDA assertまで進むため、通常UIのモデル候補には出さない。Realtimeモデルを扱う場合は、別途streaming向け実装として仕様化してから追加する。
+`microsoft/VibeVoice-Realtime-0.5B` は `model_type=vibevoice_streaming`、architectureも `VibeVoiceStreaming...` 系で、現在の非streamingスキット生成CLIとは別経路である。RunPod上の通常スキット生成ではCUDA assertまで進むため、通常UIのモデル候補には出さない。これも「Realtimeが使えない」という意味ではなく、streaming model用の入力、生成ループ、出力処理を別実装として持っていないという意味である。Realtimeモデルを扱う場合は、別途streaming向け実装として仕様化してから追加する。
 
 ## 関連モデルの扱い
 
