@@ -306,6 +306,38 @@ OpenAI Realtime翻訳の扱い:
 - `timings_ms`: 生成時間。
 - `diagnostics`: VibeVoice CLIのstdout/stderr末尾など、ローカル検証に必要な情報。
 
+`POST /api/vibevoice/jobs`
+
+リクエスト:
+
+- `POST /api/vibevoice/generate` と同じフォーム項目を受け取る。
+- 画面からの通常生成はこちらを使う。長い生成をHTTP request内で待ち続けず、ジョブIDを返して以後ポーリングする。
+
+レスポンス:
+
+- `job_id`: 生成ジョブID。
+- `status`: 初期状態。通常は `queued` または `running`。
+- `current_stage`: 現在ステージ。初期化、参照音声準備、VibeVoice生成、結果読み込みなど。
+- `elapsed_ms`: ジョブ開始からの経過時間。
+
+`GET /api/vibevoice/jobs/{job_id}`
+
+レスポンス:
+
+- `status`: `queued`、`running`、`cancelling`、`succeeded`、`failed`、`cancelled`。
+- `current_stage`: 現在ステージ。
+- `elapsed_ms`: 経過時間。
+- `result`: 成功時は `POST /api/vibevoice/generate` と同等の生成結果。
+- `error`: 失敗時またはキャンセル時の理由。
+
+`POST /api/vibevoice/jobs/{job_id}/cancel`
+
+挙動:
+
+- ローカルVibeVoice実行ではCLI subprocessへ停止要求を出す。
+- 既に終了済みの場合は現在状態を返す。
+- RunPod Serverless側の細かいキャンセルはRunPod jobの扱いに依存するため、まずはUI上でキャンセル要求済みとして扱う。
+
 `POST /api/practice/prompts`
 
 リクエスト:

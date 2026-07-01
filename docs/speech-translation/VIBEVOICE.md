@@ -21,7 +21,7 @@
 
 参照音声はブラウザのIndexedDBへ保存し、次回以降は同じSpeaker枠の既定音声として再利用する。ブラウザの制約によりfile inputへ前回ファイルを直接セットすることはできないため、保存済みファイル名をSpeaker枠内に表示し、生成時に保存済みBlobを送信する。生成時は台本から必要なSpeaker枠を判定し、不要な保存済み音声を送らない。APIからVibeVoice CLIへ渡す時もSpeaker枠番号を保持し、`Speaker 2` の参照音声が `Speaker 1` として詰め直されないようにする。
 
-長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
+長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。現時点のプログレスバーは処理中であることを示すインジケータであり、VibeVoice CLIの `tqdm` 出力に含まれる実進捗値はまだ反映していない。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
 
 `VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。RunPod比較では、community copyである `aoi-ot/VibeVoice-Large` を実験扱いで使う。
 
@@ -88,6 +88,7 @@ UIでモデルを選んだ場合は、そのリクエストの間だけ `VIBEVOI
 - 日本語参照音声でも漢字読みを誤る場合がある。台本をひらがなにすると改善するため、テキスト正規化または読み指定の仕組みが必要。
 - 途中にノイズや不自然な音が混じることがある。RunPod実行、依存ライブラリ、GPU、生成パラメータ、参照音声前処理の差分を分けて検証する。
 - `VibeVoice Realtime 0.5B` は既存のスキット生成CLIと互換でない場合があり、生成後に音声波形が返らないことがある。この場合は内部例外ではなく「Realtime 0.5Bはこの生成経路では音声を返さなかった」と分かるエラーとして表示する。
+- ローカルmacOSのMPS backendでは、モデル読み込み後の生成中にMetal/MPS内部のshape不整合でプロセスがabortする場合がある。CPUは生成が極端に遅いため、品質確認と速度確認はRunPod/CUDAでも必ず行う。
 - 台本全体生成と行ごと生成では、自然さ、破綻のしにくさ、行間の違和感が変わる。品質比較用に生成設定と入力台本を保存できる仕組みが今後必要。
 
 ## これから詰める仕様
@@ -155,6 +156,15 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 - 優先度低: 教材生成、動画レンダリング、外部公開ページなど、音声生成品質の検証と直接関係しない周辺機能。
 
 まずは「同じ入力を条件違いで比較できる」ことを最優先にする。品質課題が残る段階で周辺機能を増やすと、問題の切り分けが難しくなる。
+
+### 7. 実進捗表示
+
+ローカル実行ではVibeVoice CLIがstderrへ `tqdm` 形式の進捗を出すため、これをジョブ状態へ取り込み、UIのプログレスバーへ反映する余地がある。
+
+- ローカル: `subprocess.Popen` のstderrを逐次読み、`Loading weights`、`Generating`、`line-by-line` の現在値、総数、割合をジョブstoreへ保存する。
+- UI: indeterminate表示は初期化や未知ステージだけに使い、進捗値が取れるステージではバー幅とパーセントを実値へ切り替える。
+- キャンセル: 進捗読取中でもキャンセル要求を優先し、subprocessをterminate/killする。
+- RunPod: 通常のRunPod job statusだけではCLI内部stderrの細かい進捗は取れない。RunPodでも実進捗を出す場合は、handlerから外部storeへ進捗を書き、gateway/UIがそれを読む設計が必要になる。
 
 ## zhskitから未移植の主な機能
 
