@@ -12,6 +12,8 @@ const cancelButton = document.querySelector("#vibevoice-cancel-button");
 const jobProgress = document.querySelector("#vibevoice-job-progress");
 const timingLabel = document.querySelector("#vibevoice-timing");
 const progressLog = document.querySelector("#vibevoice-progress-log");
+const progressBar = document.querySelector(".vibevoice-progress-bar");
+const progressFill = progressBar?.querySelector("span");
 const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
@@ -402,7 +404,49 @@ function renderJobProgress(payload) {
   message.dataset.state = payload.status === "failed" ? "error" : "busy";
   message.textContent = label ? `${label}...` : "生成中です。";
   renderProgressLog(payload.progress_log);
+  renderProgressPercent(progressPercentFromPayload(payload));
   renderElapsed(payload.elapsed_ms);
+}
+
+function progressPercentFromPayload(payload) {
+  const labels = [];
+  const currentLabel = payload?.current_stage?.label;
+  if (currentLabel) {
+    labels.push(currentLabel);
+  }
+  if (Array.isArray(payload?.progress_log)) {
+    for (const item of payload.progress_log.slice().reverse()) {
+      if (item?.label) {
+        labels.push(item.label);
+      }
+    }
+  }
+  for (const label of labels) {
+    const match = String(label).match(/生成中\s+\d+\/\d+\s+\((\d+(?:\.\d+)?)%/);
+    if (match) {
+      const percent = Number(match[1]);
+      if (Number.isFinite(percent)) {
+        return Math.max(0, Math.min(100, percent));
+      }
+    }
+  }
+  return null;
+}
+
+function renderProgressPercent(percent, fallbackProgress = "indeterminate") {
+  if (!progressBar || !progressFill) {
+    return;
+  }
+  if (Number.isFinite(percent)) {
+    const clamped = Math.max(0, Math.min(100, Number(percent)));
+    jobProgress.dataset.progress = "determinate";
+    progressBar.setAttribute("aria-valuenow", String(Math.round(clamped)));
+    progressFill.style.inlineSize = `${clamped}%`;
+    return;
+  }
+  jobProgress.dataset.progress = fallbackProgress;
+  progressBar.removeAttribute("aria-valuenow");
+  progressFill.style.inlineSize = "";
 }
 
 function renderProgressLog(items = []) {
@@ -442,6 +486,7 @@ function stopJobProgress({ keepTiming = false } = {}) {
   } else {
     jobProgress.dataset.state = "idle";
     timingLabel.textContent = "";
+    renderProgressPercent(null, "idle");
     renderProgressLog([]);
     jobProgress.hidden = true;
   }
@@ -586,9 +631,11 @@ function setBusy(busy, text) {
   cancelButton.hidden = !busy;
   if (busy) {
     jobProgress.dataset.state = "running";
+    renderProgressPercent(null);
     jobProgress.hidden = false;
   } else if (!timingLabel.textContent) {
     jobProgress.dataset.state = "idle";
+    renderProgressPercent(null, "idle");
     renderProgressLog([]);
     jobProgress.hidden = true;
   }

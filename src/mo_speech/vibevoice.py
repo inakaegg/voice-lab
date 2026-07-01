@@ -8,7 +8,7 @@ from queue import Empty, Queue
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Event, Thread
 from tempfile import TemporaryDirectory
@@ -25,6 +25,8 @@ VIBEVOICE_SAMPLE_RATE = 24_000
 DEFAULT_VIBEVOICE_MODEL_ID = "vibevoice-1.5b-pinned"
 SHORT_SPEAKER_TAG_MIN = 1
 SHORT_SPEAKER_TAG_MAX = 4
+AUTO_LINE_BY_LINE_MIN_LINES = 4
+AUTO_LINE_BY_LINE_MIN_CHARS = 180
 _SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _VIBEVOICE_TQDM_RE = re.compile(
@@ -294,7 +296,10 @@ class VibeVoiceService:
         if not self.cli_path.is_file():
             raise VibeVoiceError(f"VibeVoice CLI was not found: {self.cli_path}")
         normalized_script = normalize_vibevoice_script(script_text)
-        generation_options = options or VibeVoiceGenerationOptions()
+        generation_options = _options_with_auto_line_by_line(
+            normalized_script,
+            options or VibeVoiceGenerationOptions(),
+        )
         model_preset = resolve_vibevoice_model_preset(generation_options.model_id)
         started = perf_counter()
         _report_vibevoice_progress(progress_callback, "prepare", "入力準備")
@@ -627,7 +632,10 @@ class RunpodServerlessVibeVoiceService:
         if not voice_samples:
             raise ValueError("voice sample is required")
         normalized_script = normalize_vibevoice_script(script_text)
-        generation_options = options or VibeVoiceGenerationOptions()
+        generation_options = _options_with_auto_line_by_line(
+            normalized_script,
+            options or VibeVoiceGenerationOptions(),
+        )
         started = perf_counter()
         _report_vibevoice_progress(progress_callback, "submit", "RunPod送信")
         output = self.client.submit(
@@ -776,6 +784,25 @@ def _coerce_voice_samples(voice_paths: Sequence[Path | VibeVoiceVoiceSample]) ->
         seen_slots.add(sample.slot)
         samples.append(VibeVoiceVoiceSample(slot=sample.slot, path=Path(sample.path)))
     return samples
+
+
+def _options_with_auto_line_by_line(script: str, options: VibeVoiceGenerationOptions) -> VibeVoiceGenerationOptions:
+    if options.line_by_line or not _should_auto_line_by_line(script):
+        return options
+    return replace(options, line_by_line=True)
+
+
+def _should_auto_line_by_line(script: str) -> bool:
+    lines = [line.strip() for line in str(script or "").splitlines() if line.strip()]
+    if len(lines) >= AUTO_LINE_BY_LINE_MIN_LINES:
+        return True
+    text_chars = sum(len(_speaker_text_from_normalized_line(line)) for line in lines)
+    return text_chars >= AUTO_LINE_BY_LINE_MIN_CHARS
+
+
+def _speaker_text_from_normalized_line(line: str) -> str:
+    _prefix, sep, text = line.partition(":")
+    return text.strip() if sep else line.strip()
 
 
 def _default_vibevoice_python() -> str:

@@ -2441,12 +2441,17 @@ audio {
   border-radius: inherit;
   display: block;
   height: 100%;
-  inline-size: 46%;
+  inline-size: var(--vibevoice-progress-width, 46%);
   position: absolute;
+  transition: inline-size 180ms ease;
 }
 
-.vibevoice-job-progress[data-state="running"] .vibevoice-progress-bar span {
+.vibevoice-job-progress[data-state="running"][data-progress="indeterminate"] .vibevoice-progress-bar span {
   animation: vibevoice-progress-slide 1.35s ease-in-out infinite;
+}
+
+.vibevoice-job-progress[data-progress="determinate"] .vibevoice-progress-bar span {
+  inset-inline-start: 0;
 }
 
 .vibevoice-job-progress[data-state="complete"] .vibevoice-progress-bar {

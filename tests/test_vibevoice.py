@@ -116,6 +116,51 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     assert result.providers["vibevoice_model_id"] == "vibevoice-1.5b-latest"
 
 
+def test_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        calls.append(list(command))
+        output_index = command.index("--output") + 1
+        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+    )
+    voice1 = tmp_path / "voice1.wav"
+    voice2 = tmp_path / "voice2.wav"
+    voice1.write_bytes(b"voice1")
+    voice2.write_bytes(b"voice2")
+
+    service.generate(
+        script_text="\n".join(
+            [
+                "1 こんにちは。",
+                "2 はい。",
+                "1 北海道の話をしましょう。",
+                "2 温泉も近くにあります。",
+            ]
+        ),
+        voice_paths=[VibeVoiceVoiceSample(slot=1, path=voice1), VibeVoiceVoiceSample(slot=2, path=voice2)],
+        options=VibeVoiceGenerationOptions(line_by_line=False),
+    )
+
+    command = calls[0]
+    assert "--line_by_line" in command
+    assert "concat" in command
+
+
 def test_vibevoice_service_preserves_explicit_speaker_slots(tmp_path: Path) -> None:
     calls: list[list[str]] = []
     cli = tmp_path / "vibevoice.py"
@@ -410,3 +455,43 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     assert client.payload["generation"]["model_id"] == "vibevoice-1.5b-latest"
     assert client.payload["voices"][0]["audio_base64"] != ""
     assert client.payload["voices"][0]["speaker"] == 1
+
+
+def test_runpod_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: Path) -> None:
+    class FakeClient:
+        configured = True
+        endpoint_id = "endpoint"
+        request_mode = "async"
+
+        def __init__(self):
+            self.payload = None
+
+        def submit(self, payload):
+            self.payload = payload
+            return {
+                "audio_mime_type": "audio/wav",
+                "audio_base64": "UklGRg==",
+                "normalized_script": payload["script"],
+                "timings_ms": {"vibevoice": 3.0},
+                "providers": {"vibevoice": "runpod-serverless-vibevoice"},
+            }
+
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+    client = FakeClient()
+    service = RunpodServerlessVibeVoiceService(client=client)
+
+    service.generate(
+        script_text="\n".join(
+            [
+                "Speaker 1: こんにちは。",
+                "Speaker 1: はい。",
+                "Speaker 1: 北海道の話をしましょう。",
+                "Speaker 1: 温泉も近くにあります。",
+            ]
+        ),
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(line_by_line=False),
+    )
+
+    assert client.payload["generation"]["line_by_line"] is True

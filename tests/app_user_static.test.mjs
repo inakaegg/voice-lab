@@ -196,10 +196,14 @@ test("vibevoice progress animation only runs while a job is active", () => {
   const baseProgressSpanRule = styles.match(/\.vibevoice-progress-bar span\s*\{(?<body>[^}]*)\}/)?.groups?.body || "";
   assert.match(vibevoiceSource, /jobProgress\.dataset\.state = "running"/);
   assert.match(vibevoiceSource, /jobProgress\.dataset\.state = "complete"/);
+  assert.match(vibevoiceSource, /renderProgressPercent/);
+  assert.match(vibevoiceSource, /renderProgressPercent\(null,\s*"idle"\)/);
+  assert.match(vibevoiceSource, /aria-valuenow/);
   assert.match(styles, /\.vibevoice-job-progress\[data-state="complete"\]\s+\.vibevoice-progress-bar\s*\{[^}]*display:\s*none/s);
   assert.match(
     styles,
-    /\.vibevoice-job-progress\[data-state="running"\]\s+\.vibevoice-progress-bar span\s*\{[^}]*animation:\s*vibevoice-progress-slide/s,
+    /\.vibevoice-job-progress\[data-state="running"\]\[data-progress="indeterminate"\]\s+\.vibevoice-progress-bar span\s*\{[^}]*animation:\s*vibevoice-progress-slide/s,
   );
+  assert.match(styles, /\.vibevoice-job-progress\[data-progress="determinate"\]\s+\.vibevoice-progress-bar span/s);
   assert.doesNotMatch(baseProgressSpanRule, /animation:/);
 });
