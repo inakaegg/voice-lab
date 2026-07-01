@@ -178,7 +178,12 @@
 
             <div class="vibevoice-actions">
               <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
+              <button id="vibevoice-cancel-button" class="vibevoice-cancel-button" type="button" hidden>キャンセル</button>
               <p id="vibevoice-message" class="vibevoice-message" role="status" aria-live="polite"></p>
+              <div id="vibevoice-job-progress" class="vibevoice-job-progress" hidden>
+                <div class="vibevoice-progress-bar" aria-hidden="true"><span></span></div>
+                <p id="vibevoice-timing" class="vibevoice-timing"></p>
+              </div>
             </div>
           </div>
         </div>

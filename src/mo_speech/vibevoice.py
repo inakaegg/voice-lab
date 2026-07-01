@@ -8,8 +8,9 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event
 from tempfile import TemporaryDirectory
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Callable, Protocol, Sequence
 
 
@@ -100,6 +101,12 @@ class VibeVoiceGenerationOptions:
 
 
 @dataclass(frozen=True)
+class VibeVoiceVoiceSample:
+    slot: int
+    path: Path
+
+
+@dataclass(frozen=True)
 class VibeVoiceResult:
     audio_bytes: bytes
     audio_mime_type: str
@@ -146,8 +153,10 @@ class VibeVoiceGenerator(Protocol):
         self,
         *,
         script_text: str,
-        voice_paths: Sequence[Path],
+        voice_paths: Sequence[Path | VibeVoiceVoiceSample],
         options: VibeVoiceGenerationOptions | None = None,
+        progress_callback: Callable[[str, str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> VibeVoiceResult: ...
 
 
@@ -282,10 +291,13 @@ class VibeVoiceService:
         self,
         *,
         script_text: str,
-        voice_paths: Sequence[Path],
+        voice_paths: Sequence[Path | VibeVoiceVoiceSample],
         options: VibeVoiceGenerationOptions | None = None,
+        progress_callback: Callable[[str, str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> VibeVoiceResult:
-        if not voice_paths:
+        voice_samples = _coerce_voice_samples(voice_paths)
+        if not voice_samples:
             raise ValueError("voice sample is required")
         if not self.cli_path.is_file():
             raise VibeVoiceError(f"VibeVoice CLI was not found: {self.cli_path}")
@@ -293,6 +305,7 @@ class VibeVoiceService:
         generation_options = options or VibeVoiceGenerationOptions()
         model_preset = resolve_vibevoice_model_preset(generation_options.model_id)
         started = perf_counter()
+        _report_vibevoice_progress(progress_callback, "prepare", "入力準備")
 
         with TemporaryDirectory(prefix="mo-vibevoice-") as temp_dir:
             temp_root = Path(temp_dir)
@@ -301,8 +314,11 @@ class VibeVoiceService:
             output_path = temp_root / "vibevoice-output.wav"
             metadata_path = temp_root / "vibevoice-metadata.json"
             voice_files = [
-                self._prepare_voice_file(path, temp_root, index)
-                for index, path in enumerate(voice_paths, start=1)
+                VibeVoiceVoiceSample(
+                    slot=sample.slot,
+                    path=self._prepare_voice_file(sample.path, temp_root, sample.slot),
+                )
+                for sample in voice_samples
             ]
             command = self._build_command(
                 script_path=script_path,
@@ -311,14 +327,12 @@ class VibeVoiceService:
                 voice_files=voice_files,
                 options=generation_options,
             )
-            completed = self._subprocess_run(
+            _report_vibevoice_progress(progress_callback, "generation", "VibeVoice生成")
+            completed = self._run_generation_command(
                 command,
                 env=self._build_env(model_preset),
                 cwd=str(Path.cwd()),
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                check=False,
+                cancel_event=cancel_event,
             )
             if completed.returncode != 0:
                 raise VibeVoiceError(
@@ -327,6 +341,7 @@ class VibeVoiceService:
                 )
             if not output_path.is_file() or output_path.stat().st_size == 0:
                 raise VibeVoiceError("VibeVoice generation did not produce an audio file")
+            _report_vibevoice_progress(progress_callback, "read_output", "生成音声読み込み")
             audio_bytes = output_path.read_bytes()
 
         total_ms = _elapsed_ms(started)
@@ -346,6 +361,7 @@ class VibeVoiceService:
             },
             timings_ms={"vibevoice": total_ms, "total": total_ms},
             diagnostics={
+                "used_voice_samples": _voice_sample_diagnostics(voice_files),
                 "stdout_tail": _tail_text(completed.stdout),
                 "stderr_tail": _tail_text(completed.stderr),
                 "command": _redacted_command(command),
@@ -358,7 +374,7 @@ class VibeVoiceService:
         script_path: Path,
         output_path: Path,
         metadata_path: Path,
-        voice_files: Sequence[Path],
+        voice_files: Sequence[VibeVoiceVoiceSample],
         options: VibeVoiceGenerationOptions,
     ) -> list[str]:
         command = [
@@ -368,8 +384,6 @@ class VibeVoiceService:
             str(script_path),
             "--output",
             str(output_path),
-            "--voice",
-            *[str(path) for path in voice_files],
             "--cfg_scale",
             _format_number(options.cfg_scale),
             "--inference_steps",
@@ -385,6 +399,8 @@ class VibeVoiceService:
             "--max_voice_seconds",
             _format_number(options.max_voice_seconds),
         ]
+        for sample in sorted(voice_files, key=lambda item: item.slot):
+            command.extend([f"--voice{sample.slot}_file", str(sample.path)])
         if not options.do_sample:
             command.append("--no_sample")
         if options.line_by_line:
@@ -409,6 +425,54 @@ class VibeVoiceService:
         env["VIBEVOICE_TOKENIZER_REPO"] = model_preset.tokenizer_repo
         env["VIBEVOICE_TOKENIZER_REVISION"] = model_preset.tokenizer_revision or ""
         return env
+
+    def _run_generation_command(
+        self,
+        command: Sequence[str],
+        *,
+        env: dict[str, str],
+        cwd: str,
+        cancel_event: Event | None,
+    ) -> subprocess.CompletedProcess[str]:
+        timeout = None if cancel_event is not None else self.timeout_seconds if self.timeout_seconds > 0 else None
+        if cancel_event is None or self._subprocess_run is not subprocess.run:
+            try:
+                return self._subprocess_run(
+                    list(command),
+                    env=env,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise VibeVoiceError(f"VibeVoice generation timed out after {_format_number(self.timeout_seconds)}s") from exc
+
+        process = subprocess.Popen(
+            list(command),
+            env=env,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            while process.poll() is None:
+                if cancel_event.is_set():
+                    _terminate_process(process)
+                    stdout, stderr = process.communicate()
+                    raise VibeVoiceError(
+                        "VibeVoice generation was cancelled by the user. "
+                        f"{_tail_text(stderr) or _tail_text(stdout)}"
+                    )
+                sleep(0.25)
+            stdout, stderr = process.communicate()
+            return subprocess.CompletedProcess(list(command), process.returncode or 0, stdout=stdout, stderr=stderr)
+        except Exception:
+            if process.poll() is None:
+                _terminate_process(process)
+            raise
 
     def _prepare_voice_file(self, source_path: Path, temp_root: Path, index: int) -> Path:
         source = Path(source_path)
@@ -450,7 +514,7 @@ class VibeVoiceService:
         pattern_root = self.vibevoice_home / model_preset.model_cache_dir_name
         if not pattern_root.exists():
             return None
-        matches = sorted(pattern_root.glob("**/*.safetensors"))
+        matches = sorted(path for path in pattern_root.glob("**/*.safetensors") if _is_usable_model_weight(path))
         return matches[0].parent if matches else None
 
     def _find_tokenizer(self, model_preset: VibeVoiceModelPreset) -> Path | None:
@@ -490,29 +554,37 @@ class RunpodServerlessVibeVoiceService:
         self,
         *,
         script_text: str,
-        voice_paths: Sequence[Path],
+        voice_paths: Sequence[Path | VibeVoiceVoiceSample],
         options: VibeVoiceGenerationOptions | None = None,
+        progress_callback: Callable[[str, str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> VibeVoiceResult:
-        if not voice_paths:
+        if cancel_event is not None and cancel_event.is_set():
+            raise VibeVoiceError("VibeVoice generation was cancelled before submission.")
+        voice_samples = _coerce_voice_samples(voice_paths)
+        if not voice_samples:
             raise ValueError("voice sample is required")
         normalized_script = normalize_vibevoice_script(script_text)
         generation_options = options or VibeVoiceGenerationOptions()
         started = perf_counter()
+        _report_vibevoice_progress(progress_callback, "submit", "RunPod送信")
         output = self.client.submit(
             {
                 "operation_mode": "vibevoice",
                 "script": normalized_script,
                 "voices": [
                     {
-                        "filename": Path(path).name,
-                        "audio_mime_type": _audio_mime_type(path),
-                        "audio_base64": base64.b64encode(Path(path).read_bytes()).decode("ascii"),
+                        "speaker": sample.slot,
+                        "filename": sample.path.name,
+                        "audio_mime_type": _audio_mime_type(sample.path),
+                        "audio_base64": base64.b64encode(sample.path.read_bytes()).decode("ascii"),
                     }
-                    for path in voice_paths
+                    for sample in voice_samples
                 ],
                 "generation": _options_payload(generation_options),
             }
         )
+        _report_vibevoice_progress(progress_callback, "receive", "RunPod結果受信")
         return _vibevoice_result_from_output(
             output,
             normalized_script=normalized_script,
@@ -526,6 +598,68 @@ def _format_number(value: float) -> str:
 
 def _repo_cache_dir_name(repo_id: str) -> str:
     return "models--" + str(repo_id).replace("/", "--")
+
+
+def _is_usable_model_weight(path: Path) -> bool:
+    if ".no_exist" in path.parts:
+        return False
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def _report_vibevoice_progress(
+    progress_callback: Callable[[str, str], None] | None,
+    stage: str,
+    label: str,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(stage, label)
+
+
+def _voice_sample_diagnostics(voice_samples: Sequence[VibeVoiceVoiceSample]) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for sample in voice_samples:
+        try:
+            size = sample.path.stat().st_size
+        except OSError:
+            size = 0
+        items.append(
+            {
+                "slot": sample.slot,
+                "filename": sample.path.name,
+                "path": str(sample.path),
+                "size": size,
+            }
+        )
+    return items
+
+
+def _coerce_voice_samples(voice_paths: Sequence[Path | VibeVoiceVoiceSample]) -> list[VibeVoiceVoiceSample]:
+    samples: list[VibeVoiceVoiceSample] = []
+    seen_slots: set[int] = set()
+    for index, item in enumerate(voice_paths, start=1):
+        if isinstance(item, VibeVoiceVoiceSample):
+            sample = item
+        else:
+            sample = VibeVoiceVoiceSample(slot=index, path=Path(item))
+        if sample.slot < SHORT_SPEAKER_TAG_MIN or sample.slot > SHORT_SPEAKER_TAG_MAX:
+            raise ValueError(f"voice speaker slot must be between 1 and 4: {sample.slot}")
+        if sample.slot in seen_slots:
+            raise ValueError(f"voice speaker slot is duplicated: {sample.slot}")
+        seen_slots.add(sample.slot)
+        samples.append(VibeVoiceVoiceSample(slot=sample.slot, path=Path(sample.path)))
+    return samples
 
 
 def _default_vibevoice_python() -> str:

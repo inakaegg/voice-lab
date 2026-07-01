@@ -201,7 +201,8 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
         def generate(self, *, script_text, voice_paths, options):
             assert script_text == "Speaker 1: 你好。"
             assert len(voice_paths) == 1
-            assert voice_paths[0].read_bytes() == b"voice"
+            assert voice_paths[0].slot == 1
+            assert voice_paths[0].path.read_bytes() == b"voice"
             assert options.model_id == "vibevoice-1.5b-latest"
             assert options.inference_steps == 2
             return type(
@@ -224,6 +225,7 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
             "script": "Speaker 1: 你好。",
             "voices": [
                 {
+                    "speaker": 1,
                     "filename": "voice.wav",
                     "audio_mime_type": "audio/wav",
                     "audio_base64": base64.b64encode(b"voice").decode("ascii"),

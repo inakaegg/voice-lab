@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
+import inspect
 import logging
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from tempfile import TemporaryDirectory
+from time import perf_counter
 from uuid import uuid4
 
 from .api_audio_history import (
@@ -27,6 +31,7 @@ from .audio_effects import insert_audio_effect
 from .audio_history import AudioHistoryEntry, AudioHistoryStore
 from .pipeline import PipelineProgress, PipelineRequest, SpeechTranslationPipeline
 from .providers.voice import VoiceConversionRequest, VoiceConversionResult, VoiceConversionService
+from .vibevoice import VibeVoiceGenerationOptions, VibeVoiceGenerator, VibeVoiceResult, VibeVoiceVoiceSample
 
 LOGGER = logging.getLogger("mo_speech")
 
@@ -329,6 +334,137 @@ class VoiceConversionJobStore:
                 job.stages.append(item)
 
 
+@dataclass
+class VibeVoiceJob:
+    job_id: str
+    status: str
+    stages: list[dict[str, str]]
+    temp_dir: Path
+    cancel_event: Event
+    current_stage: dict[str, str] | None = None
+    result: dict[str, object] | None = None
+    error: str | None = None
+    cancel_requested: bool = False
+    started_at: float | None = None
+    finished_at: float | None = None
+
+
+@dataclass
+class VibeVoiceJobStore:
+    jobs: dict[str, VibeVoiceJob] = field(default_factory=dict)
+    lock: Lock = field(default_factory=Lock)
+
+    def start(
+        self,
+        *,
+        generator: VibeVoiceGenerator,
+        script_text: str,
+        voice_paths: list[VibeVoiceVoiceSample],
+        options: VibeVoiceGenerationOptions,
+        temp_dir: Path,
+    ) -> dict[str, object]:
+        job = VibeVoiceJob(
+            job_id=uuid4().hex,
+            status="queued",
+            stages=[{"stage": "generation", "label": "VibeVoice生成", "provider": ""}],
+            temp_dir=temp_dir,
+            cancel_event=Event(),
+        )
+        with self.lock:
+            self.jobs[job.job_id] = job
+        thread = Thread(
+            target=self._run_job,
+            args=(job.job_id, generator, script_text, voice_paths, options),
+            daemon=True,
+        )
+        thread.start()
+        return self.snapshot(job.job_id)
+
+    def snapshot(self, job_id: str) -> dict[str, object]:
+        with self.lock:
+            job = self.jobs[job_id]
+            return {
+                "job_id": job.job_id,
+                "status": job.status,
+                "current_stage": job.current_stage,
+                "stages": list(job.stages),
+                "result": job.result,
+                "error": job.error,
+                "cancel_requested": job.cancel_requested,
+                "elapsed_ms": _elapsed_vibevoice_job_ms(job),
+            }
+
+    def cancel(self, job_id: str) -> dict[str, object]:
+        with self.lock:
+            job = self.jobs[job_id]
+            job.cancel_requested = True
+            job.cancel_event.set()
+            if job.status in {"queued", "running"}:
+                job.status = "cancelling"
+                job.current_stage = {"stage": "cancel", "label": "キャンセル中", "provider": ""}
+        return self.snapshot(job_id)
+
+    def _run_job(
+        self,
+        job_id: str,
+        generator: VibeVoiceGenerator,
+        script_text: str,
+        voice_paths: list[VibeVoiceVoiceSample],
+        options: VibeVoiceGenerationOptions,
+    ) -> None:
+        try:
+            with self.lock:
+                job = self.jobs[job_id]
+                if job.cancel_event.is_set():
+                    job.status = "cancelled"
+                    job.finished_at = perf_counter()
+                    return
+                job.status = "running"
+                job.started_at = perf_counter()
+                job.current_stage = {"stage": "generation", "label": "VibeVoice生成", "provider": ""}
+
+            def report_progress(stage: str, label: str, provider: str = "") -> None:
+                self._update_progress(job_id, stage, label, provider)
+
+            result = _generate_vibevoice_with_optional_hooks(
+                generator,
+                script_text=script_text,
+                voice_paths=voice_paths,
+                options=options,
+                progress_callback=report_progress,
+                cancel_event=self.jobs[job_id].cancel_event,
+            )
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "cancelled" if job.cancel_event.is_set() else "succeeded"
+                job.result = None if job.status == "cancelled" else _serialize_vibevoice_result(result)
+                job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
+                job.finished_at = perf_counter()
+        except Exception as exc:
+            LOGGER.exception("VibeVoice job failed: job_id=%s", job_id)
+            with self.lock:
+                job = self.jobs[job_id]
+                job.status = "cancelled" if job.cancel_event.is_set() else "failed"
+                job.error = str(exc)
+                job.finished_at = perf_counter()
+        finally:
+            with self.lock:
+                temp_dir = self.jobs[job_id].temp_dir
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _update_progress(self, job_id: str, stage: str, label: str, provider: str = "") -> None:
+        item = {"stage": stage, "label": label, "provider": provider}
+        with self.lock:
+            job = self.jobs[job_id]
+            job.current_stage = item
+            for index, existing in enumerate(job.stages):
+                if existing["stage"] == stage:
+                    job.stages[index] = item
+                    break
+            else:
+                job.stages.append(item)
+
+
 def planned_stages(pipeline: SpeechTranslationPipeline, request: PipelineRequest) -> list[dict[str, str]]:
     if pipeline.tts.name.startswith("openai-realtime-audio-"):
         return [
@@ -421,3 +557,43 @@ def _insert_audio_effect_for_voice_result(
             *effect_result.warnings,
         ],
     )
+
+
+def _generate_vibevoice_with_optional_hooks(
+    generator: VibeVoiceGenerator,
+    *,
+    script_text: str,
+    voice_paths: list[VibeVoiceVoiceSample],
+    options: VibeVoiceGenerationOptions,
+    progress_callback,
+    cancel_event: Event,
+) -> VibeVoiceResult:
+    kwargs = {
+        "script_text": script_text,
+        "voice_paths": voice_paths,
+        "options": options,
+    }
+    parameters = inspect.signature(generator.generate).parameters
+    if "progress_callback" in parameters:
+        kwargs["progress_callback"] = progress_callback
+    if "cancel_event" in parameters:
+        kwargs["cancel_event"] = cancel_event
+    return generator.generate(**kwargs)
+
+
+def _serialize_vibevoice_result(result: VibeVoiceResult) -> dict[str, object]:
+    return {
+        "audio_mime_type": result.audio_mime_type,
+        "audio_base64": base64.b64encode(result.audio_bytes).decode("ascii"),
+        "normalized_script": result.normalized_script,
+        "providers": result.providers,
+        "timings_ms": result.timings_ms,
+        "diagnostics": result.diagnostics,
+    }
+
+
+def _elapsed_vibevoice_job_ms(job: VibeVoiceJob) -> float:
+    if job.started_at is None:
+        return 0.0
+    ended = job.finished_at if job.finished_at is not None else perf_counter()
+    return max(0.0, (ended - job.started_at) * 1000)

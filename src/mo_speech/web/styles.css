@@ -2391,12 +2391,14 @@ audio {
   border-radius: 10px;
   box-shadow: 0 12px 34px rgba(33, 64, 116, 0.08);
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   order: -1;
   padding: 12px 14px;
 }
 
-.vibevoice-generate-button {
+.vibevoice-generate-button,
+.vibevoice-cancel-button {
   background: #1d75dc;
   border: 0;
   border-radius: 10px;
@@ -2408,9 +2410,52 @@ audio {
   padding: 12px 18px;
 }
 
+.vibevoice-cancel-button {
+  background: #f0f4fb;
+  border: 1px solid #c9d9ec;
+  color: #17395f;
+  min-width: 112px;
+}
+
 .vibevoice-generate-button:disabled {
   cursor: progress;
   opacity: 0.72;
+}
+
+.vibevoice-job-progress {
+  display: grid;
+  flex-basis: 100%;
+  gap: 6px;
+}
+
+.vibevoice-progress-bar {
+  background: #e9f1fb;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.vibevoice-progress-bar span {
+  animation: vibevoice-progress-slide 1.35s ease-in-out infinite;
+  background: linear-gradient(90deg, #1d75dc, #46c0ff, #7d5cff);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  inline-size: 46%;
+  position: absolute;
+}
+
+.vibevoice-timing {
+  color: #526783;
+  font-size: 12px;
+  font-weight: 900;
+  margin: 0;
+}
+
+.vibevoice-job-progress[hidden],
+.vibevoice-cancel-button[hidden] {
+  display: none;
 }
 
 .vibevoice-result audio {
@@ -2500,5 +2545,23 @@ audio {
 
   .vibevoice-generate-button {
     width: 100%;
+  }
+
+  .vibevoice-cancel-button {
+    width: 100%;
+  }
+}
+
+@keyframes vibevoice-progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  55% {
+    transform: translateX(95%);
+  }
+
+  100% {
+    transform: translateX(230%);
   }
 }

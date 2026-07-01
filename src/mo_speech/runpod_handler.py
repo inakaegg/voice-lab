@@ -18,7 +18,7 @@ from .providers.voice import (
     VoiceConversionService,
     create_voice_conversion_service_from_env,
 )
-from .vibevoice import VibeVoiceGenerationOptions, VibeVoiceService
+from .vibevoice import VibeVoiceGenerationOptions, VibeVoiceService, VibeVoiceVoiceSample
 
 _WORKER_STARTED_AT = perf_counter()
 _PIPELINE: SpeechTranslationPipeline | None = None
@@ -262,15 +262,19 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         raise ValueError("voices are required")
 
     decode_started = perf_counter()
-    decoded_voices: list[tuple[str, str, bytes]] = []
+    decoded_voices: list[tuple[int, str, str, bytes]] = []
     for index, item in enumerate(voices, start=1):
         if not isinstance(item, dict):
             raise ValueError("each voice must be an object")
         audio_base64 = item.get("audio_base64")
         if not isinstance(audio_base64, str) or audio_base64 == "":
             raise ValueError(f"voice {index} audio_base64 is required")
+        speaker = _optional_int(item.get("speaker"))
+        if speaker is None:
+            speaker = index
         decoded_voices.append(
             (
+                speaker,
                 str(item.get("filename") or f"voice-{index}.wav"),
                 str(item.get("audio_mime_type") or "audio/wav"),
                 base64.b64decode(audio_base64),
@@ -282,12 +286,12 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
     temp_write_ms = 0.0
     with TemporaryDirectory() as temp_dir_raw:
         temp_dir = Path(temp_dir_raw)
-        voice_paths: list[Path] = []
+        voice_paths: list[VibeVoiceVoiceSample] = []
         temp_write_started = perf_counter()
-        for index, (filename, mime_type, audio_bytes) in enumerate(decoded_voices, start=1):
-            path = temp_dir / f"voice-{index}{Path(filename).suffix or _audio_suffix(mime_type)}"
+        for index, (speaker, filename, mime_type, audio_bytes) in enumerate(decoded_voices, start=1):
+            path = temp_dir / f"voice-{speaker or index}{Path(filename).suffix or _audio_suffix(mime_type)}"
             path.write_bytes(audio_bytes)
-            voice_paths.append(path)
+            voice_paths.append(VibeVoiceVoiceSample(slot=speaker, path=path))
         temp_write_ms = _elapsed_ms(temp_write_started)
         result = service.generate(
             script_text=script,

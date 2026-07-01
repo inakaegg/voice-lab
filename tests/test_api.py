@@ -184,9 +184,11 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     class FakeVibeVoiceService:
         def __init__(self):
             self.calls = []
+            self.voice_bytes = b""
 
         def generate(self, *, script_text, voice_paths, options):
             self.calls.append((script_text, voice_paths, options))
+            self.voice_bytes = voice_paths[0].path.read_bytes()
             return FakeVibeVoiceResult()
 
     service = FakeVibeVoiceService()
@@ -213,6 +215,42 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert service.calls[0][2].model_id == "vibevoice-realtime-0.5b-latest"
     assert service.calls[0][2].inference_steps == 3
     assert service.calls[0][2].line_by_line is True
+
+
+def test_vibevoice_generate_api_preserves_voice_slots() -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 2: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+            self.voice_bytes = b""
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            self.voice_bytes = voice_paths[0].path.read_bytes()
+            return FakeVibeVoiceResult()
+
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={"script": "Speaker 2: 你好。"},
+        files={"voice_file_2": ("voice2.wav", b"voice2", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    voice_samples = service.calls[0][1]
+    assert len(voice_samples) == 1
+    assert voice_samples[0].slot == 2
+    assert service.voice_bytes == b"voice2"
 
 
 def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
@@ -249,6 +287,66 @@ def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
     assert payload["providers"]["vibevoice"] == "runpod-serverless-vibevoice"
     assert payload["audio_base64"] == base64.b64encode(b"RIFrunpod").decode("ascii")
     assert len(runpod_service.calls) == 1
+
+
+def test_vibevoice_job_api_reports_elapsed_and_result() -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {"used_voice_samples": [{"slot": 1, "filename": "voice.wav", "size": 5}]}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
+            if progress_callback is not None:
+                progress_callback("generation", "VibeVoice生成")
+            return FakeVibeVoiceResult()
+
+    client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
+
+    response = client.post(
+        "/api/vibevoice/jobs",
+        data={"script": "你好。"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    status_payload = None
+    for _ in range(20):
+        status_response = client.get(f"/api/vibevoice/jobs/{job_id}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "succeeded":
+            break
+    assert status_payload is not None
+    assert status_payload["status"] == "succeeded"
+    assert status_payload["elapsed_ms"] >= 0
+    assert status_payload["result"]["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
+
+
+def test_vibevoice_job_api_can_request_cancel() -> None:
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
+            if cancel_event is not None:
+                cancel_event.wait(timeout=2)
+            raise RuntimeError("cancel observed")
+
+    client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
+    response = client.post(
+        "/api/vibevoice/jobs",
+        data={"script": "你好。"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    cancel_response = client.post(f"/api/vibevoice/jobs/{job_id}/cancel")
+
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] in {"cancelling", "cancelled", "failed"}
 
 
 def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:

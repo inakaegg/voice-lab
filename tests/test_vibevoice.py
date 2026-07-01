@@ -3,12 +3,15 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from threading import Event
 
 from mo_speech.vibevoice import (
     RunpodServerlessVibeVoiceService,
     VIBEVOICE_MODEL_PRESETS,
     VibeVoiceGenerationOptions,
+    VibeVoiceError,
     VibeVoiceService,
+    VibeVoiceVoiceSample,
     resolve_vibevoice_model_preset,
     normalize_vibevoice_script,
 )
@@ -97,7 +100,8 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     command, env = calls[0]
     assert command[:2] == ["python3", str(cli)]
     assert "--text_file" in command
-    assert "--voice" in command
+    assert "--voice1_file" in command
+    assert "--voice" not in command
     assert str(voice) in command
     assert "--line_by_line" in command
     assert "concat" in command
@@ -110,6 +114,104 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-0.5B"
     assert env["VIBEVOICE_TOKENIZER_REVISION"] == ""
     assert result.providers["vibevoice_model_id"] == "vibevoice-realtime-0.5b-latest"
+
+
+def test_vibevoice_service_preserves_explicit_speaker_slots(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        calls.append(list(command))
+        output_index = command.index("--output") + 1
+        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice2.wav"
+    voice.write_bytes(b"voice2")
+
+    service.generate(
+        script_text="Speaker 2: 你好。",
+        voice_paths=[VibeVoiceVoiceSample(slot=2, path=voice)],
+    )
+
+    command = calls[0]
+    assert "--voice2_file" in command
+    assert str(voice) in command
+    assert "--voice1_file" not in command
+    assert "--voice" not in command
+
+
+def test_vibevoice_service_reports_timeout_explicitly(tmp_path: Path) -> None:
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        timeout_seconds=7,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    try:
+        service.generate(script_text="你好。", voice_paths=[voice])
+    except VibeVoiceError as exc:
+        assert "timed out after 7s" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("VibeVoiceError was not raised")
+
+
+def test_vibevoice_service_disables_timeout_when_cancel_event_controls_job(tmp_path: Path) -> None:
+    captured_timeouts: list[float | None] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        captured_timeouts.append(timeout)
+        output_index = command.index("--output") + 1
+        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        timeout_seconds=7,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    service.generate(script_text="你好。", voice_paths=[voice], cancel_event=Event())
+
+    assert captured_timeouts == [None]
 
 
 def test_vibevoice_model_presets_include_pinned_latest_and_realtime() -> None:
@@ -147,6 +249,35 @@ def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None
     assert status["comfyui_vibevoice_exists"] is False
     assert status["model_cache_found"] is False
     assert status["tokenizer_found"] is False
+
+
+def test_vibevoice_service_status_ignores_no_exist_zero_byte_weights(tmp_path: Path) -> None:
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    no_exist = home / "models--microsoft--VibeVoice-1.5B" / ".no_exist" / "revision"
+    snapshot = home / "models--microsoft--VibeVoice-1.5B" / "snapshots" / "revision"
+    tokenizer_dir = home / "models--Qwen--Qwen2.5-1.5B" / "snapshots" / "tokenizer-revision"
+    module_dir.mkdir(parents=True)
+    no_exist.mkdir(parents=True)
+    snapshot.mkdir(parents=True)
+    tokenizer_dir.mkdir(parents=True)
+    (no_exist / "model.safetensors").write_bytes(b"")
+    (snapshot / "model-00001-of-00003.safetensors").write_bytes(b"model")
+    (tokenizer_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    service = VibeVoiceService(
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+    )
+
+    status = service.status()
+
+    assert status["available"] is True
+    assert status["model_cache_found"] is True
+    assert status["model_cache_path"] == str(snapshot)
 
 
 def test_vibevoice_service_defaults_do_not_use_legacy_project_paths(
@@ -210,3 +341,4 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     assert client.payload["generation"]["do_sample"] is False
     assert client.payload["generation"]["model_id"] == "vibevoice-1.5b-latest"
     assert client.payload["voices"][0]["audio_base64"] != ""
+    assert client.payload["voices"][0]["speaker"] == 1

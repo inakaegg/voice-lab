@@ -19,7 +19,9 @@
 
 台本の正式形式は `Speaker 1: ...` だが、入力時は `1: ...`、`1 ...`、`A: ...`、`A ...` の短縮タグも使える。短縮タグは最大4つの参照音声に合わせて `1-4` または `A-D` を受け、生成前に `Speaker N:` へ正規化する。タグがない行は `Speaker 1:` として扱う。
 
-参照音声はブラウザのIndexedDBへ保存し、次回以降は同じSpeaker枠の既定音声として再利用する。ブラウザの制約によりfile inputへ前回ファイルを直接セットすることはできないため、保存済みファイル名をSpeaker枠内に表示し、生成時に保存済みBlobを送信する。
+参照音声はブラウザのIndexedDBへ保存し、次回以降は同じSpeaker枠の既定音声として再利用する。ブラウザの制約によりfile inputへ前回ファイルを直接セットすることはできないため、保存済みファイル名をSpeaker枠内に表示し、生成時に保存済みBlobを送信する。生成時は台本から必要なSpeaker枠を判定し、不要な保存済み音声を送らない。APIからVibeVoice CLIへ渡す時もSpeaker枠番号を保持し、`Speaker 2` の参照音声が `Speaker 1` として詰め直されないようにする。
+
+長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
 
 `VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。RunPod比較では、community copyである `aoi-ot/VibeVoice-Large` を実験扱いで使う。
 
@@ -62,6 +64,8 @@ export VIBEVOICE_DEVICE=cpu
 
 ローカルmacOSでは、MPS backendがVibeVoiceの複数話者生成中にMetal側で落ちる場合があるため、既定deviceはCPUにする。MPSを明示的に試す場合だけ `VIBEVOICE_DEVICE=mps` を設定する。RunPodなどCUDA環境ではCUDAを自動利用する。
 
+Transformers 5系では、VibeVoice拡張の `tie_weights()` が `decoder_config.tie_word_embeddings` を見ずに早期returnし、`lm_head.weight` がランダム初期化のままになる場合がある。この状態では生成音声が言葉として崩れる可能性が高いため、アプリ内CLIではロード時に `lm_head.weight` を `model.language_model.embed_tokens.weight` へ明示的に結び直す。
+
 RunPod Network Volumeでは、モデルキャッシュを `/workspace` または `/runpod-volume` 配下に置く。ComfyUI-VibeVoice拡張はDocker image内の `/app/ComfyUI-VibeVoice` に入れる構成を既定とし、別途Volumeへ置く場合だけ環境変数で上書きする。
 
 ```bash
@@ -83,6 +87,7 @@ UIでモデルを選んだ場合は、そのリクエストの間だけ `VIBEVOI
 - 日本語の漢字読みが誤ることがある。例として、参照音声が中国語の場合に「最近」を中国語読みへ寄せるなど、参照音声言語の影響を受ける可能性がある。
 - 日本語参照音声でも漢字読みを誤る場合がある。台本をひらがなにすると改善するため、テキスト正規化または読み指定の仕組みが必要。
 - 途中にノイズや不自然な音が混じることがある。RunPod実行、依存ライブラリ、GPU、生成パラメータ、参照音声前処理の差分を分けて検証する。
+- `VibeVoice Realtime 0.5B` は既存のスキット生成CLIと互換でない場合があり、生成後に音声波形が返らないことがある。この場合は内部例外ではなく「Realtime 0.5Bはこの生成経路では音声を返さなかった」と分かるエラーとして表示する。
 - 台本全体生成と行ごと生成では、自然さ、破綻のしにくさ、行間の違和感が変わる。品質比較用に生成設定と入力台本を保存できる仕組みが今後必要。
 
 ## これから詰める仕様

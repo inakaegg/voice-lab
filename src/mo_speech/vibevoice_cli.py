@@ -120,10 +120,36 @@ def _patch_transformers5_tie_weights_signature(model_class: Any) -> None:
         return
 
     def wrapped_tie_weights(self, *args, **kwargs):
-        return tie_weights(self)
+        config = getattr(self, "config", None)
+        decoder_config = getattr(config, "decoder_config", None)
+        if (
+            config is not None
+            and decoder_config is not None
+            and not getattr(config, "tie_word_embeddings", False)
+            and getattr(decoder_config, "tie_word_embeddings", False)
+        ):
+            setattr(config, "tie_word_embeddings", True)
+        result = tie_weights(self)
+        _tie_vibevoice_lm_head_to_decoder_embeddings(self)
+        return result
 
     wrapped_tie_weights._mo_accepts_transformers5_kwargs = True
     model_class.tie_weights = wrapped_tie_weights
+
+
+def _tie_vibevoice_lm_head_to_decoder_embeddings(model: Any) -> None:
+    """Keep VibeVoice tied embeddings intact with newer Transformers loaders."""
+
+    lm_head = getattr(model, "lm_head", None)
+    base_model = getattr(model, "model", None)
+    language_model = getattr(base_model, "language_model", None)
+    embed_tokens = getattr(language_model, "embed_tokens", None)
+    if lm_head is None or embed_tokens is None:
+        return
+    embed_weight = getattr(embed_tokens, "weight", None)
+    if embed_weight is None:
+        return
+    lm_head.weight = embed_weight
 
 
 def _patch_transformers5_prepare_generation_config(model_class: Any) -> None:
@@ -581,8 +607,10 @@ class VibeVoice:
         audio_processor = VibeVoiceTokenizerProcessor()
         self.processor = VibeVoiceProcessor(tokenizer=vibevoice_tokenizer, audio_processor=audio_processor)
 
-        # Reduce GPU memory footprint by using half-precision during inference
-        final_load_dtype = torch.float16
+        # Reduce GPU memory footprint by using half-precision during GPU/MPS
+        # inference. CPU float16 can produce poor compatibility and quality, so
+        # keep CPU execution in float32.
+        final_load_dtype = torch.float16 if self.device.type in {"cuda", "mps"} else torch.float32
 
         # Load model
         try:
@@ -606,6 +634,7 @@ class VibeVoice:
 
             with _torch_creation_cpu_when_default_device_is_meta():
                 self.model = VibeVoiceForConditionalGenerationInference.from_pretrained(self.model_path, **from_pretrained_kwargs)
+            _tie_vibevoice_lm_head_to_decoder_embeddings(self.model)
             if not should_load_directly_to_device:
                 self.model.to(self.device)
             self.model.eval()
@@ -752,7 +781,11 @@ class VibeVoice:
                 **inputs, max_new_tokens=None, cfg_scale=cfg_scale, tokenizer=self.processor.tokenizer, generation_config=generation_config, verbose=False
             )
 
-        output_waveform = outputs.speech_outputs[0]
+        speech_outputs = getattr(outputs, "speech_outputs", None)
+        if not speech_outputs or speech_outputs[0] is None:
+            raise RuntimeError("VibeVoiceモデルが音声波形を返しませんでした。モデルとCLIの互換性を確認してください。")
+
+        output_waveform = speech_outputs[0]
         if output_waveform.ndim == 1:
             output_waveform = output_waveform.unsqueeze(0)
         if output_waveform.ndim == 2:

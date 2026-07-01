@@ -4,8 +4,9 @@ import base64
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from time import perf_counter
 from typing import Annotated
 
@@ -25,7 +26,7 @@ from .api_audio_history import (
     serialize_audio_history_settings as _serialize_audio_history_settings,
     upload_suffix as _upload_suffix,
 )
-from .api_jobs import TextToSpeechJobStore, TranslationJobStore, VoiceConversionJobStore
+from .api_jobs import TextToSpeechJobStore, TranslationJobStore, VibeVoiceJobStore, VoiceConversionJobStore
 from .api_requests import (
     create_pipeline_request as _create_pipeline_request,
     create_seed_vc_settings as _create_seed_vc_settings,
@@ -80,6 +81,7 @@ from .vibevoice import (
     VibeVoiceGenerator,
     VibeVoiceGenerationOptions,
     VibeVoiceService,
+    VibeVoiceVoiceSample,
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -166,12 +168,17 @@ async def _save_vibevoice_upload(upload: UploadFile, directory: Path, fallback_n
     return output
 
 
-async def _save_vibevoice_voice_uploads(uploads: list[UploadFile | None], directory: Path) -> list[Path]:
-    voice_paths: list[Path] = []
+async def _save_vibevoice_voice_uploads(uploads: list[UploadFile | None], directory: Path) -> list[VibeVoiceVoiceSample]:
+    voice_paths: list[VibeVoiceVoiceSample] = []
     for index, upload in enumerate(uploads, start=1):
         if upload is None or not upload.filename:
             continue
-        voice_paths.append(await _save_vibevoice_upload(upload, directory, f"voice-{index}"))
+        voice_paths.append(
+            VibeVoiceVoiceSample(
+                slot=index,
+                path=await _save_vibevoice_upload(upload, directory, f"voice-{index}"),
+            )
+        )
     if not voice_paths:
         raise ValueError("voice sample is required")
     return voice_paths
@@ -387,6 +394,7 @@ def create_app(
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
+    vibevoice_job_store = VibeVoiceJobStore()
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
     if os.getenv("MO_PRELOAD_VOICE_CONVERSION") == "1" or os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
@@ -636,6 +644,77 @@ def create_app(
             "timings_ms": vibevoice_result.timings_ms,
             "diagnostics": vibevoice_result.diagnostics,
         }
+
+    @app.post("/api/vibevoice/jobs")
+    async def create_vibevoice_job(
+        script: Annotated[str, Form()] = "",
+        script_file: Annotated[UploadFile | None, File()] = None,
+        voice_file_1: Annotated[UploadFile | None, File()] = None,
+        voice_file_2: Annotated[UploadFile | None, File()] = None,
+        voice_file_3: Annotated[UploadFile | None, File()] = None,
+        voice_file_4: Annotated[UploadFile | None, File()] = None,
+        cfg_scale: Annotated[str, Form()] = "1.3",
+        inference_steps: Annotated[str, Form()] = "10",
+        seed: Annotated[str, Form()] = "42",
+        do_sample: Annotated[str, Form()] = "true",
+        temperature: Annotated[str, Form()] = "0.95",
+        top_p: Annotated[str, Form()] = "0.95",
+        top_k: Annotated[str, Form()] = "0",
+        max_voice_seconds: Annotated[str, Form()] = "5",
+        line_by_line: Annotated[str, Form()] = "false",
+        line_gap: Annotated[str, Form()] = "1",
+        backend: Annotated[str, Form()] = "local",
+        model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
+    ) -> dict[str, object]:
+        temp_dir = Path(mkdtemp(prefix="mo-vibevoice-job-"))
+        try:
+            script_text = await _read_vibevoice_script(script, script_file)
+            options = _vibevoice_generation_options(
+                model_id=model_id,
+                cfg_scale=cfg_scale,
+                inference_steps=inference_steps,
+                seed=seed,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                max_voice_seconds=max_voice_seconds,
+                line_by_line=line_by_line,
+                line_gap=line_gap,
+            )
+            voice_paths = await _save_vibevoice_voice_uploads(
+                [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
+                temp_dir,
+            )
+            generator = (
+                active_runpod_vibevoice_service
+                if backend in {"runpod", "runpod_serverless"}
+                else active_vibevoice_service
+            )
+            return vibevoice_job_store.start(
+                generator=generator,
+                script_text=script_text,
+                voice_paths=voice_paths,
+                options=options,
+                temp_dir=temp_dir,
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/vibevoice/jobs/{job_id}")
+    def get_vibevoice_job(job_id: str) -> dict[str, object]:
+        try:
+            return vibevoice_job_store.snapshot(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.post("/api/vibevoice/jobs/{job_id}/cancel")
+    def cancel_vibevoice_job(job_id: str) -> dict[str, object]:
+        try:
+            return vibevoice_job_store.cancel(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
 
     @app.post("/api/practice/prompts")
     async def create_practice_prompt(

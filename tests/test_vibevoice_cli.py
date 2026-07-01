@@ -68,6 +68,29 @@ def test_vibevoice_cli_patches_tie_weights_signature() -> None:
     assert model.called is True
 
 
+def test_vibevoice_cli_ties_decoder_embeddings_when_config_only_has_decoder_flag() -> None:
+    class ModelClass:
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(decoder_config=SimpleNamespace(tie_word_embeddings=True))
+            self.lm_head = SimpleNamespace(weight=object())
+            self.model = SimpleNamespace(
+                language_model=SimpleNamespace(embed_tokens=SimpleNamespace(weight=object()))
+            )
+
+        def tie_weights(self):
+            if not getattr(self.config, "tie_word_embeddings", False):
+                return
+            self.lm_head.weight = self.model.language_model.embed_tokens.weight
+
+    vibevoice_cli._patch_transformers5_tie_weights_signature(ModelClass)
+    model = ModelClass()
+
+    model.tie_weights(recompute_mapping=False)
+
+    assert model.config.tie_word_embeddings is True
+    assert model.lm_head.weight is model.model.language_model.embed_tokens.weight
+
+
 def test_vibevoice_cli_patches_prepare_generation_config_signature() -> None:
     class ModelClass:
         def _prepare_generation_config(self, generation_config, **kwargs):
@@ -232,6 +255,29 @@ def test_vibevoice_cli_load_model_uses_device_map_for_cuda(tmp_path, monkeypatch
     assert model.eval_called is True
 
 
+def test_vibevoice_cli_load_model_uses_float32_for_cpu(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    service = vibevoice_cli.VibeVoice(model_path=str(model_path), tokenizer_path=str(tokenizer_path))
+    service.device = torch.device("cpu")
+    _FakeModel.calls = []
+    monkeypatch.setattr(
+        vibevoice_cli,
+        "_import_vibevoice_components",
+        lambda: (_FakeModel, _FakeProcessor, _FakeProcessor, _FakeTokenizer),
+    )
+    monkeypatch.setattr(service, "_resolve_model_path", lambda value: "model")
+    monkeypatch.setattr(service, "_resolve_tokenizer_path", lambda value: "tokenizer.json")
+
+    service.load_model()
+
+    call = _FakeModel.calls[0]
+    dtype_arg = "dtype" if vibevoice_cli._DTYPE_ARG_SUPPORTED else "torch_dtype"
+    assert call["kwargs"][dtype_arg] == torch.float32
+
+
 def test_vibevoice_cli_tensor_creation_patch_uses_cpu_under_meta_default_device() -> None:
     if not hasattr(torch, "set_default_device") or not hasattr(torch, "get_default_device"):
         pytest.skip("torch default device API is not available")
@@ -248,3 +294,42 @@ def test_vibevoice_cli_tensor_creation_patch_uses_cpu_under_meta_default_device(
             assert tensor.item() == 1.0
     finally:
         torch.set_default_device(original_device)
+
+
+def test_vibevoice_cli_rejects_missing_speech_output(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+
+    class FakeProcessor:
+        tokenizer = object()
+
+        def __call__(self, **kwargs):
+            return {}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, **kwargs):
+            return SimpleNamespace(speech_outputs=[None])
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    with pytest.raises(RuntimeError, match="音声波形を返しませんでした"):
+        service._synthesize_script(
+            script_text="Speaker 1: こんにちは。",
+            voice_samples_np=[],
+            cfg_scale=1.3,
+            inference_steps=2,
+            do_sample=True,
+            temperature=0.95,
+            top_p=0.95,
+            top_k=0,
+        )
