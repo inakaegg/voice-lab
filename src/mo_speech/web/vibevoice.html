@@ -97,6 +97,14 @@
               </select>
             </label>
             <label>
+              モデル
+              <select name="model_id" id="vibevoice-model-id">
+                <option value="vibevoice-1.5b-pinned" selected>VibeVoice 1.5B 固定版</option>
+                <option value="vibevoice-1.5b-latest">VibeVoice 1.5B 最新</option>
+                <option value="vibevoice-realtime-0.5b-latest">Realtime 0.5B 実験</option>
+              </select>
+            </label>
+            <label>
               CFG
               <input name="cfg_scale" type="number" min="0" step="0.1" value="1.3" />
             </label>
@@ -140,7 +148,7 @@
             </label>
           </div>
           <p class="vibevoice-help">
-            ランダム性を使うと同じ台本でも抑揚が変わります。行ごと生成は長い台本を1行ずつ生成してから無音を挟んで結合します。
+            Realtime 0.5Bは軽量候補ですが、既存CLIとの互換性と日本語/中国語品質は検証対象です。行ごと生成は長い台本を1行ずつ生成してから無音を挟んで結合します。
           </p>
         </section>
 

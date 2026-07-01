@@ -179,6 +179,7 @@ async def _save_vibevoice_voice_uploads(uploads: list[UploadFile | None], direct
 
 def _vibevoice_generation_options(
     *,
+    model_id: str,
     cfg_scale: str,
     inference_steps: str,
     seed: str,
@@ -191,6 +192,7 @@ def _vibevoice_generation_options(
     line_gap: str,
 ) -> VibeVoiceGenerationOptions:
     return VibeVoiceGenerationOptions(
+        model_id=model_id,
         cfg_scale=_float_form_value(cfg_scale, 1.3),
         inference_steps=max(1, _int_form_value(inference_steps, 10)),
         seed=_int_form_value(seed, 42),
@@ -590,10 +592,12 @@ def create_app(
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
         backend: Annotated[str, Form()] = "local",
+        model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
         try:
             script_text = await _read_vibevoice_script(script, script_file)
             options = _vibevoice_generation_options(
+                model_id=model_id,
                 cfg_scale=cfg_scale,
                 inference_steps=inference_steps,
                 seed=seed,

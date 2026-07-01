@@ -8,9 +8,22 @@
 
 ## 生成オプション
 
+- `モデル`: 比較検証用に、RunPod/ローカルへ渡すVibeVoiceモデルを選ぶ。初期候補は以下とする。
+  - `VibeVoice 1.5B 固定版`: ローカルで動作確認した `microsoft/VibeVoice-1.5B` のrevisionを固定して使う。再現性を優先する既定値。
+  - `VibeVoice 1.5B 最新`: `microsoft/VibeVoice-1.5B` のHugging Face `main` を使う。2026-07-01時点では固定版と重み/configは同一に見えるが、今後の更新比較用に残す。
+  - `VibeVoice Realtime 0.5B`: `microsoft/VibeVoice-Realtime-0.5B` を使う実験候補。軽量で初回応答が速い可能性がある一方、単一話者寄り・英語寄りのモデルであり、既存CLIとの互換性と日本語/中国語品質は検証対象とする。
 - `ランダム性を使う`: VibeVoiceのsamplingを有効にする。同じ台本でもseedや設定によって抑揚や細部が変わる。安定性を優先して比較したい場合はOFFも試す。
 - `行ごとに生成して結合`: 台本全体を一度に生成せず、1行ずつ生成して無音を挟んで結合する。長文や複数発話で破綻を分けやすい一方、行間や話し方の連続性は不自然になる可能性がある。
 - `参照音声秒数`: 参照音声の先頭から使う長さ。長すぎると処理が重くなり、短すぎると声質特徴が不足する。
+
+`VibeVoice Large` は過去のREADMEで言及されていたが、現在の公開Hugging Face repoとしては取得できない。RunPodで比較対象にするのは、repoまたはローカル/Volume上の実体パスを確認してからにする。
+
+## 関連モデルの扱い
+
+- `microsoft/VibeVoice-1.5B`: 現在のスキット生成の主対象。長めの複数話者TTSを想定する。
+- `microsoft/VibeVoice-Realtime-0.5B`: 低遅延TTS候補。軽量だが、単一話者寄りで、既存の複数話者スキット生成CLIと同じように使えるかは検証対象。
+- `microsoft/VibeVoice-ASR` / `microsoft/VibeVoice-ASR-HF`: TTSではなく、ASR、話者分離、タイムスタンプをまとめて出すためのモデル。長い会話音声を「誰が、いつ、何を話したか」に落とす用途で、VibeVoiceスキット生成の直接代替にはしない。
+- `microsoft/VibeVoice-Large`: 過去の案内では上位候補として見えていたが、現時点では公開repoとして取得できないため、UIの選択肢には出さない。
 
 ## モデル配置方針
 
@@ -52,6 +65,8 @@ VIBEVOICE_TOKENIZER_REVISION=8faed761d45a263340a0528343f099c05c9a4323
 ```
 
 `VIBEVOICE_MODEL_REVISION` と `VIBEVOICE_TOKENIZER_REVISION` は、ローカルで動作確認したキャッシュと同じrevisionをRunPod初回ダウンロードでも使うために固定する。未固定のままHugging Faceの `main` を取得すると、後日のモデル更新で同じ入力でも挙動が変わる可能性がある。
+
+UIでモデルを選んだ場合は、そのリクエストの間だけ `VIBEVOICE_MODEL_REPO`、`VIBEVOICE_MODEL_REVISION`、`VIBEVOICE_TOKENIZER_REPO`、`VIBEVOICE_TOKENIZER_REVISION` 相当の値をRunPod handlerへ渡す。RunPod Volumeに該当モデルがなければ、初回生成内でHugging Faceからダウンロードされる。
 
 ## 既知の品質課題
 

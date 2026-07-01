@@ -6,8 +6,10 @@ from pathlib import Path
 
 from mo_speech.vibevoice import (
     RunpodServerlessVibeVoiceService,
+    VIBEVOICE_MODEL_PRESETS,
     VibeVoiceGenerationOptions,
     VibeVoiceService,
+    resolve_vibevoice_model_preset,
     normalize_vibevoice_script,
 )
 
@@ -50,7 +52,13 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     result = service.generate(
         script_text="你好。",
         voice_paths=[voice],
-        options=VibeVoiceGenerationOptions(inference_steps=3, seed=7, line_by_line=True, line_gap=0.25),
+        options=VibeVoiceGenerationOptions(
+            model_id="vibevoice-realtime-0.5b-latest",
+            inference_steps=3,
+            seed=7,
+            line_by_line=True,
+            line_gap=0.25,
+        ),
     )
 
     assert result.audio_bytes == b"RIFFfakewav"
@@ -66,6 +74,28 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     assert "0.25" in command
     assert env["VIBEVOICE_HOME"] == str(home)
     assert env["COMFYUI_VIBEVOICE_PATH"] == str(module_dir)
+    assert env["VIBEVOICE_MODEL_REPO"] == "microsoft/VibeVoice-Realtime-0.5B"
+    assert env["VIBEVOICE_MODEL_REVISION"] == ""
+    assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-0.5B"
+    assert env["VIBEVOICE_TOKENIZER_REVISION"] == ""
+    assert result.providers["vibevoice_model_id"] == "vibevoice-realtime-0.5b-latest"
+
+
+def test_vibevoice_model_presets_include_pinned_latest_and_realtime() -> None:
+    assert set(VIBEVOICE_MODEL_PRESETS) >= {
+        "vibevoice-1.5b-pinned",
+        "vibevoice-1.5b-latest",
+        "vibevoice-realtime-0.5b-latest",
+    }
+    pinned = resolve_vibevoice_model_preset("vibevoice-1.5b-pinned")
+    latest = resolve_vibevoice_model_preset("vibevoice-1.5b-latest")
+    realtime = resolve_vibevoice_model_preset("vibevoice-realtime-0.5b-latest")
+    assert pinned.model_repo == "microsoft/VibeVoice-1.5B"
+    assert pinned.model_revision == "1904eae38036e9c780d28e27990c27748984eafe"
+    assert latest.model_repo == "microsoft/VibeVoice-1.5B"
+    assert latest.model_revision is None
+    assert realtime.model_repo == "microsoft/VibeVoice-Realtime-0.5B"
+    assert realtime.tokenizer_repo == "Qwen/Qwen2.5-0.5B"
 
 
 def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None:
@@ -131,7 +161,11 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     result = service.generate(
         script_text="你好。",
         voice_paths=[voice],
-        options=VibeVoiceGenerationOptions(inference_steps=2, do_sample=False),
+        options=VibeVoiceGenerationOptions(
+            model_id="vibevoice-1.5b-latest",
+            inference_steps=2,
+            do_sample=False,
+        ),
     )
 
     assert result.audio_bytes == b"RIFF"
@@ -139,4 +173,5 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     assert client.payload["script"] == "Speaker 1: 你好。"
     assert client.payload["generation"]["inference_steps"] == 2
     assert client.payload["generation"]["do_sample"] is False
+    assert client.payload["generation"]["model_id"] == "vibevoice-1.5b-latest"
     assert client.payload["voices"][0]["audio_base64"] != ""

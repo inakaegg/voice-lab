@@ -194,7 +194,12 @@ def test_vibevoice_generate_api_returns_audio() -> None:
 
     response = client.post(
         "/api/vibevoice/generate",
-        data={"script": "你好。", "inference_steps": "3", "line_by_line": "true"},
+        data={
+            "script": "你好。",
+            "inference_steps": "3",
+            "line_by_line": "true",
+            "model_id": "vibevoice-realtime-0.5b-latest",
+        },
         files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
     )
 
@@ -205,6 +210,7 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert payload["normalized_script"] == "Speaker 1: 你好。"
     assert payload["providers"]["vibevoice"] == "fake-vibevoice"
     assert len(service.calls) == 1
+    assert service.calls[0][2].model_id == "vibevoice-realtime-0.5b-latest"
     assert service.calls[0][2].inference_steps == 3
     assert service.calls[0][2].line_by_line is True
 

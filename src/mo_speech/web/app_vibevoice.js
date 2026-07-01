@@ -35,9 +35,14 @@ async function loadStatus() {
 function renderStatus(status) {
   const localStatus = status.backends?.local || status;
   const runpodStatus = status.backends?.runpod_serverless || {};
+  const modelLabels = Array.isArray(localStatus.model_presets)
+    ? localStatus.model_presets.map((preset) => preset.label || preset.model_id).join(" / ")
+    : "";
   runtimeStatus.dataset.state = localStatus.available ? "ready" : "missing";
   runtimeStatus.textContent = localStatus.available ? "ローカル実行できます" : "ローカルモデルまたはCLIが見つかりません";
   runtimeDetails.replaceChildren(
+    detailItem("Default Model", localStatus.default_model_id || ""),
+    detailItem("Selectable Models", modelLabels),
     detailItem("Local CLI", localStatus.cli_exists ? localStatus.cli_path : `${localStatus.cli_path} (missing)`),
     detailItem(
       "Local Module",

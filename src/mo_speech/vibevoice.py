@@ -18,6 +18,57 @@ DEFAULT_VIBEVOICE_CLI = Path(__file__).with_name("vibevoice_cli.py")
 DEFAULT_COMFYUI_VIBEVOICE_PATH = DEFAULT_VIBEVOICE_ROOT / "ComfyUI-VibeVoice"
 DEFAULT_VIBEVOICE_TIMEOUT_SECONDS = 900.0
 VIBEVOICE_SAMPLE_RATE = 24_000
+DEFAULT_VIBEVOICE_MODEL_ID = "vibevoice-1.5b-pinned"
+
+
+@dataclass(frozen=True)
+class VibeVoiceModelPreset:
+    model_id: str
+    label: str
+    model_repo: str
+    model_revision: str | None
+    tokenizer_repo: str
+    tokenizer_revision: str | None
+    notes: str = ""
+
+    @property
+    def model_cache_dir_name(self) -> str:
+        return _repo_cache_dir_name(self.model_repo)
+
+    @property
+    def tokenizer_cache_dir_name(self) -> str:
+        return _repo_cache_dir_name(self.tokenizer_repo)
+
+
+VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
+    "vibevoice-1.5b-pinned": VibeVoiceModelPreset(
+        model_id="vibevoice-1.5b-pinned",
+        label="VibeVoice 1.5B 固定版",
+        model_repo="microsoft/VibeVoice-1.5B",
+        model_revision="1904eae38036e9c780d28e27990c27748984eafe",
+        tokenizer_repo="Qwen/Qwen2.5-1.5B",
+        tokenizer_revision="8faed761d45a263340a0528343f099c05c9a4323",
+        notes="ローカルで動作確認したrevisionを固定する再現性優先の既定値。",
+    ),
+    "vibevoice-1.5b-latest": VibeVoiceModelPreset(
+        model_id="vibevoice-1.5b-latest",
+        label="VibeVoice 1.5B 最新",
+        model_repo="microsoft/VibeVoice-1.5B",
+        model_revision=None,
+        tokenizer_repo="Qwen/Qwen2.5-1.5B",
+        tokenizer_revision=None,
+        notes="Hugging Face mainを取得する比較用。将来の更新で挙動が変わる可能性がある。",
+    ),
+    "vibevoice-realtime-0.5b-latest": VibeVoiceModelPreset(
+        model_id="vibevoice-realtime-0.5b-latest",
+        label="VibeVoice Realtime 0.5B",
+        model_repo="microsoft/VibeVoice-Realtime-0.5B",
+        model_revision=None,
+        tokenizer_repo="Qwen/Qwen2.5-0.5B",
+        tokenizer_revision=None,
+        notes="軽量・低遅延候補。既存CLIとの互換性と日本語/中国語品質は検証対象。",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -32,6 +83,7 @@ class VibeVoiceGenerationOptions:
     max_voice_seconds: float = 5.0
     line_by_line: bool = False
     line_gap: float = 1.0
+    model_id: str = DEFAULT_VIBEVOICE_MODEL_ID
 
 
 @dataclass(frozen=True)
@@ -46,6 +98,29 @@ class VibeVoiceResult:
 
 class VibeVoiceError(RuntimeError):
     pass
+
+
+def resolve_vibevoice_model_preset(model_id: str | None) -> VibeVoiceModelPreset:
+    normalized = str(model_id or DEFAULT_VIBEVOICE_MODEL_ID).strip() or DEFAULT_VIBEVOICE_MODEL_ID
+    try:
+        return VIBEVOICE_MODEL_PRESETS[normalized]
+    except KeyError as exc:
+        raise ValueError(f"unsupported VibeVoice model: {normalized}") from exc
+
+
+def serialize_vibevoice_model_presets() -> list[dict[str, object]]:
+    return [
+        {
+            "model_id": preset.model_id,
+            "label": preset.label,
+            "model_repo": preset.model_repo,
+            "model_revision": preset.model_revision or "",
+            "tokenizer_repo": preset.tokenizer_repo,
+            "tokenizer_revision": preset.tokenizer_revision or "",
+            "notes": preset.notes,
+        }
+        for preset in VIBEVOICE_MODEL_PRESETS.values()
+    ]
 
 
 SubprocessRun = Callable[..., subprocess.CompletedProcess[str]]
@@ -135,14 +210,24 @@ class VibeVoiceService:
         return cls()
 
     def status(self) -> dict[str, object]:
-        model_cache = self._find_model_cache()
-        tokenizer = self._find_tokenizer()
+        try:
+            default_model = resolve_vibevoice_model_preset(os.getenv("VIBEVOICE_DEFAULT_MODEL_ID"))
+        except ValueError:
+            default_model = resolve_vibevoice_model_preset(DEFAULT_VIBEVOICE_MODEL_ID)
+        model_cache = self._find_model_cache(default_model)
+        tokenizer = self._find_tokenizer(default_model)
         cli_exists = self.cli_path.is_file()
         module_exists = self.comfyui_vibevoice_path.is_dir()
         available = cli_exists and module_exists and model_cache is not None and tokenizer is not None
         return {
             "available": available,
             "provider": self.name,
+            "default_model_id": default_model.model_id,
+            "model_presets": serialize_vibevoice_model_presets(),
+            "model_repo": default_model.model_repo,
+            "model_revision": default_model.model_revision or "",
+            "tokenizer_repo": default_model.tokenizer_repo,
+            "tokenizer_revision": default_model.tokenizer_revision or "",
             "python": self.python,
             "cli_path": str(self.cli_path),
             "cli_exists": cli_exists,
@@ -169,6 +254,7 @@ class VibeVoiceService:
             raise VibeVoiceError(f"VibeVoice CLI was not found: {self.cli_path}")
         normalized_script = normalize_vibevoice_script(script_text)
         generation_options = options or VibeVoiceGenerationOptions()
+        model_preset = resolve_vibevoice_model_preset(generation_options.model_id)
         started = perf_counter()
 
         with TemporaryDirectory(prefix="mo-vibevoice-") as temp_dir:
@@ -190,7 +276,7 @@ class VibeVoiceService:
             )
             completed = self._subprocess_run(
                 command,
-                env=self._build_env(),
+                env=self._build_env(model_preset),
                 cwd=str(Path.cwd()),
                 capture_output=True,
                 text=True,
@@ -213,6 +299,11 @@ class VibeVoiceService:
             normalized_script=normalized_script,
             providers={
                 "vibevoice": self.name,
+                "vibevoice_model_id": model_preset.model_id,
+                "vibevoice_model_repo": model_preset.model_repo,
+                "vibevoice_model_revision": model_preset.model_revision or "main",
+                "vibevoice_tokenizer_repo": model_preset.tokenizer_repo,
+                "vibevoice_tokenizer_revision": model_preset.tokenizer_revision or "main",
                 "cli_path": str(self.cli_path),
                 "vibevoice_home": str(self.vibevoice_home),
             },
@@ -272,10 +363,14 @@ class VibeVoiceService:
             )
         return command
 
-    def _build_env(self) -> dict[str, str]:
+    def _build_env(self, model_preset: VibeVoiceModelPreset) -> dict[str, str]:
         env = dict(os.environ)
         env["VIBEVOICE_HOME"] = str(self.vibevoice_home)
         env["COMFYUI_VIBEVOICE_PATH"] = str(self.comfyui_vibevoice_path)
+        env["VIBEVOICE_MODEL_REPO"] = model_preset.model_repo
+        env["VIBEVOICE_MODEL_REVISION"] = model_preset.model_revision or ""
+        env["VIBEVOICE_TOKENIZER_REPO"] = model_preset.tokenizer_repo
+        env["VIBEVOICE_TOKENIZER_REVISION"] = model_preset.tokenizer_revision or ""
         return env
 
     def _prepare_voice_file(self, source_path: Path, temp_root: Path, index: int) -> Path:
@@ -314,15 +409,15 @@ class VibeVoiceService:
             return output
         return source
 
-    def _find_model_cache(self) -> Path | None:
-        pattern_root = self.vibevoice_home / "models--microsoft--VibeVoice-1.5B"
+    def _find_model_cache(self, model_preset: VibeVoiceModelPreset) -> Path | None:
+        pattern_root = self.vibevoice_home / model_preset.model_cache_dir_name
         if not pattern_root.exists():
             return None
-        matches = sorted(pattern_root.glob("**/model-*.safetensors"))
+        matches = sorted(pattern_root.glob("**/*.safetensors"))
         return matches[0].parent if matches else None
 
-    def _find_tokenizer(self) -> Path | None:
-        pattern_root = self.vibevoice_home / "models--Qwen--Qwen2.5-1.5B"
+    def _find_tokenizer(self, model_preset: VibeVoiceModelPreset) -> Path | None:
+        pattern_root = self.vibevoice_home / model_preset.tokenizer_cache_dir_name
         if not pattern_root.exists():
             return None
         matches = sorted(pattern_root.glob("**/tokenizer.json"))
@@ -392,6 +487,10 @@ def _format_number(value: float) -> str:
     return f"{float(value):g}"
 
 
+def _repo_cache_dir_name(repo_id: str) -> str:
+    return "models--" + str(repo_id).replace("/", "--")
+
+
 def _default_vibevoice_python() -> str:
     return sys.executable
 
@@ -447,6 +546,7 @@ def _redacted_command(command: Sequence[str]) -> list[str]:
 
 def _options_payload(options: VibeVoiceGenerationOptions) -> dict[str, object]:
     return {
+        "model_id": options.model_id,
         "cfg_scale": options.cfg_scale,
         "inference_steps": options.inference_steps,
         "seed": options.seed,

@@ -434,6 +434,7 @@ def _seed_vc_settings_from_payload(payload: dict[str, object]) -> SeedVcRuntimeS
 def _vibevoice_options_from_payload(value: object) -> VibeVoiceGenerationOptions:
     generation = value if isinstance(value, dict) else {}
     return VibeVoiceGenerationOptions(
+        model_id=str(generation.get("model_id") or "vibevoice-1.5b-pinned"),
         cfg_scale=float(generation.get("cfg_scale", 1.3)),
         inference_steps=max(1, int(generation.get("inference_steps", 10))),
         seed=int(generation.get("seed", 42)),

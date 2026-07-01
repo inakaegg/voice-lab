@@ -122,6 +122,21 @@ def _first_match(pattern: str) -> Optional[Path]:
     return None
 
 
+def _cached_snapshot_dir(repo_id: str, revision: Optional[str], *, file_pattern: str) -> Optional[Path]:
+    repo_root = VIBEVOICE_HOME / _repo_cache_dir_name(repo_id)
+    snapshot_id = revision
+    if not snapshot_id:
+        ref_path = repo_root / "refs" / "main"
+        if ref_path.is_file():
+            snapshot_id = ref_path.read_text(encoding="utf-8").strip()
+    if not snapshot_id:
+        return None
+    snapshot_dir = repo_root / "snapshots" / snapshot_id
+    if snapshot_dir.is_dir() and list(snapshot_dir.glob(file_pattern)):
+        return snapshot_dir
+    return None
+
+
 def _propagate_decoder_config_fields(config: Any):
     decoder_config = getattr(config, "decoder_config", None)
     if not decoder_config:
@@ -144,8 +159,16 @@ MODEL_REVISION = os.getenv("VIBEVOICE_MODEL_REVISION")
 TOKENIZER_REPO_ID = os.getenv("VIBEVOICE_TOKENIZER_REPO", "Qwen/Qwen2.5-1.5B")
 TOKENIZER_REVISION = os.getenv("VIBEVOICE_TOKENIZER_REVISION")
 TOKENIZER_FILENAME = os.getenv("VIBEVOICE_TOKENIZER_FILENAME", "tokenizer.json")
-MODEL_GLOB_PATTERN = (VIBEVOICE_HOME / "models--microsoft--VibeVoice-1.5B" / "**" / "model-*.safetensors").as_posix()
-TOKENIZER_GLOB_PATTERN = (VIBEVOICE_HOME / "models--Qwen--Qwen2.5-1.5B" / "**" / TOKENIZER_FILENAME).as_posix()
+
+
+def _repo_cache_dir_name(repo_id: str) -> str:
+    return "models--" + repo_id.replace("/", "--")
+
+
+MODEL_GLOB_PATTERN = (VIBEVOICE_HOME / _repo_cache_dir_name(MODEL_REPO_ID) / "**" / "*.safetensors").as_posix()
+TOKENIZER_GLOB_PATTERN = (
+    VIBEVOICE_HOME / _repo_cache_dir_name(TOKENIZER_REPO_ID) / "**" / TOKENIZER_FILENAME
+).as_posix()
 
 AUDIO_EXTENSIONS = (".wav", ".mp3", ".m4a")
 SAMPLE_RATE = 24000
@@ -248,9 +271,10 @@ class VibeVoice:
                 return resolved.as_posix()
             raise FileNotFoundError(f"指定されたモデルパスが存在しません: {resolved}")
 
-        match = _first_match(MODEL_GLOB_PATTERN)
-        if match:
-            return match.parent.as_posix()
+        if MODEL_REVISION:
+            cached_snapshot = _cached_snapshot_dir(MODEL_REPO_ID, MODEL_REVISION, file_pattern="*.safetensors")
+            if cached_snapshot:
+                return cached_snapshot.as_posix()
 
         if snapshot_download is None:
             raise ImportError("huggingface_hub がインストールされていません。`pip install huggingface_hub` を実行してモデルを取得してください。")
@@ -273,6 +297,10 @@ class VibeVoice:
         try:
             resolved_path = snapshot_download(**download_kwargs)
         except Exception as exc:
+            match = _first_match(MODEL_GLOB_PATTERN)
+            if match:
+                logger.warning("Hugging Faceから取得できないため、既存cacheを使います: %s", match.parent)
+                return match.parent.as_posix()
             raise RuntimeError(f"VibeVoiceモデルのダウンロードに失敗しました: {exc}") from exc
 
         logger.info("モデルをダウンロードしました: %s", resolved_path)
@@ -287,9 +315,16 @@ class VibeVoice:
                 return resolved.as_posix()
             raise FileNotFoundError(f"指定されたtokenizerパスが存在しません: {resolved}")
 
-        match = _first_match(TOKENIZER_GLOB_PATTERN)
-        if match:
-            return match.as_posix()
+        if TOKENIZER_REVISION:
+            cached_snapshot = _cached_snapshot_dir(
+                TOKENIZER_REPO_ID,
+                TOKENIZER_REVISION,
+                file_pattern=TOKENIZER_FILENAME,
+            )
+            if cached_snapshot:
+                match = _first_match((cached_snapshot / "**" / TOKENIZER_FILENAME).as_posix())
+                if match:
+                    return match.as_posix()
 
         if hf_hub_download is None:
             raise ImportError("huggingface_hub がインストールされていません。`pip install huggingface_hub` を実行してtokenizerを取得してください。")
@@ -313,6 +348,10 @@ class VibeVoice:
         try:
             resolved_path = hf_hub_download(**download_kwargs)
         except Exception as exc:
+            match = _first_match(TOKENIZER_GLOB_PATTERN)
+            if match:
+                logger.warning("Hugging Faceから取得できないため、既存tokenizer cacheを使います: %s", match)
+                return match.as_posix()
             raise RuntimeError(f"Tokenizerのダウンロードに失敗しました: {exc}") from exc
 
         logger.info("Tokenizerをダウンロードしました: %s", resolved_path)
