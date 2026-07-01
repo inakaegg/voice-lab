@@ -305,6 +305,7 @@ def test_vibevoice_job_api_reports_elapsed_and_result() -> None:
         def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
             if progress_callback is not None:
                 progress_callback("generation", "VibeVoice生成")
+                progress_callback("generation", "生成中 16/32 (50%, 残り約00:08)")
             return FakeVibeVoiceResult()
 
     client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
@@ -328,6 +329,7 @@ def test_vibevoice_job_api_reports_elapsed_and_result() -> None:
     assert status_payload["status"] == "succeeded"
     assert status_payload["elapsed_ms"] >= 0
     assert status_payload["result"]["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
+    assert any("16/32" in item["label"] for item in status_payload["progress_log"])
 
 
 def test_vibevoice_job_api_can_request_cancel() -> None:

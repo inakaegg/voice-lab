@@ -2460,6 +2460,21 @@ audio {
   margin: 0;
 }
 
+.vibevoice-progress-log {
+  background: #f6f9fd;
+  border: 1px solid #d6e3f2;
+  border-radius: 6px;
+  color: #274463;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+  max-block-size: 132px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
 .vibevoice-job-progress[hidden],
 .vibevoice-cancel-button[hidden] {
   display: none;

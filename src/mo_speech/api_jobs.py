@@ -347,6 +347,7 @@ class VibeVoiceJob:
     cancel_requested: bool = False
     started_at: float | None = None
     finished_at: float | None = None
+    progress_log: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -392,6 +393,7 @@ class VibeVoiceJobStore:
                 "error": job.error,
                 "cancel_requested": job.cancel_requested,
                 "elapsed_ms": _elapsed_vibevoice_job_ms(job),
+                "progress_log": list(job.progress_log),
             }
 
     def cancel(self, job_id: str) -> dict[str, object]:
@@ -402,6 +404,7 @@ class VibeVoiceJobStore:
             if job.status in {"queued", "running"}:
                 job.status = "cancelling"
                 job.current_stage = {"stage": "cancel", "label": "キャンセル中", "provider": ""}
+                job.progress_log.append(job.current_stage)
         return self.snapshot(job_id)
 
     def _run_job(
@@ -422,6 +425,7 @@ class VibeVoiceJobStore:
                 job.status = "running"
                 job.started_at = perf_counter()
                 job.current_stage = {"stage": "generation", "label": "VibeVoice生成", "provider": ""}
+                job.progress_log.append(job.current_stage)
 
             def report_progress(stage: str, label: str, provider: str = "") -> None:
                 self._update_progress(job_id, stage, label, provider)
@@ -439,6 +443,7 @@ class VibeVoiceJobStore:
                 job.status = "cancelled" if job.cancel_event.is_set() else "succeeded"
                 job.result = None if job.status == "cancelled" else _serialize_vibevoice_result(result)
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
+                job.progress_log.append(job.current_stage)
                 job.finished_at = perf_counter()
         except Exception as exc:
             LOGGER.exception("VibeVoice job failed: job_id=%s", job_id)
@@ -446,6 +451,9 @@ class VibeVoiceJobStore:
                 job = self.jobs[job_id]
                 job.status = "cancelled" if job.cancel_event.is_set() else "failed"
                 job.error = str(exc)
+                if job.status == "failed":
+                    job.current_stage = {"stage": "failed", "label": "失敗", "provider": ""}
+                    job.progress_log.append(job.current_stage)
                 job.finished_at = perf_counter()
         finally:
             with self.lock:
@@ -457,6 +465,9 @@ class VibeVoiceJobStore:
         with self.lock:
             job = self.jobs[job_id]
             job.current_stage = item
+            if not job.progress_log or job.progress_log[-1] != item:
+                job.progress_log.append(item)
+                del job.progress_log[:-80]
             for index, existing in enumerate(job.stages):
                 if existing["stage"] == stage:
                     job.stages[index] = item

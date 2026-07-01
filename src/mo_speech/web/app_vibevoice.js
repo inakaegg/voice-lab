@@ -11,6 +11,7 @@ const diagnostics = document.querySelector("#vibevoice-diagnostics");
 const cancelButton = document.querySelector("#vibevoice-cancel-button");
 const jobProgress = document.querySelector("#vibevoice-job-progress");
 const timingLabel = document.querySelector("#vibevoice-timing");
+const progressLog = document.querySelector("#vibevoice-progress-log");
 const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
@@ -400,7 +401,28 @@ function renderJobProgress(payload) {
   const label = stage.label || statusLabel(payload.status);
   message.dataset.state = payload.status === "failed" ? "error" : "busy";
   message.textContent = label ? `${label}...` : "生成中です。";
+  renderProgressLog(payload.progress_log);
   renderElapsed(payload.elapsed_ms);
+}
+
+function renderProgressLog(items = []) {
+  if (!progressLog) {
+    return;
+  }
+  const rows = Array.isArray(items) ? items.slice(-12) : [];
+  progressLog.textContent = rows.map((item) => progressLogLine(item)).filter(Boolean).join("\n");
+}
+
+function progressLogLine(item) {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+  const label = String(item.label || "").trim();
+  if (!label) {
+    return "";
+  }
+  const stage = String(item.stage || "").trim();
+  return stage ? `${stage}: ${label}` : label;
 }
 
 function renderElapsed(elapsedMs = null) {
@@ -420,6 +442,7 @@ function stopJobProgress({ keepTiming = false } = {}) {
   } else {
     jobProgress.dataset.state = "idle";
     timingLabel.textContent = "";
+    renderProgressLog([]);
     jobProgress.hidden = true;
   }
 }
@@ -566,6 +589,7 @@ function setBusy(busy, text) {
     jobProgress.hidden = false;
   } else if (!timingLabel.textContent) {
     jobProgress.dataset.state = "idle";
+    renderProgressLog([]);
     jobProgress.hidden = true;
   }
   message.dataset.state = busy ? "busy" : "ready";

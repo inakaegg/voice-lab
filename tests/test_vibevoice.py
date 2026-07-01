@@ -183,7 +183,7 @@ def test_vibevoice_service_reports_timeout_explicitly(tmp_path: Path) -> None:
         raise AssertionError("VibeVoiceError was not raised")
 
 
-def test_vibevoice_service_disables_timeout_when_cancel_event_controls_job(tmp_path: Path) -> None:
+def test_vibevoice_service_keeps_timeout_when_cancel_event_controls_job(tmp_path: Path) -> None:
     captured_timeouts: list[float | None] = []
     cli = tmp_path / "vibevoice.py"
     cli.write_text("# cli", encoding="utf-8")
@@ -211,7 +211,56 @@ def test_vibevoice_service_disables_timeout_when_cancel_event_controls_job(tmp_p
 
     service.generate(script_text="你好。", voice_paths=[voice], cancel_event=Event())
 
-    assert captured_timeouts == [None]
+    assert captured_timeouts == [7]
+
+
+def test_vibevoice_service_streams_cli_progress_from_stderr(tmp_path: Path) -> None:
+    cli = tmp_path / "fake_vibevoice_cli.py"
+    cli.write_text(
+        "\n".join(
+            [
+                "from pathlib import Path",
+                "import sys",
+                "import time",
+                "output = Path(sys.argv[sys.argv.index('--output') + 1])",
+                "sys.stderr.write('2026-07-02 00:00:00,000 - INFO - VibeVoice生成token上限: 32\\n')",
+                "sys.stderr.flush()",
+                "for current, percent in [(1, 3), (16, 50), (32, 100)]:",
+                "    sys.stderr.write(f'\\rGenerating (active: 1/1): {percent:3d}%|###| {current}/32 [00:01<00:00, 1.00it/s]')",
+                "    sys.stderr.flush()",
+                "    time.sleep(0.01)",
+                "sys.stderr.write('\\n')",
+                "sys.stderr.flush()",
+                "output.write_bytes(b'RIFFfakewav')",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+    service = VibeVoiceService(
+        python=sys.executable,
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        timeout_seconds=5,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+    progress: list[tuple[str, str]] = []
+
+    result = service.generate(
+        script_text="Speaker 1: こんにちは。",
+        voice_paths=[voice],
+        progress_callback=lambda stage, label: progress.append((stage, label)),
+    )
+
+    assert result.audio_bytes == b"RIFFfakewav"
+    assert any(stage == "generation" and "16/32" in label for stage, label in progress)
+    assert any(stage == "generation" and "32/32" in label for stage, label in progress)
+    assert "32/32" in result.diagnostics["stderr_tail"]
 
 
 def test_vibevoice_model_presets_include_only_skit_verified_candidates() -> None:

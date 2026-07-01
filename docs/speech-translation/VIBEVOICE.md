@@ -76,6 +76,8 @@ ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.m
 
 VibeVoice本体の既定生成長は、テキストだけでなく参照音声promptを含む入力長から決まるため、短い台本でも150 token程度まで生成が続くことがある。アプリ内CLIでは、`max_new_tokens` を台本文字数と行数から見積もって明示的に渡し、短文が20秒級の無関係な音声として伸び続ける回帰を避ける。
 
+ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。Web UIはpollingごとに現在のstage labelと直近ログを表示し、完了まで無変化のアニメーションだけが続く状態にしない。キャンセル要求はこのストリーミング実行中にも監視し、子プロセスを終了する。job API経由でも `MO_VIBEVOICE_TIMEOUT_SECONDS` の上限は有効で、キャンセル監視のためにtimeoutを無効化しない。
+
 ```bash
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub
 COMFYUI_VIBEVOICE_PATH=/app/ComfyUI-VibeVoice

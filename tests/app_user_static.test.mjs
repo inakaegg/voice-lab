@@ -154,6 +154,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /id="vibevoice-cancel-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-job-progress"/);
   assert.match(vibevoiceHtml, /id="vibevoice-timing"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-progress-log"/);
   assert.match(vibevoiceHtml, /id="vibevoice-audio"/);
   assert.match(vibevoiceHtml, /\/static\/app_vibevoice\.js/);
   assert.match(vibevoiceSource, /\/api\/vibevoice\/status/);
@@ -173,6 +174,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /vibevoiceSettingsStorageKey/);
   assert.match(vibevoiceSource, /loadVibeVoiceDraft/);
   assert.match(vibevoiceSource, /saveVibeVoiceDraft/);
+  assert.match(vibevoiceSource, /progress_log/);
   assert.match(vibevoiceSource, /localStorage\.getItem/);
   assert.match(vibevoiceSource, /localStorage\.setItem/);
   assert.match(vibevoiceSource, /scriptInput\.addEventListener\("input",\s*saveVibeVoiceDraft\)/);
@@ -186,6 +188,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-range-control/);
   assert.match(styles, /\.vibevoice-debug-runtime/);
   assert.match(styles, /\.vibevoice-progress-bar/);
+  assert.match(styles, /\.vibevoice-progress-log/);
   assert.match(styles, /\.vibevoice-saved-voice/);
 });
 

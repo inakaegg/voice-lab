@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import base64
+import logging
 import mimetypes
 import os
+from queue import Empty, Queue
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from tempfile import TemporaryDirectory
 from time import perf_counter, sleep
 from typing import Callable, Protocol, Sequence
@@ -24,6 +26,14 @@ DEFAULT_VIBEVOICE_MODEL_ID = "vibevoice-1.5b-pinned"
 SHORT_SPEAKER_TAG_MIN = 1
 SHORT_SPEAKER_TAG_MAX = 4
 _SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_VIBEVOICE_TQDM_RE = re.compile(
+    r"Generating(?:\s+\(active:\s*(?P<active>\d+/\d+)\))?:\s*"
+    r"(?P<percent>\d+)%.*\|\s*(?P<current>\d+)/(?P<total>\d+)\s*"
+    r"\[(?P<elapsed>[^<,\]]+)(?:<(?P<remaining>[^,\]]+))?"
+)
+_VIBEVOICE_TOKEN_LIMIT_RE = re.compile(r"VibeVoice生成token上限:\s*(?P<tokens>\d+)")
+LOGGER = logging.getLogger("mo_speech")
 
 
 @dataclass(frozen=True)
@@ -315,6 +325,7 @@ class VibeVoiceService:
                 env=self._build_env(model_preset),
                 cwd=str(Path.cwd()),
                 cancel_event=cancel_event,
+                progress_callback=progress_callback,
             )
             if completed.returncode != 0:
                 raise VibeVoiceError(
@@ -415,9 +426,10 @@ class VibeVoiceService:
         env: dict[str, str],
         cwd: str,
         cancel_event: Event | None,
+        progress_callback: Callable[[str, str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        timeout = None if cancel_event is not None else self.timeout_seconds if self.timeout_seconds > 0 else None
-        if cancel_event is None or self._subprocess_run is not subprocess.run:
+        timeout = self.timeout_seconds if self.timeout_seconds > 0 else None
+        if self._subprocess_run is not subprocess.run:
             try:
                 return self._subprocess_run(
                     list(command),
@@ -431,6 +443,12 @@ class VibeVoiceService:
             except subprocess.TimeoutExpired as exc:
                 raise VibeVoiceError(f"VibeVoice generation timed out after {_format_number(self.timeout_seconds)}s") from exc
 
+        events: Queue[tuple[str, str | None]] = Queue()
+        stdout_chars: list[str] = []
+        stderr_chars: list[str] = []
+        buffers: dict[str, list[str]] = {"stdout": [], "stderr": []}
+        last_label = ""
+
         process = subprocess.Popen(
             list(command),
             env=env,
@@ -439,17 +457,79 @@ class VibeVoiceService:
             stderr=subprocess.PIPE,
             text=True,
         )
+
+        def read_pipe(name: str, pipe) -> None:
+            try:
+                while True:
+                    char = pipe.read(1)
+                    if char == "":
+                        break
+                    events.put((name, char))
+            finally:
+                events.put((name, None))
+
+        def emit_progress_line(line: str) -> None:
+            nonlocal last_label
+            label = _progress_label_from_vibevoice_cli_line(line)
+            if not label or label == last_label:
+                return
+            last_label = label
+            LOGGER.info("VibeVoice CLI progress: %s", label)
+            _report_vibevoice_progress(progress_callback, "generation", label)
+
+        def handle_char(name: str, char: str) -> None:
+            if name == "stdout":
+                stdout_chars.append(char)
+            else:
+                stderr_chars.append(char)
+            if char in {"\n", "\r"}:
+                line = "".join(buffers[name]).strip()
+                buffers[name].clear()
+                if line:
+                    emit_progress_line(line)
+                return
+            buffers[name].append(char)
+
+        reader_threads = []
+        if process.stdout is not None:
+            reader_threads.append(Thread(target=read_pipe, args=("stdout", process.stdout), daemon=True))
+        if process.stderr is not None:
+            reader_threads.append(Thread(target=read_pipe, args=("stderr", process.stderr), daemon=True))
+        for thread in reader_threads:
+            thread.start()
+
+        deadline = perf_counter() + timeout if timeout is not None else None
+        open_readers = len(reader_threads)
         try:
-            while process.poll() is None:
-                if cancel_event.is_set():
+            while process.poll() is None or open_readers > 0:
+                if cancel_event is not None and cancel_event.is_set():
                     _terminate_process(process)
-                    stdout, stderr = process.communicate()
+                    _join_reader_threads(reader_threads)
+                    stdout = "".join(stdout_chars)
+                    stderr = "".join(stderr_chars)
                     raise VibeVoiceError(
                         "VibeVoice generation was cancelled by the user. "
                         f"{_tail_text(stderr) or _tail_text(stdout)}"
                     )
-                sleep(0.25)
-            stdout, stderr = process.communicate()
+                if deadline is not None and perf_counter() >= deadline:
+                    _terminate_process(process)
+                    _join_reader_threads(reader_threads)
+                    raise VibeVoiceError(
+                        "VibeVoice generation timed out after "
+                        f"{_format_number(self.timeout_seconds)}s: {_tail_text(''.join(stderr_chars)) or _tail_text(''.join(stdout_chars))}"
+                    )
+                try:
+                    name, char = events.get(timeout=0.1)
+                except Empty:
+                    continue
+                if char is None:
+                    open_readers -= 1
+                    continue
+                handle_char(name, char)
+            _flush_vibevoice_stream_buffers(buffers, emit_progress_line)
+            _join_reader_threads(reader_threads)
+            stdout = "".join(stdout_chars)
+            stderr = "".join(stderr_chars)
             return subprocess.CompletedProcess(list(command), process.returncode or 0, stdout=stdout, stderr=stderr)
         except Exception:
             if process.poll() is None:
@@ -598,6 +678,60 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
+
+
+def _join_reader_threads(threads: Sequence[Thread]) -> None:
+    for thread in threads:
+        thread.join(timeout=1)
+
+
+def _flush_vibevoice_stream_buffers(
+    buffers: dict[str, list[str]],
+    emit_progress_line: Callable[[str], None],
+) -> None:
+    for buffer in buffers.values():
+        line = "".join(buffer).strip()
+        buffer.clear()
+        if line:
+            emit_progress_line(line)
+
+
+def _progress_label_from_vibevoice_cli_line(line: str) -> str | None:
+    normalized = _ANSI_ESCAPE_RE.sub("", line).strip()
+    if not normalized:
+        return None
+    token_limit_match = _VIBEVOICE_TOKEN_LIMIT_RE.search(normalized)
+    if token_limit_match:
+        return f"生成準備: 上限 {token_limit_match.group('tokens')} token"
+    tqdm_match = _VIBEVOICE_TQDM_RE.search(normalized)
+    if tqdm_match:
+        current = tqdm_match.group("current")
+        total = tqdm_match.group("total")
+        percent = tqdm_match.group("percent")
+        remaining = (tqdm_match.group("remaining") or "").strip()
+        suffix = f", 残り約{remaining}" if remaining else ""
+        return f"生成中 {current}/{total} ({percent}%{suffix})"
+    if "VibeVoiceモデルを読み込み中" in normalized:
+        return "モデル読み込み中"
+    if "モデルの読み込みが完了" in normalized:
+        return "モデル読み込み完了"
+    if "スクリプトをパースしました" in normalized:
+        return "台本解析完了"
+    if "音声サンプルを処理中" in normalized:
+        return _strip_log_prefix(normalized)
+    if "音声を生成中" in normalized:
+        return "VibeVoice生成開始"
+    if "行単位モードで音声を生成します" in normalized:
+        return "行単位生成開始"
+    if re.search(r"行\d+:\s*(新規に音声を生成します|キャッシュを使用します)", normalized):
+        return _strip_log_prefix(normalized)
+    if "音声を保存しました" in normalized:
+        return "音声保存完了"
+    return None
+
+
+def _strip_log_prefix(line: str) -> str:
+    return re.sub(r"^\d{4}-\d{2}-\d{2} [^ ]+ - [A-Z]+ - ", "", line)
 
 
 def _report_vibevoice_progress(
