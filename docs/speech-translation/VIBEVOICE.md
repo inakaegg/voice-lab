@@ -8,10 +8,9 @@
 
 ## 生成オプション
 
-- `モデル`: 比較検証用に、RunPod/ローカルへ渡すVibeVoiceモデルを選ぶ。初期候補は以下とする。
+- `モデル`: 比較検証用に、RunPod/ローカルへ渡すVibeVoiceモデルを選ぶ。通常候補は以下とする。
   - `VibeVoice 1.5B 固定版`: ローカルで動作確認した `microsoft/VibeVoice-1.5B` のrevisionを固定して使う。再現性を優先する既定値。
   - `VibeVoice 1.5B 最新`: `microsoft/VibeVoice-1.5B` のHugging Face `main` を使う。2026-07-01時点では固定版と重み/configは同一に見えるが、今後の更新比較用に残す。
-  - `VibeVoice Large 実験`: `aoi-ot/VibeVoice-Large` を使う実験候補。Microsoft公式HF repoではなく、ModelScope由来のcommunity copyなので、取得元とrevisionを固定して比較する。Large repoには `tokenizer.json` がないため、decoder configに合わせて `Qwen/Qwen2.5-7B` のtokenizerを使う。
 - `ランダム性を使う`: VibeVoiceのsamplingを有効にする。同じ台本でもseedや設定によって抑揚や細部が変わる。安定性を優先して比較したい場合はOFFも試す。
 - `行ごとに生成して結合`: 台本全体を一度に生成せず、1行ずつ生成して無音を挟んで結合する。長文や複数発話で破綻を分けやすい一方、行間や話し方の連続性は不自然になる可能性がある。
 - `参照音声秒数`: 参照音声の先頭から使う長さ。長すぎると処理が重くなり、短すぎると声質特徴が不足する。
@@ -24,7 +23,7 @@
 
 長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。現時点のプログレスバーは処理中であることを示すインジケータであり、VibeVoice CLIの `tqdm` 出力に含まれる実進捗値はまだ反映していない。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
 
-`VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。RunPod比較では、community copyである `aoi-ot/VibeVoice-Large` を実験扱いで使う。
+`VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるが、2026-07-01のRunPod検証では現行の非streamingスキット生成CLIで音声生成まで通らなかった。Large repoには `tokenizer.json` がないため `Qwen/Qwen2.5-7B` tokenizerに分ける必要があり、この404は解消できる。しかしその後の生成で、sampling時は `torch.multinomial` のCUDA assert、greedy時は音声波形なしで終了する。そのため通常UIのモデル候補には出さない。Largeを扱う場合は、別の実装ref、推奨生成コード、必要GPU/VRAMを再確認してから実験候補として戻す。
 
 `microsoft/VibeVoice-Realtime-0.5B` は `model_type=vibevoice_streaming`、architectureも `VibeVoiceStreaming...` 系で、現在の非streamingスキット生成CLIとは別経路である。RunPod上の通常スキット生成ではCUDA assertまで進むため、通常UIのモデル候補には出さない。Realtimeモデルを扱う場合は、別途streaming向け実装として仕様化してから追加する。
 
@@ -33,7 +32,7 @@
 - `microsoft/VibeVoice-1.5B`: 現在のスキット生成の主対象。長めの複数話者TTSを想定する。
 - `microsoft/VibeVoice-Realtime-0.5B`: 低遅延TTS候補。streaming modelであり、現在の複数話者スキット生成CLIの通常候補には含めない。
 - `microsoft/VibeVoice-ASR` / `microsoft/VibeVoice-ASR-HF`: TTSではなく、ASR、話者分離、タイムスタンプをまとめて出すためのモデル。長い会話音声を「誰が、いつ、何を話したか」に落とす用途で、VibeVoiceスキット生成の直接代替にはしない。
-- `aoi-ot/VibeVoice-Large`: Microsoft公式HF repoではないが、ModelScope由来の重みコピーとして取得できるLarge実験候補。約17GiBの重みを持つため、RunPod Volume容量、初回DL時間、GPU VRAMを分けて測る。
+- `aoi-ot/VibeVoice-Large`: Microsoft公式HF repoではないが、ModelScope由来の重みコピーとして取得できるLarge候補。現行CLIではRunPod生成に失敗するため、通常候補には含めない。
 - `microsoft/VibeVoice-Large`: 過去の案内では上位候補として見えていたが、現時点では公開repoとして取得できない。
 
 ## モデル配置方針
@@ -83,7 +82,7 @@ VIBEVOICE_TOKENIZER_REPO=Qwen/Qwen2.5-1.5B
 VIBEVOICE_TOKENIZER_REVISION=8faed761d45a263340a0528343f099c05c9a4323
 ```
 
-Large実験では、モデルrepoとtokenizer repoを分ける。
+Largeを再検証する場合は、モデルrepoとtokenizer repoを分ける。ただし、以下の組み合わせは2026-07-01時点の現行CLIではモデル読み込み後の生成に失敗しており、通常運用には使わない。
 
 ```bash
 VIBEVOICE_MODEL_REPO=aoi-ot/VibeVoice-Large
@@ -102,6 +101,7 @@ UIでモデルを選んだ場合は、そのリクエストの間だけ `VIBEVOI
 - 日本語参照音声でも漢字読みを誤る場合がある。台本をひらがなにすると改善するため、テキスト正規化または読み指定の仕組みが必要。
 - 途中にノイズや不自然な音が混じることがある。RunPod実行、依存ライブラリ、GPU、生成パラメータ、参照音声前処理の差分を分けて検証する。
 - `VibeVoice Realtime 0.5B` は既存の非streamingスキット生成CLIと互換でないため、通常UIでは選択肢に出さない。
+- `aoi-ot/VibeVoice-Large` はtokenizerを `Qwen/Qwen2.5-7B` に分けることで404は避けられるが、現行CLIでは生成時にCUDA assertまたは音声波形なしで失敗するため、通常UIでは選択肢に出さない。
 - ローカルmacOSのMPS backendでは、モデル読み込み後の生成中にMetal/MPS内部のshape不整合でプロセスがabortする場合がある。CPUは生成が極端に遅いため、品質確認と速度確認はRunPod/CUDAでも必ず行う。
 - 台本全体生成と行ごと生成では、自然さ、破綻のしにくさ、行間の違和感が変わる。品質比較では、ブラウザに復元される直近の生成設定と入力台本に加えて、後から比較できる生成履歴が必要。
 

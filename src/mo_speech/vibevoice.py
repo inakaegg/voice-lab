@@ -64,15 +64,6 @@ VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
         tokenizer_revision=None,
         notes="Hugging Face mainを取得する比較用。将来の更新で挙動が変わる可能性がある。",
     ),
-    "vibevoice-large-aoi-pinned": VibeVoiceModelPreset(
-        model_id="vibevoice-large-aoi-pinned",
-        label="VibeVoice Large 実験",
-        model_repo="aoi-ot/VibeVoice-Large",
-        model_revision="1b81fecc784a076dcd935678db551871f4598ebf",
-        tokenizer_repo="Qwen/Qwen2.5-7B",
-        tokenizer_revision="d149729398750b98c0af14eb82c78cfe92750796",
-        notes="ModelScope由来のcommunity copy。tokenizerはdecoder configに合わせてQwen2.5-7Bを使う。",
-    ),
 }
 
 
