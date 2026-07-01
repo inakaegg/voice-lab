@@ -148,7 +148,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /name="model_id"/);
   assert.match(vibevoiceHtml, /value="vibevoice-1\.5b-pinned"/);
   assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-realtime-0\.5b-latest"/);
-  assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"/);
+  assert.match(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"[^>]*data-vibevoice-backends="runpod_serverless"/);
   assert.match(vibevoiceHtml, /name="inference_steps"/);
   assert.match(vibevoiceHtml, /id="vibevoice-generate-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-cancel-button"/);
@@ -182,6 +182,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /handleScriptFileChange[\s\S]*saveVibeVoiceDraft\(\)/);
   assert.match(vibevoiceSource, /"backend"/);
   assert.match(vibevoiceSource, /"model_id"/);
+  assert.match(vibevoiceSource, /function updateModelAvailability\(\)/);
+  assert.match(vibevoiceSource, /dataset\.vibevoiceBackends/);
+  assert.match(vibevoiceSource, /option\.disabled = !allowedBackends\.includes\(backend\)/);
   assert.match(vibevoiceSource, /"cfg_scale"/);
   assert.match(vibevoiceSource, /"line_by_line"/);
   assert.match(styles, /\.vibevoice-shell/);

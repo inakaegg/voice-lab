@@ -56,6 +56,8 @@ class VibeVoiceModelPreset:
     model_revision: str | None
     tokenizer_repo: str
     tokenizer_revision: str | None
+    torch_dtype: str | None = None
+    supported_backends: tuple[str, ...] = ("local", "runpod_serverless")
     notes: str = ""
 
     @property
@@ -85,6 +87,17 @@ VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
         tokenizer_repo="Qwen/Qwen2.5-1.5B",
         tokenizer_revision=None,
         notes="Hugging Face mainを取得する比較用。将来の更新で挙動が変わる可能性がある。",
+    ),
+    "vibevoice-large-aoi-pinned": VibeVoiceModelPreset(
+        model_id="vibevoice-large-aoi-pinned",
+        label="VibeVoice Large (RunPod)",
+        model_repo="aoi-ot/VibeVoice-Large",
+        model_revision="1b81fecc784a076dcd935678db551871f4598ebf",
+        tokenizer_repo="Qwen/Qwen2.5-7B",
+        tokenizer_revision="d149729398750b98c0af14eb82c78cfe92750796",
+        torch_dtype="bfloat16",
+        supported_backends=("runpod_serverless",),
+        notes="Large候補。ローカルmacOSでは扱わず、RunPod/CUDA上でのみ実験対象にする。",
     ),
 }
 
@@ -132,6 +145,29 @@ def resolve_vibevoice_model_preset(model_id: str | None) -> VibeVoiceModelPreset
         raise ValueError(f"unsupported VibeVoice model: {normalized}") from exc
 
 
+def normalize_vibevoice_backend(backend: str | None) -> str:
+    normalized = str(backend or "local").strip() or "local"
+    if normalized == "runpod":
+        normalized = "runpod_serverless"
+    if normalized not in {"local", "runpod_serverless"}:
+        raise ValueError(f"unsupported VibeVoice backend: {normalized}")
+    return normalized
+
+
+def is_vibevoice_model_supported_by_backend(model_id: str | None, backend: str | None) -> bool:
+    preset = resolve_vibevoice_model_preset(model_id)
+    return normalize_vibevoice_backend(backend) in preset.supported_backends
+
+
+def validate_vibevoice_model_backend(model_id: str | None, backend: str | None) -> VibeVoiceModelPreset:
+    preset = resolve_vibevoice_model_preset(model_id)
+    backend_id = normalize_vibevoice_backend(backend)
+    if backend_id not in preset.supported_backends:
+        allowed = ", ".join(preset.supported_backends)
+        raise ValueError(f"{preset.model_id} は {allowed} backendでのみ利用できます。選択中: {backend_id}")
+    return preset
+
+
 def serialize_vibevoice_model_presets() -> list[dict[str, object]]:
     return [
         {
@@ -141,6 +177,8 @@ def serialize_vibevoice_model_presets() -> list[dict[str, object]]:
             "model_revision": preset.model_revision or "",
             "tokenizer_repo": preset.tokenizer_repo,
             "tokenizer_revision": preset.tokenizer_revision or "",
+            "torch_dtype": preset.torch_dtype or "",
+            "supported_backends": list(preset.supported_backends),
             "notes": preset.notes,
         }
         for preset in VIBEVOICE_MODEL_PRESETS.values()
@@ -432,6 +470,8 @@ class VibeVoiceService:
         env["VIBEVOICE_MODEL_REVISION"] = model_preset.model_revision or ""
         env["VIBEVOICE_TOKENIZER_REPO"] = model_preset.tokenizer_repo
         env["VIBEVOICE_TOKENIZER_REVISION"] = model_preset.tokenizer_revision or ""
+        if model_preset.torch_dtype:
+            env["VIBEVOICE_TORCH_DTYPE"] = model_preset.torch_dtype
         return env
 
     def _run_generation_command(
@@ -628,6 +668,8 @@ class RunpodServerlessVibeVoiceService:
             "configured": configured,
             "endpoint_id": getattr(self.client, "endpoint_id", ""),
             "request_mode": getattr(self.client, "request_mode", ""),
+            "default_model_id": DEFAULT_VIBEVOICE_MODEL_ID,
+            "model_presets": serialize_vibevoice_model_presets(),
             "reason": "" if configured else "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。",
         }
 

@@ -257,6 +257,30 @@ def test_vibevoice_cli_load_model_uses_device_map_for_cuda(tmp_path, monkeypatch
     assert model.eval_called is True
 
 
+def test_vibevoice_cli_load_model_respects_torch_dtype_override(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("VIBEVOICE_TORCH_DTYPE", "bfloat16")
+    service = vibevoice_cli.VibeVoice(model_path=str(model_path), tokenizer_path=str(tokenizer_path))
+    service.device = torch.device("cuda")
+    _FakeModel.calls = []
+    monkeypatch.setattr(
+        vibevoice_cli,
+        "_import_vibevoice_components",
+        lambda: (_FakeModel, _FakeProcessor, _FakeProcessor, _FakeTokenizer),
+    )
+    monkeypatch.setattr(service, "_resolve_model_path", lambda value: "model")
+    monkeypatch.setattr(service, "_resolve_tokenizer_path", lambda value: "tokenizer.json")
+
+    service.load_model()
+
+    call = _FakeModel.calls[0]
+    dtype_arg = "dtype" if vibevoice_cli._DTYPE_ARG_SUPPORTED else "torch_dtype"
+    assert call["kwargs"][dtype_arg] == torch.bfloat16
+
+
 def test_vibevoice_cli_load_model_uses_float32_for_cpu(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     model_path = tmp_path / "model"
     model_path.mkdir()

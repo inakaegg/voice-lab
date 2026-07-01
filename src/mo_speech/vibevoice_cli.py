@@ -468,6 +468,27 @@ TOKENIZER_GLOB_PATTERN = (
 ).as_posix()
 
 AUDIO_EXTENSIONS = (".wav", ".mp3", ".m4a")
+
+
+def _resolve_torch_dtype_for_device(device: torch.device):
+    dtype_name_raw = os.getenv("VIBEVOICE_TORCH_DTYPE")
+    dtype_name = str(dtype_name_raw or "").strip().lower()
+    if dtype_name:
+        dtype_map = {
+            "float32": torch.float32,
+            "fp32": torch.float32,
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "bf16": torch.bfloat16,
+        }
+        try:
+            return dtype_map[dtype_name]
+        except KeyError as exc:
+            raise ValueError(f"unsupported VIBEVOICE_TORCH_DTYPE: {dtype_name_raw}") from exc
+    return torch.float16 if device.type in {"cuda", "mps"} else torch.float32
+
+
 SAMPLE_RATE = 24000
 LINE_CACHE_ROOT = Path(os.getenv("VIBEVOICE_LINE_CACHE_DIR", Path.cwd() / ".cache" / "vibevoice" / "line_segments")).expanduser()
 
@@ -679,8 +700,9 @@ class VibeVoice:
 
         # Reduce GPU memory footprint by using half-precision during GPU/MPS
         # inference. CPU float16 can produce poor compatibility and quality, so
-        # keep CPU execution in float32.
-        final_load_dtype = torch.float16 if self.device.type in {"cuda", "mps"} else torch.float32
+        # keep CPU execution in float32 unless explicitly overridden.
+        final_load_dtype = _resolve_torch_dtype_for_device(self.device)
+        logger.info("モデル読み込みdtype: %s", final_load_dtype)
 
         # Load model
         try:

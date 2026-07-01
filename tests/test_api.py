@@ -281,7 +281,7 @@ def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
 
     response = client.post(
         "/api/vibevoice/generate",
-        data={"script": "你好。", "backend": "runpod_serverless"},
+        data={"script": "你好。", "backend": "runpod_serverless", "model_id": "vibevoice-large-aoi-pinned"},
         files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
     )
 
@@ -290,6 +290,43 @@ def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
     assert payload["providers"]["vibevoice"] == "runpod-serverless-vibevoice"
     assert payload["audio_base64"] == base64.b64encode(b"RIFrunpod").decode("ascii")
     assert len(runpod_service.calls) == 1
+    assert runpod_service.calls[0][2].model_id == "vibevoice-large-aoi-pinned"
+
+
+def test_vibevoice_generate_api_rejects_runpod_only_model_on_local_backend() -> None:
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            raise AssertionError("local service should not be called for a RunPod-only model")
+
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={"script": "你好。", "backend": "local", "model_id": "vibevoice-large-aoi-pinned"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert "runpod_serverless" in response.json()["detail"]
+    assert service.calls == []
+
+
+def test_vibevoice_job_api_rejects_runpod_only_model_on_local_backend() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/vibevoice/jobs",
+        data={"script": "你好。", "backend": "local", "model_id": "vibevoice-large-aoi-pinned"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert "runpod_serverless" in response.json()["detail"]
 
 
 def test_vibevoice_job_api_reports_elapsed_and_result() -> None:

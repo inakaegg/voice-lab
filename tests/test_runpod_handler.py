@@ -203,7 +203,7 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
             assert len(voice_paths) == 1
             assert voice_paths[0].slot == 1
             assert voice_paths[0].path.read_bytes() == b"voice"
-            assert options.model_id == "vibevoice-1.5b-latest"
+            assert options.model_id == "vibevoice-large-aoi-pinned"
             assert options.inference_steps == 2
             return type(
                 "FakeVibeVoiceResult",
@@ -231,7 +231,7 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
                     "audio_base64": base64.b64encode(b"voice").decode("ascii"),
                 }
             ],
-            "generation": {"model_id": "vibevoice-1.5b-latest", "inference_steps": 2},
+            "generation": {"model_id": "vibevoice-large-aoi-pinned", "inference_steps": 2},
         }
     }
 

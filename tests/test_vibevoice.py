@@ -12,6 +12,7 @@ from mo_speech.vibevoice import (
     VibeVoiceError,
     VibeVoiceService,
     VibeVoiceVoiceSample,
+    is_vibevoice_model_supported_by_backend,
     resolve_vibevoice_model_preset,
     normalize_vibevoice_script,
 )
@@ -371,17 +372,71 @@ def test_vibevoice_service_streams_line_by_line_overall_progress(tmp_path: Path)
     assert labels[-1] == "行単位生成 4/4 (100%)"
 
 
-def test_vibevoice_model_presets_include_only_skit_verified_candidates() -> None:
+def test_vibevoice_model_presets_include_runpod_only_large_candidate() -> None:
     assert set(VIBEVOICE_MODEL_PRESETS) == {
         "vibevoice-1.5b-pinned",
         "vibevoice-1.5b-latest",
+        "vibevoice-large-aoi-pinned",
     }
     pinned = resolve_vibevoice_model_preset("vibevoice-1.5b-pinned")
     latest = resolve_vibevoice_model_preset("vibevoice-1.5b-latest")
+    large = resolve_vibevoice_model_preset("vibevoice-large-aoi-pinned")
     assert pinned.model_repo == "microsoft/VibeVoice-1.5B"
     assert pinned.model_revision == "1904eae38036e9c780d28e27990c27748984eafe"
+    assert pinned.supported_backends == ("local", "runpod_serverless")
     assert latest.model_repo == "microsoft/VibeVoice-1.5B"
     assert latest.model_revision is None
+    assert latest.supported_backends == ("local", "runpod_serverless")
+    assert large.model_repo == "aoi-ot/VibeVoice-Large"
+    assert large.model_revision == "1b81fecc784a076dcd935678db551871f4598ebf"
+    assert large.tokenizer_repo == "Qwen/Qwen2.5-7B"
+    assert large.tokenizer_revision == "d149729398750b98c0af14eb82c78cfe92750796"
+    assert large.torch_dtype == "bfloat16"
+    assert large.supported_backends == ("runpod_serverless",)
+    assert is_vibevoice_model_supported_by_backend("vibevoice-large-aoi-pinned", "runpod_serverless")
+    assert not is_vibevoice_model_supported_by_backend("vibevoice-large-aoi-pinned", "local")
+
+
+def test_vibevoice_service_sets_large_dtype_override(tmp_path: Path) -> None:
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    model_dir = home / "models--aoi-ot--VibeVoice-Large" / "snapshots" / "large"
+    tokenizer_dir = home / "models--Qwen--Qwen2.5-7B" / "snapshots" / "tokenizer"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    model_dir.mkdir(parents=True)
+    tokenizer_dir.mkdir(parents=True)
+    module_dir.mkdir()
+    (model_dir / "model-00001-of-00009.safetensors").write_bytes(b"model")
+    (tokenizer_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        calls.append((list(command), dict(env)))
+        output_index = command.index("--output") + 1
+        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    service.generate(
+        script_text="你好。",
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(model_id="vibevoice-large-aoi-pinned"),
+    )
+
+    _command, env = calls[0]
+    assert env["VIBEVOICE_MODEL_REPO"] == "aoi-ot/VibeVoice-Large"
+    assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-7B"
+    assert env["VIBEVOICE_TORCH_DTYPE"] == "bfloat16"
 
 
 def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None:
@@ -504,7 +559,7 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
         script_text="你好。",
         voice_paths=[voice],
         options=VibeVoiceGenerationOptions(
-            model_id="vibevoice-1.5b-latest",
+            model_id="vibevoice-large-aoi-pinned",
             inference_steps=2,
             do_sample=False,
         ),
@@ -515,7 +570,7 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     assert client.payload["script"] == "Speaker 1: 你好。"
     assert client.payload["generation"]["inference_steps"] == 2
     assert client.payload["generation"]["do_sample"] is False
-    assert client.payload["generation"]["model_id"] == "vibevoice-1.5b-latest"
+    assert client.payload["generation"]["model_id"] == "vibevoice-large-aoi-pinned"
     assert client.payload["voices"][0]["audio_base64"] != ""
     assert client.payload["voices"][0]["speaker"] == 1
 

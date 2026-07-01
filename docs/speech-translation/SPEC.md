@@ -294,6 +294,7 @@ OpenAI Realtime翻訳の扱い:
 - `script_file`: UTF-8の台本ファイル。指定された場合は `script` より優先する。
 - `voice_file_1` から `voice_file_4`: 参照音声または動画ファイル。少なくとも1つ必要。
 - `backend`: `local` または `runpod_serverless`。未指定時は `local`。
+- `model_id`: `vibevoice-1.5b-pinned`、`vibevoice-1.5b-latest`、`vibevoice-large-aoi-pinned`。`vibevoice-large-aoi-pinned` はRunPod/CUDA専用候補のため、`backend=local` では拒否する。
 - `cfg_scale`、`inference_steps`、`seed`、`temperature`、`top_p`、`top_k`、`do_sample`、`max_voice_seconds`: VibeVoice CLIへ渡す生成パラメータ。
 - `line_by_line`: `true` の場合、VibeVoice CLIのline-by-line concatモードを使う。
 - `line_gap`: line-by-line concat時の行間無音秒数。

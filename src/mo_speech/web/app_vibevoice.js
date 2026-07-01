@@ -16,6 +16,8 @@ const progressBar = document.querySelector(".vibevoice-progress-bar");
 const progressFill = progressBar?.querySelector("span");
 const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
+const backendSelect = form.elements.backend;
+const modelSelect = form.elements.model_id;
 const lineByLineControl = form.elements.line_by_line;
 const lineByLineSwitch = lineByLineControl?.closest(".vibevoice-switch");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
@@ -69,6 +71,13 @@ persistedControls.forEach((control) => {
     });
     return;
   }
+  if (control === backendSelect) {
+    control.addEventListener("change", () => {
+      updateModelAvailability();
+      saveVibeVoiceDraft();
+    });
+    return;
+  }
   const eventName = control.type === "checkbox" || control.tagName === "SELECT" ? "change" : "input";
   control.addEventListener(eventName, saveVibeVoiceDraft);
 });
@@ -76,6 +85,7 @@ voiceFileInputs.forEach((input) => {
   input.addEventListener("change", () => handleVoiceFileChange(input));
 });
 loadVibeVoiceDraft();
+updateModelAvailability();
 updateLineByLineAutoState();
 rangeInputs.forEach((input) => {
   input.addEventListener("input", () => renderRangeValue(input));
@@ -150,6 +160,30 @@ function restoreControlValue(control, value) {
 
 function checkboxValue(value) {
   return value === true || value === "true";
+}
+
+function updateModelAvailability() {
+  if (!backendSelect || !modelSelect) {
+    return;
+  }
+  const backend = backendSelect.value || "local";
+  let firstAvailableOption = null;
+  let selectedOptionIsAvailable = false;
+  for (const option of Array.from(modelSelect.options)) {
+    const allowedBackends = String(option.dataset.vibevoiceBackends || "local runpod_serverless")
+      .split(/\s+/)
+      .filter(Boolean);
+    option.disabled = !allowedBackends.includes(backend);
+    if (!option.disabled && firstAvailableOption === null) {
+      firstAvailableOption = option;
+    }
+    if (option.selected && !option.disabled) {
+      selectedOptionIsAvailable = true;
+    }
+  }
+  if (!selectedOptionIsAvailable && firstAvailableOption !== null) {
+    firstAvailableOption.selected = true;
+  }
 }
 
 function updateLineByLineAutoState() {
@@ -263,6 +297,7 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
+  updateModelAvailability();
   updateLineByLineAutoState();
   saveVibeVoiceDraft();
   clearResult();

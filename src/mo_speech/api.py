@@ -82,6 +82,8 @@ from .vibevoice import (
     VibeVoiceGenerationOptions,
     VibeVoiceService,
     VibeVoiceVoiceSample,
+    normalize_vibevoice_backend,
+    validate_vibevoice_model_backend,
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -211,6 +213,18 @@ def _vibevoice_generation_options(
         line_by_line=_bool_form_value(line_by_line, default=False),
         line_gap=max(0.0, _float_form_value(line_gap, 1.0)),
     )
+
+
+def _select_vibevoice_generator(
+    *,
+    backend: str,
+    options: VibeVoiceGenerationOptions,
+    local_service: VibeVoiceGenerator,
+    runpod_service: VibeVoiceGenerator,
+) -> VibeVoiceGenerator:
+    backend_id = normalize_vibevoice_backend(backend)
+    validate_vibevoice_model_backend(options.model_id, backend_id)
+    return runpod_service if backend_id == "runpod_serverless" else local_service
 
 
 def _float_form_value(value: str | None, default: float) -> float:
@@ -622,10 +636,11 @@ def create_app(
                     [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
                     Path(temp_dir),
                 )
-                generator = (
-                    active_runpod_vibevoice_service
-                    if backend in {"runpod", "runpod_serverless"}
-                    else active_vibevoice_service
+                generator = _select_vibevoice_generator(
+                    backend=backend,
+                    options=options,
+                    local_service=active_vibevoice_service,
+                    runpod_service=active_runpod_vibevoice_service,
                 )
                 vibevoice_result = generator.generate(
                     script_text=script_text,
@@ -686,10 +701,11 @@ def create_app(
                 [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
                 temp_dir,
             )
-            generator = (
-                active_runpod_vibevoice_service
-                if backend in {"runpod", "runpod_serverless"}
-                else active_vibevoice_service
+            generator = _select_vibevoice_generator(
+                backend=backend,
+                options=options,
+                local_service=active_vibevoice_service,
+                runpod_service=active_runpod_vibevoice_service,
             )
             return vibevoice_job_store.start(
                 generator=generator,
