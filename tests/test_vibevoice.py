@@ -228,7 +228,7 @@ def test_vibevoice_service_reports_timeout_explicitly(tmp_path: Path) -> None:
         raise AssertionError("VibeVoiceError was not raised")
 
 
-def test_vibevoice_service_keeps_timeout_when_cancel_event_controls_job(tmp_path: Path) -> None:
+def test_vibevoice_service_disables_timeout_when_cancel_event_controls_job(tmp_path: Path) -> None:
     captured_timeouts: list[float | None] = []
     cli = tmp_path / "vibevoice.py"
     cli.write_text("# cli", encoding="utf-8")
@@ -256,7 +256,7 @@ def test_vibevoice_service_keeps_timeout_when_cancel_event_controls_job(tmp_path
 
     service.generate(script_text="你好。", voice_paths=[voice], cancel_event=Event())
 
-    assert captured_timeouts == [7]
+    assert captured_timeouts == [None]
 
 
 def test_vibevoice_service_streams_cli_progress_from_stderr(tmp_path: Path) -> None:

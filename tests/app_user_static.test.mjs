@@ -162,6 +162,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /cancelVibeVoiceJob/);
   assert.match(vibevoiceSource, /requiredVoiceSlotsFromScript/);
   assert.match(vibevoiceSource, /runpod_serverless/);
+  assert.match(vibevoiceSource, /Sync Timeout/);
   assert.match(vibevoiceSource, /audio_base64/);
   assert.match(vibevoiceSource, /handleScriptFileChange/);
   assert.match(vibevoiceSource, /file\.text\(\)/);

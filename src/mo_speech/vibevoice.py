@@ -443,7 +443,10 @@ class VibeVoiceService:
         cancel_event: Event | None,
         progress_callback: Callable[[str, str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        timeout = self.timeout_seconds if self.timeout_seconds > 0 else None
+        if cancel_event is not None:
+            timeout = None
+        else:
+            timeout = self.timeout_seconds if self.timeout_seconds > 0 else None
         if self._subprocess_run is not subprocess.run:
             try:
                 return self._subprocess_run(

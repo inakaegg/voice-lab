@@ -226,7 +226,7 @@ function renderStatus(status) {
     detailItem("Local Model", localStatus.model_cache_found ? localStatus.model_cache_path : "missing"),
     detailItem("Local Tokenizer", localStatus.tokenizer_found ? localStatus.tokenizer_path : "missing"),
     detailItem("RunPod", runpodStatus.available ? `configured (${runpodStatus.request_mode})` : runpodStatus.reason || "not configured"),
-    detailItem("Timeout", `${localStatus.timeout_seconds}s`),
+    detailItem("Sync Timeout", `${localStatus.timeout_seconds}s`),
   );
 }
 

@@ -76,7 +76,7 @@ ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.m
 
 VibeVoice本体の既定生成長は、テキストだけでなく参照音声promptを含む入力長から決まるため、短い台本でも150 token程度まで生成が続くことがある。アプリ内CLIでは、`max_new_tokens` を台本文字数と行数から見積もって明示的に渡し、短文が20秒級の無関係な音声として伸び続ける回帰を避ける。
 
-ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。行単位生成では、各行の内部tqdmをそのまま表示すると行ごとに0%へ戻って全体の進み具合が分からないため、`行単位生成 2/11 (18.2%, 行内 16/32 50%)` のように全体行数に対する進捗へ変換して表示する。Web UIはpollingごとに現在のstage labelと直近ログを表示し、数値進捗が取れた時点でプログレスバーをdeterminate表示へ切り替える。完了まで無変化のアニメーションだけが続く状態にしない。キャンセル要求はこのストリーミング実行中にも監視し、子プロセスを終了する。job API経由でも `MO_VIBEVOICE_TIMEOUT_SECONDS` の上限は有効で、キャンセル監視のためにtimeoutを無効化しない。
+ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。行単位生成では、各行の内部tqdmをそのまま表示すると行ごとに0%へ戻って全体の進み具合が分からないため、`行単位生成 2/11 (18.2%, 行内 16/32 50%)` のように全体行数に対する進捗へ変換して表示する。Web UIはpollingごとに現在のstage labelと直近ログを表示し、数値進捗が取れた時点でプログレスバーをdeterminate表示へ切り替える。完了まで無変化のアニメーションだけが続く状態にしない。キャンセル要求はこのストリーミング実行中にも監視し、子プロセスを終了する。ローカルjob API経由では固定timeoutで停止せず、ユーザーのキャンセル要求で子プロセスを終了する。`MO_VIBEVOICE_TIMEOUT_SECONDS` は互換用の同期生成やRunPod handler内の直接実行など、キャンセルイベントを持たない呼び出しの上限として扱う。
 
 ```bash
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub
