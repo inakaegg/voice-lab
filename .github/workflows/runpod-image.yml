@@ -1,0 +1,72 @@
+name: Build RunPod Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Docker image name"
+        required: true
+        default: "docker.io/dockerhubfd/mo-speech"
+      image_tag:
+        description: "Docker image tag. Empty uses runpod-<short-sha>."
+        required: false
+        default: ""
+      comfyui_vibevoice_ref:
+        description: "ComfyUI-VibeVoice git ref"
+        required: true
+        default: "99a98031d79e07f279a7aa6d01ce89042e8bba26"
+
+jobs:
+  build:
+    name: Build and push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: image
+        shell: bash
+        run: |
+          tag="${{ inputs.image_tag }}"
+          if [[ -z "${tag}" ]]; then
+            tag="runpod-${GITHUB_SHA::7}"
+          fi
+          image="${{ inputs.image_name }}:${tag}"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved image: ${image}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Build and push RunPod image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.runpod
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          build-args: |
+            COMFYUI_VIBEVOICE_REF=${{ inputs.comfyui_vibevoice_ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## RunPod image"
+            echo ""
+            echo "- Image: \`${{ steps.image.outputs.image }}\`"
+            echo "- Dockerfile: \`Dockerfile.runpod\`"
+            echo "- Platform: \`linux/amd64\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
