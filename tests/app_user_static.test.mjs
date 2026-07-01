@@ -170,6 +170,17 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /body\.set\(input\.name,\s*saved\.blob/s);
   assert.match(vibevoiceSource, /data-vibevoice-range/);
   assert.match(vibevoiceSource, /renderRangeValue/);
+  assert.match(vibevoiceSource, /vibevoiceSettingsStorageKey/);
+  assert.match(vibevoiceSource, /loadVibeVoiceDraft/);
+  assert.match(vibevoiceSource, /saveVibeVoiceDraft/);
+  assert.match(vibevoiceSource, /localStorage\.getItem/);
+  assert.match(vibevoiceSource, /localStorage\.setItem/);
+  assert.match(vibevoiceSource, /scriptInput\.addEventListener\("input",\s*saveVibeVoiceDraft\)/);
+  assert.match(vibevoiceSource, /handleScriptFileChange[\s\S]*saveVibeVoiceDraft\(\)/);
+  assert.match(vibevoiceSource, /"backend"/);
+  assert.match(vibevoiceSource, /"model_id"/);
+  assert.match(vibevoiceSource, /"cfg_scale"/);
+  assert.match(vibevoiceSource, /"line_by_line"/);
   assert.match(styles, /\.vibevoice-shell/);
   assert.match(styles, /\.vibevoice-workspace/);
   assert.match(styles, /\.vibevoice-range-control/);

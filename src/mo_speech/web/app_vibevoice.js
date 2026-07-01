@@ -18,6 +18,24 @@ const savedVoiceLabels = Array.from(document.querySelectorAll("[data-saved-voice
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
+const vibevoiceSettingsStorageKey = "mo-speech-vibevoice-draft";
+const persistedFieldNames = [
+  "backend",
+  "model_id",
+  "cfg_scale",
+  "inference_steps",
+  "seed",
+  "temperature",
+  "top_p",
+  "top_k",
+  "max_voice_seconds",
+  "line_gap",
+  "do_sample",
+  "line_by_line",
+];
+const persistedControls = persistedFieldNames
+  .map((name) => form.elements[name])
+  .filter((control) => control && typeof control.name === "string");
 const savedVoiceFilesBySlot = new Map();
 
 let currentAudioUrl = "";
@@ -29,16 +47,78 @@ let jobStartedAt = 0;
 
 form.addEventListener("submit", handleGenerate);
 cancelButton.addEventListener("click", cancelVibeVoiceJob);
+scriptInput.addEventListener("input", saveVibeVoiceDraft);
 scriptFileInput.addEventListener("change", handleScriptFileChange);
+persistedControls.forEach((control) => {
+  const eventName = control.type === "checkbox" || control.tagName === "SELECT" ? "change" : "input";
+  control.addEventListener(eventName, saveVibeVoiceDraft);
+});
 voiceFileInputs.forEach((input) => {
   input.addEventListener("change", () => handleVoiceFileChange(input));
 });
+loadVibeVoiceDraft();
 rangeInputs.forEach((input) => {
   input.addEventListener("input", () => renderRangeValue(input));
   renderRangeValue(input);
 });
 loadStatus();
 savedVoiceFilesReady = loadSavedVoiceFiles();
+
+function loadVibeVoiceDraft() {
+  const draft = readVibeVoiceDraft();
+  if (!draft || typeof draft !== "object") {
+    return;
+  }
+  if (typeof draft.script === "string") {
+    scriptInput.value = draft.script;
+  }
+  const settings = draft.settings && typeof draft.settings === "object" ? draft.settings : {};
+  for (const control of persistedControls) {
+    if (!Object.hasOwn(settings, control.name)) {
+      continue;
+    }
+    restoreControlValue(control, settings[control.name]);
+  }
+}
+
+function readVibeVoiceDraft() {
+  try {
+    const value = localStorage.getItem(vibevoiceSettingsStorageKey);
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveVibeVoiceDraft() {
+  const settings = {};
+  for (const control of persistedControls) {
+    settings[control.name] = control.type === "checkbox" ? control.checked : control.value;
+  }
+  try {
+    localStorage.setItem(
+      vibevoiceSettingsStorageKey,
+      JSON.stringify({
+        script: scriptInput.value,
+        settings,
+      }),
+    );
+  } catch {
+    // 保存できない環境でも生成自体は続ける。
+  }
+}
+
+function restoreControlValue(control, value) {
+  if (control.type === "checkbox") {
+    control.checked = value === true || value === "true";
+    return;
+  }
+  const nextValue = String(value);
+  if (control.tagName === "SELECT" && !Array.from(control.options).some((option) => option.value === nextValue)) {
+    return;
+  }
+  control.value = nextValue;
+}
 
 async function loadStatus() {
   try {
@@ -113,6 +193,7 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
+  saveVibeVoiceDraft();
   clearResult();
   setBusy(true, "生成中です。初回はモデルロードに時間がかかります。");
   try {
@@ -156,6 +237,7 @@ async function handleScriptFileChange() {
   }
   try {
     scriptInput.value = await file.text();
+    saveVibeVoiceDraft();
     message.dataset.state = "ready";
     message.textContent = `${file.name} を台本へ読み込みました。`;
   } catch (error) {
