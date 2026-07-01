@@ -68,3 +68,79 @@ def test_runpod_image_workflow_frees_disk_space_before_build() -> None:
     assert cleanup_index < build_index
     assert "/opt/hostedtoolcache" in workflow
     assert "/usr/local/cuda*" in workflow
+
+
+def test_runpod_update_serverless_template_redacts_env_json(tmp_path: Path) -> None:
+    env_file = tmp_path / ".runpod.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "RUNPOD_SERVERLESS_TEMPLATE_ID=template-id",
+                "RUNPOD_IMAGE=docker.io/example/mo-speech:new",
+                "OPENAI_API_KEY=secret-value",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"RUNPOD_DRY_RUN": "1", "RUNPOD_ENV_FILE": str(env_file)})
+
+    result = subprocess.run(
+        ["bash", "scripts/runpod_update_serverless_template.sh"],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert "runpodctl template update template-id" in result.stdout
+    assert "--image docker.io/example/mo-speech:new" in result.stdout
+    assert "env-json-redacted" in result.stdout
+    assert "secret-value" not in result.stdout
+
+
+def test_runpod_update_serverless_template_redacts_runpodctl_output(tmp_path: Path) -> None:
+    env_file = tmp_path / ".runpod.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "RUNPOD_SERVERLESS_TEMPLATE_ID=template-id",
+                "RUNPOD_IMAGE=docker.io/example/mo-speech:new",
+                "OPENAI_API_KEY=secret-value",
+                "HF_TOKEN=token-value",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_runpodctl = bin_dir / "runpodctl"
+    fake_runpodctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' '{\"env\":{\"OPENAI_API_KEY\":\"secret-value\",\"HF_TOKEN\":\"token-value\"}}'\n",
+        encoding="utf-8",
+    )
+    fake_runpodctl.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "RUNPOD_ENV_FILE": str(env_file),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/runpod_update_serverless_template.sh"],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert '"OPENAI_API_KEY": "<redacted>"' in result.stdout
+    assert '"HF_TOKEN": "<redacted>"' in result.stdout
+    assert "secret-value" not in result.stdout
+    assert "token-value" not in result.stdout

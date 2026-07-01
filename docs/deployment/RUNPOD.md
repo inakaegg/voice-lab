@@ -162,6 +162,16 @@ Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh
 RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-20260701
 ```
 
+既存templateへ反映する場合:
+
+```bash
+scripts/runpod_update_serverless_template.sh
+```
+
+このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimageと環境変数を更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のimageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
+
+`runpodctl template get` などの確認コマンドは、template envの値をそのまま表示する場合がある。出力を保存・共有するときはAPI keyやtokenが含まれていないことを確認し、必要なら伏せる。
+
 ## モデル配置
 
 モデル本体はDocker imageに焼き込まない。RunPod Network Volumeへ置く。
