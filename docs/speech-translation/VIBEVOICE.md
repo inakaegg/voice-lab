@@ -45,7 +45,13 @@ RunPod Network Volumeでは、モデルキャッシュを `/workspace` または
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub
 COMFYUI_VIBEVOICE_PATH=/app/ComfyUI-VibeVoice
 MO_VIBEVOICE_CLI=/app/src/mo_speech/vibevoice_cli.py
+VIBEVOICE_MODEL_REPO=microsoft/VibeVoice-1.5B
+VIBEVOICE_MODEL_REVISION=1904eae38036e9c780d28e27990c27748984eafe
+VIBEVOICE_TOKENIZER_REPO=Qwen/Qwen2.5-1.5B
+VIBEVOICE_TOKENIZER_REVISION=8faed761d45a263340a0528343f099c05c9a4323
 ```
+
+`VIBEVOICE_MODEL_REVISION` と `VIBEVOICE_TOKENIZER_REVISION` は、ローカルで動作確認したキャッシュと同じrevisionをRunPod初回ダウンロードでも使うために固定する。未固定のままHugging Faceの `main` を取得すると、後日のモデル更新で同じ入力でも挙動が変わる可能性がある。
 
 ## 既知の品質課題
 

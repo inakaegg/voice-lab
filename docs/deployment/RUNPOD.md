@@ -126,6 +126,8 @@ Mac上のDocker buildは容量を使う。`buildx --push` を使い、最終imag
 
 GitHub Actionsの手動実行では、`workflow_dispatch` を持つworkflowファイルがdefault branchに存在している必要がある。新規workflowをfeature branchで追加した直後は、そのbranchをpushするだけではActions画面や `gh workflow run` から見つからない場合がある。初回はworkflowファイルをmainへ入れてから、必要に応じて `--ref <branch>` で対象branchのコードをbuildする。
 
+RunPod用base imageはCUDA/PyTorchを含むため大きい。GitHub-hosted runnerではbase image展開中に容量不足になることがあるため、workflowはbuild前にAndroid、.NET、hosted tool cache、runner側CUDAなどの不要なプリインストールを削除してからDocker buildを開始する。
+
 事前にGitHub repository secretsへ以下を登録する。
 
 | Secret | 用途 |
@@ -146,6 +148,7 @@ gh secret set DOCKERHUB_TOKEN
 
 ```bash
 gh workflow run runpod-image.yml \
+  --ref feature/vibevoice-zhskit-mode \
   -f image_name=docker.io/dockerhubfd/mo-speech \
   -f image_tag=runpod-vibevoice-20260701
 ```
