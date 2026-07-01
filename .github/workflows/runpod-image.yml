@@ -80,6 +80,8 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ inputs.base_image }}
             COMFYUI_VIBEVOICE_REF=${{ inputs.comfyui_vibevoice_ref }}
+            SOURCE_REVISION=${{ github.sha }}
+            IMAGE_TAG=${{ steps.image.outputs.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

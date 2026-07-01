@@ -12,6 +12,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from ..env import load_runpod_gateway_env
 from ..pipeline import (
     PipelineProgress,
     PipelineRequest,
@@ -29,18 +30,23 @@ RUNPOD_TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMED_OUT"}
 RUNPOD_IN_PROGRESS_STATES = {"IN_QUEUE", "IN_PROGRESS", "RUNNING"}
 
 
+def _runpod_env(name: str, default: str = "") -> str:
+    load_runpod_gateway_env()
+    return os.getenv(name, default)
+
+
 @dataclass
 class RunpodServerlessClient:
-    endpoint_id: str = field(default_factory=lambda: os.getenv("RUNPOD_ENDPOINT_ID", ""))
-    api_key: str = field(default_factory=lambda: os.getenv("RUNPOD_API_KEY", ""))
-    request_mode: str = field(default_factory=lambda: os.getenv("RUNPOD_SERVERLESS_REQUEST_MODE", "async"))
+    endpoint_id: str = field(default_factory=lambda: _runpod_env("RUNPOD_ENDPOINT_ID", ""))
+    api_key: str = field(default_factory=lambda: _runpod_env("RUNPOD_API_KEY", ""))
+    request_mode: str = field(default_factory=lambda: _runpod_env("RUNPOD_SERVERLESS_REQUEST_MODE", "async"))
     timeout_seconds: float = field(
-        default_factory=lambda: float(os.getenv("RUNPOD_SERVERLESS_TIMEOUT_SECONDS", "1800"))
+        default_factory=lambda: float(_runpod_env("RUNPOD_SERVERLESS_TIMEOUT_SECONDS", "1800"))
     )
     poll_interval_seconds: float = field(
-        default_factory=lambda: float(os.getenv("RUNPOD_SERVERLESS_POLL_INTERVAL_SECONDS", "1.0"))
+        default_factory=lambda: float(_runpod_env("RUNPOD_SERVERLESS_POLL_INTERVAL_SECONDS", "1.0"))
     )
-    base_url: str = field(default_factory=lambda: os.getenv("RUNPOD_API_BASE_URL", RUNPOD_API_BASE_URL))
+    base_url: str = field(default_factory=lambda: _runpod_env("RUNPOD_API_BASE_URL", RUNPOD_API_BASE_URL))
 
     @classmethod
     def from_env(cls) -> "RunpodServerlessClient":
@@ -151,6 +157,7 @@ class RunpodServerlessSpeechTranslationPipeline(SpeechTranslationPipeline):
         internal_translation_backend: str | None = None,
     ) -> None:
         self.client = client or RunpodServerlessClient.from_env()
+        load_runpod_gateway_env()
         self.internal_translation_backend = internal_translation_backend or os.getenv(
             "RUNPOD_SERVERLESS_TRANSLATION_BACKEND",
             "openai",

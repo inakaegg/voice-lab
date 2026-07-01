@@ -18,13 +18,16 @@ def main() -> int:
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
     parser.add_argument(
         "--operation-mode",
-        choices=("translation", "text_tts", "voice_conversion", "warmup"),
+        choices=("translation", "text_tts", "voice_conversion", "warmup", "diagnostics", "vibevoice"),
         default="translation",
     )
     parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
     parser.add_argument("--audio")
     parser.add_argument("--reference-audio")
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
+    parser.add_argument("--script", default=os.getenv("RUNPOD_SMOKE_SCRIPT"))
+    parser.add_argument("--script-file")
+    parser.add_argument("--voice-audio", action="append", default=[])
     parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "google_translate"))
     parser.add_argument("--translation-backend", default=os.getenv("RUNPOD_SMOKE_TRANSLATION_BACKEND", "openai"))
     parser.add_argument("--source-language", default=os.getenv("RUNPOD_SMOKE_SOURCE_LANGUAGE", "id-ID"))
@@ -47,6 +50,15 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--http-timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_HTTP_TIMEOUT_SECONDS", "120")))
     parser.add_argument("--poll-interval", type=float, default=float(os.getenv("RUNPOD_SMOKE_POLL_INTERVAL_SECONDS", "1.0")))
+    parser.add_argument("--vibevoice-model-id", default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_MODEL_ID", "vibevoice-1.5b-pinned"))
+    parser.add_argument("--vibevoice-inference-steps", type=int, default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_INFERENCE_STEPS", "2")))
+    parser.add_argument("--vibevoice-seed", type=int, default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_SEED", "42")))
+    parser.add_argument(
+        "--vibevoice-max-voice-seconds",
+        type=float,
+        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_MAX_VOICE_SECONDS", "3")),
+    )
+    parser.add_argument("--vibevoice-line-by-line", action="store_true")
     parser.add_argument("--print-audio-base64", action="store_true")
     args = parser.parse_args()
 
@@ -55,7 +67,9 @@ def main() -> int:
     if not args.api_key:
         raise SystemExit("RUNPOD_API_KEY or --api-key is required")
 
-    if args.operation_mode == "warmup":
+    if args.operation_mode == "diagnostics":
+        input_payload = {"operation_mode": "diagnostics"}
+    elif args.operation_mode == "warmup":
         input_payload = {
             "operation_mode": "warmup",
             "translation_backend": args.translation_backend,
@@ -70,6 +84,26 @@ def main() -> int:
             "text": args.text,
             "target_language": args.target_language,
             "tts_backend": args.tts_backend,
+        }
+    elif args.operation_mode == "vibevoice":
+        script_text = Path(args.script_file).read_text(encoding="utf-8") if args.script_file else args.script
+        if not script_text:
+            raise SystemExit("--script or --script-file is required for vibevoice")
+        voice_specs = args.voice_audio or ([args.reference_audio] if args.reference_audio else [])
+        if not voice_specs:
+            raise SystemExit("--voice-audio is required for vibevoice")
+        voices = [_vibevoice_voice_payload(spec, index) for index, spec in enumerate(voice_specs, start=1)]
+        input_payload = {
+            "operation_mode": "vibevoice",
+            "script": script_text,
+            "voices": voices,
+            "generation": {
+                "model_id": args.vibevoice_model_id,
+                "inference_steps": args.vibevoice_inference_steps,
+                "seed": args.vibevoice_seed,
+                "max_voice_seconds": args.vibevoice_max_voice_seconds,
+                "line_by_line": args.vibevoice_line_by_line,
+            },
         }
     else:
         if not args.audio:
@@ -195,6 +229,24 @@ def _json_request(
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _vibevoice_voice_payload(spec: str, fallback_speaker: int) -> dict[str, Any]:
+    speaker = fallback_speaker
+    path_text = spec
+    if ":" in spec:
+        maybe_speaker, maybe_path = spec.split(":", 1)
+        if maybe_speaker.isdigit():
+            speaker = int(maybe_speaker)
+            path_text = maybe_path
+    audio_path = Path(path_text)
+    mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+    return {
+        "speaker": speaker,
+        "filename": audio_path.name,
+        "audio_mime_type": mime_type,
+        "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+    }
 
 
 def _monotonic_seconds() -> float:

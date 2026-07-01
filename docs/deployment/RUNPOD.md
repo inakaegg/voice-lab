@@ -69,6 +69,7 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_VOLUME_MOUNT_PATH` | Network Volumeのmount先。Serverlessでは返却されたtemplateのmount先にcache設定を合わせる。 |
 | `RUNPOD_SERVERLESS_TEMPLATE_ID` | Serverless endpoint作成時のtemplate ID |
 | `RUNPOD_ENDPOINT_ID` | Serverlessスモーク確認先 |
+| `RUNPOD_API_KEY` | ローカルFastAPI gatewayやスモーク確認からRunPod APIを呼ぶためのAPIキー |
 | `RUNPOD_SERVERLESS_TRANSLATION_BACKEND` | Serverless handler内部で使う翻訳backend。既定は `openai`。GPU上のローカルモデル検証では `qwen`。 |
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
@@ -87,7 +88,7 @@ cp scripts/runpod.env.example .runpod.env
 RUNPOD_DRY_RUN=1 scripts/runpod_create_gpu_pod.sh
 ```
 
-`.runpod.env` はコンテナ内へファイルとしてアップロードしない。作成スクリプトがローカルで `.runpod.env` を読み、RunPodのPod/Serverless templateへ `--env '{...}'` として環境変数を登録する。既存のtemplateを作った後に `.runpod.env` だけを変更しても、RunPod側の環境変数は自動更新されない。OpenAI APIキーを追加・変更した場合は、templateまたはPodを作り直すか、RunPod管理画面で環境変数を更新する。
+`.runpod.env` はコンテナ内へファイルとしてアップロードしない。作成スクリプトがローカルで `.runpod.env` を読み、RunPodのPod/Serverless templateへ `--env '{...}'` として環境変数を登録する。ローカルFastAPIをUI/gatewayとして起動する場合は、RunPod clientが `.runpod.env` から接続に必要なキーだけを読み、不足している値だけ環境変数へ入れる。既にシェルで設定済みの値やデプロイ先secretは上書きしない。`.runpod.env` 内の `MO_PROVIDER_MODE` や `MODEL_CACHE_DIR` などRunPodコンテナ用のアプリ設定は、ローカルFastAPIへ自動反映しない。既存のtemplateを作った後に `.runpod.env` だけを変更しても、RunPod側の環境変数は自動更新されない。OpenAI APIキーを追加・変更した場合は、templateまたはPodを作り直すか、RunPod管理画面で環境変数を更新する。
 
 ## Docker image
 
@@ -117,6 +118,106 @@ docker buildx build --platform linux/amd64 -f Dockerfile.runpod -t "$RUNPOD_IMAG
 ```
 
 Mac上のDocker buildは容量を使う。`buildx --push` を使い、最終imageをローカルに保持しない。ローカル容量が厳しい場合は、RunPod上の一時Pod、GitHub Actions、または別マシンでbuildする。
+
+### GitHub Actionsでbuild/pushする
+
+ローカル回線の上りが遅い場合は、GitHub ActionsでRunPod用imageをbuildし、GitHub側からDocker Hubへpushする。ローカルMacから大きいDocker layerをアップロードしないため、個人回線の上り速度に依存しにくい。
+
+このリポジトリでは手動実行用workflowとして `.github/workflows/runpod-image.yml` を使う。通常のpushごとに巨大imageをbuildしないよう、`workflow_dispatch` のみで起動する。
+
+GitHub Actionsの手動実行では、`workflow_dispatch` を持つworkflowファイルがdefault branchに存在している必要がある。新規workflowをfeature branchで追加した直後は、そのbranchをpushするだけではActions画面や `gh workflow run` から見つからない場合がある。初回はworkflowファイルをmainへ入れてから、必要に応じて `--ref <branch>` で対象branchのコードをbuildする。
+
+RunPod用base imageはCUDA/PyTorchを含むため大きい。GitHub-hosted runnerではbase image展開中に容量不足になることがあるため、workflowはbuild前にAndroid、.NET、hosted tool cache、runner側CUDAなどの不要なプリインストールを削除してからDocker buildを開始する。
+
+事前にGitHub repository secretsへ以下を登録する。
+
+| Secret | 用途 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hubのユーザー名 |
+| `DOCKERHUB_TOKEN` | Docker Hubのaccess token。パスワードではなくpush権限を持つtokenを使う |
+
+`DOCKERHUB_USERNAME` と `DOCKERHUB_TOKEN` はGitHub Actions専用の認証情報としてGitHub Secretsへ保存する。`.env` や `.runpod.env` へは書かない。ローカルで `gh secret set` を実行するときも、履歴にtokenが残らない入力方式を使う。
+
+GitHub CLIで登録する場合:
+
+```bash
+gh secret set DOCKERHUB_USERNAME --body "<Docker Hub user>"
+gh secret set DOCKERHUB_TOKEN
+```
+
+通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
+
+```bash
+scripts/runpod_deploy_serverless_image.sh
+```
+
+既定のimage tagは `runpod-vibevoice-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
+
+スクリプトは、現在のHEADがupstreamへpush済みであることを確認する。push前のローカルcommitを指定してActionsを起動してもGitHub側ではそのcommitをcheckoutできないため、通常は先にpushする。確認だけしたい場合はdry-runを使う。
+
+```bash
+RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh
+```
+
+個別に手順を実行する場合:
+
+```bash
+gh workflow run runpod-image.yml \
+  --ref feature/vibevoice-zhskit-mode \
+  -f image_name=docker.io/dockerhubfd/mo-speech \
+  -f image_tag=runpod-vibevoice-$(git rev-parse --short HEAD)
+```
+
+Actions実行が成功したら、出力されたimage tagを `.runpod.env` の `RUNPOD_IMAGE` に反映し、Serverless templateを更新する。Docker HubへのpushはGitHub側で完了しているため、ローカルではRunPod APIへの小さいリクエストだけで済む。deployスクリプトを使う場合、この `.runpod.env` 更新も自動で行う。
+
+`image_tag` はcommitごとに一意にする。固定タグを再利用すると、registry上のdigestが更新されてもRunPod側の既存workerやimage cacheが古いコードを実行し続けるかを切り分けにくい。`image_tag` を空にした場合、workflowは `runpod-<short-sha>` を使う。
+
+Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh` は実行しない。既存Serverless templateはRunPod管理画面またはRunPod APIでimageだけ差し替えられるが、確実な検証では新しいtemplateを作り、endpointの `templateId` 自体を切り替える。deployスクリプトはこの新template方式を既定とする。手動で行う場合は、`.runpod.env` の `RUNPOD_IMAGE` をActionsでpushしたtagにしてからtemplate作成スクリプトを実行する。
+
+```bash
+# .runpod.env
+RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-<short-sha>
+```
+
+既存templateへ反映する場合:
+
+```bash
+scripts/runpod_update_serverless_template.sh
+```
+
+このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimageと環境変数を更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のimageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
+
+新しいtemplateとして切り替える場合:
+
+```bash
+scripts/runpod_create_serverless_template.sh
+```
+
+返ってきたtemplate IDを `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` に反映し、RunPod管理画面またはREST APIでendpointの `templateId` をそのIDへ更新する。既存workerが残る場合は、一時的に `workersMax=0` へ下げてから `workersMax=1` へ戻すと、旧workerを避けて新templateから起動し直せる。
+
+image更新後は、生成jobを投げる前に軽量なdiagnostics jobでworker内の実行コードを確認する。`runpod-image.yml` はbuild時のGit commit SHAをimage環境変数 `MO_IMAGE_REVISION` に埋め込み、diagnosticsはその値と `/app/src/mo_speech/vibevoice_cli.py` の実装マーカーを返す。VibeVoice確認では `vibevoice_cli.uses_parsed_scripts=false`、`vibevoice_cli.uses_raw_text_processor_call=true`、`vibevoice_cli.installs_vibevoice_modules_utils_alias=true`、`image.revision` がbuild対象commitに一致することを先に確認する。
+
+```bash
+python scripts/runpod_smoke_serverless.py \
+  --operation-mode diagnostics \
+  --request-mode async
+```
+
+diagnosticsが未対応、`uses_raw_text_processor_call=false`、または `installs_vibevoice_modules_utils_alias=false` を返す場合、RunPod endpointは古いimageまたは古いworkerを使っている。Serverless templateのimage更新、endpointのworker入れ替え、またはidle timeout後の再実行を先に行い、VibeVoice生成の成否判断に進まない。
+
+diagnosticsが新imageを示した後、VibeVoice単体のServerless smokeを実行する。UIやローカルFastAPIを介さず、RunPod handlerへ直接 `operation_mode=vibevoice` を投げるため、endpoint側のモデルロード、参照音声処理、VibeVoice CLI実行の問題を分けて確認できる。
+
+```bash
+python scripts/runpod_smoke_serverless.py \
+  --operation-mode vibevoice \
+  --request-mode async \
+  --script "Speaker 1: こんにちは。" \
+  --voice-audio 1:/path/to/reference.wav \
+  --vibevoice-inference-steps 2 \
+  --vibevoice-max-voice-seconds 3
+```
+
+`runpodctl template get` などの確認コマンドは、template envの値をそのまま表示する場合がある。出力を保存・共有するときはAPI keyやtokenが含まれていないことを確認し、必要なら伏せる。
 
 ## モデル配置
 
@@ -267,16 +368,13 @@ python scripts/runpod_smoke_serverless.py \
   --preload-voice-conversion
 ```
 
-ローカルFastAPIからServerless backendを使う場合は、FastAPI側にも以下を設定する。
+ローカルFastAPIからServerless backendを使う場合は、FastAPI側にもRunPod接続設定を渡す。シェルで渡してもよいし、git管理外の `.runpod.env` に `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を入れてもよい。ローカルFastAPI自体のprovider設定を変える場合は、`.env` またはシェルで明示する。
 
 ```sh
-RUNPOD_ENDPOINT_ID=<endpoint-id> \
-RUNPOD_API_KEY=<api-key> \
-RUNPOD_SERVERLESS_TRANSLATION_BACKEND=openai \
-RUNPOD_SERVERLESS_REQUEST_MODE=async \
-MO_VC_BACKENDS=runpod-seed-vc \
 uvicorn mo_speech.api:app --host 0.0.0.0 --port 8000
 ```
+
+RunPod実行先を選んだときに `RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.` が出る場合は、起動中のFastAPIプロセスが `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を読めていない。`.runpod.env` を直した後は、Uvicornプロセスを再起動してから確認する。
 
 この構成ではFastAPIがUIと履歴保存を担当し、ASR/翻訳/TTS/VCはRunPod Serverless handlerへ送る。Cloudflare gatewayとオブジェクトストレージ履歴は別段階で追加する。
 

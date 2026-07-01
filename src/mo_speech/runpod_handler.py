@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from time import perf_counter
@@ -18,6 +20,7 @@ from .providers.voice import (
     VoiceConversionService,
     create_voice_conversion_service_from_env,
 )
+from .vibevoice import VibeVoiceGenerationOptions, VibeVoiceService, VibeVoiceVoiceSample
 
 _WORKER_STARTED_AT = perf_counter()
 _PIPELINE: SpeechTranslationPipeline | None = None
@@ -30,6 +33,8 @@ _TEXT_TTS_PROVIDERS: dict[str, object] | None = None
 _TEXT_TTS_PROVIDERS_LOAD_MS: float | None = None
 _VOICE_CONVERSION_SERVICE: VoiceConversionService | None = None
 _VOICE_CONVERSION_SERVICE_LOAD_MS: float | None = None
+_VIBEVOICE_SERVICE: VibeVoiceService | None = None
+_VIBEVOICE_SERVICE_LOAD_MS: float | None = None
 
 
 def handler(event: dict[str, Any]) -> dict[str, object]:
@@ -45,6 +50,10 @@ def handler(event: dict[str, Any]) -> dict[str, object]:
         return _handle_text_tts(payload, handler_started)
     if operation_mode == "voice_conversion":
         return _handle_voice_conversion(payload, handler_started)
+    if operation_mode in {"vibevoice", "vibe_voice"}:
+        return _handle_vibevoice(payload, handler_started)
+    if operation_mode in {"diagnostics", "diag"}:
+        return _handle_diagnostics(payload, handler_started)
     if operation_mode in {"warmup", "preload"}:
         return _handle_warmup(payload, handler_started)
     raise ValueError(f"unsupported operation_mode: {operation_mode}")
@@ -248,6 +257,131 @@ def _handle_voice_conversion(payload: dict[str, object], handler_started: float)
     return response
 
 
+def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    script = str(payload.get("script", ""))
+    voices = payload.get("voices")
+    if script.strip() == "":
+        raise ValueError("script is required")
+    if not isinstance(voices, list) or not voices:
+        raise ValueError("voices are required")
+
+    decode_started = perf_counter()
+    decoded_voices: list[tuple[int, str, str, bytes]] = []
+    for index, item in enumerate(voices, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("each voice must be an object")
+        audio_base64 = item.get("audio_base64")
+        if not isinstance(audio_base64, str) or audio_base64 == "":
+            raise ValueError(f"voice {index} audio_base64 is required")
+        speaker = _optional_int(item.get("speaker"))
+        if speaker is None:
+            speaker = index
+        decoded_voices.append(
+            (
+                speaker,
+                str(item.get("filename") or f"voice-{index}.wav"),
+                str(item.get("audio_mime_type") or "audio/wav"),
+                base64.b64decode(audio_base64),
+            )
+        )
+    audio_decode_ms = _elapsed_ms(decode_started)
+
+    service, service_load_ms = _vibevoice_service()
+    temp_write_ms = 0.0
+    with TemporaryDirectory() as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        voice_paths: list[VibeVoiceVoiceSample] = []
+        temp_write_started = perf_counter()
+        for index, (speaker, filename, mime_type, audio_bytes) in enumerate(decoded_voices, start=1):
+            path = temp_dir / f"voice-{speaker or index}{Path(filename).suffix or _audio_suffix(mime_type)}"
+            path.write_bytes(audio_bytes)
+            voice_paths.append(VibeVoiceVoiceSample(slot=speaker, path=path))
+        temp_write_ms = _elapsed_ms(temp_write_started)
+        result = service.generate(
+            script_text=script,
+            voice_paths=voice_paths,
+            options=_vibevoice_options_from_payload(payload.get("generation")),
+        )
+
+    response: dict[str, object] = {
+        "audio_mime_type": result.audio_mime_type,
+        "audio_base64": base64.b64encode(result.audio_bytes).decode("ascii"),
+        "normalized_script": result.normalized_script,
+        "timings_ms": result.timings_ms,
+        "providers": result.providers,
+        "diagnostics": result.diagnostics,
+    }
+    _attach_serverless_metrics(
+        response,
+        operation_mode="vibevoice",
+        handler_started=handler_started,
+        worker_cold=service_load_ms is not None,
+        audio_decode_ms=audio_decode_ms,
+        temp_write_ms=temp_write_ms,
+        load_metric_name="vibevoice_service_load",
+        load_ms=service_load_ms,
+    )
+    return response
+
+
+def _handle_diagnostics(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    response: dict[str, object] = {
+        "diagnostics": True,
+        "image": {
+            "revision": os.getenv("MO_IMAGE_REVISION", ""),
+            "tag": os.getenv("MO_IMAGE_TAG", ""),
+        },
+        "runtime": {
+            "python": sys.version.split()[0],
+            "handler_file": __file__,
+        },
+        "paths": {
+            "comfyui_vibevoice_path": os.getenv("COMFYUI_VIBEVOICE_PATH", ""),
+            "mo_vibevoice_home": os.getenv("MO_VIBEVOICE_HOME", ""),
+        },
+        "vibevoice_cli": _source_file_diagnostics(
+            Path(os.getenv("MO_VIBEVOICE_CLI") or Path(__file__).with_name("vibevoice_cli.py")).expanduser()
+        ),
+    }
+    _attach_serverless_metrics(
+        response,
+        operation_mode="diagnostics",
+        handler_started=handler_started,
+        worker_cold=False,
+        audio_decode_ms=0.0,
+        temp_write_ms=0.0,
+        load_metric_name="diagnostics_load",
+        load_ms=0.0,
+    )
+    return response
+
+
+def _source_file_diagnostics(path: Path) -> dict[str, object]:
+    info: dict[str, object] = {
+        "path": str(path),
+        "exists": path.is_file(),
+        "size_bytes": 0,
+        "sha256": "",
+        "uses_parsed_scripts": False,
+        "uses_raw_text_processor_call": False,
+        "installs_vibevoice_modules_utils_alias": False,
+    }
+    if not path.is_file():
+        return info
+    data = path.read_bytes()
+    text = data.decode("utf-8", errors="replace")
+    info.update(
+        {
+            "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "uses_parsed_scripts": "parsed_scripts=" in text and "speaker_ids_for_prompt" in text,
+            "uses_raw_text_processor_call": "text=[script_text]" in text and "voice_samples=[voice_samples_np]" in text,
+            "installs_vibevoice_modules_utils_alias": "_install_vibevoice_modules_utils_alias" in text,
+        }
+    )
+    return info
+
+
 def _pipeline() -> tuple[SpeechTranslationPipeline, float | None]:
     global _PIPELINE, _PIPELINE_LOAD_MS
     if _PIPELINE is None:
@@ -319,6 +453,16 @@ def _voice_conversion_service() -> tuple[VoiceConversionService, float | None]:
     return _VOICE_CONVERSION_SERVICE, None
 
 
+def _vibevoice_service() -> tuple[VibeVoiceService, float | None]:
+    global _VIBEVOICE_SERVICE, _VIBEVOICE_SERVICE_LOAD_MS
+    if _VIBEVOICE_SERVICE is None:
+        started = perf_counter()
+        _VIBEVOICE_SERVICE = VibeVoiceService.from_env()
+        _VIBEVOICE_SERVICE_LOAD_MS = _elapsed_ms(started)
+        return _VIBEVOICE_SERVICE, _VIBEVOICE_SERVICE_LOAD_MS
+    return _VIBEVOICE_SERVICE, None
+
+
 def _attach_serverless_metrics(
     response: dict[str, object],
     *,
@@ -350,6 +494,23 @@ def _seed_vc_settings_from_payload(payload: dict[str, object]) -> SeedVcRuntimeS
         inference_cfg_rate=_optional_float(payload.get("seed_vc_inference_cfg_rate")),
         reference_max_seconds=_optional_float(payload.get("seed_vc_reference_max_seconds")),
         reference_auto_select=_optional_bool(payload.get("seed_vc_reference_auto_select")),
+    )
+
+
+def _vibevoice_options_from_payload(value: object) -> VibeVoiceGenerationOptions:
+    generation = value if isinstance(value, dict) else {}
+    return VibeVoiceGenerationOptions(
+        model_id=str(generation.get("model_id") or "vibevoice-1.5b-pinned"),
+        cfg_scale=float(generation.get("cfg_scale", 1.3)),
+        inference_steps=max(1, int(generation.get("inference_steps", 10))),
+        seed=int(generation.get("seed", 42)),
+        do_sample=_optional_bool(generation.get("do_sample")) is not False,
+        temperature=float(generation.get("temperature", 0.95)),
+        top_p=float(generation.get("top_p", 0.95)),
+        top_k=max(0, int(generation.get("top_k", 0))),
+        max_voice_seconds=max(0.0, float(generation.get("max_voice_seconds", 5.0))),
+        line_by_line=_optional_bool(generation.get("line_by_line")) is True,
+        line_gap=max(0.0, float(generation.get("line_gap", 1.0))),
     )
 
 

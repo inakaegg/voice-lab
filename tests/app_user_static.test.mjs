@@ -8,6 +8,8 @@ const practiceHtml = await readFile(new URL("../src/mo_speech/web/practice.html"
 const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
 const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_admin.html", import.meta.url), "utf8");
 const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_practice_history.js", import.meta.url), "utf8");
+const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
+const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
@@ -121,4 +123,103 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
+});
+
+test("vibevoice page provides local skit generation controls", () => {
+  assert.match(vibevoiceHtml, /VibeVoice/);
+  assert.match(vibevoiceHtml, /id="vibevoice-script"/);
+  assert.match(vibevoiceHtml, /name="script_file"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
+  assert.match(vibevoiceHtml, /name="voice_file_1"/);
+  assert.match(vibevoiceHtml, /name="voice_file_4"/);
+  assert.match(vibevoiceHtml, /data-saved-voice-slot="1"/);
+  assert.match(vibevoiceHtml, /data-saved-voice-slot="4"/);
+  assert.match(vibevoiceHtml, /name="cfg_scale"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-workspace"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-control-stack"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-debug-runtime"/);
+  assert.doesNotMatch(vibevoiceHtml, /class="vibevoice-status-card"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-cfg-scale"[^>]*name="cfg_scale"[^>]*type="range"/s);
+  assert.match(vibevoiceHtml, /id="vibevoice-inference-steps"[^>]*name="inference_steps"[^>]*type="range"/s);
+  assert.match(vibevoiceHtml, /data-vibevoice-range-output="cfg_scale"/);
+  assert.match(vibevoiceHtml, /data-vibevoice-range-output="line_gap"/);
+  assert.match(vibevoiceHtml, /name="backend"/);
+  assert.match(vibevoiceHtml, /value="runpod_serverless"/);
+  assert.match(vibevoiceHtml, /name="model_id"/);
+  assert.match(vibevoiceHtml, /value="vibevoice-1\.5b-pinned"/);
+  assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-realtime-0\.5b-latest"/);
+  assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"/);
+  assert.match(vibevoiceHtml, /name="inference_steps"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-generate-button"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-cancel-button"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-job-progress"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-timing"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-progress-log"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-audio"/);
+  assert.match(vibevoiceHtml, /\/static\/app_vibevoice\.js/);
+  assert.match(vibevoiceSource, /\/api\/vibevoice\/status/);
+  assert.match(vibevoiceSource, /\/api\/vibevoice\/jobs/);
+  assert.match(vibevoiceSource, /cancelVibeVoiceJob/);
+  assert.match(vibevoiceSource, /requiredVoiceSlotsFromScript/);
+  assert.match(vibevoiceSource, /runpod_serverless/);
+  assert.match(vibevoiceSource, /Sync Timeout/);
+  assert.match(vibevoiceSource, /audio_base64/);
+  assert.match(vibevoiceSource, /handleScriptFileChange/);
+  assert.match(vibevoiceSource, /file\.text\(\)/);
+  assert.match(vibevoiceSource, /indexedDB\.open/);
+  assert.match(vibevoiceSource, /savedVoiceFilesBySlot/);
+  assert.match(vibevoiceSource, /appendVoiceFiles/);
+  assert.match(vibevoiceSource, /body\.set\(input\.name,\s*saved\.blob/s);
+  assert.match(vibevoiceSource, /data-vibevoice-range/);
+  assert.match(vibevoiceSource, /renderRangeValue/);
+  assert.match(vibevoiceSource, /vibevoiceSettingsStorageKey/);
+  assert.match(vibevoiceSource, /loadVibeVoiceDraft/);
+  assert.match(vibevoiceSource, /saveVibeVoiceDraft/);
+  assert.match(vibevoiceSource, /progress_log/);
+  assert.match(vibevoiceSource, /localStorage\.getItem/);
+  assert.match(vibevoiceSource, /localStorage\.setItem/);
+  assert.match(vibevoiceSource, /scriptInput\.addEventListener\("input"[\s\S]*updateLineByLineAutoState\(\)[\s\S]*saveVibeVoiceDraft\(\)/);
+  assert.match(vibevoiceSource, /handleScriptFileChange[\s\S]*saveVibeVoiceDraft\(\)/);
+  assert.match(vibevoiceSource, /"backend"/);
+  assert.match(vibevoiceSource, /"model_id"/);
+  assert.match(vibevoiceSource, /"cfg_scale"/);
+  assert.match(vibevoiceSource, /"line_by_line"/);
+  assert.match(styles, /\.vibevoice-shell/);
+  assert.match(styles, /\.vibevoice-workspace/);
+  assert.match(styles, /\.vibevoice-range-control/);
+  assert.match(styles, /\.vibevoice-debug-runtime/);
+  assert.match(styles, /\.vibevoice-progress-bar/);
+  assert.match(styles, /\.vibevoice-progress-log/);
+  assert.match(styles, /\.vibevoice-saved-voice/);
+});
+
+test("vibevoice auto line-by-line state is reflected in the UI without overwriting the saved preference", () => {
+  assert.match(vibevoiceSource, /const autoLineByLineMinLines = 4/);
+  assert.match(vibevoiceSource, /const autoLineByLineMinChars = 180/);
+  assert.match(vibevoiceSource, /let lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /function updateLineByLineAutoState\(\)/);
+  assert.match(vibevoiceSource, /lineByLineControl\.disabled = autoLineByLine/);
+  assert.match(vibevoiceSource, /lineByLineControl\.checked = autoLineByLine \|\| lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
+  assert.match(vibevoiceHtml, /data-auto-line-by-line/);
+  assert.match(styles, /\.vibevoice-switch\[data-auto-line-by-line="true"\]/);
+});
+
+test("vibevoice progress animation only runs while a job is active", () => {
+  const baseProgressSpanRule = styles.match(/\.vibevoice-progress-bar span\s*\{(?<body>[^}]*)\}/)?.groups?.body || "";
+  assert.match(vibevoiceSource, /jobProgress\.dataset\.state = "running"/);
+  assert.match(vibevoiceSource, /jobProgress\.dataset\.state = "complete"/);
+  assert.match(vibevoiceSource, /renderProgressPercent/);
+  assert.match(vibevoiceSource, /renderProgressPercent\(null,\s*"idle"\)/);
+  assert.match(vibevoiceSource, /progressPercentFromLabel/);
+  assert.match(vibevoiceSource, /行単位生成\\s\+\\d\+\\\/\\d\+/);
+  assert.match(vibevoiceSource, /aria-valuenow/);
+  assert.match(styles, /\.vibevoice-job-progress\[data-state="complete"\]\s+\.vibevoice-progress-bar\s*\{[^}]*display:\s*none/s);
+  assert.match(
+    styles,
+    /\.vibevoice-job-progress\[data-state="running"\]\[data-progress="indeterminate"\]\s+\.vibevoice-progress-bar span\s*\{[^}]*animation:\s*vibevoice-progress-slide/s,
+  );
+  assert.match(styles, /\.vibevoice-job-progress\[data-progress="determinate"\]\s+\.vibevoice-progress-bar span/s);
+  assert.doesNotMatch(baseProgressSpanRule, /animation:/);
 });

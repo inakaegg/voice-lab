@@ -15,6 +15,36 @@ from mo_speech.providers.runpod_serverless import (
 from mo_speech.providers.voice import SeedVcRuntimeSettings
 
 
+@pytest.fixture(autouse=True)
+def isolate_runpod_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
+
+
+def test_runpod_client_reads_connection_keys_from_runpod_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runpod_env_file = tmp_path / ".runpod.env"
+    runpod_env_file.write_text(
+        "\n".join(
+            [
+                "RUNPOD_ENDPOINT_ID=endpoint-from-file",
+                "RUNPOD_API_KEY=secret-from-file",
+                "RUNPOD_SERVERLESS_REQUEST_MODE=sync",
+                "MO_PROVIDER_MODE=local",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUNPOD_ENV_FILE", str(runpod_env_file))
+    monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
+    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+    monkeypatch.delenv("RUNPOD_SERVERLESS_REQUEST_MODE", raising=False)
+
+    client = RunpodServerlessClient.from_env()
+
+    assert client.endpoint_id == "endpoint-from-file"
+    assert client.api_key == "secret-from-file"
+    assert client.request_mode == "sync"
+
+
 def test_runpod_serverless_pipeline_maps_request_and_response(tmp_path: Path) -> None:
     client = FakeRunpodClient(
         {
