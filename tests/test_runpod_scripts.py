@@ -70,6 +70,23 @@ def test_runpod_image_workflow_frees_disk_space_before_build() -> None:
     assert "/usr/local/cuda*" in workflow
 
 
+def test_runpod_image_workflow_embeds_source_revision() -> None:
+    workflow = Path(".github/workflows/runpod-image.yml").read_text(encoding="utf-8")
+    dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
+
+    assert "SOURCE_REVISION=${{ github.sha }}" in workflow
+    assert "IMAGE_TAG=${{ steps.image.outputs.image }}" in workflow
+    assert "ARG SOURCE_REVISION=unknown" in dockerfile
+    assert "ENV MO_IMAGE_REVISION=${SOURCE_REVISION}" in dockerfile
+
+
+def test_runpod_smoke_script_supports_diagnostics_operation() -> None:
+    script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
+
+    assert '"diagnostics"' in script
+    assert 'input_payload = {"operation_mode": "diagnostics"}' in script
+
+
 def test_runpod_update_serverless_template_redacts_env_json(tmp_path: Path) -> None:
     env_file = tmp_path / ".runpod.env"
     env_file.write_text(

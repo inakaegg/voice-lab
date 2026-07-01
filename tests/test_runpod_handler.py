@@ -244,6 +244,34 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     assert payload["serverless"]["operation_mode"] == "vibevoice"
 
 
+def test_runpod_handler_reports_worker_diagnostics(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cli_path = tmp_path / "vibevoice_cli.py"
+    cli_path.write_text(
+        "\n".join(
+            [
+                "inputs = self.processor(",
+                "    parsed_scripts=[parsed_lines],",
+                "    speaker_ids_for_prompt=[speaker_ids],",
+                ")",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MO_IMAGE_REVISION", "abc123")
+    monkeypatch.setenv("MO_IMAGE_TAG", "docker.io/example/mo-speech:test")
+    monkeypatch.setenv("MO_VIBEVOICE_CLI", str(cli_path))
+
+    payload = runpod_handler.handler({"input": {"operation_mode": "diagnostics"}})
+
+    assert payload["image"]["revision"] == "abc123"
+    assert payload["image"]["tag"] == "docker.io/example/mo-speech:test"
+    assert payload["vibevoice_cli"]["path"] == str(cli_path)
+    assert payload["vibevoice_cli"]["exists"] is True
+    assert payload["vibevoice_cli"]["uses_parsed_scripts"] is True
+    assert payload["vibevoice_cli"]["uses_raw_text_processor_call"] is False
+    assert payload["serverless"]["operation_mode"] == "diagnostics"
+
+
 def test_runpod_handler_warms_translation_and_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 

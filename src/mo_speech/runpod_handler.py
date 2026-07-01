@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from time import perf_counter
@@ -50,6 +52,8 @@ def handler(event: dict[str, Any]) -> dict[str, object]:
         return _handle_voice_conversion(payload, handler_started)
     if operation_mode in {"vibevoice", "vibe_voice"}:
         return _handle_vibevoice(payload, handler_started)
+    if operation_mode in {"diagnostics", "diag"}:
+        return _handle_diagnostics(payload, handler_started)
     if operation_mode in {"warmup", "preload"}:
         return _handle_warmup(payload, handler_started)
     raise ValueError(f"unsupported operation_mode: {operation_mode}")
@@ -318,6 +322,63 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         load_ms=service_load_ms,
     )
     return response
+
+
+def _handle_diagnostics(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    response: dict[str, object] = {
+        "diagnostics": True,
+        "image": {
+            "revision": os.getenv("MO_IMAGE_REVISION", ""),
+            "tag": os.getenv("MO_IMAGE_TAG", ""),
+        },
+        "runtime": {
+            "python": sys.version.split()[0],
+            "handler_file": __file__,
+        },
+        "paths": {
+            "comfyui_vibevoice_path": os.getenv("COMFYUI_VIBEVOICE_PATH", ""),
+            "mo_vibevoice_home": os.getenv("MO_VIBEVOICE_HOME", ""),
+        },
+        "vibevoice_cli": _source_file_diagnostics(
+            Path(os.getenv("MO_VIBEVOICE_CLI") or Path(__file__).with_name("vibevoice_cli.py")).expanduser()
+        ),
+    }
+    _attach_serverless_metrics(
+        response,
+        operation_mode="diagnostics",
+        handler_started=handler_started,
+        worker_cold=False,
+        audio_decode_ms=0.0,
+        temp_write_ms=0.0,
+        load_metric_name="diagnostics_load",
+        load_ms=0.0,
+    )
+    return response
+
+
+def _source_file_diagnostics(path: Path) -> dict[str, object]:
+    info: dict[str, object] = {
+        "path": str(path),
+        "exists": path.is_file(),
+        "size_bytes": 0,
+        "sha256": "",
+        "uses_parsed_scripts": False,
+        "uses_raw_text_processor_call": False,
+    }
+    if not path.is_file():
+        return info
+    data = path.read_bytes()
+    text = data.decode("utf-8", errors="replace")
+    info.update(
+        {
+            "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "uses_parsed_scripts": "parsed_scripts=" in text and "speaker_ids_for_prompt" in text,
+            "uses_raw_text_processor_call": "processor(text=[script_text]" in text
+            or "self.processor(text=[script_text]" in text,
+        }
+    )
+    return info
 
 
 def _pipeline() -> tuple[SpeechTranslationPipeline, float | None]:
