@@ -69,6 +69,7 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_VOLUME_MOUNT_PATH` | Network Volumeのmount先。Serverlessでは返却されたtemplateのmount先にcache設定を合わせる。 |
 | `RUNPOD_SERVERLESS_TEMPLATE_ID` | Serverless endpoint作成時のtemplate ID |
 | `RUNPOD_ENDPOINT_ID` | Serverlessスモーク確認先 |
+| `RUNPOD_API_KEY` | ローカルFastAPI gatewayやスモーク確認からRunPod APIを呼ぶためのAPIキー |
 | `RUNPOD_SERVERLESS_TRANSLATION_BACKEND` | Serverless handler内部で使う翻訳backend。既定は `openai`。GPU上のローカルモデル検証では `qwen`。 |
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
@@ -87,7 +88,7 @@ cp scripts/runpod.env.example .runpod.env
 RUNPOD_DRY_RUN=1 scripts/runpod_create_gpu_pod.sh
 ```
 
-`.runpod.env` はコンテナ内へファイルとしてアップロードしない。作成スクリプトがローカルで `.runpod.env` を読み、RunPodのPod/Serverless templateへ `--env '{...}'` として環境変数を登録する。既存のtemplateを作った後に `.runpod.env` だけを変更しても、RunPod側の環境変数は自動更新されない。OpenAI APIキーを追加・変更した場合は、templateまたはPodを作り直すか、RunPod管理画面で環境変数を更新する。
+`.runpod.env` はコンテナ内へファイルとしてアップロードしない。作成スクリプトがローカルで `.runpod.env` を読み、RunPodのPod/Serverless templateへ `--env '{...}'` として環境変数を登録する。ローカルFastAPIをUI/gatewayとして起動する場合は、RunPod clientが `.runpod.env` から接続に必要なキーだけを読み、不足している値だけ環境変数へ入れる。既にシェルで設定済みの値やデプロイ先secretは上書きしない。`.runpod.env` 内の `MO_PROVIDER_MODE` や `MODEL_CACHE_DIR` などRunPodコンテナ用のアプリ設定は、ローカルFastAPIへ自動反映しない。既存のtemplateを作った後に `.runpod.env` だけを変更しても、RunPod側の環境変数は自動更新されない。OpenAI APIキーを追加・変更した場合は、templateまたはPodを作り直すか、RunPod管理画面で環境変数を更新する。
 
 ## Docker image
 
@@ -321,16 +322,13 @@ python scripts/runpod_smoke_serverless.py \
   --preload-voice-conversion
 ```
 
-ローカルFastAPIからServerless backendを使う場合は、FastAPI側にも以下を設定する。
+ローカルFastAPIからServerless backendを使う場合は、FastAPI側にもRunPod接続設定を渡す。シェルで渡してもよいし、git管理外の `.runpod.env` に `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を入れてもよい。ローカルFastAPI自体のprovider設定を変える場合は、`.env` またはシェルで明示する。
 
 ```sh
-RUNPOD_ENDPOINT_ID=<endpoint-id> \
-RUNPOD_API_KEY=<api-key> \
-RUNPOD_SERVERLESS_TRANSLATION_BACKEND=openai \
-RUNPOD_SERVERLESS_REQUEST_MODE=async \
-MO_VC_BACKENDS=runpod-seed-vc \
 uvicorn mo_speech.api:app --host 0.0.0.0 --port 8000
 ```
+
+RunPod実行先を選んだときに `RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.` が出る場合は、起動中のFastAPIプロセスが `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を読めていない。`.runpod.env` を直した後は、Uvicornプロセスを再起動してから確認する。
 
 この構成ではFastAPIがUIと履歴保存を担当し、ASR/翻訳/TTS/VCはRunPod Serverless handlerへ送る。Cloudflare gatewayとオブジェクトストレージ履歴は別段階で追加する。
 

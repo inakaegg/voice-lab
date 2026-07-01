@@ -300,6 +300,33 @@ def test_vibevoice_service_defaults_do_not_use_legacy_project_paths(
     assert "/ComfyUI" not in str(service.comfyui_vibevoice_path.parent)
 
 
+def test_runpod_vibevoice_service_status_reads_connection_keys_from_runpod_env_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runpod_env_file = tmp_path / ".runpod.env"
+    runpod_env_file.write_text(
+        "\n".join(
+            [
+                "RUNPOD_ENDPOINT_ID=endpoint-from-file",
+                "RUNPOD_API_KEY=secret-from-file",
+                "RUNPOD_SERVERLESS_REQUEST_MODE=sync",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUNPOD_ENV_FILE", str(runpod_env_file))
+    monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
+    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+    monkeypatch.delenv("RUNPOD_SERVERLESS_REQUEST_MODE", raising=False)
+
+    status = RunpodServerlessVibeVoiceService.from_env().status()
+
+    assert status["available"] is True
+    assert status["endpoint_id"] == "endpoint-from-file"
+    assert status["request_mode"] == "sync"
+
+
 def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> None:
     class FakeClient:
         configured = True

@@ -23,6 +23,9 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "default-audio-history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+    monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
+    monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
+    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
 
 
 def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch) -> None:
