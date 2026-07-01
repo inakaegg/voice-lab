@@ -151,16 +151,18 @@ gh secret set DOCKERHUB_TOKEN
 gh workflow run runpod-image.yml \
   --ref feature/vibevoice-zhskit-mode \
   -f image_name=docker.io/dockerhubfd/mo-speech \
-  -f image_tag=runpod-vibevoice-20260701
+  -f image_tag=runpod-vibevoice-$(git rev-parse --short HEAD)
 ```
 
 Actions実行が成功したら、出力されたimage tagを `.runpod.env` の `RUNPOD_IMAGE` に反映し、Serverless templateを更新する。Docker HubへのpushはGitHub側で完了しているため、ローカルではRunPod APIへの小さいリクエストだけで済む。
 
-Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh` は実行しない。既存Serverless templateはRunPod管理画面またはRunPod APIでimageだけ差し替える。新しいtemplateとして作り直す場合は、`.runpod.env` の `RUNPOD_IMAGE` をActionsでpushしたtagにしてからtemplate作成スクリプトを実行する。
+`image_tag` はcommitごとに一意にする。固定タグを再利用すると、registry上のdigestが更新されてもRunPod側の既存workerやimage cacheが古いコードを実行し続けるかを切り分けにくい。`image_tag` を空にした場合、workflowは `runpod-<short-sha>` を使う。
+
+Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh` は実行しない。既存Serverless templateはRunPod管理画面またはRunPod APIでimageだけ差し替えられるが、確実な検証では新しいtemplateを作り、endpointの `templateId` 自体を切り替える。`.runpod.env` の `RUNPOD_IMAGE` をActionsでpushしたtagにしてからtemplate作成スクリプトを実行する。
 
 ```bash
 # .runpod.env
-RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-20260701
+RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-<short-sha>
 ```
 
 既存templateへ反映する場合:
@@ -170,6 +172,14 @@ scripts/runpod_update_serverless_template.sh
 ```
 
 このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimageと環境変数を更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のimageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
+
+新しいtemplateとして切り替える場合:
+
+```bash
+scripts/runpod_create_serverless_template.sh
+```
+
+返ってきたtemplate IDを `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` に反映し、RunPod管理画面またはREST APIでendpointの `templateId` をそのIDへ更新する。既存workerが残る場合は、一時的に `workersMax=0` へ下げてから `workersMax=1` へ戻すと、旧workerを避けて新templateから起動し直せる。
 
 image更新後は、生成jobを投げる前に軽量なdiagnostics jobでworker内の実行コードを確認する。`runpod-image.yml` はbuild時のGit commit SHAをimage環境変数 `MO_IMAGE_REVISION` に埋め込み、diagnosticsはその値と `/app/src/mo_speech/vibevoice_cli.py` の実装マーカーを返す。VibeVoice確認では `vibevoice_cli.uses_parsed_scripts=true`、`vibevoice_cli.uses_raw_text_processor_call=false`、`image.revision` がbuild対象commitに一致することを先に確認する。
 
