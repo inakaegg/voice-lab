@@ -536,6 +536,97 @@ def test_vibevoice_cli_can_use_model_default_generation_config(
     assert "generation_config" not in generate_calls[0]
 
 
+def test_vibevoice_cli_adds_large_stability_logits_processors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("VIBEVOICE_GENERATION_CONFIG_MODE", "explicit")
+    monkeypatch.setenv("VIBEVOICE_MIN_AUDIO_TOKENS", "1")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+    generate_calls = []
+
+    class FakeTokenizer:
+        eos_token_id = 1
+        speech_start_id = 2
+        speech_end_id = 3
+        speech_diffusion_id = 4
+
+    class FakeProcessor:
+        tokenizer = FakeTokenizer()
+
+        def __call__(self, **kwargs):
+            return {"input_ids": torch.tensor([[10, 11]])}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, **kwargs):
+            generate_calls.append(kwargs)
+            return SimpleNamespace(speech_outputs=[torch.zeros(10, dtype=torch.float32)])
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    service._synthesize_script(
+        script_text="Speaker 1: こんにちは。",
+        voice_samples_np=[],
+        cfg_scale=1.3,
+        inference_steps=2,
+        do_sample=True,
+        temperature=0.95,
+        top_p=0.95,
+        top_k=0,
+    )
+
+    call = generate_calls[0]
+    assert call["generation_config"]["do_sample"] is True
+    assert "logits_processor" in call
+    assert any(isinstance(item, vibevoice_cli._FiniteLogitsProcessor) for item in call["logits_processor"])
+    assert any(isinstance(item, vibevoice_cli._MinAudioTokensProcessor) for item in call["logits_processor"])
+
+
+def test_vibevoice_cli_min_audio_tokens_processor_masks_early_stop_tokens() -> None:
+    processor = vibevoice_cli._MinAudioTokensProcessor(
+        prompt_length=2,
+        speech_diffusion_id=4,
+        blocked_token_ids=[1, 2, 3],
+        min_audio_tokens=1,
+    )
+    scores = torch.zeros((1, 6), dtype=torch.float32)
+
+    masked = processor(torch.tensor([[10, 11]]), scores.clone())
+    assert torch.isneginf(masked[0, 1])
+    assert torch.isneginf(masked[0, 2])
+    assert torch.isneginf(masked[0, 3])
+    assert masked[0, 4] == 0
+
+    unmasked = processor(torch.tensor([[10, 11, 4]]), scores.clone())
+    assert unmasked[0, 1] == 0
+    assert unmasked[0, 2] == 0
+    assert unmasked[0, 3] == 0
+
+
+def test_vibevoice_cli_finite_logits_processor_removes_nan_and_inf() -> None:
+    processor = vibevoice_cli._FiniteLogitsProcessor()
+    scores = torch.tensor([[float("nan"), float("inf"), float("-inf"), 0.5]], dtype=torch.float32)
+
+    cleaned = processor(torch.tensor([[1]]), scores)
+
+    assert torch.isfinite(cleaned[0, 0])
+    assert torch.isfinite(cleaned[0, 1])
+    assert torch.isfinite(cleaned[0, 2])
+    assert cleaned[0, 0] < cleaned[0, 3]
+    assert cleaned[0, 2] < cleaned[0, 3]
+    assert cleaned[0, 1] > cleaned[0, 3]
+
+
 def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
     short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")
     long_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens(

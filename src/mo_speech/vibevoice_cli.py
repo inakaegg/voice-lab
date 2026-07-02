@@ -35,6 +35,7 @@ import librosa
 import soundfile as sf
 import transformers
 from packaging import version
+from transformers.generation import LogitsProcessor, LogitsProcessorList
 
 from huggingface_hub import hf_hub_download, snapshot_download
 
@@ -185,6 +186,54 @@ def _processor_supports_parsed_scripts(processor: Any) -> bool:
     return _callable_has_explicit_parameter(
         call_method, "parsed_scripts"
     ) and _callable_has_explicit_parameter(call_method, "speaker_ids_for_prompt")
+
+
+def _resolve_min_audio_tokens() -> int:
+    raw_value = os.getenv("VIBEVOICE_MIN_AUDIO_TOKENS", "0")
+    try:
+        return max(0, int(str(raw_value or "0").strip()))
+    except ValueError as exc:
+        raise ValueError(f"unsupported VIBEVOICE_MIN_AUDIO_TOKENS: {raw_value}") from exc
+
+
+class _FiniteLogitsProcessor(LogitsProcessor):
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        if scores.is_floating_point():
+            limit = torch.finfo(scores.dtype).max / 2
+        else:
+            limit = 1e4
+        return torch.nan_to_num(scores, nan=-limit, posinf=limit, neginf=-limit)
+
+
+class _MinAudioTokensProcessor(LogitsProcessor):
+    def __init__(
+        self,
+        *,
+        prompt_length: int,
+        speech_diffusion_id: int,
+        blocked_token_ids: list[int],
+        min_audio_tokens: int,
+    ) -> None:
+        self.prompt_length = max(0, int(prompt_length))
+        self.speech_diffusion_id = int(speech_diffusion_id)
+        self.blocked_token_ids = sorted({int(token_id) for token_id in blocked_token_ids if token_id is not None})
+        self.min_audio_tokens = max(0, int(min_audio_tokens))
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        if self.min_audio_tokens <= 0 or not self.blocked_token_ids:
+            return scores
+        generated = input_ids[:, self.prompt_length :]
+        if generated.numel() == 0:
+            audio_token_counts = torch.zeros(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
+        else:
+            audio_token_counts = (generated == self.speech_diffusion_id).sum(dim=1)
+        needs_audio = audio_token_counts < self.min_audio_tokens
+        if needs_audio.any():
+            scores = scores.clone()
+            blocked = torch.tensor(self.blocked_token_ids, dtype=torch.long, device=scores.device)
+            rows = torch.nonzero(needs_audio, as_tuple=False).squeeze(1)
+            scores[rows[:, None], blocked[None, :]] = float("-inf")
+        return scores
 
 
 def _install_vibevoice_modules_utils_alias() -> None:
@@ -901,6 +950,25 @@ class VibeVoice:
             "tokenizer": self.processor.tokenizer,
             "verbose": False,
         }
+        logits_processors = LogitsProcessorList([_FiniteLogitsProcessor()])
+        min_audio_tokens = _resolve_min_audio_tokens()
+        if min_audio_tokens > 0:
+            tokenizer = self.processor.tokenizer
+            blocked_token_ids = [
+                getattr(tokenizer, "eos_token_id", None),
+                getattr(tokenizer, "speech_end_id", None),
+                getattr(tokenizer, "speech_start_id", None),
+            ]
+            logits_processors.append(
+                _MinAudioTokensProcessor(
+                    prompt_length=int(inputs["input_ids"].shape[-1]),
+                    speech_diffusion_id=int(getattr(tokenizer, "speech_diffusion_id")),
+                    blocked_token_ids=[token_id for token_id in blocked_token_ids if token_id is not None],
+                    min_audio_tokens=min_audio_tokens,
+                )
+            )
+            logger.info("VibeVoice初期音声token制約: diffusion tokenを%d個以上要求します", min_audio_tokens)
+        generate_kwargs["logits_processor"] = logits_processors
         generation_config_mode = _resolve_generation_config_mode()
         if generation_config_mode == GENERATION_CONFIG_MODE_MODEL_DEFAULT:
             logger.info("VibeVoice生成設定: モデル既定generation_configを使用します")

@@ -392,7 +392,8 @@ def test_vibevoice_model_presets_include_runpod_only_large_candidate() -> None:
     assert large.tokenizer_repo == "Qwen/Qwen2.5-7B"
     assert large.tokenizer_revision == "d149729398750b98c0af14eb82c78cfe92750796"
     assert large.torch_dtype == "bfloat16"
-    assert large.generation_config_mode == "model_default"
+    assert large.generation_config_mode == "explicit"
+    assert large.min_audio_tokens == 1
     assert large.supported_backends == ("runpod_serverless",)
     assert is_vibevoice_model_supported_by_backend("vibevoice-large-aoi-pinned", "runpod_serverless")
     assert not is_vibevoice_model_supported_by_backend("vibevoice-large-aoi-pinned", "local")
@@ -438,7 +439,8 @@ def test_vibevoice_service_sets_large_dtype_override(tmp_path: Path) -> None:
     assert env["VIBEVOICE_MODEL_REPO"] == "aoi-ot/VibeVoice-Large"
     assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-7B"
     assert env["VIBEVOICE_TORCH_DTYPE"] == "bfloat16"
-    assert env["VIBEVOICE_GENERATION_CONFIG_MODE"] == "model_default"
+    assert env["VIBEVOICE_GENERATION_CONFIG_MODE"] == "explicit"
+    assert env["VIBEVOICE_MIN_AUDIO_TOKENS"] == "1"
 
 
 def test_vibevoice_service_status_reports_missing_assets(tmp_path: Path) -> None:

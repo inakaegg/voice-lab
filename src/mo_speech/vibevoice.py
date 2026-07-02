@@ -58,6 +58,7 @@ class VibeVoiceModelPreset:
     tokenizer_revision: str | None
     torch_dtype: str | None = None
     generation_config_mode: str | None = None
+    min_audio_tokens: int = 0
     supported_backends: tuple[str, ...] = ("local", "runpod_serverless")
     notes: str = ""
 
@@ -97,7 +98,8 @@ VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
         tokenizer_repo="Qwen/Qwen2.5-7B",
         tokenizer_revision="d149729398750b98c0af14eb82c78cfe92750796",
         torch_dtype="bfloat16",
-        generation_config_mode="model_default",
+        generation_config_mode="explicit",
+        min_audio_tokens=1,
         supported_backends=("runpod_serverless",),
         notes="Large候補。ローカルmacOSでは扱わず、RunPod/CUDA上でのみ実験対象にする。",
     ),
@@ -478,6 +480,10 @@ class VibeVoiceService:
             env["VIBEVOICE_GENERATION_CONFIG_MODE"] = model_preset.generation_config_mode
         else:
             env.pop("VIBEVOICE_GENERATION_CONFIG_MODE", None)
+        if model_preset.min_audio_tokens > 0:
+            env["VIBEVOICE_MIN_AUDIO_TOKENS"] = str(model_preset.min_audio_tokens)
+        else:
+            env.pop("VIBEVOICE_MIN_AUDIO_TOKENS", None)
         return env
 
     def _run_generation_command(
