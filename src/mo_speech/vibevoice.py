@@ -120,6 +120,7 @@ class VibeVoiceGenerationOptions:
     max_voice_seconds: float = 5.0
     line_by_line: bool = False
     line_gap: float = 1.0
+    directed_line_mode: bool = False
     model_id: str = DEFAULT_VIBEVOICE_MODEL_ID
 
 
@@ -231,6 +232,28 @@ def normalize_vibevoice_script(text: str, *, max_bytes: int = 200_000) -> str:
     return "\n".join(normalized_lines)
 
 
+def normalize_vibevoice_directed_line_script(text: str, *, max_bytes: int = 200_000) -> str:
+    normalized = normalize_vibevoice_script(text, max_bytes=max_bytes)
+    speaker_lines: list[tuple[int, str]] = []
+    for line in normalized.splitlines():
+        slot = _speaker_slot_from_normalized_line(line)
+        if slot is None:
+            slot = 1
+        text_part = _speaker_text_from_normalized_line(line)
+        if text_part:
+            speaker_lines.append((slot, _collapse_directed_line_spacing(text_part)))
+    if not speaker_lines:
+        raise ValueError("script is required")
+
+    speaker_slots = {slot for slot, _text_part in speaker_lines}
+    if len(speaker_slots) > 1:
+        raise ValueError("指定台詞向け1行化は現在1話者のみ対応です。複数話者は話者別生成とASR再配置が必要です。")
+
+    separator = _directed_line_separator(normalized)
+    joined = _join_directed_line_phrases([text_part for _slot, text_part in speaker_lines], separator=separator)
+    return f"Speaker {speaker_lines[0][0]}: {joined}"
+
+
 def _has_speaker_tag(line: str) -> bool:
     prefix, sep, _rest = line.partition(":")
     if not sep:
@@ -260,11 +283,43 @@ def _speaker_number_from_short_tag(tag: str) -> int | None:
     normalized = tag.strip()
     if normalized.isdigit():
         number = int(normalized)
-        return number if SHORT_SPEAKER_TAG_MIN <= number <= SHORT_SPEAKER_TAG_MAX else None
-    if len(normalized) == 1 and normalized.isalpha() and normalized.isascii():
+    elif len(normalized) == 1 and normalized.isalpha():
         number = ord(normalized.upper()) - ord("A") + 1
-        return number if SHORT_SPEAKER_TAG_MIN <= number <= SHORT_SPEAKER_TAG_MAX else None
-    return None
+    else:
+        return None
+    return number if SHORT_SPEAKER_TAG_MIN <= number <= SHORT_SPEAKER_TAG_MAX else None
+
+
+def _speaker_slot_from_normalized_line(line: str) -> int | None:
+    match = re.match(r"^Speaker\s+([1-4])\s*:", str(line or "").strip(), flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _collapse_directed_line_spacing(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", str(text or "").strip())
+    collapsed = re.sub(r"\s+([、。，，,.!?！？])", r"\1", collapsed)
+    collapsed = re.sub(r"([、。，，,.!?！？])\s+", r"\1", collapsed)
+    return collapsed
+
+
+def _directed_line_separator(text: str) -> str:
+    return "、" if re.search(r"[ぁ-んァ-ン一-龯、。]", text) else ","
+
+
+def _join_directed_line_phrases(phrases: Sequence[str], *, separator: str) -> str:
+    non_empty = [phrase.strip() for phrase in phrases if phrase.strip()]
+    if not non_empty:
+        raise ValueError("script is required")
+    parts: list[str] = []
+    for index, phrase in enumerate(non_empty):
+        parts.append(phrase)
+        if index < len(non_empty) - 1 and not _ends_with_sentence_punctuation(phrase):
+            parts.append(separator)
+    return "".join(parts)
+
+
+def _ends_with_sentence_punctuation(text: str) -> bool:
+    return bool(re.search(r"[、。，，,.!?！？…]$", str(text or "").strip()))
 
 
 class VibeVoiceService:
@@ -350,10 +405,11 @@ class VibeVoiceService:
             raise ValueError("voice sample is required")
         if not self.cli_path.is_file():
             raise VibeVoiceError(f"VibeVoice CLI was not found: {self.cli_path}")
-        normalized_script = normalize_vibevoice_script(script_text)
+        base_options = options or VibeVoiceGenerationOptions()
+        normalized_script = _normalize_vibevoice_script_for_options(script_text, base_options)
         generation_options = _options_with_auto_line_by_line(
             normalized_script,
-            options or VibeVoiceGenerationOptions(),
+            base_options,
         )
         model_preset = resolve_vibevoice_model_preset(generation_options.model_id)
         started = perf_counter()
@@ -702,10 +758,11 @@ class RunpodServerlessVibeVoiceService:
         voice_samples = _coerce_voice_samples(voice_paths)
         if not voice_samples:
             raise ValueError("voice sample is required")
-        normalized_script = normalize_vibevoice_script(script_text)
+        base_options = options or VibeVoiceGenerationOptions()
+        normalized_script = _normalize_vibevoice_script_for_options(script_text, base_options)
         generation_options = _options_with_auto_line_by_line(
             normalized_script,
-            options or VibeVoiceGenerationOptions(),
+            base_options,
         )
         started = perf_counter()
         _report_vibevoice_progress(progress_callback, "submit", "RunPod送信")
@@ -894,9 +951,20 @@ def _coerce_voice_samples(voice_paths: Sequence[Path | VibeVoiceVoiceSample]) ->
 
 def _options_with_auto_line_by_line(script: str, options: VibeVoiceGenerationOptions) -> VibeVoiceGenerationOptions:
     model_preset = resolve_vibevoice_model_preset(options.model_id)
-    if options.line_by_line or not model_preset.auto_line_by_line or not _should_auto_line_by_line(script):
+    if (
+        options.directed_line_mode
+        or options.line_by_line
+        or not model_preset.auto_line_by_line
+        or not _should_auto_line_by_line(script)
+    ):
         return options
     return replace(options, line_by_line=True)
+
+
+def _normalize_vibevoice_script_for_options(script: str, options: VibeVoiceGenerationOptions) -> str:
+    if options.directed_line_mode:
+        return normalize_vibevoice_directed_line_script(script)
+    return normalize_vibevoice_script(script)
 
 
 def _should_auto_line_by_line(script: str) -> bool:
@@ -974,6 +1042,7 @@ def _options_payload(options: VibeVoiceGenerationOptions) -> dict[str, object]:
         "max_voice_seconds": options.max_voice_seconds,
         "line_by_line": options.line_by_line,
         "line_gap": options.line_gap,
+        "directed_line_mode": options.directed_line_mode,
     }
 
 

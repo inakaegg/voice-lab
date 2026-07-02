@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from threading import Event
 
+import pytest
+
 from mo_speech.vibevoice import (
     RunpodServerlessVibeVoiceService,
     VIBEVOICE_MODEL_PRESETS,
@@ -14,6 +16,7 @@ from mo_speech.vibevoice import (
     VibeVoiceVoiceSample,
     is_vibevoice_model_supported_by_backend,
     resolve_vibevoice_model_preset,
+    normalize_vibevoice_directed_line_script,
     normalize_vibevoice_script,
 )
 
@@ -52,6 +55,23 @@ def test_normalize_vibevoice_script_does_not_treat_content_as_short_tag() -> Non
             "Speaker 1: 2026 年の話です。",
         ]
     )
+
+
+def test_normalize_vibevoice_directed_line_script_collapses_one_speaker_with_punctuation() -> None:
+    assert normalize_vibevoice_directed_line_script(
+        "\n".join(
+            [
+                "1 あっ、小鸡さん、こんにちは〜",
+                "1 こんにちは。ご無沙汰してます",
+                "1 最近、北海道に移住したって聞きました",
+            ]
+        )
+    ) == "Speaker 1: あっ、小鸡さん、こんにちは〜、こんにちは。ご無沙汰してます、最近、北海道に移住したって聞きました"
+
+
+def test_normalize_vibevoice_directed_line_script_rejects_multiple_speakers() -> None:
+    with pytest.raises(ValueError, match="複数話者"):
+        normalize_vibevoice_directed_line_script("1 こんにちは。\n2 こんにちは。")
 
 
 def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
@@ -115,6 +135,54 @@ def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
     assert env["VIBEVOICE_TOKENIZER_REPO"] == "Qwen/Qwen2.5-1.5B"
     assert env["VIBEVOICE_TOKENIZER_REVISION"] == ""
     assert result.providers["vibevoice_model_id"] == "vibevoice-1.5b-latest"
+
+
+def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_line(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    script_texts: list[str] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        calls.append(list(command))
+        script_texts.append(Path(command[command.index("--text_file") + 1]).read_text(encoding="utf-8"))
+        output_index = command.index("--output") + 1
+        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    result = service.generate(
+        script_text="\n".join(
+            [
+                "1 あっ、こんにちは",
+                "1 最近、北海道に移住したって聞きました",
+                "1 温泉も近くにありますか",
+                "1 お仕事は何ですか",
+            ]
+        ),
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_by_line=False),
+    )
+
+    command = calls[0]
+    assert script_texts[0] == (
+        "Speaker 1: あっ、こんにちは、最近、北海道に移住したって聞きました、温泉も近くにありますか、お仕事は何ですか"
+    )
+    assert result.normalized_script == script_texts[0]
+    assert "--line_by_line" not in command
 
 
 def test_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: Path) -> None:

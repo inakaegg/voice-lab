@@ -154,6 +154,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /name="inference_steps"/);
   assert.match(vibevoiceHtml, /id="vibevoice-reset-settings-button"/);
   assert.match(vibevoiceHtml, /class="vibevoice-parameter-guide"/);
+  assert.match(vibevoiceHtml, /name="directed_line_mode"/);
+  assert.match(vibevoiceHtml, /改行・空白を1行化して生成/);
   assert.match(vibevoiceHtml, /パラメータ目安/);
   assert.match(vibevoiceHtml, /まず 1\.1-1\.5/);
   assert.match(vibevoiceHtml, /試作は 10-15/);
@@ -199,6 +201,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /option\.disabled = !allowedBackends\.includes\(backend\)/);
   assert.match(vibevoiceSource, /"cfg_scale"/);
   assert.match(vibevoiceSource, /"line_by_line"/);
+  assert.match(vibevoiceSource, /"directed_line_mode"/);
+  assert.match(vibevoiceSource, /body\.set\("directed_line_mode",\s*directedLineModeControl\.checked \? "true" : "false"\)/);
   assert.match(styles, /\.vibevoice-shell/);
   assert.match(styles, /\.vibevoice-workspace/);
   assert.match(styles, /\.vibevoice-range-control/);
@@ -216,10 +220,11 @@ test("vibevoice auto line-by-line state is reflected in the UI without overwriti
   assert.match(vibevoiceSource, /function selectedModelAllowsAutoLineByLine\(\)/);
   assert.match(vibevoiceSource, /dataset\.vibevoiceAutoLineByLine !== "false"/);
   assert.match(vibevoiceSource, /function updateLineByLineAutoState\(\)/);
-  assert.match(vibevoiceSource, /lineByLineControl\.disabled = autoLineByLine/);
-  assert.match(vibevoiceSource, /lineByLineControl\.checked = autoLineByLine \|\| lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /lineByLineControl\.disabled = autoLineByLine \|\| directedLineModeEnabled/);
+  assert.match(vibevoiceSource, /lineByLineControl\.checked = directedLineModeEnabled \? false : autoLineByLine \|\| lineByLineUserPreference/);
   assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
   assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
+  assert.match(vibevoiceSource, /function updateDirectedLineModeState\(\)/);
   assert.match(vibevoiceHtml, /data-auto-line-by-line/);
   assert.match(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"[^>]*data-vibevoice-auto-line-by-line="false"/);
   assert.match(styles, /\.vibevoice-switch\[data-auto-line-by-line="true"\]/);

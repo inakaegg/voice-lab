@@ -511,6 +511,7 @@ def _vibevoice_options_from_payload(value: object) -> VibeVoiceGenerationOptions
         max_voice_seconds=max(0.0, float(generation.get("max_voice_seconds", 5.0))),
         line_by_line=_optional_bool(generation.get("line_by_line")) is True,
         line_gap=max(0.0, float(generation.get("line_gap", 1.0))),
+        directed_line_mode=_optional_bool(generation.get("directed_line_mode")) is True,
     )
 
 

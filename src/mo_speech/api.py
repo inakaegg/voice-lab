@@ -199,6 +199,7 @@ def _vibevoice_generation_options(
     max_voice_seconds: str,
     line_by_line: str,
     line_gap: str,
+    directed_line_mode: str,
 ) -> VibeVoiceGenerationOptions:
     return VibeVoiceGenerationOptions(
         model_id=model_id,
@@ -212,6 +213,7 @@ def _vibevoice_generation_options(
         max_voice_seconds=max(0.0, _float_form_value(max_voice_seconds, 5.0)),
         line_by_line=_bool_form_value(line_by_line, default=False),
         line_gap=max(0.0, _float_form_value(line_gap, 1.0)),
+        directed_line_mode=_bool_form_value(directed_line_mode, default=False),
     )
 
 
@@ -617,6 +619,7 @@ def create_app(
         max_voice_seconds: Annotated[str, Form()] = "5",
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
+        directed_line_mode: Annotated[str, Form()] = "false",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
@@ -634,6 +637,7 @@ def create_app(
                 max_voice_seconds=max_voice_seconds,
                 line_by_line=line_by_line,
                 line_gap=line_gap,
+                directed_line_mode=directed_line_mode,
             )
             with TemporaryDirectory(prefix="mo-vibevoice-api-") as temp_dir:
                 voice_paths = await _save_vibevoice_voice_uploads(
@@ -682,6 +686,7 @@ def create_app(
         max_voice_seconds: Annotated[str, Form()] = "5",
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
+        directed_line_mode: Annotated[str, Form()] = "false",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
@@ -700,6 +705,7 @@ def create_app(
                 max_voice_seconds=max_voice_seconds,
                 line_by_line=line_by_line,
                 line_gap=line_gap,
+                directed_line_mode=directed_line_mode,
             )
             voice_paths = await _save_vibevoice_voice_uploads(
                 [voice_file_1, voice_file_2, voice_file_3, voice_file_4],

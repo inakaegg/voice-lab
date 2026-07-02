@@ -222,6 +222,7 @@ def test_vibevoice_generate_api_returns_audio() -> None:
             "script": "你好。",
             "inference_steps": "3",
             "line_by_line": "true",
+            "directed_line_mode": "true",
             "model_id": "vibevoice-1.5b-latest",
         },
         files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
@@ -237,6 +238,7 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert service.calls[0][2].model_id == "vibevoice-1.5b-latest"
     assert service.calls[0][2].inference_steps == 3
     assert service.calls[0][2].line_by_line is True
+    assert service.calls[0][2].directed_line_mode is True
 
 
 def test_vibevoice_generate_api_preserves_voice_slots() -> None:

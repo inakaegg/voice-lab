@@ -21,6 +21,8 @@ const backendSelect = form.elements.backend;
 const modelSelect = form.elements.model_id;
 const lineByLineControl = form.elements.line_by_line;
 const lineByLineSwitch = lineByLineControl?.closest(".vibevoice-switch");
+const directedLineModeControl = form.elements.directed_line_mode;
+const directedLineModeSwitch = directedLineModeControl?.closest(".vibevoice-switch");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
 const savedVoiceLabels = Array.from(document.querySelectorAll("[data-saved-voice-slot]"));
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
@@ -42,6 +44,7 @@ const persistedFieldNames = [
   "line_gap",
   "do_sample",
   "line_by_line",
+  "directed_line_mode",
 ];
 const persistedControls = persistedFieldNames
   .map((name) => form.elements[name])
@@ -64,6 +67,7 @@ cancelButton.addEventListener("click", cancelVibeVoiceJob);
 resetSettingsButton.addEventListener("click", resetVibeVoiceGenerationSettings);
 scriptInput.addEventListener("input", () => {
   updateLineByLineAutoState();
+  updateDirectedLineModeState();
   saveVibeVoiceDraft();
 });
 scriptFileInput.addEventListener("change", handleScriptFileChange);
@@ -72,6 +76,14 @@ persistedControls.forEach((control) => {
     control.addEventListener("change", () => {
       lineByLineUserPreference = control.checked;
       updateLineByLineAutoState();
+      updateDirectedLineModeState();
+      saveVibeVoiceDraft();
+    });
+    return;
+  }
+  if (control === directedLineModeControl) {
+    control.addEventListener("change", () => {
+      updateDirectedLineModeState();
       saveVibeVoiceDraft();
     });
     return;
@@ -80,6 +92,7 @@ persistedControls.forEach((control) => {
     control.addEventListener("change", () => {
       updateModelAvailability();
       updateLineByLineAutoState();
+      updateDirectedLineModeState();
       saveVibeVoiceDraft();
     });
     return;
@@ -87,6 +100,7 @@ persistedControls.forEach((control) => {
   if (control === modelSelect) {
     control.addEventListener("change", () => {
       updateLineByLineAutoState();
+      updateDirectedLineModeState();
       saveVibeVoiceDraft();
     });
     return;
@@ -100,6 +114,7 @@ voiceFileInputs.forEach((input) => {
 loadVibeVoiceDraft();
 updateModelAvailability();
 updateLineByLineAutoState();
+updateDirectedLineModeState();
 rangeInputs.forEach((input) => {
   input.addEventListener("input", () => renderRangeValue(input));
   renderRangeValue(input);
@@ -194,6 +209,7 @@ function resetVibeVoiceGenerationSettings() {
   }
   updateModelAvailability();
   updateLineByLineAutoState();
+  updateDirectedLineModeState();
   rangeInputs.forEach((input) => renderRangeValue(input));
   saveVibeVoiceDraft();
   message.dataset.state = "ready";
@@ -232,12 +248,21 @@ function updateLineByLineAutoState() {
   if (!lineByLineControl) {
     return;
   }
-  const autoLineByLine = shouldAutoLineByLine(scriptInput.value);
-  lineByLineControl.disabled = autoLineByLine;
-  lineByLineControl.checked = autoLineByLine || lineByLineUserPreference;
+  const directedLineModeEnabled = directedLineModeControl?.checked === true;
+  const autoLineByLine = directedLineModeEnabled ? false : shouldAutoLineByLine(scriptInput.value);
+  lineByLineControl.disabled = autoLineByLine || directedLineModeEnabled;
+  lineByLineControl.checked = directedLineModeEnabled ? false : autoLineByLine || lineByLineUserPreference;
   if (lineByLineSwitch) {
     lineByLineSwitch.dataset.autoLineByLine = autoLineByLine ? "true" : "false";
   }
+}
+
+function updateDirectedLineModeState() {
+  const directedLineModeEnabled = directedLineModeControl?.checked === true;
+  if (directedLineModeSwitch) {
+    directedLineModeSwitch.dataset.directedLineMode = directedLineModeEnabled ? "true" : "false";
+  }
+  updateLineByLineAutoState();
 }
 
 function effectiveLineByLineEnabled() {
@@ -355,6 +380,9 @@ async function handleGenerate(event) {
   try {
     const body = new FormData(form);
     const requiredSlots = requiredVoiceSlotsFromScript(scriptInput.value);
+    if (directedLineModeControl?.checked === true && requiredSlots.size > 1) {
+      throw new Error("改行・空白を1行化して生成は、現在1話者の台本だけ対応しています。");
+    }
     const voiceState = await appendVoiceFiles(body, requiredSlots);
     if (voiceState.missingSlots.length > 0) {
       throw new Error(`Speaker ${voiceState.missingSlots.join(", ")} の参照音声を指定してください。`);
@@ -364,6 +392,7 @@ async function handleGenerate(event) {
     }
     body.set("do_sample", form.elements.do_sample.checked ? "true" : "false");
     body.set("line_by_line", effectiveLineByLineEnabled() ? "true" : "false");
+    body.set("directed_line_mode", directedLineModeControl.checked ? "true" : "false");
     const response = await fetch("/api/vibevoice/jobs", {
       method: "POST",
       body,
@@ -394,6 +423,7 @@ async function handleScriptFileChange() {
   try {
     scriptInput.value = await file.text();
     updateLineByLineAutoState();
+    updateDirectedLineModeState();
     saveVibeVoiceDraft();
     message.dataset.state = "ready";
     message.textContent = `${file.name} を台本へ読み込みました。`;
