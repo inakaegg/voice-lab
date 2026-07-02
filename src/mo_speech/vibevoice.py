@@ -59,6 +59,7 @@ class VibeVoiceModelPreset:
     torch_dtype: str | None = None
     generation_config_mode: str | None = None
     min_audio_tokens: int = 0
+    auto_line_by_line: bool = True
     supported_backends: tuple[str, ...] = ("local", "runpod_serverless")
     notes: str = ""
 
@@ -100,6 +101,7 @@ VIBEVOICE_MODEL_PRESETS: dict[str, VibeVoiceModelPreset] = {
         torch_dtype="bfloat16",
         generation_config_mode="explicit",
         min_audio_tokens=1,
+        auto_line_by_line=False,
         supported_backends=("runpod_serverless",),
         notes="Large候補。ローカルmacOSでは扱わず、RunPod/CUDA上でのみ実験対象にする。",
     ),
@@ -182,6 +184,7 @@ def serialize_vibevoice_model_presets() -> list[dict[str, object]]:
             "tokenizer_repo": preset.tokenizer_repo,
             "tokenizer_revision": preset.tokenizer_revision or "",
             "torch_dtype": preset.torch_dtype or "",
+            "auto_line_by_line": preset.auto_line_by_line,
             "supported_backends": list(preset.supported_backends),
             "notes": preset.notes,
         }
@@ -890,7 +893,8 @@ def _coerce_voice_samples(voice_paths: Sequence[Path | VibeVoiceVoiceSample]) ->
 
 
 def _options_with_auto_line_by_line(script: str, options: VibeVoiceGenerationOptions) -> VibeVoiceGenerationOptions:
-    if options.line_by_line or not _should_auto_line_by_line(script):
+    model_preset = resolve_vibevoice_model_preset(options.model_id)
+    if options.line_by_line or not model_preset.auto_line_by_line or not _should_auto_line_by_line(script):
         return options
     return replace(options, line_by_line=True)
 

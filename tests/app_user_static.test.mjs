@@ -200,12 +200,15 @@ test("vibevoice auto line-by-line state is reflected in the UI without overwriti
   assert.match(vibevoiceSource, /const autoLineByLineMinLines = 4/);
   assert.match(vibevoiceSource, /const autoLineByLineMinChars = 180/);
   assert.match(vibevoiceSource, /let lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /function selectedModelAllowsAutoLineByLine\(\)/);
+  assert.match(vibevoiceSource, /dataset\.vibevoiceAutoLineByLine !== "false"/);
   assert.match(vibevoiceSource, /function updateLineByLineAutoState\(\)/);
   assert.match(vibevoiceSource, /lineByLineControl\.disabled = autoLineByLine/);
   assert.match(vibevoiceSource, /lineByLineControl\.checked = autoLineByLine \|\| lineByLineUserPreference/);
   assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
   assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
   assert.match(vibevoiceHtml, /data-auto-line-by-line/);
+  assert.match(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"[^>]*data-vibevoice-auto-line-by-line="false"/);
   assert.match(styles, /\.vibevoice-switch\[data-auto-line-by-line="true"\]/);
 });
 

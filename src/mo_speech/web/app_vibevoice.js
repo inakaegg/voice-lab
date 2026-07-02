@@ -74,6 +74,14 @@ persistedControls.forEach((control) => {
   if (control === backendSelect) {
     control.addEventListener("change", () => {
       updateModelAvailability();
+      updateLineByLineAutoState();
+      saveVibeVoiceDraft();
+    });
+    return;
+  }
+  if (control === modelSelect) {
+    control.addEventListener("change", () => {
+      updateLineByLineAutoState();
       saveVibeVoiceDraft();
     });
     return;
@@ -204,6 +212,9 @@ function effectiveLineByLineEnabled() {
 }
 
 function shouldAutoLineByLine(script) {
+  if (!selectedModelAllowsAutoLineByLine()) {
+    return false;
+  }
   const lines = String(script || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -213,6 +224,11 @@ function shouldAutoLineByLine(script) {
   }
   const textChars = lines.reduce((total, line) => total + speakerTextFromScriptLine(line).length, 0);
   return textChars >= autoLineByLineMinChars;
+}
+
+function selectedModelAllowsAutoLineByLine() {
+  const selectedOption = modelSelect?.selectedOptions?.[0];
+  return selectedOption?.dataset.vibevoiceAutoLineByLine !== "false";
 }
 
 function speakerTextFromScriptLine(line) {

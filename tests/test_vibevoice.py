@@ -162,6 +162,51 @@ def test_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: 
     assert "concat" in command
 
 
+def test_vibevoice_service_does_not_auto_enable_line_by_line_for_large(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        calls.append(list(command))
+        output_index = command.index("--output") + 1
+        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    service.generate(
+        script_text="\n".join(
+            [
+                "Speaker 1: こんにちは。",
+                "Speaker 1: はい。",
+                "Speaker 1: 北海道の話をしましょう。",
+                "Speaker 1: 温泉も近くにあります。",
+            ]
+        ),
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(
+            line_by_line=False,
+            model_id="vibevoice-large-aoi-pinned",
+        ),
+    )
+
+    command = calls[0]
+    assert "--line_by_line" not in command
+
+
 def test_vibevoice_service_preserves_explicit_speaker_slots(tmp_path: Path) -> None:
     calls: list[list[str]] = []
     cli = tmp_path / "vibevoice.py"
@@ -394,6 +439,8 @@ def test_vibevoice_model_presets_include_runpod_only_large_candidate() -> None:
     assert large.torch_dtype == "bfloat16"
     assert large.generation_config_mode == "explicit"
     assert large.min_audio_tokens == 1
+    assert pinned.auto_line_by_line is True
+    assert large.auto_line_by_line is False
     assert large.supported_backends == ("runpod_serverless",)
     assert is_vibevoice_model_supported_by_backend("vibevoice-large-aoi-pinned", "runpod_serverless")
     assert not is_vibevoice_model_supported_by_backend("vibevoice-large-aoi-pinned", "local")
@@ -617,3 +664,46 @@ def test_runpod_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp
     )
 
     assert client.payload["generation"]["line_by_line"] is True
+
+
+def test_runpod_vibevoice_service_preserves_large_line_by_line_off(tmp_path: Path) -> None:
+    class FakeClient:
+        configured = True
+        endpoint_id = "endpoint"
+        request_mode = "async"
+
+        def __init__(self):
+            self.payload = None
+
+        def submit(self, payload):
+            self.payload = payload
+            return {
+                "audio_mime_type": "audio/wav",
+                "audio_base64": "UklGRg==",
+                "normalized_script": payload["script"],
+                "timings_ms": {"vibevoice": 3.0},
+                "providers": {"vibevoice": "runpod-serverless-vibevoice"},
+            }
+
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+    client = FakeClient()
+    service = RunpodServerlessVibeVoiceService(client=client)
+
+    service.generate(
+        script_text="\n".join(
+            [
+                "Speaker 1: こんにちは。",
+                "Speaker 1: はい。",
+                "Speaker 1: 北海道の話をしましょう。",
+                "Speaker 1: 温泉も近くにあります。",
+            ]
+        ),
+        voice_paths=[voice],
+        options=VibeVoiceGenerationOptions(
+            line_by_line=False,
+            model_id="vibevoice-large-aoi-pinned",
+        ),
+    )
+
+    assert client.payload["generation"]["line_by_line"] is False
