@@ -361,6 +361,7 @@ class VibeVoiceService:
         timeout_seconds: float | None = None,
         subprocess_run: SubprocessRun = subprocess.run,
         directed_asr_provider: object | None = None,
+        directed_voice_conversion_service: object | None = None,
     ) -> None:
         self.python = python or os.getenv("MO_VIBEVOICE_PYTHON") or _default_vibevoice_python()
         self.cli_path = Path(cli_path or os.getenv("MO_VIBEVOICE_CLI") or DEFAULT_VIBEVOICE_CLI).expanduser()
@@ -382,6 +383,8 @@ class VibeVoiceService:
         self._subprocess_run = subprocess_run
         self._directed_asr_provider_instance = directed_asr_provider
         self._owns_directed_asr_provider = directed_asr_provider is None
+        self._directed_voice_conversion_service_instance = directed_voice_conversion_service
+        self._owns_directed_voice_conversion_service = directed_voice_conversion_service is None
 
     @classmethod
     def from_env(cls) -> "VibeVoiceService":
@@ -548,14 +551,19 @@ class VibeVoiceService:
         speaker_outputs: dict[int, Path] = {}
         ranges_by_line: dict[int, VibeVoiceAudioRange] = {}
         speaker_results: dict[int, VibeVoiceResult] = {}
+        speaker_vibevoice_outputs: dict[int, Path] = {}
         asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
         asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
+        vc_results_by_speaker: dict[int, object] = {}
         warnings: list[str] = []
         generation_total_ms = 0.0
+        voice_conversion_total_ms = 0.0
         asr_total_ms = 0.0
         asr_name = ""
+        voice_conversion_name = ""
 
         self._release_directed_asr_provider()
+        self._release_directed_voice_conversion_service()
         _report_vibevoice_progress(progress_callback, "prepare", "指定台詞モード準備")
         with TemporaryDirectory(prefix="mo-vibevoice-directed-") as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
@@ -580,7 +588,37 @@ class VibeVoiceService:
                 speaker_results[speaker] = speaker_result
                 speaker_output = temp_dir / f"speaker-{speaker}.wav"
                 speaker_output.write_bytes(speaker_result.audio_bytes)
+                speaker_vibevoice_outputs[speaker] = speaker_output
                 speaker_outputs[speaker] = speaker_output
+
+            if _directed_voice_conversion_enabled():
+                vc_service = self._get_directed_voice_conversion_service()
+                try:
+                    for speaker_index, speaker in enumerate(lines_by_speaker, start=1):
+                        _raise_if_cancelled(cancel_event)
+                        _report_vibevoice_progress(
+                            progress_callback,
+                            "voice_conversion",
+                            f"指定台詞 話者{speaker} VC {speaker_index}/{len(lines_by_speaker)}",
+                        )
+                        vc_started = perf_counter()
+                        vc_result = _convert_directed_voice(
+                            vc_service,
+                            source_audio_path=speaker_vibevoice_outputs[speaker],
+                            reference_audio_path=samples_by_slot[speaker].path,
+                        )
+                        voice_conversion_total_ms += _elapsed_ms(vc_started)
+                        vc_results_by_speaker[speaker] = vc_result
+                        voice_conversion_name = str(
+                            getattr(vc_result, "providers", {}).get("voice_conversion", "")
+                            or voice_conversion_name
+                            or "voice_conversion"
+                        )
+                        vc_output = temp_dir / f"speaker-{speaker}-vc.wav"
+                        vc_output.write_bytes(getattr(vc_result, "output_audio_bytes"))
+                        speaker_outputs[speaker] = vc_output
+                finally:
+                    self._release_directed_voice_conversion_service()
 
             asr_provider = self._get_directed_asr_provider()
             asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
@@ -626,6 +664,8 @@ class VibeVoiceService:
         providers = dict(first_result.providers)
         providers["vibevoice_directed_asr"] = asr_name
         providers["vibevoice_directed_mode"] = "asr_reconstruct"
+        if voice_conversion_name:
+            providers["vibevoice_directed_vc"] = voice_conversion_name
         return VibeVoiceResult(
             audio_bytes=audio_bytes,
             audio_mime_type=self.audio_mime_type,
@@ -633,6 +673,7 @@ class VibeVoiceService:
             providers=providers,
             timings_ms={
                 "vibevoice": generation_total_ms,
+                "vibevoice_directed_vc": voice_conversion_total_ms,
                 "vibevoice_directed_asr": asr_total_ms,
                 "vibevoice_directed_reconstruct": reconstruct_ms,
                 "total": total_ms,
@@ -642,6 +683,7 @@ class VibeVoiceService:
                     "speakers": sorted(lines_by_speaker),
                     "line_count": len(lines),
                     "asr_provider": asr_name,
+                    "voice_conversion_provider": voice_conversion_name,
                     "gap_seconds": options.line_gap,
                     "warnings": warnings,
                     "speaker_scripts": {
@@ -650,6 +692,14 @@ class VibeVoiceService:
                     },
                     "asr_segments": {str(speaker): rows for speaker, rows in asr_segments_by_speaker.items()},
                     "asr_words": {str(speaker): rows for speaker, rows in asr_words_by_speaker.items()},
+                    "voice_conversion": {
+                        str(speaker): {
+                            "timings_ms": getattr(result, "timings_ms", {}),
+                            "providers": getattr(result, "providers", {}),
+                            "warnings": getattr(result, "warnings", []),
+                        }
+                        for speaker, result in sorted(vc_results_by_speaker.items())
+                    },
                     "ranges": [
                         {
                             "line_index": audio_range.line_index,
@@ -679,6 +729,19 @@ class VibeVoiceService:
         if callable(release):
             release()
         self._directed_asr_provider_instance = None
+
+    def _get_directed_voice_conversion_service(self):
+        if self._directed_voice_conversion_service_instance is None:
+            self._directed_voice_conversion_service_instance = _create_directed_voice_conversion_service()
+        return self._directed_voice_conversion_service_instance
+
+    def _release_directed_voice_conversion_service(self) -> None:
+        if not self._owns_directed_voice_conversion_service or self._directed_voice_conversion_service_instance is None:
+            return
+        release = getattr(self._directed_voice_conversion_service_instance, "release", None)
+        if callable(release):
+            release()
+        self._directed_voice_conversion_service_instance = None
 
     def _build_command(
         self,
@@ -1123,7 +1186,7 @@ def _raise_if_cancelled(cancel_event: Event | None) -> None:
 
 
 def _create_directed_asr_provider():
-    provider = os.getenv("MO_VIBEVOICE_DIRECTED_ASR_PROVIDER", os.getenv("MO_ASR_PROVIDER", "faster-whisper"))
+    provider = os.getenv("MO_VIBEVOICE_DIRECTED_ASR_PROVIDER", "openai").strip().lower() or "openai"
     if provider in {"faster-whisper", "faster_whisper"}:
         from .providers.local import FasterWhisperAsrProvider
 
@@ -1133,6 +1196,33 @@ def _create_directed_asr_provider():
 
         return OpenAiAsrProvider(model=os.getenv("MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL", "whisper-1"))
     raise ValueError(f"unsupported VibeVoice directed ASR provider: {provider}")
+
+
+def _directed_voice_conversion_enabled() -> bool:
+    return os.getenv("MO_VIBEVOICE_DIRECTED_VC_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _directed_voice_conversion_backend() -> str:
+    return os.getenv("MO_VIBEVOICE_DIRECTED_VC_BACKEND", "seed-vc").strip() or "seed-vc"
+
+
+def _create_directed_voice_conversion_service():
+    from .providers.voice import create_voice_conversion_service_from_env
+
+    return create_voice_conversion_service_from_env()
+
+
+def _convert_directed_voice(voice_conversion_service, *, source_audio_path: Path, reference_audio_path: Path):
+    from .providers.voice import SeedVcRuntimeSettings, VoiceConversionRequest
+
+    return voice_conversion_service.convert(
+        VoiceConversionRequest(
+            source_audio_path=source_audio_path,
+            reference_audio_path=reference_audio_path,
+            backend_id=_directed_voice_conversion_backend(),
+            seed_vc_settings=SeedVcRuntimeSettings(),
+        )
+    )
 
 
 def _directed_asr_language() -> str:

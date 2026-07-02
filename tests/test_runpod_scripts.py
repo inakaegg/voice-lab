@@ -82,6 +82,35 @@ def test_runpod_common_does_not_preload_voice_conversion_by_default() -> None:
     }
 
 
+def test_runpod_common_sets_directed_vibevoice_pipeline_defaults() -> None:
+    command = (
+        "source scripts/runpod_common.sh; "
+        "set_default_runpod_app_env; "
+        "runpod_env_json "
+        "MO_VIBEVOICE_DIRECTED_ASR_PROVIDER "
+        "MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL "
+        "MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE "
+        "MO_VIBEVOICE_DIRECTED_VC_ENABLED "
+        "MO_VIBEVOICE_DIRECTED_VC_BACKEND"
+    )
+
+    result = subprocess.run(
+        ["bash", "-lc", command],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "MO_VIBEVOICE_DIRECTED_ASR_PROVIDER": "openai",
+        "MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL": "whisper-1",
+        "MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE": "auto",
+        "MO_VIBEVOICE_DIRECTED_VC_ENABLED": "1",
+        "MO_VIBEVOICE_DIRECTED_VC_BACKEND": "seed-vc",
+    }
+
+
 def test_runpod_image_workflow_frees_disk_space_before_build() -> None:
     workflow = Path(".github/workflows/runpod-image.yml").read_text(encoding="utf-8")
 

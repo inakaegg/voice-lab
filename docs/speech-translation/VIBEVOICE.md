@@ -14,7 +14,7 @@
   - `VibeVoice Large (RunPod)`: `aoi-ot/VibeVoice-Large` をRunPod/CUDAで検証する実験候補。ローカルmacOSでは選択不可にし、APIも `backend=local` との組み合わせを拒否する。
 - `ランダム性を使う`: VibeVoiceのsamplingを有効にする。同じ台本でもseedや設定によって抑揚や細部が変わる。安定性を優先して比較したい場合はOFFも試す。
 - `行ごとに生成して結合`: 台本全体を一度に生成せず、1行ずつ生成して無音を挟んで結合する。長文や複数発話で破綻を分けやすい一方、行間や話し方の連続性は不自然になる可能性がある。
-- `指定台詞を1行生成してASR再配置`: 指定台詞を正確に読ませるための実験モード。表示用台本は保持し、生成時だけ話者ごとに1行テキストへまとめてVibeVoiceへ渡す。生成後はASR timestampでフレーズ区間を推定し、元台本の行順へ並べ直し、`行間秒数` の無音を挿入して最終WAVを作る。
+- `指定台詞を1行生成してASR再配置`: 指定台詞を正確に読ませるための実験モード。表示用台本は保持し、生成時だけ話者ごとに1行テキストへまとめてVibeVoiceへ渡す。生成後に話者ごとのSeed-VCを1回かけ、VC後の音声をASR timestampでフレーズ区間推定し、元台本の行順へ並べ直し、`行間秒数` の無音を挿入して最終WAVを作る。
 - `参照音声秒数`: 参照音声の有声区間から使う長さ。生成時は入力形式に関わらず、参照音声をmonoへdecodeし、24kHzへresampleし、前後の無音をtrimしてから、この秒数を上限に切り出す。長すぎると処理が重くなり、短すぎると声質特徴が不足する。
 - 生成設定パネルにはパラメータ目安を常時表示する。探索の初期値は `cfg_scale=1.1-1.5`、`inference_steps=10-15`、本命候補で `20-30`、`temperature=0.75-0.95`、`top_p=0.85-0.95`、`top_k=0` を基準とし、不安定な時だけ `top_k=30-50` を試す。参照音声秒数は5秒を基準に、声質が弱ければ8-10秒、ノイズ混入時は3-5秒へ寄せる。
 
@@ -64,14 +64,14 @@ Large候補の [aoi-ot/VibeVoice-Large](https://huggingface.co/aoi-ot/VibeVoice-
 2. 生成用台本は、話者ごとに発話を抽出し、句読点でつないだ1行テキストへ正規化する。
 3. 1話者の場合は、正規化した1行テキストを `Speaker 1:` としてVibeVoiceへ1回渡す。
 4. 複数話者の場合は、話者ごとに1行テキストを作り、話者数分だけVibeVoice生成を行う。各生成では、その話者の参照音声だけを使い、VibeVoice上は単一話者として扱う。
-5. 各VibeVoice出力をASRでフレーズ分割し、タイムスタンプを取る。ASR候補はWhisper系またはVibeVoice-ASRを比較する。
-6. ASR結果と元台本を、話者、発話順、テキスト類似度で対応付ける。完全一致を前提にせず、読み替えや脱落に備える。
-7. 元台本の発話順に、対応する音声区間を並べ直し、必要な無音、クロスフェード、音量正規化を入れて最終音声を作る。
-8. 最終または話者別のVibeVoice出力へSeed-VCを1回かけ、VibeVoiceで作った台詞再現と発話品質を維持しつつ、声質だけを最終的に寄せる。Seed-VCは話し方や間を根本的に作り直す工程ではないため、前段のVibeVoice生成品質を先に安定させる。
+5. 各VibeVoice出力へSeed-VCを1回かけ、VibeVoiceで作った台詞再現と発話品質を維持しつつ、声質だけを最終的に寄せる。Seed-VCは話し方や間を根本的に作り直す工程ではないため、前段のVibeVoice生成品質を先に安定させる。
+6. VC後の話者別音声をASRでフレーズ分割し、タイムスタンプを取る。ASR候補はOpenAI Whisper API、faster-whisper、VibeVoice-ASRを比較するが、RunPod Largeとの同居ではGPU上のASR常駐を避ける。
+7. ASR結果と元台本を、話者、発話順、テキスト類似度で対応付ける。完全一致を前提にせず、読み替えや脱落に備える。
+8. 元台本の発話順に、対応するVC後の音声区間を並べ直し、必要な無音、クロスフェード、音量正規化を入れて最終音声を作る。
 
-現在のWeb UIでは、「指定台詞を1行生成してASR再配置」をONにすると指定台詞向けのASR再配置モードを使う。この設定は、表示用台本を変更せず、生成前に話者ごとの発話を句読点つきの1行へまとめる。複数話者の場合は、話者ごとにVibeVoice生成を行い、各生成ではその話者の参照音声だけを `Speaker 1` として渡す。生成後にASRでword/segment timestampを取り、元台本の発話行へ対応付け、元の話者順・行順にWAV区間を切り出して再配置する。行間には `line_gap` 秒の無音を挿入する。行ごと生成とは同時に使わない。
+現在のWeb UIでは、「指定台詞を1行生成してASR再配置」をONにすると指定台詞向けのASR再配置モードを使う。この設定は、表示用台本を変更せず、生成前に話者ごとの発話を句読点つきの1行へまとめる。複数話者の場合は、話者ごとにVibeVoice生成を行い、各生成ではその話者の参照音声だけを `Speaker 1` として渡す。全話者のVibeVoice生成が終わった後、話者ごとのVibeVoice出力を同じ話者の参照音声でSeed-VCへ通す。さらにVC後の音声へASRをかけてword/segment timestampを取り、元台本の発話行へ対応付け、元の話者順・行順にWAV区間を切り出して再配置する。行間には `line_gap` 秒の無音を挿入する。行ごと生成とは同時に使わない。
 
-指定台詞向けモードのASRは、既定では `MO_ASR_PROVIDER` または `MO_VIBEVOICE_DIRECTED_ASR_PROVIDER` の `faster-whisper` を使う。RunPod imageでは `faster-whisper` とCUDA設定を含める。`MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE` は既定 `auto` で、必要に応じて `ja-JP`、`zh-CN`、`en-US`、`hi-IN` などを指定する。`MO_VIBEVOICE_DIRECTED_ASR_PROVIDER=openai` の場合は `MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL` を使うが、外部API課金とキー管理が必要になるため、通常検証ではローカルASRを優先する。
+指定台詞向けモードのASRは、既定では `MO_VIBEVOICE_DIRECTED_ASR_PROVIDER=openai` と `MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL=whisper-1` を使う。これはVibeVoice LargeとSeed-VCを同じRunPod workerで扱う時に、faster-whisperをGPUへ追加ロードしてVRAMを圧迫しないためである。OpenAI経路では `OPENAI_API_KEY` が必要で、外部API課金が発生する。ローカルまたはGPU余裕のある環境で自前ASRを使う場合だけ、`MO_VIBEVOICE_DIRECTED_ASR_PROVIDER=faster-whisper` を明示する。`MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE` は既定 `auto` で、必要に応じて `ja-JP`、`zh-CN`、`en-US`、`hi-IN` などを指定する。Seed-VCは既定で `MO_VIBEVOICE_DIRECTED_VC_ENABLED=1`、`MO_VIBEVOICE_DIRECTED_VC_BACKEND=seed-vc` として有効にする。
 
 この再配置はASR結果に依存するため、ASR誤認識、台詞の脱落、生成順のずれ、長尺生成の途中終了があると切り出し位置がずれる。現在はword timestampがあれば台本行の文字数比でword範囲を割り当て、wordが無ければsegment数一致または文字数比でfallbackする。最終的な実用化では、対応付け結果をUIに出して、ユーザーが台詞行ごとに採用区間を調整できる必要がある。
 
@@ -148,7 +148,7 @@ VIBEVOICE_GENERATION_CONFIG_MODE=explicit
 VIBEVOICE_MIN_AUDIO_TOKENS=1
 ```
 
-20GB級GPUでLargeを使う場合は、VibeVoice以外のresident GPUモデルを同じworker processに残さない。特に `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` でSeed-VCを起動時preloadすると、親process側に数GiBのVRAMが残り、Largeのロード中にOOMしやすい。VibeVoice用RunPod imageの既定は `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` とし、VibeVoice request前に既存のVoice Conversion serviceを解放する。指定台詞向けASR再配置モードでは、複数話者のVibeVoice生成を全て終えてからASR timestamp取得へ進める。これにより、Large生成とfaster-whisper ASRが同時にGPUへ載る状態を避ける。
+20GB級GPUでLargeを使う場合は、VibeVoice以外のresident GPUモデルを同じworker processに残さない。特に `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` でSeed-VCを起動時preloadすると、親process側に数GiBのVRAMが残り、Largeのロード中にOOMしやすい。VibeVoice用RunPod imageの既定は `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` とし、VibeVoice request前に既存のVoice Conversion serviceを解放する。指定台詞向けASR再配置モードでは、複数話者のVibeVoice生成を全て終え、次に話者ごとのSeed-VCを実行し、その後にVC後音声へASR timestamp取得を行う。ASRの既定をOpenAI `whisper-1` にすることで、Large生成とfaster-whisper ASRが同じGPUへ同時または連続で載る状態を避ける。
 
 `VIBEVOICE_MIN_AUDIO_TOKENS` はLargeで `speech_start` 直後にEOSへ落ちる挙動を避けるための下限指定である。CLIはこの値を固定の生成長としては扱わず、台本文字数、行数、`max_new_tokens` から実際に強制する最低音声token数を見積もる。これにより短文でも1tokenだけで終了せず、長い台本では台本長に応じた最低限の音声tokenを要求する。
 

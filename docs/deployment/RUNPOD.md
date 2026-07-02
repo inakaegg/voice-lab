@@ -80,7 +80,12 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_WORKERS_MAX` | 最大worker数。既定は `1`。`2` 以上にすると同時VC jobを別workerへ振れるが、新規workerはcold startとSeed-VC preloadをそれぞれ行うため、低頻度デモでは必ず高速化する設定ではない。 |
 | `MO_PRELOAD_MODELS` | FastAPI通常pipelineの起動時preload。30GB最小デモでは `0` にし、VCだけを別途preloadする。 |
 | `MO_VC_BACKENDS` | UI/VC比較で使うVC backend。RunPod単体デモでは `seed-vc` に絞る。 |
-| `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー |
+| `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー。VibeVoice指定台詞モードの既定ASRでも使う。 |
+| `MO_VIBEVOICE_DIRECTED_ASR_PROVIDER` | VibeVoice指定台詞モードのtimestamp ASR。既定は `openai`。GPU上の自前ASRを使う場合だけ `faster-whisper` にする。 |
+| `MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL` | 指定台詞モードでOpenAI ASRを使う時のモデル。timestamp取得のため既定は `whisper-1`。 |
+| `MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE` | 指定台詞モードのASR言語。既定は `auto`。必要な時だけ `ja-JP` などへ固定する。 |
+| `MO_VIBEVOICE_DIRECTED_VC_ENABLED` | 指定台詞モードでVibeVoice出力へSeed-VCをかけてからASR/再配置するか。既定は `1`。 |
+| `MO_VIBEVOICE_DIRECTED_VC_BACKEND` | 指定台詞モードで使うVC backend。既定は `seed-vc`。 |
 
 課金リソースを作らずにコマンドだけ確認する場合は、各CLIスクリプトに `RUNPOD_DRY_RUN=1` を付ける。
 
@@ -452,7 +457,7 @@ Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker
 
 FlashBoot状態はRunPod REST APIのendpoint詳細で `flashboot=true` を確認する。`runpodctl serverless create --help` ではFlashBootが既定有効になっているが、既存endpointの確認や更新はCLIのversion差分を受ける場合がある。既存endpointが `flashboot=false` の場合は、REST APIの `POST /v1/endpoints/{endpoint_id}/update` に `{"flashboot": true}` を送るか、FlashBoot有効のendpointを作り直す。
 
-VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードできる。ただしVibeVoice Largeを同じworkerで使う場合、Seed-VC residentが数GiBのVRAMを保持し、20GB級GPUではLargeのロード中にOOMしやすい。そのためVibeVoice用image/envでは `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` を既定にし、必要な時だけwarmup requestでVCを前倒しする。`MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE=1` の場合、VibeVoice request前に既存のVC serviceを解放してVRAMを空ける。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前に管理者用画面 `/admin` の手動準備ボタンからwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。CloudflareのページHTML配信だけではRunPod jobは起きず、管理者用画面の手動操作、または録音送信後の実変換でRunPod jobが作られる。
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードできる。ただしVibeVoice Largeを同じworkerで使う場合、Seed-VC residentが数GiBのVRAMを保持し、20GB級GPUではLargeのロード中にOOMしやすい。そのためVibeVoice用image/envでは `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` を既定にし、必要な時だけwarmup requestでVCを前倒しする。`MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE=1` の場合、VibeVoice request前に既存のVC serviceを解放してVRAMを空ける。指定台詞モードは `全話者VibeVoice生成 -> 話者別Seed-VC -> VC後音声のASR -> 分割/再配置` の順に進める。ASRは既定でOpenAI `whisper-1` を使い、Largeとfaster-whisperを同じGPUへ載せない。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前に管理者用画面 `/admin` の手動準備ボタンからwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。CloudflareのページHTML配信だけではRunPod jobは起きず、管理者用画面の手動操作、または録音送信後の実変換でRunPod jobが作られる。
 
 `RUNPOD_WORKERS_MAX` を増やすと、同時アクセス時にRunPodが追加workerを起動できる。ただし `RUNPOD_WORKERS_MIN=0` のデモ運用では、追加workerは基本的にcold状態から起動し、各worker内でSeed-VC preloadが必要になる。1つ目のwarm workerだけで処理できる程度の同時数なら `workers-max=1` の方が予測しやすい。複数人が同時にVCを使うデモでは `workers-max=2` を試せるが、2人目以降の初回VCはcold start分だけ遅くなる可能性を測定して判断する。
 

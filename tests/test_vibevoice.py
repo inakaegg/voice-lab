@@ -50,6 +50,28 @@ class FakeDirectedAsrProvider:
             self.events.append("release-asr")
 
 
+class FakeDirectedVoiceConversionService:
+    def __init__(self, events: list[str] | None = None):
+        self.events = events
+        self.calls: list[object] = []
+
+    def convert(self, request):
+        self.calls.append(request)
+        if self.events is not None:
+            self.events.append(f"vc:{request.source_audio_path.name}")
+        return SimpleNamespace(
+            output_audio_bytes=request.source_audio_path.read_bytes(),
+            output_audio_mime_type="audio/wav",
+            timings_ms={"voice_conversion": 1.0},
+            providers={"voice_conversion": "fake-directed-vc"},
+            warnings=[],
+        )
+
+    def release(self) -> None:
+        if self.events is not None:
+            self.events.append("release-vc")
+
+
 def _write_test_wav(path: Path, *, seconds: float = 1.0, sample_value: int = 1200, sample_rate: int = 1000) -> None:
     frame_count = max(1, int(seconds * sample_rate))
     frame = int(sample_value).to_bytes(2, "little", signed=True)
@@ -116,6 +138,16 @@ def test_normalize_vibevoice_directed_line_script_collapses_one_speaker_with_pun
 def test_normalize_vibevoice_directed_line_script_rejects_multiple_speakers() -> None:
     with pytest.raises(ValueError, match="複数話者"):
         normalize_vibevoice_directed_line_script("1 こんにちは。\n2 こんにちは。")
+
+
+def test_directed_asr_provider_defaults_to_openai_whisper_timestamp_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MO_VIBEVOICE_DIRECTED_ASR_PROVIDER", raising=False)
+    monkeypatch.delenv("MO_ASR_PROVIDER", raising=False)
+    monkeypatch.delenv("MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL", raising=False)
+
+    provider = vibevoice_module._create_directed_asr_provider()
+
+    assert provider.name == "openai-asr-whisper-1"
 
 
 def test_vibevoice_service_builds_cli_command_and_env(tmp_path: Path) -> None:
@@ -215,6 +247,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
         comfyui_vibevoice_path=module_dir,
         subprocess_run=fake_run,
         directed_asr_provider=asr,
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(),
     )
     voice = tmp_path / "voice.wav"
     voice.write_bytes(b"voice")
@@ -245,6 +278,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
         ]
     )
     assert result.providers["vibevoice_directed_asr"] == "fake-directed-asr"
+    assert result.providers["vibevoice_directed_vc"] == "fake-directed-vc"
     assert result.diagnostics["directed_line_mode"]["line_count"] == 4
     assert len(result.diagnostics["directed_line_mode"]["ranges"]) == 4
     assert "--line_by_line" not in command
@@ -291,6 +325,7 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
         comfyui_vibevoice_path=module_dir,
         subprocess_run=fake_run,
         directed_asr_provider=asr,
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(events=events),
     )
     voice1 = tmp_path / "voice1.wav"
     voice2 = tmp_path / "voice2.wav"
@@ -314,7 +349,14 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
         "Speaker 1: 一番目です、三番目です",
         "Speaker 1: 二番目です、四番目です",
     ]
-    assert events == ["vv:1", "vv:2", "asr:speaker-1.wav", "asr:speaker-2.wav"]
+    assert events == [
+        "vv:1",
+        "vv:2",
+        "vc:speaker-1.wav",
+        "vc:speaker-2.wav",
+        "asr:speaker-1-vc.wav",
+        "asr:speaker-2-vc.wav",
+    ]
     assert result.normalized_script == "\n".join(
         [
             "Speaker 1: 一番目です",
@@ -359,6 +401,7 @@ def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcrip
         vibevoice_home=home,
         comfyui_vibevoice_path=module_dir,
         subprocess_run=fake_run,
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(events=events),
     )
     voice = tmp_path / "voice.wav"
     voice.write_bytes(b"voice")
@@ -369,8 +412,53 @@ def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcrip
         options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
     )
 
-    assert events == ["vv", "asr:speaker-1.wav", "release-asr"]
+    assert events == ["vv", "vc:speaker-1.wav", "asr:speaker-1-vc.wav", "release-asr"]
     assert service._directed_asr_provider_instance is None
+
+
+def test_vibevoice_service_directed_line_mode_releases_owned_voice_conversion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        events.append("vv")
+        output_index = command.index("--output") + 1
+        _write_test_wav(Path(command[output_index]), seconds=0.5)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    asr = FakeDirectedAsrProvider(
+        [[{"text": "一番", "start": 0.0, "end": 0.2}]],
+        events=events,
+    )
+    vc = FakeDirectedVoiceConversionService(events=events)
+    monkeypatch.setattr(vibevoice_module, "_create_directed_asr_provider", lambda: asr)
+    monkeypatch.setattr(vibevoice_module, "_create_directed_voice_conversion_service", lambda: vc)
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    service.generate(
+        script_text="1 一番目です",
+        voice_paths=[VibeVoiceVoiceSample(slot=1, path=voice)],
+        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
+    )
+
+    assert events == ["vv", "vc:speaker-1.wav", "release-vc", "asr:speaker-1-vc.wav", "release-asr"]
+    assert service._directed_voice_conversion_service_instance is None
 
 
 def test_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: Path) -> None:
