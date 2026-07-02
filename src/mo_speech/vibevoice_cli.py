@@ -89,6 +89,8 @@ VIBEVOICE_MIN_NEW_TOKENS = 32
 VIBEVOICE_MAX_NEW_TOKENS = 768
 VIBEVOICE_TEXT_CHAR_TOKEN_RATIO = 1.6
 VIBEVOICE_LINE_TOKEN_OVERHEAD = 6
+GENERATION_CONFIG_MODE_EXPLICIT = "explicit"
+GENERATION_CONFIG_MODE_MODEL_DEFAULT = "model_default"
 
 
 def _install_transformers_qwen2_fast_alias() -> None:
@@ -153,6 +155,18 @@ def _estimate_vibevoice_max_new_tokens(script: str) -> int:
         + len(parsed_lines) * VIBEVOICE_LINE_TOKEN_OVERHEAD
     )
     return max(VIBEVOICE_MIN_NEW_TOKENS, min(VIBEVOICE_MAX_NEW_TOKENS, estimated_tokens))
+
+
+def _resolve_generation_config_mode() -> str:
+    raw_value = os.getenv("VIBEVOICE_GENERATION_CONFIG_MODE", GENERATION_CONFIG_MODE_EXPLICIT)
+    normalized = str(raw_value or "").strip().lower().replace("-", "_")
+    if not normalized:
+        return GENERATION_CONFIG_MODE_EXPLICIT
+    if normalized in {GENERATION_CONFIG_MODE_EXPLICIT, "manual"}:
+        return GENERATION_CONFIG_MODE_EXPLICIT
+    if normalized in {GENERATION_CONFIG_MODE_MODEL_DEFAULT, "default", "model"}:
+        return GENERATION_CONFIG_MODE_MODEL_DEFAULT
+    raise ValueError(f"unsupported VIBEVOICE_GENERATION_CONFIG_MODE: {raw_value}")
 
 
 def _install_vibevoice_modules_utils_alias() -> None:
@@ -850,21 +864,28 @@ class VibeVoice:
         inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
         self.model.set_ddpm_inference_steps(num_steps=inference_steps)
 
-        generation_config = {"do_sample": do_sample}
-        if do_sample:
-            generation_config["temperature"] = temperature
-            generation_config["top_p"] = top_p
-            if top_k > 0:
-                generation_config["top_k"] = top_k
+        generate_kwargs = {
+            "max_new_tokens": max_new_tokens,
+            "cfg_scale": cfg_scale,
+            "tokenizer": self.processor.tokenizer,
+            "verbose": False,
+        }
+        generation_config_mode = _resolve_generation_config_mode()
+        if generation_config_mode == GENERATION_CONFIG_MODE_MODEL_DEFAULT:
+            logger.info("VibeVoice生成設定: モデル既定generation_configを使用します")
+        else:
+            generation_config = {"do_sample": do_sample}
+            if do_sample:
+                generation_config["temperature"] = temperature
+                generation_config["top_p"] = top_p
+                if top_k > 0:
+                    generation_config["top_k"] = top_k
+            generate_kwargs["generation_config"] = generation_config
 
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=max_new_tokens,
-                cfg_scale=cfg_scale,
-                tokenizer=self.processor.tokenizer,
-                generation_config=generation_config,
-                verbose=False,
+                **generate_kwargs,
             )
 
         speech_outputs = getattr(outputs, "speech_outputs", None)
@@ -1059,6 +1080,7 @@ class VibeVoice:
                 "temperature": temperature,
                 "top_p": top_p,
                 "top_k": top_k,
+                "generation_config_mode": _resolve_generation_config_mode(),
                 "voice_digest": voice_digest(voice_path),
                 "voice_path": voice_path.as_posix(),
                 "model_path": self.model_path,

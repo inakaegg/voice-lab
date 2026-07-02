@@ -12,6 +12,20 @@ from pathlib import Path
 from typing import Any
 
 
+def _optional_float_env(name: str) -> float | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, text-TTS, or voice-conversion smoke request.")
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
@@ -51,8 +65,17 @@ def main() -> int:
     parser.add_argument("--http-timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_HTTP_TIMEOUT_SECONDS", "120")))
     parser.add_argument("--poll-interval", type=float, default=float(os.getenv("RUNPOD_SMOKE_POLL_INTERVAL_SECONDS", "1.0")))
     parser.add_argument("--vibevoice-model-id", default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_MODEL_ID", "vibevoice-1.5b-pinned"))
+    parser.add_argument("--vibevoice-cfg-scale", type=float, default=_optional_float_env("RUNPOD_SMOKE_VIBEVOICE_CFG_SCALE"))
     parser.add_argument("--vibevoice-inference-steps", type=int, default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_INFERENCE_STEPS", "2")))
     parser.add_argument("--vibevoice-seed", type=int, default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_SEED", "42")))
+    parser.add_argument(
+        "--vibevoice-no-sample",
+        action="store_true",
+        default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_NO_SAMPLE") == "1",
+    )
+    parser.add_argument("--vibevoice-temperature", type=float, default=_optional_float_env("RUNPOD_SMOKE_VIBEVOICE_TEMPERATURE"))
+    parser.add_argument("--vibevoice-top-p", type=float, default=_optional_float_env("RUNPOD_SMOKE_VIBEVOICE_TOP_P"))
+    parser.add_argument("--vibevoice-top-k", type=int, default=_optional_int_env("RUNPOD_SMOKE_VIBEVOICE_TOP_K"))
     parser.add_argument(
         "--vibevoice-max-voice-seconds",
         type=float,
@@ -93,17 +116,28 @@ def main() -> int:
         if not voice_specs:
             raise SystemExit("--voice-audio is required for vibevoice")
         voices = [_vibevoice_voice_payload(spec, index) for index, spec in enumerate(voice_specs, start=1)]
+        generation_payload: dict[str, Any] = {
+            "model_id": args.vibevoice_model_id,
+            "inference_steps": args.vibevoice_inference_steps,
+            "seed": args.vibevoice_seed,
+            "max_voice_seconds": args.vibevoice_max_voice_seconds,
+            "line_by_line": args.vibevoice_line_by_line,
+        }
+        if args.vibevoice_cfg_scale is not None:
+            generation_payload["cfg_scale"] = args.vibevoice_cfg_scale
+        if args.vibevoice_no_sample:
+            generation_payload["do_sample"] = False
+        if args.vibevoice_temperature is not None:
+            generation_payload["temperature"] = args.vibevoice_temperature
+        if args.vibevoice_top_p is not None:
+            generation_payload["top_p"] = args.vibevoice_top_p
+        if args.vibevoice_top_k is not None:
+            generation_payload["top_k"] = args.vibevoice_top_k
         input_payload = {
             "operation_mode": "vibevoice",
             "script": script_text,
             "voices": voices,
-            "generation": {
-                "model_id": args.vibevoice_model_id,
-                "inference_steps": args.vibevoice_inference_steps,
-                "seed": args.vibevoice_seed,
-                "max_voice_seconds": args.vibevoice_max_voice_seconds,
-                "line_by_line": args.vibevoice_line_by_line,
-            },
+            "generation": generation_payload,
         }
     else:
         if not args.audio:

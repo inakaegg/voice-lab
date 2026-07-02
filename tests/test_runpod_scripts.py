@@ -87,6 +87,17 @@ def test_runpod_smoke_script_supports_diagnostics_operation() -> None:
     assert 'input_payload = {"operation_mode": "diagnostics"}' in script
 
 
+def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
+    script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
+
+    assert "--vibevoice-cfg-scale" in script
+    assert "--vibevoice-no-sample" in script
+    assert "--vibevoice-temperature" in script
+    assert 'generation_payload["cfg_scale"] = args.vibevoice_cfg_scale' in script
+    assert 'generation_payload["do_sample"] = False' in script
+    assert 'generation_payload["temperature"] = args.vibevoice_temperature' in script
+
+
 def test_runpod_update_serverless_template_redacts_env_json(tmp_path: Path) -> None:
     env_file = tmp_path / ".runpod.env"
     env_file.write_text(

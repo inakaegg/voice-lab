@@ -423,6 +423,52 @@ def test_vibevoice_cli_uses_raw_text_processor_path(tmp_path: Path) -> None:
     assert generate_calls[0]["max_new_tokens"] < 150
 
 
+def test_vibevoice_cli_can_use_model_default_generation_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("VIBEVOICE_GENERATION_CONFIG_MODE", "model_default")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+    generate_calls = []
+
+    class FakeProcessor:
+        tokenizer = object()
+
+        def __call__(self, **kwargs):
+            return {}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, **kwargs):
+            generate_calls.append(kwargs)
+            return SimpleNamespace(speech_outputs=[torch.zeros(10, dtype=torch.float32)])
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    waveform = service._synthesize_script(
+        script_text="Speaker 1: こんにちは。",
+        voice_samples_np=[],
+        cfg_scale=1.3,
+        inference_steps=2,
+        do_sample=True,
+        temperature=0.95,
+        top_p=0.95,
+        top_k=0,
+    )
+
+    assert waveform.shape == (10,)
+    assert "generation_config" not in generate_calls[0]
+
+
 def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
     short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")
     long_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens(

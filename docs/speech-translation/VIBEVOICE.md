@@ -24,7 +24,9 @@
 
 長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。ローカル実行ではVibeVoice CLIの `tqdm` 出力に含まれる実進捗値を取り込み、プログレスバーを数値進捗へ切り替える。進捗値がまだ取れない初期化や未知ステージだけ、処理中インジケータとしてアニメーション表示する。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
 
-`VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるため、RunPod/CUDA専用の実験候補として扱う。Large repoには `tokenizer.json` がないため、tokenizerは `Qwen/Qwen2.5-7B` に分けて指定する。Largeの利用例はCUDA上で `bfloat16` 読み込みを使っているため、`vibevoice-large-aoi-pinned` はCLIへ `VIBEVOICE_TORCH_DTYPE=bfloat16` を渡す。UIではRunPod Serverlessを選んだ時だけLargeを選択可能にし、ローカルbackendへは送らない。2026-07-01のRunPod検証では、tokenizer 404を解消した後も現行の非streamingスキット生成CLIで生成失敗が残っていたため、Largeは安定運用候補ではなく、RunPod上で依存ref、生成経路、生成パラメータを詰める対象とする。
+`VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるため、RunPod/CUDA専用の実験候補として扱う。Large repoには `tokenizer.json` がないため、tokenizerは `Qwen/Qwen2.5-7B` に分けて指定する。Largeの利用例はCUDA上で `bfloat16` 読み込みを使っているため、`vibevoice-large-aoi-pinned` はCLIへ `VIBEVOICE_TORCH_DTYPE=bfloat16` を渡す。UIではRunPod Serverlessを選んだ時だけLargeを選択可能にし、ローカルbackendへは送らない。
+
+2026-07-02のRunPod検証では、Largeのモデル読み込みと `Qwen/Qwen2.5-7B` tokenizer読み込みは通るが、1.5B向けに組み立てた明示 `generation_config` をLargeへ渡すと、最初のtoken生成前に `torch.multinomial` の確率テンソル不正でCUDA assertする。`do_sample=false` ではCUDA assertを避けられるが、先頭でEOS相当になり音声波形が返らない。Large公開例は `generation_config` を明示せず `cfg_scale` とtokenizerを渡しているため、Largeプリセットでは `VIBEVOICE_GENERATION_CONFIG_MODE=model_default` を使い、モデル側の既定生成設定を優先する。Largeは引き続き安定運用候補ではなく、RunPod上で短い台本、参照音声、生成パラメータを固定して検証する対象とする。
 
 `microsoft/VibeVoice-Realtime-0.5B` は `model_type=vibevoice_streaming`、architectureも `VibeVoiceStreaming...` 系で、現在の非streamingスキット生成CLIとは別経路である。RunPod上の通常スキット生成ではCUDA assertまで進むため、通常UIのモデル候補には出さない。これも「Realtimeが使えない」という意味ではなく、streaming model用の入力、生成ループ、出力処理を別実装として持っていないという意味である。Realtimeモデルを扱う場合は、別途streaming向け実装として仕様化してから追加する。
 
@@ -97,6 +99,7 @@ VIBEVOICE_MODEL_REVISION=1b81fecc784a076dcd935678db551871f4598ebf
 VIBEVOICE_TOKENIZER_REPO=Qwen/Qwen2.5-7B
 VIBEVOICE_TOKENIZER_REVISION=d149729398750b98c0af14eb82c78cfe92750796
 VIBEVOICE_TORCH_DTYPE=bfloat16
+VIBEVOICE_GENERATION_CONFIG_MODE=model_default
 ```
 
 `VIBEVOICE_MODEL_REVISION` と `VIBEVOICE_TOKENIZER_REVISION` は、ローカルで動作確認したキャッシュと同じrevisionをRunPod初回ダウンロードでも使うために固定する。未固定のままHugging Faceの `main` を取得すると、後日のモデル更新で同じ入力でも挙動が変わる可能性がある。
@@ -109,7 +112,7 @@ UIでモデルを選んだ場合は、そのリクエストの間だけ `VIBEVOI
 - 日本語参照音声でも漢字読みを誤る場合がある。台本をひらがなにすると改善するため、テキスト正規化または読み指定の仕組みが必要。
 - 途中にノイズや不自然な音が混じることがある。RunPod実行、依存ライブラリ、GPU、生成パラメータ、参照音声前処理の差分を分けて検証する。
 - `VibeVoice Realtime 0.5B` は既存の非streamingスキット生成CLIと互換でないため、通常UIでは選択肢に出さない。
-- `aoi-ot/VibeVoice-Large` はtokenizerを `Qwen/Qwen2.5-7B` に分けることで404は避けられる。UI/APIではRunPod専用候補として扱うが、現行CLIでの生成安定性は短文から再検証が必要。
+- `aoi-ot/VibeVoice-Large` はtokenizerを `Qwen/Qwen2.5-7B` に分けることで404は避けられる。UI/APIではRunPod専用候補として扱い、CLIはLarge時だけ明示 `generation_config` を渡さずモデル既定を使う。生成安定性は短文から再検証が必要。
 - ローカルmacOSのMPS backendでは、モデル読み込み後の生成中にMetal/MPS内部のshape不整合でプロセスがabortする場合がある。CPUは生成が極端に遅いため、品質確認と速度確認はRunPod/CUDAでも必ず行う。
 - 台本全体生成と行ごと生成では、自然さ、破綻のしにくさ、行間の違和感が変わる。品質比較では、ブラウザに復元される直近の生成設定と入力台本に加えて、後から比較できる生成履歴が必要。
 
