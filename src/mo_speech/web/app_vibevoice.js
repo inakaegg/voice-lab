@@ -16,6 +16,7 @@ const progressBar = document.querySelector(".vibevoice-progress-bar");
 const progressFill = progressBar?.querySelector("span");
 const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
+const resetSettingsButton = document.querySelector("#vibevoice-reset-settings-button");
 const backendSelect = form.elements.backend;
 const modelSelect = form.elements.model_id;
 const lineByLineControl = form.elements.line_by_line;
@@ -45,6 +46,9 @@ const persistedFieldNames = [
 const persistedControls = persistedFieldNames
   .map((name) => form.elements[name])
   .filter((control) => control && typeof control.name === "string");
+const defaultGenerationSettings = Object.fromEntries(
+  persistedControls.map((control) => [control.name, defaultControlValue(control)]),
+);
 const savedVoiceFilesBySlot = new Map();
 
 let currentAudioUrl = "";
@@ -57,6 +61,7 @@ let lineByLineUserPreference = lineByLineControl?.checked === true;
 
 form.addEventListener("submit", handleGenerate);
 cancelButton.addEventListener("click", cancelVibeVoiceJob);
+resetSettingsButton.addEventListener("click", resetVibeVoiceGenerationSettings);
 scriptInput.addEventListener("input", () => {
   updateLineByLineAutoState();
   saveVibeVoiceDraft();
@@ -154,6 +159,17 @@ function saveVibeVoiceDraft() {
   }
 }
 
+function defaultControlValue(control) {
+  if (control.type === "checkbox") {
+    return control.defaultChecked;
+  }
+  if (control.tagName === "SELECT") {
+    const selectedOption = Array.from(control.options).find((option) => option.defaultSelected);
+    return selectedOption?.value || control.options[0]?.value || "";
+  }
+  return control.defaultValue;
+}
+
 function restoreControlValue(control, value) {
   if (control.type === "checkbox") {
     control.checked = checkboxValue(value);
@@ -164,6 +180,24 @@ function restoreControlValue(control, value) {
     return;
   }
   control.value = nextValue;
+}
+
+function resetVibeVoiceGenerationSettings() {
+  for (const control of persistedControls) {
+    const defaultValue = defaultGenerationSettings[control.name];
+    if (control === lineByLineControl) {
+      lineByLineUserPreference = checkboxValue(defaultValue);
+      control.checked = lineByLineUserPreference;
+      continue;
+    }
+    restoreControlValue(control, defaultValue);
+  }
+  updateModelAvailability();
+  updateLineByLineAutoState();
+  rangeInputs.forEach((input) => renderRangeValue(input));
+  saveVibeVoiceDraft();
+  message.dataset.state = "ready";
+  message.textContent = "生成設定をデフォルトに戻しました。";
 }
 
 function checkboxValue(value) {
@@ -753,6 +787,7 @@ function clearResult() {
 function setBusy(busy, text) {
   generateButton.disabled = busy;
   generateButton.textContent = busy ? "生成中..." : "生成";
+  resetSettingsButton.disabled = busy;
   cancelButton.hidden = !busy;
   if (busy) {
     jobProgress.dataset.state = "running";

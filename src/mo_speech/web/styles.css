@@ -2191,6 +2191,23 @@ audio {
   justify-content: space-between;
 }
 
+.vibevoice-reset-settings-button {
+  background: #f0f4fb;
+  border: 1px solid #c9d9ec;
+  border-radius: 8px;
+  color: #17395f;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.vibevoice-reset-settings-button:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
 .vibevoice-file-button {
   cursor: pointer;
   display: inline-flex;
@@ -2402,6 +2419,46 @@ audio {
   cursor: not-allowed;
 }
 
+.vibevoice-parameter-guide {
+  border-top: 1px solid #dbe5f2;
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.vibevoice-parameter-guide h3 {
+  color: #17395f;
+  font-size: 14px;
+  font-weight: 900;
+  margin: 0;
+}
+
+.vibevoice-parameter-guide dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.vibevoice-parameter-guide div {
+  display: grid;
+  gap: 3px 8px;
+  grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+}
+
+.vibevoice-parameter-guide dt {
+  color: #17395f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.vibevoice-parameter-guide dd {
+  color: #556984;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .vibevoice-actions {
   align-items: center;
   background: #ffffff;
@@ -2569,6 +2626,10 @@ audio {
     width: 100%;
   }
 
+  .vibevoice-reset-settings-button {
+    width: 100%;
+  }
+
   .vibevoice-nav {
     justify-content: start;
   }
@@ -2581,6 +2642,10 @@ audio {
 
   .vibevoice-setting-wide {
     grid-column: auto;
+  }
+
+  .vibevoice-parameter-guide div {
+    grid-template-columns: 1fr;
   }
 
   .vibevoice-actions {

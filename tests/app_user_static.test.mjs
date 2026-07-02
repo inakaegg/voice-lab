@@ -152,6 +152,14 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-realtime-0\.5b-latest"/);
   assert.match(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"[^>]*data-vibevoice-backends="runpod_serverless"/);
   assert.match(vibevoiceHtml, /name="inference_steps"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-reset-settings-button"/);
+  assert.match(vibevoiceHtml, /class="vibevoice-parameter-guide"/);
+  assert.match(vibevoiceHtml, /パラメータ目安/);
+  assert.match(vibevoiceHtml, /まず 1\.1-1\.5/);
+  assert.match(vibevoiceHtml, /試作は 10-15/);
+  assert.match(vibevoiceHtml, /まず 0\.75-0\.95/);
+  assert.match(vibevoiceHtml, /基本 0、不安定なら 30-50/);
+  assert.match(vibevoiceHtml, /自然会話は 0\.4-0\.7秒/);
   assert.match(vibevoiceHtml, /id="vibevoice-generate-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-cancel-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-job-progress"/);
@@ -180,6 +188,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /progress_log/);
   assert.match(vibevoiceSource, /localStorage\.getItem/);
   assert.match(vibevoiceSource, /localStorage\.setItem/);
+  assert.match(vibevoiceSource, /resetVibeVoiceGenerationSettings/);
+  assert.match(vibevoiceSource, /defaultGenerationSettings/);
   assert.match(vibevoiceSource, /scriptInput\.addEventListener\("input"[\s\S]*updateLineByLineAutoState\(\)[\s\S]*saveVibeVoiceDraft\(\)/);
   assert.match(vibevoiceSource, /handleScriptFileChange[\s\S]*saveVibeVoiceDraft\(\)/);
   assert.match(vibevoiceSource, /"backend"/);
@@ -192,6 +202,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-shell/);
   assert.match(styles, /\.vibevoice-workspace/);
   assert.match(styles, /\.vibevoice-range-control/);
+  assert.match(styles, /\.vibevoice-parameter-guide/);
   assert.match(styles, /\.vibevoice-debug-runtime/);
   assert.match(styles, /\.vibevoice-progress-bar/);
   assert.match(styles, /\.vibevoice-progress-log/);

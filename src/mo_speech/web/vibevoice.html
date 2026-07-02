@@ -89,6 +89,7 @@
                   <p class="vibevoice-section-label">Parameters</p>
                   <h2>生成設定</h2>
                 </div>
+                <button id="vibevoice-reset-settings-button" class="vibevoice-reset-settings-button" type="button">デフォルトに戻す</button>
               </div>
               <div class="vibevoice-settings-grid">
                 <label class="vibevoice-setting-field vibevoice-setting-wide">
@@ -173,6 +174,47 @@
                   <span>行ごとに生成して結合</span>
                 </label>
               </div>
+              <section class="vibevoice-parameter-guide" aria-label="生成パラメータの目安">
+                <h3>パラメータ目安</h3>
+                <dl>
+                  <div>
+                    <dt>CFG</dt>
+                    <dd>台本と参照音声への寄せ具合。まず 1.1-1.5、既定 1.3。</dd>
+                  </div>
+                  <div>
+                    <dt>Steps</dt>
+                    <dd>音声生成の反復数。試作は 10-15、本命候補は 20-30。</dd>
+                  </div>
+                  <div>
+                    <dt>Seed</dt>
+                    <dd>候補差を出す乱数。固定比較は 42、候補出しは 123/777/2024 も試す。</dd>
+                  </div>
+                  <div>
+                    <dt>Temperature</dt>
+                    <dd>乱択の強さ。まず 0.75-0.95、崩れる時は下げる。</dd>
+                  </div>
+                  <div>
+                    <dt>Top P</dt>
+                    <dd>候補に残す確率範囲。まず 0.85-0.95。</dd>
+                  </div>
+                  <div>
+                    <dt>Top K</dt>
+                    <dd>候補数の上限。基本 0、不安定なら 30-50。</dd>
+                  </div>
+                  <div>
+                    <dt>参照秒数</dt>
+                    <dd>参照音声の有声区間上限。基準 5秒、声質が弱い時は 8-10秒、ノイズ混入時は 3-5秒。</dd>
+                  </div>
+                  <div>
+                    <dt>行ごと生成</dt>
+                    <dd>長文の破綻分離用。1-3行はOFFも比較、4行以上はON優先。</dd>
+                  </div>
+                  <div>
+                    <dt>行間秒数</dt>
+                    <dd>行ごと結合の無音。自然会話は 0.4-0.7秒、聞き取り重視は 1.0秒。</dd>
+                  </div>
+                </dl>
+              </section>
             </section>
 
             <div class="vibevoice-actions">
