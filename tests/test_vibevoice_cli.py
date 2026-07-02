@@ -589,7 +589,47 @@ def test_vibevoice_cli_adds_large_stability_logits_processors(
     assert call["generation_config"]["do_sample"] is True
     assert "logits_processor" in call
     assert any(isinstance(item, vibevoice_cli._FiniteLogitsProcessor) for item in call["logits_processor"])
-    assert any(isinstance(item, vibevoice_cli._MinAudioTokensProcessor) for item in call["logits_processor"])
+    min_audio_processors = [
+        item for item in call["logits_processor"] if isinstance(item, vibevoice_cli._MinAudioTokensProcessor)
+    ]
+    assert min_audio_processors
+    assert min_audio_processors[0].min_audio_tokens > 1
+
+
+def test_vibevoice_cli_estimates_min_audio_tokens_from_script_text() -> None:
+    short_min = vibevoice_cli._estimate_vibevoice_min_audio_tokens(
+        "Speaker 1: こんにちは。",
+        configured_min_audio_tokens=1,
+        max_new_tokens=32,
+    )
+    long_min = vibevoice_cli._estimate_vibevoice_min_audio_tokens(
+        "\n".join(
+            [
+                "Speaker 1: こんにちは。今日は北海道の暮らしについて話します。",
+                "Speaker 2: 自然が多く、温泉も近くにあって、とても快適です。",
+                "Speaker 1: 仕事は牧場で、牛の世話や搾乳をしています。",
+            ]
+        ),
+        configured_min_audio_tokens=1,
+        max_new_tokens=120,
+    )
+    capped_min = vibevoice_cli._estimate_vibevoice_min_audio_tokens(
+        "Speaker 1: " + "こんにちは。" * 200,
+        configured_min_audio_tokens=1,
+        max_new_tokens=32,
+    )
+
+    assert short_min > 1
+    assert long_min > short_min
+    assert capped_min == 28
+    assert (
+        vibevoice_cli._estimate_vibevoice_min_audio_tokens(
+            "Speaker 1: こんにちは。",
+            configured_min_audio_tokens=0,
+            max_new_tokens=32,
+        )
+        == 0
+    )
 
 
 def test_vibevoice_cli_min_audio_tokens_processor_masks_early_stop_tokens() -> None:
@@ -786,6 +826,35 @@ def test_vibevoice_cli_large_startup_contract_is_locally_testable(
             assert torch.isneginf(fixed[0, FakeTokenizer.speech_start_id])
             assert torch.isneginf(fixed[0, FakeTokenizer.speech_end_id])
             assert fixed[0, FakeTokenizer.speech_diffusion_id] == 0
+
+            fixed_after_one_token = token_constraint(
+                torch.cat(
+                    [
+                        input_ids,
+                        torch.tensor([[FakeTokenizer.speech_diffusion_id]], dtype=torch.long, device=input_ids.device),
+                    ],
+                    dim=1,
+                ),
+                scores.clone(),
+            )
+            assert torch.isneginf(fixed_after_one_token[0, FakeTokenizer.eos_token_id])
+
+            required_audio_tokens = vibevoice_cli._estimate_vibevoice_min_audio_tokens(
+                "Speaker 1: こんにちは。",
+                configured_min_audio_tokens=1,
+                max_new_tokens=kwargs["max_new_tokens"],
+            )
+            enough_audio_tokens = torch.full(
+                (1, required_audio_tokens),
+                FakeTokenizer.speech_diffusion_id,
+                dtype=torch.long,
+                device=input_ids.device,
+            )
+            fixed_after_required_tokens = token_constraint(
+                torch.cat([input_ids, enough_audio_tokens], dim=1),
+                scores.clone(),
+            )
+            assert fixed_after_required_tokens[0, FakeTokenizer.eos_token_id] == 20.0
 
             next_token = torch.argmax(fixed, dim=-1)
             assert int(next_token.item()) == FakeTokenizer.speech_diffusion_id

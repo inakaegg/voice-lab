@@ -25,6 +25,7 @@ import types
 import zipfile
 import inspect
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
@@ -91,8 +92,15 @@ VIBEVOICE_MIN_NEW_TOKENS = 32
 VIBEVOICE_MAX_NEW_TOKENS = 768
 VIBEVOICE_TEXT_CHAR_TOKEN_RATIO = 1.6
 VIBEVOICE_LINE_TOKEN_OVERHEAD = 6
+VIBEVOICE_MIN_AUDIO_TEXT_CHAR_TOKEN_RATIO = 1.0
+VIBEVOICE_MIN_AUDIO_LINE_TOKEN_OVERHEAD = 4
+VIBEVOICE_STOP_TOKEN_MARGIN = 4
 GENERATION_CONFIG_MODE_EXPLICIT = "explicit"
 GENERATION_CONFIG_MODE_MODEL_DEFAULT = "model_default"
+_MIN_AUDIO_TOKENS_OVERRIDE: ContextVar[int | None] = ContextVar(
+    "_MIN_AUDIO_TOKENS_OVERRIDE",
+    default=None,
+)
 
 
 def _install_transformers_qwen2_fast_alias() -> None:
@@ -189,11 +197,41 @@ def _processor_supports_parsed_scripts(processor: Any) -> bool:
 
 
 def _resolve_min_audio_tokens() -> int:
+    override = _MIN_AUDIO_TOKENS_OVERRIDE.get()
+    if override is not None:
+        return max(0, int(override))
+    return _resolve_configured_min_audio_tokens()
+
+
+def _resolve_configured_min_audio_tokens() -> int:
     raw_value = os.getenv("VIBEVOICE_MIN_AUDIO_TOKENS", "0")
     try:
         return max(0, int(str(raw_value or "0").strip()))
     except ValueError as exc:
         raise ValueError(f"unsupported VIBEVOICE_MIN_AUDIO_TOKENS: {raw_value}") from exc
+
+
+def _estimate_vibevoice_min_audio_tokens(
+    script: str,
+    *,
+    configured_min_audio_tokens: int,
+    max_new_tokens: int,
+) -> int:
+    configured_min = max(0, int(configured_min_audio_tokens))
+    if configured_min == 0:
+        return 0
+
+    parsed_lines, _speaker_ids = _parse_script_1_based(script)
+    if not parsed_lines:
+        return configured_min
+
+    text_char_count = sum(len(text.strip()) for _speaker_id, text in parsed_lines)
+    estimated = math.ceil(
+        text_char_count * VIBEVOICE_MIN_AUDIO_TEXT_CHAR_TOKEN_RATIO
+        + len(parsed_lines) * VIBEVOICE_MIN_AUDIO_LINE_TOKEN_OVERHEAD
+    )
+    upper_bound = max(configured_min, max(0, int(max_new_tokens) - VIBEVOICE_STOP_TOKEN_MARGIN))
+    return max(configured_min, min(upper_bound, estimated))
 
 
 def _patch_vibevoice_token_constraint_processor_for_safe_sampling(processor_cls: Any) -> None:
@@ -1012,6 +1050,18 @@ class VibeVoice:
             raise ValueError("スクリプトが空または無効です。'Speaker 1:', 'Speaker 2:' などの形式を使用してください")
         max_new_tokens = _estimate_vibevoice_max_new_tokens(script_text)
         logger.info("VibeVoice生成token上限: %d", max_new_tokens)
+        configured_min_audio_tokens = _resolve_configured_min_audio_tokens()
+        min_audio_tokens = _estimate_vibevoice_min_audio_tokens(
+            script_text,
+            configured_min_audio_tokens=configured_min_audio_tokens,
+            max_new_tokens=max_new_tokens,
+        )
+        if min_audio_tokens > 0:
+            logger.info(
+                "VibeVoice初期音声token下限: %d (設定値=%d)",
+                min_audio_tokens,
+                configured_min_audio_tokens,
+            )
         if _processor_supports_parsed_scripts(self.processor):
             prompt_speaker_ids = speaker_ids_for_prompt or _speaker_ids_1_based
             logger.info("VibeVoice processor入力: parsed_scripts経路を使用します")
@@ -1049,7 +1099,6 @@ class VibeVoice:
             "verbose": False,
         }
         logits_processors = LogitsProcessorList([_FiniteLogitsProcessor()])
-        min_audio_tokens = _resolve_min_audio_tokens()
         if min_audio_tokens > 0:
             tokenizer = self.processor.tokenizer
             blocked_token_ids = [
@@ -1079,11 +1128,15 @@ class VibeVoice:
                     generation_config["top_k"] = top_k
             generate_kwargs["generation_config"] = generation_config
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                **generate_kwargs,
-            )
+        min_audio_token = _MIN_AUDIO_TOKENS_OVERRIDE.set(min_audio_tokens)
+        try:
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    **generate_kwargs,
+                )
+        finally:
+            _MIN_AUDIO_TOKENS_OVERRIDE.reset(min_audio_token)
 
         speech_outputs = getattr(outputs, "speech_outputs", None)
         if not speech_outputs or speech_outputs[0] is None:

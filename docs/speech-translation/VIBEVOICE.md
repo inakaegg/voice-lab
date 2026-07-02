@@ -105,6 +105,8 @@ VIBEVOICE_GENERATION_CONFIG_MODE=explicit
 VIBEVOICE_MIN_AUDIO_TOKENS=1
 ```
 
+`VIBEVOICE_MIN_AUDIO_TOKENS` はLargeで `speech_start` 直後にEOSへ落ちる挙動を避けるための下限指定である。CLIはこの値を固定の生成長としては扱わず、台本文字数、行数、`max_new_tokens` から実際に強制する最低音声token数を見積もる。これにより短文でも1tokenだけで終了せず、長い台本では台本長に応じた最低限の音声tokenを要求する。
+
 `VIBEVOICE_MODEL_REVISION` と `VIBEVOICE_TOKENIZER_REVISION` は、ローカルで動作確認したキャッシュと同じrevisionをRunPod初回ダウンロードでも使うために固定する。未固定のままHugging Faceの `main` を取得すると、後日のモデル更新で同じ入力でも挙動が変わる可能性がある。
 
 UIでモデルを選んだ場合は、そのリクエストの間だけ `VIBEVOICE_MODEL_REPO`、`VIBEVOICE_MODEL_REVISION`、`VIBEVOICE_TOKENIZER_REPO`、`VIBEVOICE_TOKENIZER_REVISION` 相当の値をRunPod handlerへ渡す。RunPod Volumeに該当モデルがなければ、初回生成内でHugging Faceからダウンロードされる。
