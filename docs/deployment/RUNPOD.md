@@ -145,6 +145,20 @@ gh secret set DOCKERHUB_USERNAME --body "<Docker Hub user>"
 gh secret set DOCKERHUB_TOKEN
 ```
 
+### deploy系スクリプトの使い分け
+
+push後にRunPod Serverlessへ反映する通常手順では、まず `scripts/runpod_deploy_serverless_image.sh` を使う。これはActions build、image push、新template作成、endpoint切替、`.runpod.env` 更新、diagnostics確認までをまとめて行うため、固定tag再利用や古いworkerを踏むリスクを減らせる。
+
+| スクリプト | 使う場面 | 主な処理 |
+| --- | --- | --- |
+| `scripts/runpod_deploy_serverless_image.sh` | 通常のdeploy。push済みの現在HEADをRunPod Serverlessへ反映したい時 | GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作り、endpointの `templateId` を切り替え、`.runpod.env` を更新し、diagnostics smokeを実行する |
+| `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` と `RUNPOD_IMAGE` を使い、既存templateを更新する。endpoint切替やworker入れ替えは行わない |
+| `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` の `RUNPOD_IMAGE` から新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
+| `scripts/runpod_build_push.sh` | ローカルDockerで直接build/pushしたい時 | `Dockerfile.runpod` をローカルでbuildx buildしてregistryへpushする。Actions運用では通常使わない |
+| `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、VibeVoiceなどのjobを直接投げる |
+
+判断に迷う場合は、`RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh` で実行予定のtag、template名、workflow起動内容を確認してからdry-runなしで実行する。
+
 通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
 
 ```bash
