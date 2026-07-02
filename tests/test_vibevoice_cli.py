@@ -707,6 +707,114 @@ def test_vibevoice_cli_casts_bfloat16_waveform_before_numpy(tmp_path: Path) -> N
     assert waveform.dtype == np.float32
 
 
+def test_vibevoice_cli_large_startup_contract_is_locally_testable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("VIBEVOICE_DEVICE", "cpu")
+    monkeypatch.setenv("VIBEVOICE_GENERATION_CONFIG_MODE", "explicit")
+    monkeypatch.setenv("VIBEVOICE_MIN_AUDIO_TOKENS", "1")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+    processor_calls = []
+    generate_calls = []
+    constraint_checks = []
+
+    class FakeTokenizer:
+        bos_token_id = 0
+        eos_token_id = 1
+        speech_start_id = 2
+        speech_end_id = 3
+        speech_diffusion_id = 4
+
+    class FakeTokenConstraintProcessor:
+        def __init__(self, valid_token_ids, device=None):
+            self.valid_token_ids = torch.tensor(valid_token_ids, dtype=torch.long, device=device)
+
+        def __call__(self, input_ids, scores):
+            mask = torch.full_like(scores, float("-inf"))
+            mask[:, self.valid_token_ids] = 0
+            return scores + mask
+
+    vibevoice_cli._patch_vibevoice_token_constraint_processor_for_safe_sampling(FakeTokenConstraintProcessor)
+
+    class FakeProcessor:
+        tokenizer = FakeTokenizer()
+
+        def __call__(
+            self,
+            *,
+            parsed_scripts=None,
+            voice_samples=None,
+            speaker_ids_for_prompt=None,
+            padding=True,
+            return_tensors=None,
+            return_attention_mask=True,
+        ):
+            processor_calls.append(
+                {
+                    "parsed_scripts": parsed_scripts,
+                    "voice_samples": voice_samples,
+                    "speaker_ids_for_prompt": speaker_ids_for_prompt,
+                    "padding": padding,
+                    "return_tensors": return_tensors,
+                    "return_attention_mask": return_attention_mask,
+                }
+            )
+            # 先頭のspeech_diffusion_idは参照音声由来のpromptを模したもの。
+            # 生成済み音声tokenとして数えると、Largeはspeech_start直後にEOSへ落ちる。
+            return {"input_ids": torch.tensor([[4, 10, 11, 2]], dtype=torch.long)}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, input_ids, **kwargs):
+            generate_calls.append({"input_ids": input_ids, "kwargs": kwargs})
+            token_constraint = FakeTokenConstraintProcessor([2, 3, 4, 1, 0], device=input_ids.device)
+            scores = torch.zeros((input_ids.shape[0], 6), dtype=torch.float32, device=input_ids.device)
+            scores[:, FakeTokenizer.eos_token_id] = 20.0
+
+            fixed = token_constraint(input_ids, scores)
+            constraint_checks.append(fixed.detach().cpu())
+            assert torch.isneginf(fixed[0, FakeTokenizer.eos_token_id])
+            assert torch.isneginf(fixed[0, FakeTokenizer.speech_start_id])
+            assert torch.isneginf(fixed[0, FakeTokenizer.speech_end_id])
+            assert fixed[0, FakeTokenizer.speech_diffusion_id] == 0
+
+            next_token = torch.argmax(fixed, dim=-1)
+            assert int(next_token.item()) == FakeTokenizer.speech_diffusion_id
+            return SimpleNamespace(
+                speech_outputs=[torch.zeros(10, dtype=torch.bfloat16, device=input_ids.device)],
+                sequences=torch.cat([input_ids, next_token[:, None]], dim=1),
+            )
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    waveform = service._synthesize_script(
+        script_text="Speaker 1: こんにちは。",
+        voice_samples_np=[],
+        cfg_scale=1.3,
+        inference_steps=2,
+        do_sample=True,
+        temperature=0.95,
+        top_p=0.95,
+        top_k=0,
+    )
+
+    assert processor_calls[0]["parsed_scripts"] == [[(0, " こんにちは。")]]
+    assert processor_calls[0]["speaker_ids_for_prompt"] == [[1]]
+    assert generate_calls[0]["kwargs"]["generation_config"]["do_sample"] is True
+    assert constraint_checks
+    assert waveform.dtype == np.float32
+
+
 def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
     short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")
     long_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens(
