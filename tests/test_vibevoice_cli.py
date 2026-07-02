@@ -627,6 +627,37 @@ def test_vibevoice_cli_finite_logits_processor_removes_nan_and_inf() -> None:
     assert cleaned[0, 1] > cleaned[0, 3]
 
 
+def test_vibevoice_cli_patches_internal_token_constraint_for_safe_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VIBEVOICE_MIN_AUDIO_TOKENS", "1")
+
+    class FakeTokenConstraintProcessor:
+        def __init__(self, valid_token_ids, device=None):
+            self.valid_token_ids = torch.tensor(valid_token_ids, dtype=torch.long, device=device)
+
+        def __call__(self, input_ids, scores):
+            mask = torch.full_like(scores, float("-inf"))
+            mask[:, self.valid_token_ids] = 0
+            return scores + mask
+
+    vibevoice_cli._patch_vibevoice_token_constraint_processor_for_safe_sampling(FakeTokenConstraintProcessor)
+    processor = FakeTokenConstraintProcessor([2, 3, 4, 1, 0])
+    scores = torch.full((1, 6), float("-inf"), dtype=torch.float32)
+    scores[0, 5] = 999.0
+    scores[0, 4] = float("nan")
+
+    fixed = processor(torch.tensor([[10, 11]]), scores)
+
+    assert torch.isfinite(fixed[0, 4])
+    assert torch.isneginf(fixed[0, 0])
+    assert torch.isneginf(fixed[0, 1])
+    assert torch.isneginf(fixed[0, 2])
+    assert torch.isneginf(fixed[0, 3])
+    assert torch.isneginf(fixed[0, 5])
+    assert torch.isfinite(torch.nn.functional.softmax(fixed, dim=-1)).all()
+
+
 def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
     short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")
     long_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens(

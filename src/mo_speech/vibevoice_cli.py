@@ -196,6 +196,81 @@ def _resolve_min_audio_tokens() -> int:
         raise ValueError(f"unsupported VIBEVOICE_MIN_AUDIO_TOKENS: {raw_value}") from exc
 
 
+def _patch_vibevoice_token_constraint_processor_for_safe_sampling(processor_cls: Any) -> None:
+    """Make ComfyUI-VibeVoice's internal token mask safe for sampling.
+
+    wildminder/ComfyUI-VibeVoice builds its own LogitsProcessorList inside
+    generate(), so processors passed through model.generate() are overwritten.
+    Patch the internal final constraint processor instead.
+    """
+
+    if processor_cls is None or getattr(processor_cls, "_mo_safe_sampling_patch", False):
+        return
+    original_init = getattr(processor_cls, "__init__", None)
+    original_call = getattr(processor_cls, "__call__", None)
+    if not callable(original_init) or not callable(original_call):
+        return
+
+    def patched_init(self, valid_token_ids, device=None, *args, **kwargs):
+        self._mo_valid_token_ids_order = [int(token_id) for token_id in valid_token_ids]
+        return original_init(self, valid_token_ids, device=device, *args, **kwargs)
+
+    def patched_call(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        constrained = original_call(self, input_ids, scores)
+        if not isinstance(constrained, torch.Tensor) or not constrained.is_floating_point():
+            return constrained
+        valid_ids = getattr(self, "valid_token_ids", None)
+        if not isinstance(valid_ids, torch.Tensor):
+            return constrained
+
+        valid_ids = valid_ids.to(device=constrained.device, dtype=torch.long).flatten()
+        if valid_ids.numel() == 0:
+            return constrained
+        vocab_size = constrained.shape[-1]
+        valid_ids = valid_ids[(valid_ids >= 0) & (valid_ids < vocab_size)]
+        if valid_ids.numel() == 0:
+            return constrained
+
+        fixed = constrained.clone()
+        limit = min(float(torch.finfo(fixed.dtype).max / 4), 1.0e4)
+        valid_scores = fixed.index_select(-1, valid_ids)
+        valid_scores = torch.nan_to_num(valid_scores, nan=-limit, posinf=limit, neginf=-limit)
+        fixed[:, valid_ids] = valid_scores
+
+        token_order = list(getattr(self, "_mo_valid_token_ids_order", []))
+        min_audio_tokens = _resolve_min_audio_tokens()
+        fallback_token_id = int(valid_ids[0].item())
+        if len(token_order) >= 3:
+            fallback_token_id = int(token_order[2])
+        if min_audio_tokens > 0 and len(token_order) >= 3:
+            speech_diffusion_id = int(token_order[2])
+            audio_token_counts = (input_ids == speech_diffusion_id).sum(dim=1)
+            needs_audio = audio_token_counts < min_audio_tokens
+            blocked_token_ids = []
+            for index in (0, 1, 3, 4):
+                if index < len(token_order):
+                    token_id = int(token_order[index])
+                    if 0 <= token_id < vocab_size and token_id != speech_diffusion_id:
+                        blocked_token_ids.append(token_id)
+            if needs_audio.any() and blocked_token_ids:
+                rows = torch.nonzero(needs_audio, as_tuple=False).squeeze(1)
+                blocked = torch.tensor(sorted(set(blocked_token_ids)), dtype=torch.long, device=fixed.device)
+                fixed[rows[:, None], blocked[None, :]] = float("-inf")
+
+        finite_valid = torch.isfinite(fixed.index_select(-1, valid_ids)).any(dim=1)
+        empty_rows = ~finite_valid
+        if empty_rows.any() and 0 <= fallback_token_id < vocab_size:
+            rows = torch.nonzero(empty_rows, as_tuple=False).squeeze(1)
+            fixed[rows, fallback_token_id] = 0.0
+        return fixed
+
+    processor_cls.__init__ = patched_init
+    processor_cls.__call__ = patched_call
+    processor_cls._mo_safe_sampling_patch = True
+    processor_cls._mo_original_init = original_init
+    processor_cls._mo_original_call = original_call
+
+
 class _FiniteLogitsProcessor(LogitsProcessor):
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         if scores.is_floating_point():
@@ -463,7 +538,7 @@ def _import_vibevoice_components():
     _install_vibevoice_modules_utils_alias()
 
     try:
-        from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
+        import vibevoice.modular.modeling_vibevoice_inference as vibevoice_inference_module
         from vibevoice.modular.modeling_vibevoice import VibeVoiceForConditionalGeneration
         from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
         from vibevoice.processor.vibevoice_tokenizer_processor import VibeVoiceTokenizerProcessor
@@ -475,6 +550,12 @@ def _import_vibevoice_components():
             f" 原因: {type(exc).__name__}: {exc}"
         ) from exc
 
+    VibeVoiceForConditionalGenerationInference = (
+        vibevoice_inference_module.VibeVoiceForConditionalGenerationInference
+    )
+    _patch_vibevoice_token_constraint_processor_for_safe_sampling(
+        getattr(vibevoice_inference_module, "VibeVoiceTokenConstraintProcessor", None)
+    )
     _patch_transformers5_tied_weights_mapping(VibeVoiceForConditionalGenerationInference)
     _patch_transformers5_tied_weights_mapping(VibeVoiceForConditionalGeneration)
     _patch_transformers5_tie_weights_signature(VibeVoiceForConditionalGenerationInference)
