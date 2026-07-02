@@ -23,6 +23,7 @@ import hashlib
 import shutil
 import types
 import zipfile
+import inspect
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -167,6 +168,23 @@ def _resolve_generation_config_mode() -> str:
     if normalized in {GENERATION_CONFIG_MODE_MODEL_DEFAULT, "default", "model"}:
         return GENERATION_CONFIG_MODE_MODEL_DEFAULT
     raise ValueError(f"unsupported VIBEVOICE_GENERATION_CONFIG_MODE: {raw_value}")
+
+
+def _callable_has_explicit_parameter(callable_obj: Any, parameter_name: str) -> bool:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    return parameter_name in signature.parameters
+
+
+def _processor_supports_parsed_scripts(processor: Any) -> bool:
+    call_method = getattr(processor, "__call__", None)
+    if call_method is None:
+        return False
+    return _callable_has_explicit_parameter(
+        call_method, "parsed_scripts"
+    ) and _callable_has_explicit_parameter(call_method, "speaker_ids_for_prompt")
 
 
 def _install_vibevoice_modules_utils_alias() -> None:
@@ -847,13 +865,26 @@ class VibeVoice:
             raise ValueError("スクリプトが空または無効です。'Speaker 1:', 'Speaker 2:' などの形式を使用してください")
         max_new_tokens = _estimate_vibevoice_max_new_tokens(script_text)
         logger.info("VibeVoice生成token上限: %d", max_new_tokens)
-        inputs = self.processor(
-            text=[script_text],
-            voice_samples=[voice_samples_np],
-            padding=True,
-            return_tensors="pt",
-            return_attention_mask=True,
-        )
+        if _processor_supports_parsed_scripts(self.processor):
+            prompt_speaker_ids = speaker_ids_for_prompt or _speaker_ids_1_based
+            logger.info("VibeVoice processor入力: parsed_scripts経路を使用します")
+            inputs = self.processor(
+                parsed_scripts=[parsed_lines_0_based],
+                voice_samples=[voice_samples_np],
+                speaker_ids_for_prompt=[prompt_speaker_ids],
+                padding=True,
+                return_tensors="pt",
+                return_attention_mask=True,
+            )
+        else:
+            logger.info("VibeVoice processor入力: raw text経路を使用します")
+            inputs = self.processor(
+                text=[script_text],
+                voice_samples=[voice_samples_np],
+                padding=True,
+                return_tensors="pt",
+                return_attention_mask=True,
+            )
 
         for key, value in inputs.items():
             if isinstance(value, torch.Tensor):

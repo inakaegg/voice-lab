@@ -26,7 +26,9 @@
 
 `VibeVoice Large` は過去のREADMEでMicrosoft公式候補として言及されていたが、現在の `microsoft/VibeVoice-Large` は公開Hugging Face repoとして取得できない。community copyである `aoi-ot/VibeVoice-Large` は取得できるため、RunPod/CUDA専用の実験候補として扱う。Large repoには `tokenizer.json` がないため、tokenizerは `Qwen/Qwen2.5-7B` に分けて指定する。Largeの利用例はCUDA上で `bfloat16` 読み込みを使っているため、`vibevoice-large-aoi-pinned` はCLIへ `VIBEVOICE_TORCH_DTYPE=bfloat16` を渡す。UIではRunPod Serverlessを選んだ時だけLargeを選択可能にし、ローカルbackendへは送らない。
 
-2026-07-02のRunPod検証では、Largeのモデル読み込みと `Qwen/Qwen2.5-7B` tokenizer読み込みは通るが、1.5B向けに組み立てた明示 `generation_config` をLargeへ渡すと、最初のtoken生成前に `torch.multinomial` の確率テンソル不正でCUDA assertする。`do_sample=false` ではCUDA assertを避けられるが、先頭でEOS相当になり音声波形が返らない。Large公開例は `generation_config` を明示せず `cfg_scale` とtokenizerを渡しているため、Largeプリセットでは `VIBEVOICE_GENERATION_CONFIG_MODE=model_default` を使い、モデル側の既定生成設定を優先する。Largeは引き続き安定運用候補ではなく、RunPod上で短い台本、参照音声、生成パラメータを固定して検証する対象とする。
+2026-07-02のRunPod検証では、Largeのモデル読み込みと `Qwen/Qwen2.5-7B` tokenizer読み込みは通るが、1.5B向けに組み立てた明示 `generation_config` をLargeへ渡すと、最初のtoken生成前に `torch.multinomial` の確率テンソル不正でCUDA assertする。`do_sample=false` ではCUDA assertを避けられるが、先頭でEOS相当になり音声波形が返らない。Large公開例は `generation_config` を明示せず `cfg_scale` とtokenizerを渡しているため、Largeプリセットでは `VIBEVOICE_GENERATION_CONFIG_MODE=model_default` を使い、モデル側の既定生成設定を優先する。
+
+同日の再検証では、`model_default` はRunPod imageへ反映され、CUDA assertは消えた。しかしraw text fallback経路のまま新しいComfyUI-VibeVoice processorへ渡すと、`speaker_ids_for_prompt` が空になり参照音声promptが作られず、1 tokenでEOSになって音声波形が返らない。RunPod imageで使うwildminder/ComfyUI-VibeVoice固定refは `parsed_scripts` と `speaker_ids_for_prompt` を明示する経路を持つため、CLIはその引数がprocessorに存在する場合だけ本体nodeと同じ明示parsed経路を使い、古いprocessorでは従来のraw text経路へfallbackする。Largeは引き続き安定運用候補ではなく、RunPod上で短い台本、参照音声、生成パラメータを固定して検証する対象とする。
 
 `microsoft/VibeVoice-Realtime-0.5B` は `model_type=vibevoice_streaming`、architectureも `VibeVoiceStreaming...` 系で、現在の非streamingスキット生成CLIとは別経路である。RunPod上の通常スキット生成ではCUDA assertまで進むため、通常UIのモデル候補には出さない。これも「Realtimeが使えない」という意味ではなく、streaming model用の入力、生成ループ、出力処理を別実装として持っていないという意味である。Realtimeモデルを扱う場合は、別途streaming向け実装として仕様化してから追加する。
 

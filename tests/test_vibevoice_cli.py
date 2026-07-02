@@ -373,7 +373,74 @@ def test_vibevoice_cli_rejects_missing_speech_output(tmp_path: Path) -> None:
         )
 
 
-def test_vibevoice_cli_uses_raw_text_processor_path(tmp_path: Path) -> None:
+def test_vibevoice_cli_uses_parsed_script_processor_path_when_supported(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+    processor_calls = []
+    generate_calls = []
+
+    class FakeProcessor:
+        tokenizer = object()
+
+        def __call__(
+            self,
+            *,
+            parsed_scripts=None,
+            voice_samples=None,
+            speaker_ids_for_prompt=None,
+            padding=True,
+            return_tensors=None,
+            return_attention_mask=True,
+        ):
+            kwargs = {
+                "parsed_scripts": parsed_scripts,
+                "voice_samples": voice_samples,
+                "speaker_ids_for_prompt": speaker_ids_for_prompt,
+                "padding": padding,
+                "return_tensors": return_tensors,
+                "return_attention_mask": return_attention_mask,
+            }
+            processor_calls.append(kwargs)
+            return {}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, **kwargs):
+            generate_calls.append(kwargs)
+            return SimpleNamespace(speech_outputs=[None])
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    with pytest.raises(RuntimeError, match="音声波形を返しませんでした"):
+        service._synthesize_script(
+            script_text="Speaker 2: こんにちは。",
+            voice_samples_np=[],
+            speaker_ids_for_prompt=[1, 2],
+            cfg_scale=1.3,
+            inference_steps=2,
+            do_sample=True,
+            temperature=0.95,
+            top_p=0.95,
+            top_k=0,
+        )
+
+    assert processor_calls
+    assert processor_calls[0]["parsed_scripts"] == [[(1, " こんにちは。")]]
+    assert processor_calls[0]["speaker_ids_for_prompt"] == [[1, 2]]
+    assert "text" not in processor_calls[0]
+    assert generate_calls[0]["max_new_tokens"] < 150
+
+
+def test_vibevoice_cli_falls_back_to_raw_text_processor_path(tmp_path: Path) -> None:
     model_path = tmp_path / "model"
     model_path.mkdir()
     tokenizer_path = tmp_path / "tokenizer.json"
