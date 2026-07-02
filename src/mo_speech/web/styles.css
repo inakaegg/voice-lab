@@ -2322,12 +2322,17 @@ audio {
 }
 
 .vibevoice-setting-field,
-.vibevoice-range-control {
+.vibevoice-range-control,
+.seed-vc-range-control {
   color: #40546e;
   display: grid;
   font-size: 13px;
   font-weight: 900;
   gap: 6px;
+}
+
+.seed-vc-range-control {
+  margin: 0 0 12px;
 }
 
 .vibevoice-setting-wide {
@@ -2343,14 +2348,16 @@ audio {
   width: 100%;
 }
 
-.vibevoice-range-label {
+.vibevoice-range-label,
+.seed-vc-range-label {
   align-items: center;
   display: flex;
   gap: 8px;
   justify-content: space-between;
 }
 
-.vibevoice-range-label output {
+.vibevoice-range-label output,
+.seed-vc-range-label output {
   background: #eef5ff;
   border: 1px solid #d0e0f4;
   border-radius: 999px;
@@ -2361,7 +2368,8 @@ audio {
   text-align: right;
 }
 
-.vibevoice-range-control input[type="range"] {
+.vibevoice-range-control input[type="range"],
+.seed-vc-range-control input[type="range"] {
   accent-color: #1d75dc;
   margin: 0;
   width: 100%;

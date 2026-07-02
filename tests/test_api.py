@@ -170,6 +170,13 @@ def test_seed_vc_serves_direct_conversion_ui() -> None:
     assert "Seed-VC" in response.text
     assert "seed-vc-source-audio" in response.text
     assert "seed-vc-reference-audio" in response.text
+    assert "seed-vc-audio-device" in response.text
+    assert "seed-vc-record-button" in response.text
+    assert "seed-vc-stop-button" in response.text
+    assert "seed-vc-input-level" in response.text
+    assert "seed-vc-input-audio" in response.text
+    assert 'type="range"' in response.text
+    assert "data-seed-vc-range-output" in response.text
     assert "/static/app_seed_vc_direct.js" in response.text
 
 

@@ -235,8 +235,19 @@ test("vibevoice progress animation only runs while a job is active", () => {
 test("seed-vc direct page only exposes direct voice conversion controls", () => {
   assert.match(seedVcDirectHtml, /Seed-VC/);
   assert.match(seedVcDirectHtml, /id="seed-vc-source-audio"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-audio-device"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-audio-device-refresh"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-record-button"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-stop-button"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-recording-label"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-input-level"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-recording-details"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-input-audio"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-reference-audio"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-reference-preview-button"/);
+  assert.match(seedVcDirectHtml, /id="seed_vc_diffusion_steps"[^>]*type="range"/s);
+  assert.match(seedVcDirectHtml, /data-seed-vc-range-output="seed_vc_diffusion_steps"/);
+  assert.match(seedVcDirectHtml, /class="seed-vc-range-control"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-submit-button"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-output-audio"/);
   assert.match(seedVcDirectHtml, /\/static\/app_config\.js/);
@@ -248,5 +259,12 @@ test("seed-vc direct page only exposes direct voice conversion controls", () => 
   assert.match(seedVcDirectSource, /pollVoiceConversionJob/);
   assert.match(seedVcDirectSource, /appendSeedVcSettings/);
   assert.match(seedVcDirectSource, /seedVcPresets/);
+  assert.match(seedVcDirectSource, /startRecording/);
+  assert.match(seedVcDirectSource, /stopRecording/);
+  assert.match(seedVcDirectSource, /navigator\.mediaDevices\.getUserMedia/);
+  assert.match(seedVcDirectSource, /renderSeedVcRangeValue/);
+  assert.match(seedVcDirectSource, /recordedBlob/);
+  assert.match(seedVcDirectSource, /source_audio", recordedBlob/);
   assert.match(seedVcDirectSource, /audio_base64/);
+  assert.match(styles, /\.seed-vc-range-control/);
 });

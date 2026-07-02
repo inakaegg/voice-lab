@@ -2,6 +2,14 @@ const seedVcForm = document.querySelector("#seed-vc-form");
 const seedVcStatus = document.querySelector("#seed-vc-status");
 const sourceAudioInput = document.querySelector("#seed-vc-source-audio");
 const sourceAudioStatus = document.querySelector("#seed-vc-source-status");
+const audioDeviceSelect = document.querySelector("#seed-vc-audio-device");
+const audioDeviceRefreshButton = document.querySelector("#seed-vc-audio-device-refresh");
+const recordButton = document.querySelector("#seed-vc-record-button");
+const stopButton = document.querySelector("#seed-vc-stop-button");
+const recordingLabel = document.querySelector("#seed-vc-recording-label");
+const inputLevel = document.querySelector("#seed-vc-input-level");
+const recordingDetails = document.querySelector("#seed-vc-recording-details");
+const inputAudio = document.querySelector("#seed-vc-input-audio");
 const referenceAudioInput = document.querySelector("#seed-vc-reference-audio");
 const referenceAudioStatus = document.querySelector("#seed-vc-reference-status");
 const seedVcPresetSelect = document.querySelector("#seed_vc_preset");
@@ -25,15 +33,25 @@ const downloadLink = document.querySelector("#seed-vc-download");
 const timingsList = document.querySelector("#seed-vc-timings");
 const providersList = document.querySelector("#seed-vc-providers");
 const warningsList = document.querySelector("#seed-vc-warnings");
+const seedVcRangeInputs = Array.from(document.querySelectorAll("[data-seed-vc-range]"));
 
 let outputObjectUrl = null;
 let referencePreviewOriginalObjectUrl = null;
 let referencePreviewNormalizedObjectUrl = null;
+let inputAudioObjectUrl = null;
 let seedVcAvailable = true;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordedBlob = null;
+let recordedFileName = "recording.audio";
+let inputLevelAudioContext = null;
+let inputLevelSource = null;
+let inputLevelAnimationFrame = null;
 
-sourceAudioInput.addEventListener("change", () => {
-  renderSelectedFileStatus(sourceAudioInput, sourceAudioStatus, "変換元音声なし");
-});
+sourceAudioInput.addEventListener("change", handleSourceAudioFileChange);
+audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
+recordButton.addEventListener("click", startRecording);
+stopButton.addEventListener("click", stopRecording);
 referenceAudioInput.addEventListener("change", () => {
   renderSelectedFileStatus(referenceAudioInput, referenceAudioStatus, "参照音声なし");
   clearReferencePreview();
@@ -42,10 +60,17 @@ seedVcForm.addEventListener("submit", submitSeedVcConversion);
 seedVcReferencePreviewButton.addEventListener("click", previewSeedVcReferenceAudio);
 seedVcPresetSelect.addEventListener("change", applySeedVcPreset);
 [seedVcDiffusionStepsInput, seedVcReferenceMaxSecondsInput, seedVcLengthAdjustInput, seedVcInferenceCfgRateInput].forEach(
-  (input) => input.addEventListener("input", syncSeedVcPresetSelection),
+  (input) => {
+    input.addEventListener("input", () => {
+      renderSeedVcRangeValue(input);
+      syncSeedVcPresetSelection();
+    });
+  },
 );
+seedVcRangeInputs.forEach(renderSeedVcRangeValue);
 
 applySeedVcPreset();
+loadAudioDevices();
 loadRuntime();
 
 async function loadRuntime() {
@@ -81,11 +106,10 @@ async function submitSeedVcConversion(event) {
   renderProcessingJob({ status: "queued", stages: [] });
 
   try {
-    const sourceFile = requireSelectedAudio(sourceAudioInput, "変換元音声を選択してください");
     const referenceFile = requireSelectedAudio(referenceAudioInput, "参照音声を選択してください");
     const formData = new FormData();
     formData.append("voice_backend", "seed-vc");
-    formData.append("source_audio", sourceFile, sourceFile.name || "source.audio");
+    appendSelectedSourceAudio(formData);
     formData.append("reference_audio", referenceFile, referenceFile.name || "reference.audio");
     appendSeedVcSettings(formData);
 
@@ -111,6 +135,141 @@ async function submitSeedVcConversion(event) {
   } finally {
     seedVcSubmitButton.disabled = !seedVcAvailable;
   }
+}
+
+async function startRecording() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+    renderError("このブラウザでは録音できません");
+    return;
+  }
+
+  let stream = null;
+  try {
+    clearError();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: selectedAudioConstraint() });
+    loadAudioDevices();
+  } catch (error) {
+    renderError(error.message || "マイク入力を開始できませんでした");
+    return;
+  }
+
+  sourceAudioInput.value = "";
+  recordedChunks = [];
+  recordedBlob = null;
+  recordedFileName = "recording.audio";
+  clearInputAudioPreview();
+  clearSourceAudioStatus("録音中");
+  recordingDetails.textContent = "録音中";
+  startInputLevelMeter(stream);
+  mediaRecorder = new MediaRecorder(stream, chooseRecorderOptions());
+
+  mediaRecorder.addEventListener("dataavailable", (event) => {
+    if (event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  });
+
+  mediaRecorder.addEventListener("stop", () => {
+    const mimeType = mediaRecorder.mimeType || recordedChunks[0]?.type || "audio/webm";
+    recordedBlob = new Blob(recordedChunks, { type: mimeType });
+    recordedFileName = `recording.${extensionForMimeType(mimeType)}`;
+    stopInputLevelMeter();
+    stream.getTracks().forEach((track) => track.stop());
+    recordButton.disabled = false;
+    stopButton.disabled = true;
+
+    if (recordedBlob.size < 1024) {
+      recordedBlob = null;
+      recordingLabel.textContent = "録音失敗";
+      recordingDetails.textContent = "録音データが小さすぎます。マイク入力を確認してください。";
+      clearSourceAudioStatus("録音失敗");
+      renderError("録音データが小さすぎます。マイク入力を確認してください。");
+      return;
+    }
+
+    renderInputAudioPreview(recordedBlob, recordedFileName);
+    setSourceAudioStatus("録音済み", recordedBlob, recordedFileName);
+    recordingLabel.textContent = "録音済み";
+    seedVcStatus.textContent = "待機中";
+  });
+
+  mediaRecorder.start();
+  recordingLabel.textContent = "録音中";
+  recordButton.disabled = true;
+  stopButton.disabled = false;
+  seedVcStatus.textContent = "録音中";
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+}
+
+function handleSourceAudioFileChange() {
+  const file = sourceAudioInput.files[0];
+  recordedBlob = null;
+  recordedChunks = [];
+  recordedFileName = "recording.audio";
+  stopInputLevelMeter();
+  if (file) {
+    recordingLabel.textContent = "ファイル選択済み";
+    renderInputAudioPreview(file, file.name);
+    setSourceAudioStatus("ファイル選択", file, file.name);
+    return;
+  }
+  recordingLabel.textContent = "録音なし";
+  recordingDetails.textContent = "変換元音声なし";
+  clearInputAudioPreview();
+  clearSourceAudioStatus("変換元音声なし");
+}
+
+async function loadAudioDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    audioDeviceSelect.replaceChildren(new Option("このブラウザでは選択できません", ""));
+    audioDeviceSelect.disabled = true;
+    audioDeviceRefreshButton.disabled = true;
+    return;
+  }
+
+  try {
+    const previousValue = audioDeviceSelect.value;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter((device) => device.kind === "audioinput");
+    const options = [new Option("既定のマイク", "")];
+    audioInputs.forEach((device, index) => {
+      options.push(new Option(device.label || `マイク ${index + 1}`, device.deviceId));
+    });
+    audioDeviceSelect.replaceChildren(...options);
+    if ([...audioDeviceSelect.options].some((option) => option.value === previousValue)) {
+      audioDeviceSelect.value = previousValue;
+    }
+    audioDeviceSelect.disabled = audioInputs.length === 0;
+  } catch {
+    audioDeviceSelect.replaceChildren(new Option("マイク一覧を取得できません", ""));
+    audioDeviceSelect.disabled = true;
+  }
+}
+
+function selectedAudioConstraint() {
+  if (!audioDeviceSelect.value) {
+    return true;
+  }
+  return { deviceId: { exact: audioDeviceSelect.value } };
+}
+
+function appendSelectedSourceAudio(formData) {
+  const sourceFile = sourceAudioInput.files[0];
+  if (sourceFile) {
+    requireSelectedAudio(sourceAudioInput, "変換元音声を選択してください");
+    formData.append("source_audio", sourceFile, sourceFile.name || "source.audio");
+    return;
+  }
+  if (recordedBlob && recordedBlob.size >= 1) {
+    formData.append("source_audio", recordedBlob, recordedFileName);
+    return;
+  }
+  throw new Error("変換元音声を選択するか録音してください");
 }
 
 async function previewSeedVcReferenceAudio(event) {
@@ -177,6 +336,7 @@ function applyRuntimeSeedVcDefaults(settings) {
   if (settings.reference_auto_select !== undefined && settings.reference_auto_select !== null) {
     seedVcReferenceAutoSelectInput.checked = Boolean(settings.reference_auto_select);
   }
+  seedVcRangeInputs.forEach(renderSeedVcRangeValue);
   syncSeedVcPresetSelection();
 }
 
@@ -189,6 +349,7 @@ function applySeedVcPreset() {
   setInputValue(seedVcReferenceMaxSecondsInput, preset.reference_max_seconds);
   setInputValue(seedVcLengthAdjustInput, preset.length_adjust);
   setInputValue(seedVcInferenceCfgRateInput, preset.inference_cfg_rate);
+  seedVcRangeInputs.forEach(renderSeedVcRangeValue);
 }
 
 function syncSeedVcPresetSelection() {
@@ -290,6 +451,38 @@ function clearResult() {
   warningsList.replaceChildren();
 }
 
+function renderInputAudioPreview(blob, filename = "") {
+  if (inputAudioObjectUrl) {
+    URL.revokeObjectURL(inputAudioObjectUrl);
+  }
+  inputAudioObjectUrl = URL.createObjectURL(blob);
+  inputAudio.src = inputAudioObjectUrl;
+  inputAudio.hidden = false;
+  recordingDetails.textContent = `${filename || "選択済み音声"} / ${blob.type || "unknown"} / ${formatBytes(blob.size)}`;
+}
+
+function clearInputAudioPreview() {
+  if (inputAudioObjectUrl) {
+    URL.revokeObjectURL(inputAudioObjectUrl);
+    inputAudioObjectUrl = null;
+  }
+  inputAudio.removeAttribute("src");
+  inputAudio.hidden = true;
+  inputLevel.value = 0;
+}
+
+function setSourceAudioStatus(label, blob, filename = "") {
+  const displayName = filename || blob?.name || "音声";
+  const sizeText = blob?.size ? ` / ${formatBytes(blob.size)}` : "";
+  sourceAudioStatus.textContent = `${label}: ${displayName}${sizeText}`;
+  sourceAudioStatus.dataset.state = "selected";
+}
+
+function clearSourceAudioStatus(message) {
+  sourceAudioStatus.textContent = message;
+  delete sourceAudioStatus.dataset.state;
+}
+
 function renderKeyValueList(list, entries, formatValue) {
   list.replaceChildren();
   Object.entries(entries).forEach(([key, value]) => {
@@ -313,6 +506,15 @@ function renderWarnings(warnings) {
 function renderSelectedFileStatus(input, target, emptyMessage) {
   const file = input.files[0];
   target.textContent = file ? `${file.name || "audio"} (${formatBytes(file.size)})` : emptyMessage;
+}
+
+function renderSeedVcRangeValue(input) {
+  const output = document.querySelector(`[data-seed-vc-range-output="${input.name}"]`);
+  if (!output) {
+    return;
+  }
+  output.value = input.value;
+  output.textContent = input.value;
 }
 
 function renderError(message) {
@@ -377,6 +579,78 @@ function setInputValue(input, value) {
 
 function numbersEqual(left, right) {
   return Math.abs(Number(left) - Number(right)) < 0.0001;
+}
+
+function chooseRecorderOptions() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) {
+    return {};
+  }
+  const mimeType = candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  return mimeType ? { mimeType } : {};
+}
+
+function extensionForMimeType(mimeType) {
+  if (mimeType.includes("mp4")) {
+    return "m4a";
+  }
+  if (mimeType.includes("ogg")) {
+    return "ogg";
+  }
+  if (mimeType.includes("wav")) {
+    return "wav";
+  }
+  if (mimeType.includes("webm")) {
+    return "webm";
+  }
+  return "audio";
+}
+
+function startInputLevelMeter(stream) {
+  stopInputLevelMeter();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return;
+  }
+  inputLevelAudioContext = new AudioContextClass();
+  const analyser = inputLevelAudioContext.createAnalyser();
+  analyser.fftSize = 512;
+  inputLevelSource = inputLevelAudioContext.createMediaStreamSource(stream);
+  inputLevelSource.connect(analyser);
+  const samples = new Uint8Array(analyser.fftSize);
+
+  const updateLevel = () => {
+    analyser.getByteTimeDomainData(samples);
+    let sum = 0;
+    for (const sample of samples) {
+      const normalized = (sample - 128) / 128;
+      sum += normalized * normalized;
+    }
+    inputLevel.value = Math.min(Math.sqrt(sum / samples.length) * 3, 1);
+    inputLevelAnimationFrame = requestAnimationFrame(updateLevel);
+  };
+  updateLevel();
+}
+
+function stopInputLevelMeter() {
+  if (inputLevelAnimationFrame) {
+    cancelAnimationFrame(inputLevelAnimationFrame);
+    inputLevelAnimationFrame = null;
+  }
+  if (inputLevelSource) {
+    inputLevelSource.disconnect();
+    inputLevelSource = null;
+  }
+  if (inputLevelAudioContext) {
+    inputLevelAudioContext.close();
+    inputLevelAudioContext = null;
+  }
+  inputLevel.value = 0;
 }
 
 function audioBlobFromBase64(audioBase64, mimeType) {

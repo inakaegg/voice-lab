@@ -181,7 +181,7 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 
 `/api/runtime` の `voice_conversion_backends` で `seed-vc` が `available=true` になっていれば、UIの「VC比較」または `/seed-vc` から実行できる。
 
-Seed-VCだけを確認したい場合は、`/seed-vc` を使う。この画面は翻訳、TTS、録音、ユーザー画面設定を介さず、変換元音声と参照音声を `/api/voice-conversion-jobs` へ直接送る。参照音声の前処理確認は `/api/seed-vc/reference-preview` を使う。
+Seed-VCだけを確認したい場合は、`/seed-vc` を使う。この画面は翻訳、TTS、ユーザー画面設定を介さず、変換元音声と参照音声を `/api/voice-conversion-jobs` へ直接送る。変換元音声はファイル選択またはマイク録音で指定でき、管理画面と同じマイク選択、録音/停止、入力レベル、録音プレビューを表示する。参照音声の前処理確認は `/api/seed-vc/reference-preview` を使う。Seed-VCの数値設定はrange操作と現在値表示で変更できる。
 
 UIでは、VC比較モードでSeed-VCを選択した場合と、音声翻訳モードで `Qwen生成後にSeed-VC変換` を選択した場合に、`diffusion steps`、参照音声の上限秒数、参照音声の発話区間自動選択、`length adjust`、`inference cfg rate` をjob単位で変更できる。未変更時は起動時の環境変数から決まる既定値を使う。
 
