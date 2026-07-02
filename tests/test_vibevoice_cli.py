@@ -304,6 +304,61 @@ def test_vibevoice_cli_load_model_uses_float32_for_cpu(tmp_path, monkeypatch: py
     assert call["kwargs"][dtype_arg] == torch.float32
 
 
+def test_vibevoice_cli_preprocess_audio_trims_silence_before_duration_limit_and_normalizes_rms(
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    source_sr = 16_000
+    silence = np.zeros(source_sr, dtype=np.float32)
+    t = np.arange(source_sr * 2, dtype=np.float32) / source_sr
+    voice = (0.02 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+    input_path = tmp_path / "voice.wav"
+    vibevoice_cli.sf.write(input_path.as_posix(), np.concatenate([silence, voice, silence]), source_sr)
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+        max_voice_seconds=0.5,
+    )
+
+    processed = service.preprocess_audio(input_path.as_posix())
+
+    assert processed.dtype == np.float32
+    assert int(0.45 * vibevoice_cli.SAMPLE_RATE) <= processed.shape[0] <= int(0.55 * vibevoice_cli.SAMPLE_RATE)
+    assert float(np.max(np.abs(processed))) <= vibevoice_cli.VIBEVOICE_REFERENCE_PEAK_LIMIT
+    rms = float(np.sqrt(np.mean(np.square(processed), dtype=np.float64)))
+    assert 0.09 <= rms <= 0.11
+
+
+def test_vibevoice_cli_preprocess_audio_keeps_silent_reference_as_silence(tmp_path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    input_path = tmp_path / "silent.wav"
+    vibevoice_cli.sf.write(input_path.as_posix(), np.zeros(8000, dtype=np.float32), 8000)
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+        max_voice_seconds=1.0,
+    )
+
+    processed = service.preprocess_audio(input_path.as_posix())
+
+    assert processed.dtype == np.float32
+    assert processed.shape[0] == vibevoice_cli.SAMPLE_RATE
+    assert np.all(processed == 0.0)
+
+
+def test_vibevoice_cli_reference_preprocess_cache_key_changes_line_cache() -> None:
+    cache_key = vibevoice_cli._reference_preprocess_cache_key()
+
+    assert "reference-normalization-v1" in cache_key
+    assert f"sr={vibevoice_cli.SAMPLE_RATE}" in cache_key
+
+
 def test_vibevoice_cli_tensor_creation_patch_uses_cpu_under_meta_default_device() -> None:
     if not hasattr(torch, "set_default_device") or not hasattr(torch, "get_default_device"):
         pytest.skip("torch default device API is not available")

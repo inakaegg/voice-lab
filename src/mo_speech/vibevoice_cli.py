@@ -95,6 +95,12 @@ VIBEVOICE_LINE_TOKEN_OVERHEAD = 6
 VIBEVOICE_MIN_AUDIO_TEXT_CHAR_TOKEN_RATIO = 1.0
 VIBEVOICE_MIN_AUDIO_LINE_TOKEN_OVERHEAD = 4
 VIBEVOICE_STOP_TOKEN_MARGIN = 4
+VIBEVOICE_REFERENCE_PREPROCESS_VERSION = "reference-normalization-v1"
+VIBEVOICE_REFERENCE_TRIM_TOP_DB = 35.0
+VIBEVOICE_REFERENCE_TARGET_RMS = 10 ** (-20.0 / 20.0)
+VIBEVOICE_REFERENCE_PEAK_LIMIT = 0.95
+VIBEVOICE_REFERENCE_MIN_RMS = 1e-5
+VIBEVOICE_REFERENCE_MAX_GAIN = 12.0
 GENERATION_CONFIG_MODE_EXPLICIT = "explicit"
 GENERATION_CONFIG_MODE_MODEL_DEFAULT = "model_default"
 _MIN_AUDIO_TOKENS_OVERRIDE: ContextVar[int | None] = ContextVar(
@@ -165,6 +171,83 @@ def _estimate_vibevoice_max_new_tokens(script: str) -> int:
         + len(parsed_lines) * VIBEVOICE_LINE_TOKEN_OVERHEAD
     )
     return max(VIBEVOICE_MIN_NEW_TOKENS, min(VIBEVOICE_MAX_NEW_TOKENS, estimated_tokens))
+
+
+def _reference_preprocess_cache_key() -> str:
+    return (
+        f"{VIBEVOICE_REFERENCE_PREPROCESS_VERSION}:"
+        f"sr={SAMPLE_RATE}:"
+        f"trim_db={VIBEVOICE_REFERENCE_TRIM_TOP_DB:g}:"
+        f"target_rms={VIBEVOICE_REFERENCE_TARGET_RMS:.6f}:"
+        f"peak={VIBEVOICE_REFERENCE_PEAK_LIMIT:g}:"
+        f"max_gain={VIBEVOICE_REFERENCE_MAX_GAIN:g}"
+    )
+
+
+def _trim_reference_silence(waveform: np.ndarray, sample_rate: int, audio_path: str) -> np.ndarray:
+    if waveform.size == 0 or np.all(waveform == 0):
+        return waveform
+    try:
+        trimmed, trim_index = librosa.effects.trim(waveform, top_db=VIBEVOICE_REFERENCE_TRIM_TOP_DB)
+    except Exception as exc:
+        logger.warning("参照音声の無音トリムに失敗したため元波形を使います: %s (%s)", audio_path, exc)
+        return waveform
+    if trimmed.size == 0:
+        logger.warning("参照音声の無音トリム後に空になったため元波形を使います: %s", audio_path)
+        return waveform
+
+    removed_before = int(trim_index[0])
+    removed_after = int(waveform.shape[0] - trim_index[1])
+    if removed_before > 0 or removed_after > 0:
+        logger.info(
+            "参照音声の前後無音をトリムしました: %s (start=%.2fs, end=%.2fs)",
+            audio_path,
+            removed_before / sample_rate,
+            removed_after / sample_rate,
+        )
+    return np.asarray(trimmed, dtype=np.float32)
+
+
+def _normalize_reference_loudness(waveform: np.ndarray, audio_path: str) -> np.ndarray:
+    if waveform.size == 0:
+        return waveform.astype(np.float32)
+
+    normalized = np.asarray(waveform, dtype=np.float32)
+    if np.any(np.isnan(normalized)) or np.any(np.isinf(normalized)):
+        logger.error("参照音声にNaNまたはInf値が含まれています。ゼロで置き換えます: %s", audio_path)
+        normalized = np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+    peak = float(np.max(np.abs(normalized))) if normalized.size else 0.0
+    if peak <= 0.0:
+        logger.warning("参照音声が完全に無音です: %s", audio_path)
+        return normalized.astype(np.float32)
+
+    normalized = normalized - float(np.mean(normalized))
+    peak = float(np.max(np.abs(normalized))) if normalized.size else 0.0
+    rms = float(np.sqrt(np.mean(np.square(normalized), dtype=np.float64))) if normalized.size else 0.0
+    if peak <= 0.0 or rms <= VIBEVOICE_REFERENCE_MIN_RMS:
+        logger.warning("参照音声の有効音量が小さすぎるため音量正規化をスキップします: %s", audio_path)
+        return normalized.astype(np.float32)
+
+    target_gain = VIBEVOICE_REFERENCE_TARGET_RMS / rms
+    peak_limited_gain = VIBEVOICE_REFERENCE_PEAK_LIMIT / peak
+    gain = min(target_gain, peak_limited_gain, VIBEVOICE_REFERENCE_MAX_GAIN)
+    if not math.isfinite(gain) or gain <= 0:
+        logger.warning("参照音声の音量正規化gainが不正なためスキップします: %s", audio_path)
+        return normalized.astype(np.float32)
+
+    normalized = normalized * gain
+    normalized = np.clip(normalized, -VIBEVOICE_REFERENCE_PEAK_LIMIT, VIBEVOICE_REFERENCE_PEAK_LIMIT)
+    logger.info(
+        "参照音声を音量正規化しました: %s (rms %.4f -> %.4f, peak %.4f -> %.4f, gain %.3f)",
+        audio_path,
+        rms,
+        float(np.sqrt(np.mean(np.square(normalized), dtype=np.float64))),
+        peak,
+        float(np.max(np.abs(normalized))) if normalized.size else 0.0,
+        gain,
+    )
+    return normalized.astype(np.float32)
 
 
 def _resolve_generation_config_mode() -> str:
@@ -970,6 +1053,8 @@ class VibeVoice:
 
         # Load audio
         waveform, original_sr = librosa.load(audio_path, sr=None, mono=True)
+        if waveform.size == 0:
+            raise ValueError(f"参照音声が空です: {audio_path}")
 
         # Check for invalid values
         if np.any(np.isnan(waveform)) or np.any(np.isinf(waveform)):
@@ -996,13 +1081,17 @@ class VibeVoice:
             logger.error("リサンプル後に音声データにNaNまたはInf値が含まれています。ゼロで置き換えます")
             waveform = np.nan_to_num(waveform, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Trim excessively long samples to reduce GPU memory usage
+        waveform = _trim_reference_silence(np.asarray(waveform, dtype=np.float32), target_sr, audio_path)
+
+        # Trim excessively long samples after removing leading silence so the
+        # reference prompt starts from the actual voice section.
         if self.max_voice_seconds > 0:
             max_len = int(target_sr * self.max_voice_seconds)
             if waveform.shape[0] > max_len:
-                logger.info("音声が長いため先頭%.1f秒に切り詰めます: %s", self.max_voice_seconds, audio_path)
+                logger.info("参照音声が長いため有声区間の先頭%.1f秒に切り詰めます: %s", self.max_voice_seconds, audio_path)
                 waveform = waveform[:max_len]
 
+        waveform = _normalize_reference_loudness(waveform, audio_path)
         return waveform.astype(np.float32)
 
     def set_vibevoice_seed(self, seed: int):
@@ -1348,6 +1437,7 @@ class VibeVoice:
                 "generation_config_mode": _resolve_generation_config_mode(),
                 "voice_digest": voice_digest(voice_path),
                 "voice_path": voice_path.as_posix(),
+                "voice_preprocess": _reference_preprocess_cache_key(),
                 "model_path": self.model_path,
                 "tokenizer_path": self.tokenizer_path,
             }
@@ -1446,6 +1536,7 @@ class VibeVoice:
             "mode": "line_by_line",
             "output_mode": combine_mode,
             "sample_rate": SAMPLE_RATE,
+            "voice_preprocess": _reference_preprocess_cache_key(),
             "gap_seconds": gap_seconds,
             "segments": segments_metadata,
             "output_path": output_path_obj.as_posix(),
