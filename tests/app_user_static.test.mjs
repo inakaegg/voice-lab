@@ -10,6 +10,8 @@ const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_
 const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_practice_history.js", import.meta.url), "utf8");
 const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
 const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
+const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.html", import.meta.url), "utf8");
+const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
@@ -228,4 +230,23 @@ test("vibevoice progress animation only runs while a job is active", () => {
   );
   assert.match(styles, /\.vibevoice-job-progress\[data-progress="determinate"\]\s+\.vibevoice-progress-bar span/s);
   assert.doesNotMatch(baseProgressSpanRule, /animation:/);
+});
+
+test("seed-vc direct page only exposes direct voice conversion controls", () => {
+  assert.match(seedVcDirectHtml, /Seed-VC/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-source-audio"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-reference-audio"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-reference-preview-button"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-submit-button"/);
+  assert.match(seedVcDirectHtml, /id="seed-vc-output-audio"/);
+  assert.match(seedVcDirectHtml, /\/static\/app_config\.js/);
+  assert.match(seedVcDirectHtml, /\/static\/app_seed_vc_direct\.js/);
+  assert.doesNotMatch(seedVcDirectHtml, /operation_mode|translation_backend|tts_backend|user-settings-panel|runpod-warmup-panel/);
+  assert.match(seedVcDirectSource, /\/api\/runtime/);
+  assert.match(seedVcDirectSource, /\/api\/voice-conversion-jobs/);
+  assert.match(seedVcDirectSource, /\/api\/seed-vc\/reference-preview/);
+  assert.match(seedVcDirectSource, /pollVoiceConversionJob/);
+  assert.match(seedVcDirectSource, /appendSeedVcSettings/);
+  assert.match(seedVcDirectSource, /seedVcPresets/);
+  assert.match(seedVcDirectSource, /audio_base64/);
 });

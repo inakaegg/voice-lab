@@ -161,6 +161,18 @@ def test_vibevoice_serves_local_skit_ui() -> None:
     assert "/static/app_vibevoice.js" in response.text
 
 
+def test_seed_vc_serves_direct_conversion_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/seed-vc")
+
+    assert response.status_code == 200
+    assert "Seed-VC" in response.text
+    assert "seed-vc-source-audio" in response.text
+    assert "seed-vc-reference-audio" in response.text
+    assert "/static/app_seed_vc_direct.js" in response.text
+
+
 def test_vibevoice_status_api_uses_service() -> None:
     class FakeVibeVoiceService:
         def status(self):

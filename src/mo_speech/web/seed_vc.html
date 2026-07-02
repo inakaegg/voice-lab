@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Seed-VC単体変換</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell seed-vc-direct-shell">
+      <header class="toolbar">
+        <div>
+          <p class="eyebrow">Voice conversion</p>
+          <h1>Seed-VC単体変換</h1>
+        </div>
+        <div class="status" id="seed-vc-status" role="status" aria-live="polite">確認中</div>
+      </header>
+
+      <section class="workspace" aria-label="Seed-VC変換フォーム">
+        <form id="seed-vc-form" class="control-panel">
+          <div class="field-row">
+            <label for="seed-vc-source-audio">変換元音声</label>
+            <input id="seed-vc-source-audio" name="source_audio" type="file" accept="audio/*" />
+          </div>
+          <p id="seed-vc-source-status" class="selection-status">変換元音声なし</p>
+
+          <div class="field-row">
+            <label for="seed-vc-reference-audio">参照音声</label>
+            <input id="seed-vc-reference-audio" name="reference_audio" type="file" accept="audio/*" />
+          </div>
+          <p id="seed-vc-reference-status" class="selection-status">参照音声なし</p>
+
+          <fieldset id="seed-vc-settings" class="suffix-panel">
+            <legend>Seed-VC詳細設定</legend>
+            <div class="field-row">
+              <label for="seed_vc_preset">プリセット</label>
+              <select id="seed_vc_preset" name="seed_vc_preset">
+                <option value="fast">高速確認</option>
+                <option value="reasonable">リーズナブル</option>
+                <option value="quality" selected>品質優先</option>
+                <option value="best">最高品質検証</option>
+                <option value="custom">カスタム</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="seed_vc_diffusion_steps">diffusion steps</label>
+              <input id="seed_vc_diffusion_steps" name="seed_vc_diffusion_steps" type="number" min="1" max="80" step="1" value="30" />
+            </div>
+            <div class="field-row">
+              <label for="seed_vc_reference_max_seconds">参照音声の上限秒数</label>
+              <input id="seed_vc_reference_max_seconds" name="seed_vc_reference_max_seconds" type="number" min="0.5" max="30" step="0.5" value="10" />
+            </div>
+            <label class="checkbox-row">
+              <input id="seed_vc_reference_auto_select" name="seed_vc_reference_auto_select" type="checkbox" />
+              参照音声の発話区間を自動選択
+            </label>
+            <button type="button" id="seed-vc-reference-preview-button" class="secondary-button">
+              参照音声を確認
+            </button>
+            <div class="field-row">
+              <label for="seed_vc_length_adjust">length adjust</label>
+              <input id="seed_vc_length_adjust" name="seed_vc_length_adjust" type="number" min="0.25" max="4" step="0.05" value="1.0" />
+            </div>
+            <div class="field-row">
+              <label for="seed_vc_inference_cfg_rate">inference cfg rate</label>
+              <input id="seed_vc_inference_cfg_rate" name="seed_vc_inference_cfg_rate" type="number" min="0" max="2" step="0.05" value="0.7" />
+            </div>
+          </fieldset>
+
+          <button type="submit" id="seed-vc-submit-button">変換</button>
+          <p id="seed-vc-error-message" class="error-message" hidden></p>
+        </form>
+
+        <section class="result-panel" aria-label="Seed-VC変換結果">
+          <section id="seed-vc-processing-panel" class="processing-panel" aria-label="処理状況" hidden>
+            <h2>処理状況</h2>
+            <p id="seed-vc-processing-current">待機中</p>
+            <ol id="seed-vc-processing-steps"></ol>
+          </section>
+
+          <section id="reference-preview-section" class="reference-preview-panel" aria-label="参照音声プレビュー" hidden>
+            <h2>参照音声プレビュー</h2>
+            <div class="reference-preview-grid">
+              <article>
+                <h3>正規化前</h3>
+                <audio id="reference-preview-original" controls></audio>
+              </article>
+              <article>
+                <h3>正規化後</h3>
+                <audio id="reference-preview-normalized" controls></audio>
+              </article>
+            </div>
+            <dl id="reference-preview-timings" class="timings"></dl>
+          </section>
+
+          <h2>出力音声</h2>
+          <audio id="seed-vc-output-audio" controls></audio>
+          <div class="result-actions output-actions">
+            <a id="seed-vc-download" class="secondary-button" href="#" download="seed-vc-output.wav" hidden>WAVを保存</a>
+          </div>
+          <dl id="seed-vc-timings" class="timings"></dl>
+          <dl id="seed-vc-providers" class="timings"></dl>
+          <ul id="seed-vc-warnings" class="warnings"></ul>
+        </section>
+      </section>
+    </main>
+    <script src="/static/app_config.js" defer></script>
+    <script src="/static/app_seed_vc_direct.js" defer></script>
+  </body>
+</html>

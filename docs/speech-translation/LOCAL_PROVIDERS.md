@@ -66,7 +66,7 @@ Qwen3-TTS、Seed-VC、Chatterboxは依存が重く、既存の機械学習環境
 - OpenAI系の出力言語候補はOpenAI TTS docsの対応言語リストに合わせる。OpenAI TTS docsはWhisperの対応言語に概ね従うとしているため、OpenAI API、OpenAI Realtime、OpenAI TTS APIは同じ言語集合をUIに出す。
 - テキスト読み上げでは、Google Translate TTS endpointまたはOpenAI TTS APIを選べる。Google Translate TTS endpointは公式APIではないため、開発中の比較用とし、安定運用の前提にはしない。
 
-翻訳なしのVC比較では、`MO_TTS_PROVIDER` は使わない。UIの「VC比較」は `MO_VC_BACKENDS` で指定したbackendをruntime APIから取得する。
+翻訳なしのVC比較では、`MO_TTS_PROVIDER` は使わない。管理画面の「VC比較」とSeed-VC単体画面 `/seed-vc` は `MO_VC_BACKENDS` で指定したbackendをruntime APIから取得する。
 
 | 値 | 用途 |
 | --- | --- |
@@ -179,7 +179,9 @@ PYTHONPATH=src \
 python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 ```
 
-`/api/runtime` の `voice_conversion_backends` で `seed-vc` が `available=true` になっていれば、UIの「VC比較」から実行できる。
+`/api/runtime` の `voice_conversion_backends` で `seed-vc` が `available=true` になっていれば、UIの「VC比較」または `/seed-vc` から実行できる。
+
+Seed-VCだけを確認したい場合は、`/seed-vc` を使う。この画面は翻訳、TTS、録音、ユーザー画面設定を介さず、変換元音声と参照音声を `/api/voice-conversion-jobs` へ直接送る。参照音声の前処理確認は `/api/seed-vc/reference-preview` を使う。
 
 UIでは、VC比較モードでSeed-VCを選択した場合と、音声翻訳モードで `Qwen生成後にSeed-VC変換` を選択した場合に、`diffusion steps`、参照音声の上限秒数、参照音声の発話区間自動選択、`length adjust`、`inference cfg rate` をjob単位で変更できる。未変更時は起動時の環境変数から決まる既定値を使う。
 

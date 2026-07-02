@@ -431,6 +431,10 @@ def create_app(
     def vibevoice() -> FileResponse:
         return FileResponse(WEB_DIR / "vibevoice.html")
 
+    @app.get("/seed-vc")
+    def seed_vc_direct() -> FileResponse:
+        return FileResponse(WEB_DIR / "seed_vc.html")
+
     @app.get("/admin")
     def admin() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
