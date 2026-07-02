@@ -657,6 +657,15 @@ def test_vibevoice_cli_patches_internal_token_constraint_for_safe_sampling(
     assert torch.isneginf(fixed[0, 5])
     assert torch.isfinite(torch.nn.functional.softmax(fixed, dim=-1)).all()
 
+    processor_with_reference_prompt = FakeTokenConstraintProcessor([2, 3, 4, 1, 0])
+    prompt_with_reference_diffusion = torch.tensor([[4, 10, 11]])
+    fixed = processor_with_reference_prompt(prompt_with_reference_diffusion, torch.zeros((1, 6), dtype=torch.float32))
+    assert torch.isneginf(fixed[0, 0])
+    assert torch.isneginf(fixed[0, 1])
+    assert torch.isneginf(fixed[0, 2])
+    assert torch.isneginf(fixed[0, 3])
+    assert fixed[0, 4] == 0
+
 
 def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
     short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")

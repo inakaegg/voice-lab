@@ -242,19 +242,25 @@ def _patch_vibevoice_token_constraint_processor_for_safe_sampling(processor_cls:
         fallback_token_id = int(valid_ids[0].item())
         if len(token_order) >= 3:
             fallback_token_id = int(token_order[2])
+        prompt_length = getattr(self, "_mo_prompt_length", None)
+        if prompt_length is None:
+            prompt_length = int(input_ids.shape[-1])
+            self._mo_prompt_length = prompt_length
         if not getattr(self, "_mo_safe_sampling_logged", False):
             input_tail = input_ids[0, -8:].detach().cpu().tolist() if input_ids.numel() else []
             logger.info(
-                "VibeVoice token制約patch初回: valid_token_ids=%s min_audio_tokens=%d fallback_token_id=%d input_tail=%s",
+                "VibeVoice token制約patch初回: valid_token_ids=%s min_audio_tokens=%d fallback_token_id=%d prompt_length=%d input_tail=%s",
                 token_order,
                 min_audio_tokens,
                 fallback_token_id,
+                prompt_length,
                 input_tail,
             )
             self._mo_safe_sampling_logged = True
         if min_audio_tokens > 0 and len(token_order) >= 3:
             speech_diffusion_id = int(token_order[2])
-            audio_token_counts = (input_ids == speech_diffusion_id).sum(dim=1)
+            generated_input_ids = input_ids[:, int(prompt_length) :]
+            audio_token_counts = (generated_input_ids == speech_diffusion_id).sum(dim=1)
             needs_audio = audio_token_counts < min_audio_tokens
             blocked_token_ids = []
             for index in (0, 1, 3, 4):
