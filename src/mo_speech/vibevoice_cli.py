@@ -242,6 +242,16 @@ def _patch_vibevoice_token_constraint_processor_for_safe_sampling(processor_cls:
         fallback_token_id = int(valid_ids[0].item())
         if len(token_order) >= 3:
             fallback_token_id = int(token_order[2])
+        if not getattr(self, "_mo_safe_sampling_logged", False):
+            input_tail = input_ids[0, -8:].detach().cpu().tolist() if input_ids.numel() else []
+            logger.info(
+                "VibeVoice token制約patch初回: valid_token_ids=%s min_audio_tokens=%d fallback_token_id=%d input_tail=%s",
+                token_order,
+                min_audio_tokens,
+                fallback_token_id,
+                input_tail,
+            )
+            self._mo_safe_sampling_logged = True
         if min_audio_tokens > 0 and len(token_order) >= 3:
             speech_diffusion_id = int(token_order[2])
             audio_token_counts = (input_ids == speech_diffusion_id).sum(dim=1)
@@ -269,6 +279,7 @@ def _patch_vibevoice_token_constraint_processor_for_safe_sampling(processor_cls:
     processor_cls._mo_safe_sampling_patch = True
     processor_cls._mo_original_init = original_init
     processor_cls._mo_original_call = original_call
+    logger.info("VibeVoice token制約patchを有効化しました: %s", processor_cls)
 
 
 class _FiniteLogitsProcessor(LogitsProcessor):
@@ -1070,6 +1081,19 @@ class VibeVoice:
 
         speech_outputs = getattr(outputs, "speech_outputs", None)
         if not speech_outputs or speech_outputs[0] is None:
+            sequences = getattr(outputs, "sequences", None)
+            if isinstance(sequences, torch.Tensor) and sequences.numel():
+                logger.error("VibeVoice生成sequence末尾: %s", sequences[0, -16:].detach().cpu().tolist())
+            tokenizer = getattr(self.processor, "tokenizer", None)
+            if tokenizer is not None:
+                logger.error(
+                    "VibeVoice special token ids: bos=%s eos=%s speech_start=%s speech_end=%s speech_diffusion=%s",
+                    getattr(tokenizer, "bos_token_id", None),
+                    getattr(tokenizer, "eos_token_id", None),
+                    getattr(tokenizer, "speech_start_id", None),
+                    getattr(tokenizer, "speech_end_id", None),
+                    getattr(tokenizer, "speech_diffusion_id", None),
+                )
             raise RuntimeError("VibeVoiceモデルが音声波形を返しませんでした。モデルとCLIの互換性を確認してください。")
 
         output_waveform = speech_outputs[0]
