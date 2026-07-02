@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import gc
 import json
 import os
 import re
@@ -176,6 +177,12 @@ class VoiceConversionService:
             preload = getattr(provider, "preload", None)
             if callable(preload):
                 preload()
+
+    def release(self) -> None:
+        for provider in self.providers:
+            release = getattr(provider, "release", None)
+            if callable(release):
+                release()
 
     def convert(
         self,
@@ -629,6 +636,20 @@ class SeedVcResidentDirectVoiceConversionProvider(SeedVcDirectVoiceConversionPro
     def preload(self) -> None:
         with self._lock:
             self._ensure_stream_state(self._load_seed_vc_api())
+
+    def release(self) -> None:
+        with self._lock:
+            self._stream_state = None
+            self._seed_vc_api = None
+            self._model_load_ms = None
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def convert(
         self,

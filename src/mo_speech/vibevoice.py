@@ -381,6 +381,7 @@ class VibeVoiceService:
         )
         self._subprocess_run = subprocess_run
         self._directed_asr_provider_instance = directed_asr_provider
+        self._owns_directed_asr_provider = directed_asr_provider is None
 
     @classmethod
     def from_env(cls) -> "VibeVoiceService":
@@ -544,8 +545,6 @@ class VibeVoiceService:
             raise ValueError(f"Speaker {', '.join(str(slot) for slot in missing_slots)} の参照音声を指定してください。")
 
         lines_by_speaker = _directed_lines_by_speaker(lines)
-        asr_provider = self._get_directed_asr_provider()
-        asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
         speaker_outputs: dict[int, Path] = {}
         ranges_by_line: dict[int, VibeVoiceAudioRange] = {}
         speaker_results: dict[int, VibeVoiceResult] = {}
@@ -554,7 +553,9 @@ class VibeVoiceService:
         warnings: list[str] = []
         generation_total_ms = 0.0
         asr_total_ms = 0.0
+        asr_name = ""
 
+        self._release_directed_asr_provider()
         _report_vibevoice_progress(progress_callback, "prepare", "指定台詞モード準備")
         with TemporaryDirectory(prefix="mo-vibevoice-directed-") as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
@@ -581,16 +582,30 @@ class VibeVoiceService:
                 speaker_output.write_bytes(speaker_result.audio_bytes)
                 speaker_outputs[speaker] = speaker_output
 
-                _raise_if_cancelled(cancel_event)
-                _report_vibevoice_progress(progress_callback, "asr", f"指定台詞 話者{speaker} ASR分割")
-                asr_started = perf_counter()
-                transcription = _transcribe_directed_audio(asr_provider, speaker_output)
-                asr_total_ms += _elapsed_ms(asr_started)
-                asr_segments_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "segments", []))
-                asr_words_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "words", []))
-                ranges, range_warnings = _audio_ranges_for_directed_lines(speaker_lines, transcription, speaker_output)
-                warnings.extend(f"Speaker {speaker}: {warning}" for warning in range_warnings)
-                ranges_by_line.update({audio_range.line_index: audio_range for audio_range in ranges})
+            asr_provider = self._get_directed_asr_provider()
+            asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
+            try:
+                for speaker_index, (speaker, speaker_lines) in enumerate(lines_by_speaker.items(), start=1):
+                    _raise_if_cancelled(cancel_event)
+                    _report_vibevoice_progress(
+                        progress_callback,
+                        "asr",
+                        f"指定台詞 話者{speaker} ASR分割 {speaker_index}/{len(lines_by_speaker)}",
+                    )
+                    asr_started = perf_counter()
+                    transcription = _transcribe_directed_audio(asr_provider, speaker_outputs[speaker])
+                    asr_total_ms += _elapsed_ms(asr_started)
+                    asr_segments_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "segments", []))
+                    asr_words_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "words", []))
+                    ranges, range_warnings = _audio_ranges_for_directed_lines(
+                        speaker_lines,
+                        transcription,
+                        speaker_outputs[speaker],
+                    )
+                    warnings.extend(f"Speaker {speaker}: {warning}" for warning in range_warnings)
+                    ranges_by_line.update({audio_range.line_index: audio_range for audio_range in ranges})
+            finally:
+                self._release_directed_asr_provider()
 
             _raise_if_cancelled(cancel_event)
             _report_vibevoice_progress(progress_callback, "reconstruct", "指定台詞 音声再配置")
@@ -656,6 +671,14 @@ class VibeVoiceService:
         if self._directed_asr_provider_instance is None:
             self._directed_asr_provider_instance = _create_directed_asr_provider()
         return self._directed_asr_provider_instance
+
+    def _release_directed_asr_provider(self) -> None:
+        if not self._owns_directed_asr_provider or self._directed_asr_provider_instance is None:
+            return
+        release = getattr(self._directed_asr_provider_instance, "release", None)
+        if callable(release):
+            release()
+        self._directed_asr_provider_instance = None
 
     def _build_command(
         self,

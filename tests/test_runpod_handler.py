@@ -244,6 +244,57 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     assert payload["serverless"]["operation_mode"] == "vibevoice"
 
 
+def test_runpod_handler_releases_voice_conversion_before_vibevoice(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeVoiceConversionService:
+        def release(self):
+            calls.append("release-vc")
+
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options):
+            calls.append("generate-vibevoice")
+            assert runpod_handler._VOICE_CONVERSION_SERVICE is None
+            return type(
+                "FakeVibeVoiceResult",
+                (),
+                {
+                    "audio_bytes": b"vv audio",
+                    "audio_mime_type": "audio/wav",
+                    "normalized_script": script_text,
+                    "timings_ms": {"vibevoice": 1.0},
+                    "providers": {"vibevoice": "fake-vibevoice"},
+                    "diagnostics": {},
+                },
+            )()
+
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", FakeVoiceConversionService())
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE_LOAD_MS", 1.0)
+    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    monkeypatch.setenv("MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE", "1")
+    event = {
+        "input": {
+            "operation_mode": "vibevoice",
+            "script": "Speaker 1: 你好。",
+            "voices": [
+                {
+                    "speaker": 1,
+                    "filename": "voice.wav",
+                    "audio_mime_type": "audio/wav",
+                    "audio_base64": base64.b64encode(b"voice").decode("ascii"),
+                }
+            ],
+            "generation": {"model_id": "vibevoice-large-aoi-pinned", "inference_steps": 2},
+        }
+    }
+
+    runpod_handler.handler(event)
+
+    assert calls == ["release-vc", "generate-vibevoice"]
+    assert runpod_handler._VOICE_CONVERSION_SERVICE is None
+    assert runpod_handler._VOICE_CONVERSION_SERVICE_LOAD_MS is None
+
+
 def test_runpod_handler_reports_worker_diagnostics(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     cli_path = tmp_path / "vibevoice_cli.py"
     cli_path.write_text(
@@ -352,6 +403,28 @@ def test_runpod_preload_defaults_to_openai_translation_backend(monkeypatch: pyte
     runpod_handler._preload_for_serverless()
 
     assert calls == [("translation", "openai"), ("voice_conversion", "seed-vc")]
+
+
+def test_runpod_preload_skips_voice_conversion_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def fake_translation_pipeline(translation_backend):
+        calls.append(("translation", translation_backend))
+        return object(), 12.0
+
+    def fake_voice_conversion_service():
+        calls.append(("voice_conversion", "seed-vc"))
+        return object(), 34.0
+
+    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
+    monkeypatch.setattr(runpod_handler, "_voice_conversion_service", fake_voice_conversion_service)
+    monkeypatch.setenv("MO_RUNPOD_PRELOAD_ON_START", "1")
+    monkeypatch.delenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START", raising=False)
+    monkeypatch.delenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", raising=False)
+
+    runpod_handler._preload_for_serverless()
+
+    assert calls == [("translation", "openai")]
 
 
 def test_runpod_voice_conversion_service_preloads_provider_on_first_load(monkeypatch: pytest.MonkeyPatch) -> None:

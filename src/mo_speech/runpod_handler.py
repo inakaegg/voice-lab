@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import gc
 import hashlib
 import json
 import os
@@ -286,6 +287,7 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         )
     audio_decode_ms = _elapsed_ms(decode_started)
 
+    _release_voice_conversion_before_vibevoice()
     service, service_load_ms = _vibevoice_service()
     temp_write_ms = 0.0
     with TemporaryDirectory() as temp_dir_raw:
@@ -461,6 +463,28 @@ def _vibevoice_service() -> tuple[VibeVoiceService, float | None]:
         _VIBEVOICE_SERVICE_LOAD_MS = _elapsed_ms(started)
         return _VIBEVOICE_SERVICE, _VIBEVOICE_SERVICE_LOAD_MS
     return _VIBEVOICE_SERVICE, None
+
+
+def _release_voice_conversion_before_vibevoice() -> bool:
+    global _VOICE_CONVERSION_SERVICE, _VOICE_CONVERSION_SERVICE_LOAD_MS
+    if os.getenv("MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE", "1") == "0":
+        return False
+    if _VOICE_CONVERSION_SERVICE is None:
+        return False
+    release = getattr(_VOICE_CONVERSION_SERVICE, "release", None)
+    if callable(release):
+        release()
+    _VOICE_CONVERSION_SERVICE = None
+    _VOICE_CONVERSION_SERVICE_LOAD_MS = None
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    return True
 
 
 def _attach_serverless_metrics(

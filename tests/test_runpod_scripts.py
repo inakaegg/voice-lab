@@ -59,6 +59,29 @@ def test_runpod_common_sets_vibevoice_revision_defaults() -> None:
     }
 
 
+def test_runpod_common_does_not_preload_voice_conversion_by_default() -> None:
+    command = (
+        "source scripts/runpod_common.sh; "
+        "set_default_runpod_app_env; "
+        "runpod_env_json "
+        "MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START "
+        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE"
+    )
+
+    result = subprocess.run(
+        ["bash", "-lc", command],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START": "0",
+        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE": "1",
+    }
+
+
 def test_runpod_image_workflow_frees_disk_space_before_build() -> None:
     workflow = Path(".github/workflows/runpod-image.yml").read_text(encoding="utf-8")
 

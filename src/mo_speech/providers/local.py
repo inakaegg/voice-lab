@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import platform
 from contextlib import nullcontext
@@ -88,6 +89,17 @@ class FasterWhisperAsrProvider:
 
     def preload(self) -> None:
         self._load_model()
+
+    def release(self) -> None:
+        self._model = None
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def _load_model(self) -> Any:
         if self._model is not None:

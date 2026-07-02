@@ -148,6 +148,8 @@ VIBEVOICE_GENERATION_CONFIG_MODE=explicit
 VIBEVOICE_MIN_AUDIO_TOKENS=1
 ```
 
+20GB級GPUでLargeを使う場合は、VibeVoice以外のresident GPUモデルを同じworker processに残さない。特に `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` でSeed-VCを起動時preloadすると、親process側に数GiBのVRAMが残り、Largeのロード中にOOMしやすい。VibeVoice用RunPod imageの既定は `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` とし、VibeVoice request前に既存のVoice Conversion serviceを解放する。指定台詞向けASR再配置モードでは、複数話者のVibeVoice生成を全て終えてからASR timestamp取得へ進める。これにより、Large生成とfaster-whisper ASRが同時にGPUへ載る状態を避ける。
+
 `VIBEVOICE_MIN_AUDIO_TOKENS` はLargeで `speech_start` 直後にEOSへ落ちる挙動を避けるための下限指定である。CLIはこの値を固定の生成長としては扱わず、台本文字数、行数、`max_new_tokens` から実際に強制する最低音声token数を見積もる。これにより短文でも1tokenだけで終了せず、長い台本では台本長に応じた最低限の音声tokenを要求する。
 
 `VIBEVOICE_MODEL_REVISION` と `VIBEVOICE_TOKENIZER_REVISION` は、ローカルで動作確認したキャッシュと同じrevisionをRunPod初回ダウンロードでも使うために固定する。未固定のままHugging Faceの `main` を取得すると、後日のモデル更新で同じ入力でも挙動が変わる可能性がある。
