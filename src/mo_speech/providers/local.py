@@ -9,8 +9,12 @@ from typing import Any
 
 
 WHISPER_LANGUAGE_CODES = {
+    "auto": "",
     "id-ID": "id",
     "ja-JP": "ja",
+    "zh-CN": "zh",
+    "en-US": "en",
+    "hi-IN": "hi",
 }
 
 LANGUAGE_DISPLAY_NAMES = {
@@ -40,17 +44,47 @@ class FasterWhisperAsrProvider:
         return f"faster-whisper-{self.model_name}"
 
     def transcribe(self, audio_path: Path, source_language: str) -> str:
+        result = self.transcribe_detail(audio_path, source_language, include_timestamps=False)
+        return result.text
+
+    def transcribe_detail(self, audio_path: Path, source_language: str, *, include_timestamps: bool = False):
         if source_language not in WHISPER_LANGUAGE_CODES:
             raise ValueError(f"Whisper language is not configured for {source_language}")
 
         model = self._load_model()
-        segments, _info = model.transcribe(
-            str(audio_path),
-            language=WHISPER_LANGUAGE_CODES[source_language],
-            beam_size=5,
-            vad_filter=True,
+        kwargs = {
+            "beam_size": 5,
+            "vad_filter": True,
+            "word_timestamps": include_timestamps,
+        }
+        language = WHISPER_LANGUAGE_CODES[source_language]
+        if language:
+            kwargs["language"] = language
+        segments, _info = model.transcribe(str(audio_path), **kwargs)
+        segment_rows: list[dict[str, object]] = []
+        word_rows: list[dict[str, object]] = []
+        text_parts: list[str] = []
+        for segment in segments:
+            text = str(getattr(segment, "text", "") or "")
+            text_parts.append(text)
+            start = float(getattr(segment, "start", 0.0) or 0.0)
+            end = float(getattr(segment, "end", start) or start)
+            segment_rows.append({"text": text, "start": start, "end": end})
+            for word in getattr(segment, "words", None) or []:
+                word_text = str(getattr(word, "word", None) or getattr(word, "text", "") or "")
+                word_start = float(getattr(word, "start", 0.0) or 0.0)
+                word_end = float(getattr(word, "end", word_start) or word_start)
+                word_rows.append({"text": word_text, "start": word_start, "end": word_end})
+
+        from .openai_api import AsrTranscription
+
+        return AsrTranscription(
+            text="".join(text_parts).strip(),
+            model=self.model_name,
+            words=word_rows if include_timestamps else [],
+            segments=segment_rows if include_timestamps else [],
+            timestamp_granularities=["word", "segment"] if include_timestamps else [],
         )
-        return "".join(str(segment.text) for segment in segments).strip()
 
     def preload(self) -> None:
         self._load_model()

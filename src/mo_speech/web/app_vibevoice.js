@@ -380,9 +380,6 @@ async function handleGenerate(event) {
   try {
     const body = new FormData(form);
     const requiredSlots = requiredVoiceSlotsFromScript(scriptInput.value);
-    if (directedLineModeControl?.checked === true && requiredSlots.size > 1) {
-      throw new Error("改行・空白を1行化して生成は、現在1話者の台本だけ対応しています。");
-    }
     const voiceState = await appendVoiceFiles(body, requiredSlots);
     if (voiceState.missingSlots.length > 0) {
       throw new Error(`Speaker ${voiceState.missingSlots.join(", ")} の参照音声を指定してください。`);

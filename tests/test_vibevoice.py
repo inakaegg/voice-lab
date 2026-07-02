@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import wave
 from pathlib import Path
+from types import SimpleNamespace
 from threading import Event
 
 import pytest
@@ -19,6 +21,40 @@ from mo_speech.vibevoice import (
     normalize_vibevoice_directed_line_script,
     normalize_vibevoice_script,
 )
+
+
+class FakeDirectedAsrProvider:
+    name = "fake-directed-asr"
+
+    def __init__(self, word_batches: list[list[dict[str, object]]]):
+        self.word_batches = list(word_batches)
+        self.calls: list[tuple[Path, str, bool]] = []
+
+    def transcribe_detail(self, audio_path: Path, source_language: str, *, include_timestamps: bool = False):
+        self.calls.append((audio_path, source_language, include_timestamps))
+        words = self.word_batches.pop(0)
+        return SimpleNamespace(
+            text="".join(str(item["text"]) for item in words),
+            model="fake",
+            words=words,
+            segments=[],
+            has_timestamps=True,
+        )
+
+
+def _write_test_wav(path: Path, *, seconds: float = 1.0, sample_value: int = 1200, sample_rate: int = 1000) -> None:
+    frame_count = max(1, int(seconds * sample_rate))
+    frame = int(sample_value).to_bytes(2, "little", signed=True)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(frame * frame_count)
+
+
+def _wav_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as wav:
+        return wav.getnframes() / wav.getframerate()
 
 
 def test_normalize_vibevoice_script_adds_speaker_tag_per_plain_line() -> None:
@@ -151,15 +187,26 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
         calls.append(list(command))
         script_texts.append(Path(command[command.index("--text_file") + 1]).read_text(encoding="utf-8"))
         output_index = command.index("--output") + 1
-        Path(command[output_index]).write_bytes(b"RIFFfakewav")
+        _write_test_wav(Path(command[output_index]), seconds=1.0)
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
+    asr = FakeDirectedAsrProvider(
+        [
+            [
+                {"text": "あっこんにちは", "start": 0.0, "end": 0.1},
+                {"text": "北海道", "start": 0.2, "end": 0.3},
+                {"text": "温泉", "start": 0.4, "end": 0.5},
+                {"text": "仕事", "start": 0.6, "end": 0.7},
+            ]
+        ]
+    )
     service = VibeVoiceService(
         python="python3",
         cli_path=cli,
         vibevoice_home=home,
         comfyui_vibevoice_path=module_dir,
         subprocess_run=fake_run,
+        directed_asr_provider=asr,
     )
     voice = tmp_path / "voice.wav"
     voice.write_bytes(b"voice")
@@ -174,15 +221,101 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
             ]
         ),
         voice_paths=[voice],
-        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_by_line=False),
+        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_by_line=False, line_gap=0.25),
     )
 
     command = calls[0]
     assert script_texts[0] == (
         "Speaker 1: あっ、こんにちは、最近、北海道に移住したって聞きました、温泉も近くにありますか、お仕事は何ですか"
     )
-    assert result.normalized_script == script_texts[0]
+    assert result.normalized_script == "\n".join(
+        [
+            "Speaker 1: あっ、こんにちは",
+            "Speaker 1: 最近、北海道に移住したって聞きました",
+            "Speaker 1: 温泉も近くにありますか",
+            "Speaker 1: お仕事は何ですか",
+        ]
+    )
+    assert result.providers["vibevoice_directed_asr"] == "fake-directed-asr"
+    assert result.diagnostics["directed_line_mode"]["line_count"] == 4
+    assert len(result.diagnostics["directed_line_mode"]["ranges"]) == 4
     assert "--line_by_line" not in command
+    output = tmp_path / "directed-output.wav"
+    output.write_bytes(result.audio_bytes)
+    assert 1.1 <= _wav_duration(output) <= 1.2
+    assert asr.calls[0][1:] == ("auto", True)
+
+
+def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders(tmp_path: Path) -> None:
+    script_texts: list[str] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        script_texts.append(Path(command[command.index("--text_file") + 1]).read_text(encoding="utf-8"))
+        output_index = command.index("--output") + 1
+        _write_test_wav(Path(command[output_index]), seconds=1.0, sample_value=1000 + len(script_texts))
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    asr = FakeDirectedAsrProvider(
+        [
+            [
+                {"text": "一番", "start": 0.0, "end": 0.1},
+                {"text": "三番", "start": 0.2, "end": 0.3},
+            ],
+            [
+                {"text": "二番", "start": 0.1, "end": 0.2},
+                {"text": "四番", "start": 0.3, "end": 0.4},
+            ],
+        ]
+    )
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+        directed_asr_provider=asr,
+    )
+    voice1 = tmp_path / "voice1.wav"
+    voice2 = tmp_path / "voice2.wav"
+    voice1.write_bytes(b"voice1")
+    voice2.write_bytes(b"voice2")
+
+    result = service.generate(
+        script_text="\n".join(
+            [
+                "1 一番目です",
+                "2 二番目です",
+                "1 三番目です",
+                "2 四番目です",
+            ]
+        ),
+        voice_paths=[VibeVoiceVoiceSample(slot=1, path=voice1), VibeVoiceVoiceSample(slot=2, path=voice2)],
+        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
+    )
+
+    assert script_texts == [
+        "Speaker 1: 一番目です、三番目です",
+        "Speaker 1: 二番目です、四番目です",
+    ]
+    assert result.normalized_script == "\n".join(
+        [
+            "Speaker 1: 一番目です",
+            "Speaker 2: 二番目です",
+            "Speaker 1: 三番目です",
+            "Speaker 2: 四番目です",
+        ]
+    )
+    ranges = result.diagnostics["directed_line_mode"]["ranges"]
+    assert [item["speaker"] for item in ranges] == [1, 2, 1, 2]
+    output = tmp_path / "directed-multi-output.wav"
+    output.write_bytes(result.audio_bytes)
+    assert 0.65 <= _wav_duration(output) <= 0.75
 
 
 def test_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: Path) -> None:

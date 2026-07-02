@@ -82,6 +82,16 @@ def main() -> int:
         default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_MAX_VOICE_SECONDS", "3")),
     )
     parser.add_argument("--vibevoice-line-by-line", action="store_true")
+    parser.add_argument(
+        "--vibevoice-directed-line-mode",
+        action="store_true",
+        default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_LINE_MODE") == "1",
+    )
+    parser.add_argument(
+        "--vibevoice-line-gap",
+        type=float,
+        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_LINE_GAP", "1")),
+    )
     parser.add_argument("--print-audio-base64", action="store_true")
     args = parser.parse_args()
 
@@ -122,6 +132,8 @@ def main() -> int:
             "seed": args.vibevoice_seed,
             "max_voice_seconds": args.vibevoice_max_voice_seconds,
             "line_by_line": args.vibevoice_line_by_line,
+            "directed_line_mode": args.vibevoice_directed_line_mode,
+            "line_gap": args.vibevoice_line_gap,
         }
         if args.vibevoice_cfg_scale is not None:
             generation_payload["cfg_scale"] = args.vibevoice_cfg_scale

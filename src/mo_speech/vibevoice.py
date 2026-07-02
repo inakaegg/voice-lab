@@ -8,6 +8,7 @@ from queue import Empty, Queue
 import re
 import subprocess
 import sys
+import wave
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Event, Thread
@@ -131,6 +132,22 @@ class VibeVoiceVoiceSample:
 
 
 @dataclass(frozen=True)
+class VibeVoiceDirectedLine:
+    index: int
+    speaker: int
+    text: str
+
+
+@dataclass(frozen=True)
+class VibeVoiceAudioRange:
+    speaker: int
+    line_index: int
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True)
 class VibeVoiceResult:
     audio_bytes: bytes
     audio_mime_type: str
@@ -233,25 +250,33 @@ def normalize_vibevoice_script(text: str, *, max_bytes: int = 200_000) -> str:
 
 
 def normalize_vibevoice_directed_line_script(text: str, *, max_bytes: int = 200_000) -> str:
+    speaker_lines = parse_vibevoice_directed_script_lines(text, max_bytes=max_bytes)
+    speaker_slots = {line.speaker for line in speaker_lines}
+    if len(speaker_slots) > 1:
+        raise ValueError("単一話者の1行化には1話者の台本だけ指定できます。複数話者はASR再配置モードで処理します。")
+
+    return _directed_script_for_lines(speaker_lines, output_speaker=next(iter(speaker_slots)))
+
+
+def parse_vibevoice_directed_script_lines(text: str, *, max_bytes: int = 200_000) -> list[VibeVoiceDirectedLine]:
     normalized = normalize_vibevoice_script(text, max_bytes=max_bytes)
-    speaker_lines: list[tuple[int, str]] = []
-    for line in normalized.splitlines():
-        slot = _speaker_slot_from_normalized_line(line)
-        if slot is None:
-            slot = 1
-        text_part = _speaker_text_from_normalized_line(line)
+    speaker_lines: list[VibeVoiceDirectedLine] = []
+    for index, line in enumerate(normalized.splitlines(), start=1):
+        slot = _speaker_slot_from_normalized_line(line) or 1
+        text_part = _collapse_directed_line_spacing(_speaker_text_from_normalized_line(line))
         if text_part:
-            speaker_lines.append((slot, _collapse_directed_line_spacing(text_part)))
+            speaker_lines.append(VibeVoiceDirectedLine(index=index, speaker=slot, text=text_part))
     if not speaker_lines:
         raise ValueError("script is required")
+    return speaker_lines
 
-    speaker_slots = {slot for slot, _text_part in speaker_lines}
-    if len(speaker_slots) > 1:
-        raise ValueError("指定台詞向け1行化は現在1話者のみ対応です。複数話者は話者別生成とASR再配置が必要です。")
 
-    separator = _directed_line_separator(normalized)
-    joined = _join_directed_line_phrases([text_part for _slot, text_part in speaker_lines], separator=separator)
-    return f"Speaker {speaker_lines[0][0]}: {joined}"
+def _directed_script_for_lines(lines: Sequence[VibeVoiceDirectedLine], *, output_speaker: int = 1) -> str:
+    if not lines:
+        raise ValueError("script is required")
+    separator = _directed_line_separator("\n".join(line.text for line in lines))
+    joined = _join_directed_line_phrases([line.text for line in lines], separator=separator)
+    return f"Speaker {output_speaker}: {joined}"
 
 
 def _has_speaker_tag(line: str) -> bool:
@@ -335,6 +360,7 @@ class VibeVoiceService:
         comfyui_vibevoice_path: str | Path | None = None,
         timeout_seconds: float | None = None,
         subprocess_run: SubprocessRun = subprocess.run,
+        directed_asr_provider: object | None = None,
     ) -> None:
         self.python = python or os.getenv("MO_VIBEVOICE_PYTHON") or _default_vibevoice_python()
         self.cli_path = Path(cli_path or os.getenv("MO_VIBEVOICE_CLI") or DEFAULT_VIBEVOICE_CLI).expanduser()
@@ -354,6 +380,7 @@ class VibeVoiceService:
             else os.getenv("MO_VIBEVOICE_TIMEOUT_SECONDS", str(DEFAULT_VIBEVOICE_TIMEOUT_SECONDS))
         )
         self._subprocess_run = subprocess_run
+        self._directed_asr_provider_instance = directed_asr_provider
 
     @classmethod
     def from_env(cls) -> "VibeVoiceService":
@@ -403,14 +430,37 @@ class VibeVoiceService:
         voice_samples = _coerce_voice_samples(voice_paths)
         if not voice_samples:
             raise ValueError("voice sample is required")
+        base_options = options or VibeVoiceGenerationOptions()
+        if base_options.directed_line_mode:
+            return self._generate_directed_line_mode(
+                script_text=script_text,
+                voice_samples=voice_samples,
+                options=base_options,
+                progress_callback=progress_callback,
+                cancel_event=cancel_event,
+            )
+        return self._generate_single_pass(
+            script_text=script_text,
+            voice_samples=voice_samples,
+            options=base_options,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        )
+
+    def _generate_single_pass(
+        self,
+        *,
+        script_text: str,
+        voice_samples: Sequence[VibeVoiceVoiceSample],
+        options: VibeVoiceGenerationOptions,
+        progress_callback: Callable[[str, str], None] | None = None,
+        cancel_event: Event | None = None,
+        allow_auto_line_by_line: bool = True,
+    ) -> VibeVoiceResult:
         if not self.cli_path.is_file():
             raise VibeVoiceError(f"VibeVoice CLI was not found: {self.cli_path}")
-        base_options = options or VibeVoiceGenerationOptions()
-        normalized_script = _normalize_vibevoice_script_for_options(script_text, base_options)
-        generation_options = _options_with_auto_line_by_line(
-            normalized_script,
-            base_options,
-        )
+        normalized_script = _normalize_vibevoice_script_for_options(script_text, options)
+        generation_options = _options_with_auto_line_by_line(normalized_script, options) if allow_auto_line_by_line else options
         model_preset = resolve_vibevoice_model_preset(generation_options.model_id)
         started = perf_counter()
         _report_vibevoice_progress(progress_callback, "prepare", "入力準備")
@@ -476,6 +526,136 @@ class VibeVoiceService:
                 "command": _redacted_command(command),
             },
         )
+
+    def _generate_directed_line_mode(
+        self,
+        *,
+        script_text: str,
+        voice_samples: Sequence[VibeVoiceVoiceSample],
+        options: VibeVoiceGenerationOptions,
+        progress_callback: Callable[[str, str], None] | None = None,
+        cancel_event: Event | None = None,
+    ) -> VibeVoiceResult:
+        directed_started = perf_counter()
+        lines = parse_vibevoice_directed_script_lines(script_text)
+        samples_by_slot = {sample.slot: sample for sample in voice_samples}
+        missing_slots = sorted({line.speaker for line in lines if line.speaker not in samples_by_slot})
+        if missing_slots:
+            raise ValueError(f"Speaker {', '.join(str(slot) for slot in missing_slots)} の参照音声を指定してください。")
+
+        lines_by_speaker = _directed_lines_by_speaker(lines)
+        asr_provider = self._get_directed_asr_provider()
+        asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
+        speaker_outputs: dict[int, Path] = {}
+        ranges_by_line: dict[int, VibeVoiceAudioRange] = {}
+        speaker_results: dict[int, VibeVoiceResult] = {}
+        asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
+        asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
+        warnings: list[str] = []
+        generation_total_ms = 0.0
+        asr_total_ms = 0.0
+
+        _report_vibevoice_progress(progress_callback, "prepare", "指定台詞モード準備")
+        with TemporaryDirectory(prefix="mo-vibevoice-directed-") as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            for speaker_index, (speaker, speaker_lines) in enumerate(lines_by_speaker.items(), start=1):
+                _raise_if_cancelled(cancel_event)
+                speaker_script = _directed_script_for_lines(speaker_lines, output_speaker=1)
+                speaker_options = replace(options, directed_line_mode=False, line_by_line=False)
+                _report_vibevoice_progress(
+                    progress_callback,
+                    "generation",
+                    f"指定台詞 話者{speaker}生成 {speaker_index}/{len(lines_by_speaker)}",
+                )
+                speaker_result = self._generate_single_pass(
+                    script_text=speaker_script,
+                    voice_samples=[VibeVoiceVoiceSample(slot=1, path=samples_by_slot[speaker].path)],
+                    options=speaker_options,
+                    progress_callback=progress_callback,
+                    cancel_event=cancel_event,
+                    allow_auto_line_by_line=False,
+                )
+                generation_total_ms += float(speaker_result.timings_ms.get("total", 0.0))
+                speaker_results[speaker] = speaker_result
+                speaker_output = temp_dir / f"speaker-{speaker}.wav"
+                speaker_output.write_bytes(speaker_result.audio_bytes)
+                speaker_outputs[speaker] = speaker_output
+
+                _raise_if_cancelled(cancel_event)
+                _report_vibevoice_progress(progress_callback, "asr", f"指定台詞 話者{speaker} ASR分割")
+                asr_started = perf_counter()
+                transcription = _transcribe_directed_audio(asr_provider, speaker_output)
+                asr_total_ms += _elapsed_ms(asr_started)
+                asr_segments_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "segments", []))
+                asr_words_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "words", []))
+                ranges, range_warnings = _audio_ranges_for_directed_lines(speaker_lines, transcription, speaker_output)
+                warnings.extend(f"Speaker {speaker}: {warning}" for warning in range_warnings)
+                ranges_by_line.update({audio_range.line_index: audio_range for audio_range in ranges})
+
+            _raise_if_cancelled(cancel_event)
+            _report_vibevoice_progress(progress_callback, "reconstruct", "指定台詞 音声再配置")
+            reconstruct_started = perf_counter()
+            output_path = temp_dir / "directed-vibevoice-output.wav"
+            _compose_directed_wav(
+                lines,
+                ranges_by_line=ranges_by_line,
+                speaker_outputs=speaker_outputs,
+                output_path=output_path,
+                gap_seconds=options.line_gap,
+            )
+            audio_bytes = output_path.read_bytes()
+            reconstruct_ms = _elapsed_ms(reconstruct_started)
+
+        total_ms = _elapsed_ms(directed_started)
+        first_result = next(iter(speaker_results.values()))
+        providers = dict(first_result.providers)
+        providers["vibevoice_directed_asr"] = asr_name
+        providers["vibevoice_directed_mode"] = "asr_reconstruct"
+        return VibeVoiceResult(
+            audio_bytes=audio_bytes,
+            audio_mime_type=self.audio_mime_type,
+            normalized_script=normalize_vibevoice_script(script_text),
+            providers=providers,
+            timings_ms={
+                "vibevoice": generation_total_ms,
+                "vibevoice_directed_asr": asr_total_ms,
+                "vibevoice_directed_reconstruct": reconstruct_ms,
+                "total": total_ms,
+            },
+            diagnostics={
+                "directed_line_mode": {
+                    "speakers": sorted(lines_by_speaker),
+                    "line_count": len(lines),
+                    "asr_provider": asr_name,
+                    "gap_seconds": options.line_gap,
+                    "warnings": warnings,
+                    "speaker_scripts": {
+                        str(speaker): _directed_script_for_lines(speaker_lines, output_speaker=1)
+                        for speaker, speaker_lines in lines_by_speaker.items()
+                    },
+                    "asr_segments": {str(speaker): rows for speaker, rows in asr_segments_by_speaker.items()},
+                    "asr_words": {str(speaker): rows for speaker, rows in asr_words_by_speaker.items()},
+                    "ranges": [
+                        {
+                            "line_index": audio_range.line_index,
+                            "speaker": audio_range.speaker,
+                            "text": audio_range.text,
+                            "start": audio_range.start,
+                            "end": audio_range.end,
+                        }
+                        for audio_range in sorted(ranges_by_line.values(), key=lambda item: item.line_index)
+                    ],
+                },
+                "speaker_results": {
+                    str(speaker): result.diagnostics for speaker, result in sorted(speaker_results.items())
+                },
+            },
+        )
+
+    def _get_directed_asr_provider(self):
+        if self._directed_asr_provider_instance is None:
+            self._directed_asr_provider_instance = _create_directed_asr_provider()
+        return self._directed_asr_provider_instance
 
     def _build_command(
         self,
@@ -759,7 +939,7 @@ class RunpodServerlessVibeVoiceService:
         if not voice_samples:
             raise ValueError("voice sample is required")
         base_options = options or VibeVoiceGenerationOptions()
-        normalized_script = _normalize_vibevoice_script_for_options(script_text, base_options)
+        normalized_script = normalize_vibevoice_script(script_text)
         generation_options = _options_with_auto_line_by_line(
             normalized_script,
             base_options,
@@ -914,6 +1094,241 @@ def _report_vibevoice_progress(
         progress_callback(stage, label)
 
 
+def _raise_if_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise VibeVoiceError("VibeVoice generation was cancelled by the user.")
+
+
+def _create_directed_asr_provider():
+    provider = os.getenv("MO_VIBEVOICE_DIRECTED_ASR_PROVIDER", os.getenv("MO_ASR_PROVIDER", "faster-whisper"))
+    if provider in {"faster-whisper", "faster_whisper"}:
+        from .providers.local import FasterWhisperAsrProvider
+
+        return FasterWhisperAsrProvider()
+    if provider == "openai":
+        from .providers.openai_api import OpenAiAsrProvider
+
+        return OpenAiAsrProvider(model=os.getenv("MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL", "whisper-1"))
+    raise ValueError(f"unsupported VibeVoice directed ASR provider: {provider}")
+
+
+def _directed_asr_language() -> str:
+    return os.getenv("MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE", "auto").strip() or "auto"
+
+
+def _directed_lines_by_speaker(lines: Sequence[VibeVoiceDirectedLine]) -> dict[int, list[VibeVoiceDirectedLine]]:
+    grouped: dict[int, list[VibeVoiceDirectedLine]] = {}
+    for line in lines:
+        grouped.setdefault(line.speaker, []).append(line)
+    return dict(sorted(grouped.items(), key=lambda item: min(line.index for line in item[1])))
+
+
+def _transcribe_directed_audio(asr_provider, audio_path: Path):
+    transcribe_detail = getattr(asr_provider, "transcribe_detail", None)
+    if transcribe_detail is None:
+        raise ValueError("指定台詞モードにはtimestamp対応ASRが必要です。")
+    result = transcribe_detail(audio_path, _directed_asr_language(), include_timestamps=True)
+    if not getattr(result, "has_timestamps", False):
+        raise ValueError("指定台詞モードのASRがtimestampを返しませんでした。")
+    return result
+
+
+def _timestamp_rows(rows: object) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            text = row.get("text") or row.get("word") or ""
+            start = row.get("start")
+            end = row.get("end")
+        else:
+            text = getattr(row, "text", None) or getattr(row, "word", "") or ""
+            start = getattr(row, "start", None)
+            end = getattr(row, "end", None)
+        try:
+            start_f = float(start)
+            end_f = float(end)
+        except (TypeError, ValueError):
+            continue
+        if end_f <= start_f:
+            continue
+        normalized.append({"text": str(text or ""), "start": max(0.0, start_f), "end": max(0.0, end_f)})
+    return normalized
+
+
+def _audio_ranges_for_directed_lines(
+    lines: Sequence[VibeVoiceDirectedLine],
+    transcription,
+    audio_path: Path,
+) -> tuple[list[VibeVoiceAudioRange], list[str]]:
+    duration = _wav_duration(audio_path)
+    warnings: list[str] = []
+    words = _timestamp_rows(getattr(transcription, "words", []))
+    segments = _timestamp_rows(getattr(transcription, "segments", []))
+    if words:
+        ranges = _audio_ranges_from_words(lines, words, duration=duration)
+        if len(words) < len(lines):
+            warnings.append("ASR word数が台詞行数より少ないため、範囲推定が粗くなる可能性があります。")
+        return ranges, warnings
+    if segments:
+        if len(segments) == len(lines):
+            return [
+                VibeVoiceAudioRange(
+                    speaker=line.speaker,
+                    line_index=line.index,
+                    text=line.text,
+                    start=max(0.0, min(float(segment["start"]), duration)),
+                    end=max(0.0, min(float(segment["end"]), duration)),
+                )
+                for line, segment in zip(lines, segments, strict=True)
+            ], warnings
+        warnings.append("ASR segment数と台詞行数が一致しないため、文字数比で範囲を推定しました。")
+        return _audio_ranges_by_target_text_ratio(lines, rows=segments, duration=duration), warnings
+    raise ValueError("指定台詞モードのASR timestampが空でした。")
+
+
+def _audio_ranges_from_words(
+    lines: Sequence[VibeVoiceDirectedLine],
+    words: Sequence[dict[str, object]],
+    *,
+    duration: float,
+) -> list[VibeVoiceAudioRange]:
+    if not words:
+        return _audio_ranges_by_target_text_ratio(lines, rows=[], duration=duration)
+    word_lengths = [max(1, len(_alignment_text(str(word.get("text", ""))))) for word in words]
+    total_word_length = max(1, sum(word_lengths))
+    target_lengths = [max(1, len(_alignment_text(line.text))) for line in lines]
+    total_target_length = max(1, sum(target_lengths))
+    ranges: list[VibeVoiceAudioRange] = []
+    word_index = 0
+    consumed_words = 0
+    target_cumulative = 0
+    for line, target_length in zip(lines, target_lengths, strict=True):
+        start_index = min(word_index, len(words) - 1)
+        target_cumulative += target_length
+        target_word_cumulative = target_cumulative / total_target_length * total_word_length
+        while word_index < len(words) - 1 and consumed_words + word_lengths[word_index] < target_word_cumulative:
+            consumed_words += word_lengths[word_index]
+            word_index += 1
+        end_index = min(word_index, len(words) - 1)
+        start = float(words[start_index]["start"])
+        end = float(words[end_index]["end"])
+        if end <= start:
+            end = min(duration, start + 0.05)
+        ranges.append(
+            VibeVoiceAudioRange(
+                speaker=line.speaker,
+                line_index=line.index,
+                text=line.text,
+                start=max(0.0, min(start, duration)),
+                end=max(0.0, min(end, duration)),
+            )
+        )
+        if word_index < len(words) - 1:
+            consumed_words += word_lengths[word_index]
+            word_index += 1
+    return ranges
+
+
+def _audio_ranges_by_target_text_ratio(
+    lines: Sequence[VibeVoiceDirectedLine],
+    *,
+    rows: Sequence[dict[str, object]],
+    duration: float,
+) -> list[VibeVoiceAudioRange]:
+    if rows:
+        start_time = max(0.0, min(float(rows[0]["start"]), duration))
+        end_time = max(start_time, min(float(rows[-1]["end"]), duration))
+    else:
+        start_time = 0.0
+        end_time = duration
+    target_lengths = [max(1, len(_alignment_text(line.text))) for line in lines]
+    total = max(1, sum(target_lengths))
+    cursor = start_time
+    consumed = 0
+    ranges: list[VibeVoiceAudioRange] = []
+    for index, (line, length) in enumerate(zip(lines, target_lengths, strict=True)):
+        consumed += length
+        end = end_time if index == len(lines) - 1 else start_time + (end_time - start_time) * (consumed / total)
+        ranges.append(
+            VibeVoiceAudioRange(
+                speaker=line.speaker,
+                line_index=line.index,
+                text=line.text,
+                start=max(0.0, min(cursor, duration)),
+                end=max(0.0, min(end, duration)),
+            )
+        )
+        cursor = end
+    return ranges
+
+
+def _alignment_text(text: str) -> str:
+    return re.sub(r"[\s、。，，,.!?！？…~〜:：;；\"'“”‘’（）()\[\]【】《》<>-]+", "", str(text or "").lower())
+
+
+def _compose_directed_wav(
+    lines: Sequence[VibeVoiceDirectedLine],
+    *,
+    ranges_by_line: dict[int, VibeVoiceAudioRange],
+    speaker_outputs: dict[int, Path],
+    output_path: Path,
+    gap_seconds: float,
+) -> None:
+    if not lines:
+        raise ValueError("script is required")
+    params = _wav_params(speaker_outputs[lines[0].speaker])
+    frames: list[bytes] = []
+    for index, line in enumerate(lines):
+        audio_range = ranges_by_line[line.index]
+        source_path = speaker_outputs[line.speaker]
+        if _wav_params(source_path) != params:
+            raise VibeVoiceError("指定台詞モードの話者別WAV形式が一致しません。")
+        frames.append(_read_wav_frames(source_path, start=audio_range.start, end=audio_range.end))
+        if index < len(lines) - 1 and gap_seconds > 0:
+            frames.append(_silence_frames(params=params, seconds=gap_seconds))
+    with wave.open(str(output_path), "wb") as output:
+        output.setnchannels(params["channels"])
+        output.setsampwidth(params["sample_width"])
+        output.setframerate(params["frame_rate"])
+        output.writeframes(b"".join(frames))
+
+
+def _wav_params(path: Path) -> dict[str, int]:
+    with wave.open(str(path), "rb") as wav:
+        return {
+            "channels": wav.getnchannels(),
+            "sample_width": wav.getsampwidth(),
+            "frame_rate": wav.getframerate(),
+        }
+
+
+def _read_wav_frames(path: Path, *, start: float, end: float) -> bytes:
+    with wave.open(str(path), "rb") as wav:
+        frame_rate = wav.getframerate()
+        frame_width = wav.getnchannels() * wav.getsampwidth()
+        start_frame = max(0, min(wav.getnframes(), int(start * frame_rate)))
+        end_frame = max(start_frame, min(wav.getnframes(), int(end * frame_rate)))
+        wav.setpos(start_frame)
+        data = wav.readframes(end_frame - start_frame)
+        if data:
+            return data
+        return b"\x00" * frame_width
+
+
+def _silence_frames(*, params: dict[str, int], seconds: float) -> bytes:
+    frame_count = max(0, int(seconds * params["frame_rate"]))
+    frame_width = params["channels"] * params["sample_width"]
+    return b"\x00" * frame_count * frame_width
+
+
+def _wav_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as wav:
+        frame_rate = wav.getframerate()
+        if frame_rate <= 0:
+            return 0.0
+        return wav.getnframes() / frame_rate
+
+
 def _voice_sample_diagnostics(voice_samples: Sequence[VibeVoiceVoiceSample]) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for sample in voice_samples:
@@ -963,7 +1378,7 @@ def _options_with_auto_line_by_line(script: str, options: VibeVoiceGenerationOpt
 
 def _normalize_vibevoice_script_for_options(script: str, options: VibeVoiceGenerationOptions) -> str:
     if options.directed_line_mode:
-        return normalize_vibevoice_directed_line_script(script)
+        return normalize_vibevoice_script(script)
     return normalize_vibevoice_script(script)
 
 

@@ -175,7 +175,7 @@
                 </label>
                 <label class="vibevoice-switch" data-directed-line-mode="false">
                   <input id="vibevoice-directed-line-mode" name="directed_line_mode" type="checkbox" />
-                  <span>改行・空白を1行化して生成</span>
+                  <span>指定台詞を1行生成してASR再配置</span>
                 </label>
               </div>
               <section class="vibevoice-parameter-guide" aria-label="生成パラメータの目安">
@@ -214,12 +214,12 @@
                     <dd>長文の破綻分離用。1-3行はOFFも比較、4行以上はON優先。</dd>
                   </div>
                   <div>
-                    <dt>1行化</dt>
-                    <dd>指定台詞向け。1話者の台本だけを句読点でつないで生成する。</dd>
+                    <dt>指定台詞</dt>
+                    <dd>話者ごとに1行生成し、ASR区間を元台本順へ再配置する。</dd>
                   </div>
                   <div>
                     <dt>行間秒数</dt>
-                    <dd>行ごと結合の無音。自然会話は 0.4-0.7秒、聞き取り重視は 1.0秒。</dd>
+                    <dd>結合時の無音。自然会話は 0.4-0.7秒、聞き取り重視は 1.0秒。</dd>
                   </div>
                 </dl>
               </section>

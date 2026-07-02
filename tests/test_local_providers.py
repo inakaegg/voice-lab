@@ -98,6 +98,9 @@ def test_faster_whisper_transcribes_with_language_code(tmp_path: Path, monkeypat
     class FakeSegment:
         def __init__(self, text: str) -> None:
             self.text = text
+            self.start = 0.0
+            self.end = 1.0
+            self.words = []
 
     class FakeWhisperModel:
         def __init__(
@@ -115,11 +118,20 @@ def test_faster_whisper_transcribes_with_language_code(tmp_path: Path, monkeypat
             captured["download_root"] = download_root
             captured["local_files_only"] = local_files_only
 
-        def transcribe(self, path: str, *, language: str, beam_size: int, vad_filter: bool) -> tuple[list[FakeSegment], object]:
+        def transcribe(
+            self,
+            path: str,
+            *,
+            language: str,
+            beam_size: int,
+            vad_filter: bool,
+            word_timestamps: bool,
+        ) -> tuple[list[FakeSegment], object]:
             captured["path"] = path
             captured["language"] = language
             captured["beam_size"] = beam_size
             captured["vad_filter"] = vad_filter
+            captured["word_timestamps"] = word_timestamps
             return [FakeSegment(" Selamat "), FakeSegment("pagi. ")], object()
 
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeWhisperModel))
@@ -143,7 +155,46 @@ def test_faster_whisper_transcribes_with_language_code(tmp_path: Path, monkeypat
         "language": "id",
         "beam_size": 5,
         "vad_filter": True,
+        "word_timestamps": False,
     }
+
+
+def test_faster_whisper_transcribe_detail_returns_segments_and_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audio_path = tmp_path / "input.wav"
+    audio_path.write_bytes(b"audio")
+    captured: dict[str, object] = {}
+
+    class FakeWord:
+        word = "hello"
+        start = 0.1
+        end = 0.4
+
+    class FakeSegment:
+        text = " hello"
+        start = 0.0
+        end = 0.5
+        words = [FakeWord()]
+
+    class FakeWhisperModel:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def transcribe(self, path: str, **kwargs) -> tuple[list[FakeSegment], object]:
+            captured.update(kwargs)
+            captured["path"] = path
+            return [FakeSegment()], object()
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeWhisperModel))
+    provider = FasterWhisperAsrProvider(model_name="turbo", cache_dir=tmp_path)
+
+    result = provider.transcribe_detail(audio_path, "auto", include_timestamps=True)
+
+    assert result.text == "hello"
+    assert result.segments == [{"text": " hello", "start": 0.0, "end": 0.5}]
+    assert result.words == [{"text": "hello", "start": 0.1, "end": 0.4}]
+    assert result.timestamp_granularities == ["word", "segment"]
+    assert captured["word_timestamps"] is True
+    assert "language" not in captured
 
 
 def test_qwen3_translation_builds_prompt_and_decodes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

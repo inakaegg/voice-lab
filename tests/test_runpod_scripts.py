@@ -93,9 +93,13 @@ def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
     assert "--vibevoice-cfg-scale" in script
     assert "--vibevoice-no-sample" in script
     assert "--vibevoice-temperature" in script
+    assert "--vibevoice-directed-line-mode" in script
+    assert "--vibevoice-line-gap" in script
     assert 'generation_payload["cfg_scale"] = args.vibevoice_cfg_scale' in script
     assert 'generation_payload["do_sample"] = False' in script
     assert 'generation_payload["temperature"] = args.vibevoice_temperature' in script
+    assert '"directed_line_mode": args.vibevoice_directed_line_mode' in script
+    assert '"line_gap": args.vibevoice_line_gap' in script
 
 
 def test_runpod_update_serverless_template_redacts_env_json(tmp_path: Path) -> None:
