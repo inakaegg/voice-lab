@@ -1107,6 +1107,8 @@ class VibeVoice:
             output_waveform = output_waveform.unsqueeze(0)
         if output_waveform.ndim == 2:
             output_waveform = output_waveform.unsqueeze(0)
+        if output_waveform.dtype != torch.float32:
+            output_waveform = output_waveform.float()
 
         waveform_np = output_waveform.detach().cpu().numpy().squeeze()
         if waveform_np.dtype != np.float32:

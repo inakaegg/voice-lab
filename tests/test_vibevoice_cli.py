@@ -667,6 +667,46 @@ def test_vibevoice_cli_patches_internal_token_constraint_for_safe_sampling(
     assert fixed[0, 4] == 0
 
 
+def test_vibevoice_cli_casts_bfloat16_waveform_before_numpy(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text("{}", encoding="utf-8")
+    service = vibevoice_cli.VibeVoice(
+        model_path=str(model_path),
+        tokenizer_path=str(tokenizer_path),
+    )
+
+    class FakeProcessor:
+        tokenizer = object()
+
+        def __call__(self, **kwargs):
+            return {"input_ids": torch.tensor([[10, 11]])}
+
+    class FakeModel:
+        def set_ddpm_inference_steps(self, num_steps):
+            self.num_steps = num_steps
+
+        def generate(self, **kwargs):
+            return SimpleNamespace(speech_outputs=[torch.zeros(10, dtype=torch.bfloat16)])
+
+    service.processor = FakeProcessor()
+    service.model = FakeModel()
+
+    waveform = service._synthesize_script(
+        script_text="Speaker 1: こんにちは。",
+        voice_samples_np=[],
+        cfg_scale=1.3,
+        inference_steps=2,
+        do_sample=True,
+        temperature=0.95,
+        top_p=0.95,
+        top_k=0,
+    )
+
+    assert waveform.dtype == np.float32
+
+
 def test_vibevoice_cli_estimates_generation_tokens_from_script_text() -> None:
     short_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens("Speaker 1: こんにちは。")
     long_tokens = vibevoice_cli._estimate_vibevoice_max_new_tokens(
