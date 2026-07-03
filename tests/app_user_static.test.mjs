@@ -218,7 +218,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /localStorage\.setItem/);
   assert.match(vibevoiceSource, /resetVibeVoiceGenerationSettings/);
   assert.match(vibevoiceSource, /defaultGenerationSettings/);
-  assert.match(vibevoiceSource, /directedTargetMaxChars\s*=\s*180/);
+  assert.match(vibevoiceSource, /directedTargetMaxChars\s*=\s*120/);
+  assert.match(vibevoiceSource, /directedLineMaxChars\s*=\s*180/);
   assert.match(vibevoiceSource, /validateDirectedLineModeScript/);
   assert.match(vibevoiceSource, /1行だけで/);
   assert.match(vibevoiceSource, /分割して生成します/);

@@ -189,7 +189,7 @@ def test_directed_speaker_script_skips_tail_guard_for_overlong_target() -> None:
     assert script.full_text == script.target_text
 
 
-def test_directed_line_chunks_split_speaker_without_splitting_lines() -> None:
+def test_directed_line_chunks_balance_speaker_without_splitting_lines() -> None:
     lines = [
         vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="あ" * 70),
         vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text="い" * 70),
@@ -198,8 +198,26 @@ def test_directed_line_chunks_split_speaker_without_splitting_lines() -> None:
 
     chunks = vibevoice_module._directed_line_chunks_for_speaker(lines)
 
-    assert [[line.index for line in chunk.lines] for chunk in chunks] == [[1, 2], [3]]
-    assert [chunk.chunk_index for chunk in chunks] == [1, 2]
+    assert [[line.index for line in chunk.lines] for chunk in chunks] == [[1], [2], [3]]
+    assert [chunk.chunk_index for chunk in chunks] == [1, 2, 3]
+
+
+def test_directed_speaker_script_for_chunk_rotates_guard_after_target() -> None:
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="あ" * 50),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text="い" * 50),
+        vibevoice_module.VibeVoiceDirectedLine(index=3, speaker=1, text="う" * 40),
+    ]
+    chunks = vibevoice_module._directed_line_chunks_for_speaker(lines)
+
+    first = vibevoice_module._directed_speaker_script_for_chunk(chunks[0], chunks)
+    second = vibevoice_module._directed_speaker_script_for_chunk(chunks[1], chunks)
+
+    assert [[line.index for line in chunk.lines] for chunk in chunks] == [[1], [2, 3]]
+    assert first.target_text == vibevoice_module._directed_speaker_script_for_lines([lines[0]], include_tail_guard=False).target_text
+    assert first.tail_guard_text == vibevoice_module._directed_speaker_script_for_lines(lines[1:], include_tail_guard=False).target_text
+    assert second.target_text == vibevoice_module._directed_speaker_script_for_lines(lines[1:], include_tail_guard=False).target_text
+    assert second.tail_guard_text == vibevoice_module._directed_speaker_script_for_lines([lines[0]], include_tail_guard=False).target_text
 
 
 def test_directed_line_chunks_reject_single_overlong_line() -> None:
@@ -439,6 +457,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     assert result.diagnostics["directed_line_mode"]["script_char_limits"] == {
         "target_min": vibevoice_module.DIRECTED_TARGET_MIN_CHARS,
         "target_max": vibevoice_module.DIRECTED_TARGET_MAX_CHARS,
+        "line_max": vibevoice_module.DIRECTED_LINE_MAX_CHARS,
         "full_max": vibevoice_module.DIRECTED_FULL_MAX_CHARS,
     }
     assert result.diagnostics["directed_line_mode"]["speaker_script_lengths"]["1"] == {
@@ -578,7 +597,9 @@ def test_vibevoice_service_directed_line_mode_splits_long_speaker_into_chunks(tm
         [
             [
                 {"text": line1, "start": 0.0, "end": 0.2},
-                {"text": line2, "start": 0.3, "end": 0.5},
+            ],
+            [
+                {"text": line2, "start": 0.0, "end": 0.2},
             ],
             [
                 {"text": line3, "start": 0.0, "end": 0.2},
@@ -603,14 +624,33 @@ def test_vibevoice_service_directed_line_mode_splits_long_speaker_into_chunks(tm
         options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
     )
 
-    assert len(script_texts) == 2
-    assert result.diagnostics["directed_line_mode"]["chunk_count"] == 2
+    target1 = vibevoice_module._directed_speaker_script_for_lines(
+        [vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text=line1)],
+        include_tail_guard=False,
+    ).target_text
+    target2 = vibevoice_module._directed_speaker_script_for_lines(
+        [vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text=line2)],
+        include_tail_guard=False,
+    ).target_text
+    target3 = vibevoice_module._directed_speaker_script_for_lines(
+        [vibevoice_module.VibeVoiceDirectedLine(index=3, speaker=1, text=line3)],
+        include_tail_guard=False,
+    ).target_text
+    assert script_texts == [
+        f"Speaker 1: {target1}{target2}{target3}",
+        f"Speaker 1: {target2}{target3}{target1}",
+        f"Speaker 1: {target3}{target1}{target2}",
+    ]
+    assert result.diagnostics["directed_line_mode"]["chunk_count"] == 3
     assert [
         chunk["line_indices"] for chunk in result.diagnostics["directed_line_mode"]["chunks"]
-    ] == [[1, 2], [3]]
+    ] == [[1], [2], [3]]
+    assert [
+        chunk["guard_line_indices"] for chunk in result.diagnostics["directed_line_mode"]["chunks"]
+    ] == [[2, 3], [3, 1], [1, 2]]
     ranges = result.diagnostics["directed_line_mode"]["ranges"]
     assert [item["line_index"] for item in ranges] == [1, 2, 3]
-    assert [item["chunk_index"] for item in ranges] == [1, 1, 2]
+    assert [item["chunk_index"] for item in ranges] == [1, 2, 3]
 
 
 def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcription(

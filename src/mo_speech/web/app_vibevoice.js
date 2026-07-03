@@ -41,7 +41,8 @@ const savedVoiceStoreName = "voice-files";
 const vibevoiceSettingsStorageKey = "mo-speech-vibevoice-draft";
 const autoLineByLineMinLines = 4;
 const autoLineByLineMinChars = 180;
-const directedTargetMaxChars = 180;
+const directedTargetMaxChars = 120;
+const directedLineMaxChars = 180;
 const persistedFieldNames = [
   "backend",
   "model_id",
@@ -330,9 +331,9 @@ function validateDirectedLineModeScript(scriptText) {
   const linesBySpeaker = new Map();
   for (const line of parsedLines) {
     const lineTargetText = directedTargetTextForLines([line.text]);
-    if (lineTargetText.length > directedTargetMaxChars) {
+    if (lineTargetText.length > directedLineMaxChars) {
       errors.push(
-        `Speaker ${line.speaker} Line ${line.index} の台詞が長すぎます。1行だけで${lineTargetText.length}文字です。${directedTargetMaxChars}文字以内に分けてください。`,
+        `Speaker ${line.speaker} Line ${line.index} の台詞が長すぎます。1行だけで${lineTargetText.length}文字です。${directedLineMaxChars}文字以内に分けてください。`,
       );
     }
     if (!linesBySpeaker.has(line.speaker)) {

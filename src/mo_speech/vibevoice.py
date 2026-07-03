@@ -33,9 +33,10 @@ SHORT_SPEAKER_TAG_MAX = 4
 AUTO_LINE_BY_LINE_MIN_LINES = 4
 AUTO_LINE_BY_LINE_MIN_CHARS = 180
 DIRECTED_TAIL_GUARD_MAX_CHARS = 120
-DIRECTED_TARGET_MIN_CHARS = 140
-DIRECTED_TARGET_MAX_CHARS = 180
-DIRECTED_FULL_MAX_CHARS = 280
+DIRECTED_TARGET_MIN_CHARS = 80
+DIRECTED_TARGET_MAX_CHARS = 120
+DIRECTED_LINE_MAX_CHARS = 180
+DIRECTED_FULL_MAX_CHARS = 220
 DIRECTED_OUTPUT_TARGET_RMS = 0.10
 DIRECTED_OUTPUT_PEAK_LIMIT = 0.92
 DIRECTED_OUTPUT_MAX_GAIN = 2.5
@@ -329,6 +330,49 @@ def _directed_speaker_script_for_lines(
         target_text=target_text,
         tail_guard_text=tail_guard_text,
     )
+
+
+def _directed_speaker_script_for_chunk(
+    chunk: _DirectedLineChunk,
+    chunks_for_speaker: Sequence[_DirectedLineChunk],
+) -> _DirectedSpeakerScript:
+    target_script = _directed_speaker_script_for_lines(chunk.lines, include_tail_guard=False)
+    guard_lines = _directed_guard_lines_for_chunk(chunk, chunks_for_speaker) or list(chunk.lines)
+    guard_script = _directed_speaker_script_for_lines(guard_lines, include_tail_guard=False)
+    tail_guard_text = _directed_rotated_guard_text(
+        target_script.target_text,
+        guard_script.target_text,
+        target_min_chars=DIRECTED_TARGET_MIN_CHARS,
+        full_max_chars=DIRECTED_FULL_MAX_CHARS,
+    )
+    return _DirectedSpeakerScript(
+        full_text=f"{target_script.target_text}{tail_guard_text}",
+        target_text=target_script.target_text,
+        tail_guard_text=tail_guard_text,
+    )
+
+
+def _directed_rotated_guard_text(
+    target_text: str,
+    guard_text: str,
+    *,
+    target_min_chars: int,
+    full_max_chars: int,
+) -> str:
+    target = str(target_text or "").strip()
+    guard = str(guard_text or "").strip()
+    if not target or not guard:
+        return ""
+    repeated_guard = guard
+    while target_min_chars > 0 and len(target) + len(repeated_guard) < target_min_chars:
+        repeated_guard += guard
+    if full_max_chars > 0 and len(target) + len(repeated_guard) > full_max_chars:
+        repeated_guard = _trim_directed_tail_guard(
+            repeated_guard,
+            max_chars=max(0, full_max_chars - len(target)),
+            separator="。" if _directed_line_separator(f"{target}{guard}") == "。" else ".",
+        )
+    return repeated_guard
 
 
 def _has_speaker_tag(line: str) -> bool:
@@ -716,7 +760,7 @@ class VibeVoiceService:
                 chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
                 chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
                 chunk_audio_stem = _directed_chunk_audio_stem(chunk, chunks_by_speaker)
-                speaker_script_parts = _directed_speaker_script_for_lines(chunk.lines, include_tail_guard=True)
+                speaker_script_parts = _directed_speaker_script_for_chunk(chunk, chunks_by_speaker[chunk.speaker])
                 speaker_script = f"Speaker 1: {speaker_script_parts.full_text}"
                 chunk_scripts[chunk_key] = speaker_script
                 chunk_target_scripts[chunk_key] = f"Speaker 1: {speaker_script_parts.target_text}"
@@ -851,6 +895,10 @@ class VibeVoiceService:
                 "speaker": chunk.speaker,
                 "chunk_index": chunk.chunk_index,
                 "line_indices": [line.index for line in chunk.lines],
+                "guard_line_indices": [
+                    line.index
+                    for line in (_directed_guard_lines_for_chunk(chunk, chunks_by_speaker[chunk.speaker]) or list(chunk.lines))
+                ],
                 **chunk_script_lengths[_directed_chunk_key(chunk, chunks_by_speaker)],
             }
             for chunk in chunks
@@ -885,6 +933,7 @@ class VibeVoiceService:
                     "script_char_limits": {
                         "target_min": DIRECTED_TARGET_MIN_CHARS,
                         "target_max": DIRECTED_TARGET_MAX_CHARS,
+                        "line_max": DIRECTED_LINE_MAX_CHARS,
                         "full_max": DIRECTED_FULL_MAX_CHARS,
                     },
                     "warnings": warnings,
@@ -1460,41 +1509,100 @@ def _directed_line_chunks_for_speaker(
     lines: Sequence[VibeVoiceDirectedLine],
     *,
     target_max_chars: int = DIRECTED_TARGET_MAX_CHARS,
+    line_max_chars: int = DIRECTED_LINE_MAX_CHARS,
 ) -> list[_DirectedLineChunk]:
     if not lines:
         return []
     speaker = lines[0].speaker
-    chunks: list[_DirectedLineChunk] = []
-    current: list[VibeVoiceDirectedLine] = []
     for line in lines:
         line_script = _directed_speaker_script_for_lines([line], include_tail_guard=False)
-        if len(line_script.target_text) > target_max_chars:
+        if len(line_script.target_text) > line_max_chars:
             raise ValueError(
                 f"Speaker {line.speaker} Line {line.index} の台詞が長すぎます "
-                f"({len(line_script.target_text)} chars)。{target_max_chars}文字以内に分けてください。"
+                f"({len(line_script.target_text)} chars)。{line_max_chars}文字以内に分けてください。"
             )
-        candidate = [*current, line]
-        candidate_script = _directed_speaker_script_for_lines(candidate, include_tail_guard=False)
-        if current and len(candidate_script.target_text) > target_max_chars:
-            chunks.append(
-                _DirectedLineChunk(
-                    speaker=speaker,
-                    chunk_index=len(chunks) + 1,
-                    lines=tuple(current),
-                )
-            )
-            current = [line]
-        else:
-            current = candidate
-    if current:
-        chunks.append(
-            _DirectedLineChunk(
-                speaker=speaker,
-                chunk_index=len(chunks) + 1,
-                lines=tuple(current),
-            )
+    total_chars = _directed_target_chars(lines)
+    chunk_count = max(1, math.ceil(total_chars / target_max_chars))
+    chunk_count = min(chunk_count, len(lines))
+    while chunk_count < len(lines):
+        partition = _best_directed_line_partition(lines, chunk_count)
+        if max(_directed_target_chars(part) for part in partition) <= target_max_chars:
+            break
+        chunk_count += 1
+    partition = _best_directed_line_partition(lines, chunk_count)
+    return [
+        _DirectedLineChunk(
+            speaker=speaker,
+            chunk_index=index,
+            lines=tuple(part),
         )
-    return chunks
+        for index, part in enumerate(partition, start=1)
+    ]
+
+
+def _best_directed_line_partition(
+    lines: Sequence[VibeVoiceDirectedLine],
+    chunk_count: int,
+) -> list[list[VibeVoiceDirectedLine]]:
+    if chunk_count <= 1 or len(lines) <= 1:
+        return [list(lines)]
+    count = min(chunk_count, len(lines))
+    average = _directed_target_chars(lines) / count
+    length_cache: dict[tuple[int, int], int] = {}
+    memo: dict[tuple[int, int], tuple[float, float, list[tuple[int, int]]]] = {}
+
+    def part_length(start: int, end: int) -> int:
+        key = (start, end)
+        if key not in length_cache:
+            length_cache[key] = _directed_target_chars(lines[start:end])
+        return length_cache[key]
+
+    def best(start: int, remaining: int) -> tuple[float, float, list[tuple[int, int]]]:
+        key = (start, remaining)
+        if key in memo:
+            return memo[key]
+        if remaining == 1:
+            length = part_length(start, len(lines))
+            result = (float(length), abs(length - average), [(start, len(lines))])
+            memo[key] = result
+            return result
+        best_result: tuple[float, float, list[tuple[int, int]]] | None = None
+        last_end = len(lines) - remaining + 1
+        for end in range(start + 1, last_end + 1):
+            length = part_length(start, end)
+            rest_max, rest_imbalance, rest_parts = best(end, remaining - 1)
+            result = (
+                max(float(length), rest_max),
+                abs(length - average) + rest_imbalance,
+                [(start, end), *rest_parts],
+            )
+            if best_result is None or result[:2] < best_result[:2]:
+                best_result = result
+        if best_result is None:
+            best_result = best(start, 1)
+        memo[key] = best_result
+        return best_result
+
+    return [list(lines[start:end]) for start, end in best(0, count)[2]]
+
+
+def _directed_target_chars(lines: Sequence[VibeVoiceDirectedLine]) -> int:
+    if not lines:
+        return 0
+    return len(_directed_speaker_script_for_lines(lines, include_tail_guard=False).target_text)
+
+
+def _directed_guard_lines_for_chunk(
+    chunk: _DirectedLineChunk,
+    chunks_for_speaker: Sequence[_DirectedLineChunk],
+) -> list[VibeVoiceDirectedLine]:
+    following = [candidate for candidate in chunks_for_speaker if candidate.chunk_index > chunk.chunk_index]
+    leading = [candidate for candidate in chunks_for_speaker if candidate.chunk_index < chunk.chunk_index]
+    return [
+        line
+        for candidate in [*following, *leading]
+        for line in candidate.lines
+    ]
 
 
 def _directed_chunk_key(chunk: _DirectedLineChunk, chunks_by_speaker: dict[int, list[_DirectedLineChunk]]) -> str:
