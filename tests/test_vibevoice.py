@@ -132,7 +132,29 @@ def test_normalize_vibevoice_directed_line_script_collapses_one_speaker_with_pun
                 "1 最近、北海道に移住したって聞きました",
             ]
         )
-    ) == "Speaker 1: あっ、小鸡さん、こんにちは〜、こんにちは。ご無沙汰してます、最近、北海道に移住したって聞きました"
+    ) == "Speaker 1: あっ、小鸡さん、こんにちは〜。こんにちは。ご無沙汰してます。最近、北海道に移住したって聞きました"
+
+
+def test_directed_audio_ranges_align_words_by_text_instead_of_raw_ratio() -> None:
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=3, text="清掃時間ですX"),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=3, text="今は"),
+        vibevoice_module.VibeVoiceDirectedLine(index=3, speaker=3, text="牧場"),
+    ]
+    ranges = vibevoice_module._audio_ranges_from_words(
+        lines,
+        [
+            {"text": "清掃時間です", "start": 0.0, "end": 1.0},
+            {"text": "今は", "start": 1.0, "end": 2.0},
+            {"text": "牧場", "start": 2.0, "end": 3.0},
+        ],
+        duration=3.0,
+    )
+
+    assert ranges[0].end == 1.0
+    assert ranges[0].matched_text == "清掃時間です"
+    assert ranges[1].start == 1.0
+    assert ranges[1].end == 2.0
 
 
 def test_normalize_vibevoice_directed_line_script_rejects_multiple_speakers() -> None:
@@ -267,7 +289,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
 
     command = calls[0]
     assert script_texts[0] == (
-        "Speaker 1: あっ、こんにちは、最近、北海道に移住したって聞きました、温泉も近くにありますか、お仕事は何ですか"
+        "Speaker 1: あっ、こんにちは。最近、北海道に移住したって聞きました。温泉も近くにありますか。お仕事は何ですか"
     )
     assert result.normalized_script == "\n".join(
         [
@@ -290,6 +312,8 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
         "line_segment",
     ]
     assert result.artifacts[0]["label"] == "Speaker 1 VibeVoice"
+    assert result.artifacts[0]["text"] == script_texts[0]
+    assert result.artifacts[1]["text"] == script_texts[0]
     assert result.artifacts[2]["line_index"] == 1
     assert "--line_by_line" not in command
     output = tmp_path / "directed-output.wav"
@@ -356,8 +380,8 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
     )
 
     assert script_texts == [
-        "Speaker 1: 一番目です、三番目です",
-        "Speaker 1: 二番目です、四番目です",
+        "Speaker 1: 一番目です。三番目です",
+        "Speaker 1: 二番目です。四番目です",
     ]
     assert events == [
         "vv:1",

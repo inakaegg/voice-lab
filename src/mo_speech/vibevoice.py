@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from difflib import SequenceMatcher
 from io import BytesIO
 import logging
 import mimetypes
@@ -146,6 +147,7 @@ class VibeVoiceAudioRange:
     text: str
     start: float
     end: float
+    matched_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -330,7 +332,7 @@ def _collapse_directed_line_spacing(text: str) -> str:
 
 
 def _directed_line_separator(text: str) -> str:
-    return "、" if re.search(r"[ぁ-んァ-ン一-龯、。]", text) else ","
+    return "。" if re.search(r"[ぁ-んァ-ン一-龯、。]", text) else "."
 
 
 def _join_directed_line_phrases(phrases: Sequence[str], *, separator: str) -> str:
@@ -554,6 +556,7 @@ class VibeVoiceService:
         ranges_by_line: dict[int, VibeVoiceAudioRange] = {}
         speaker_results: dict[int, VibeVoiceResult] = {}
         speaker_vibevoice_outputs: dict[int, Path] = {}
+        speaker_scripts: dict[int, str] = {}
         asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
         asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
         vc_results_by_speaker: dict[int, object] = {}
@@ -573,6 +576,7 @@ class VibeVoiceService:
             for speaker_index, (speaker, speaker_lines) in enumerate(lines_by_speaker.items(), start=1):
                 _raise_if_cancelled(cancel_event)
                 speaker_script = _directed_script_for_lines(speaker_lines, output_speaker=1)
+                speaker_scripts[speaker] = speaker_script
                 speaker_options = replace(options, directed_line_mode=False, line_by_line=False)
                 _report_vibevoice_progress(
                     progress_callback,
@@ -665,6 +669,7 @@ class VibeVoiceService:
                 lines=lines,
                 speaker_vibevoice_outputs=speaker_vibevoice_outputs,
                 speaker_outputs=speaker_outputs,
+                speaker_scripts=speaker_scripts,
                 ranges_by_line=ranges_by_line,
                 include_voice_conversion=bool(vc_results_by_speaker),
             )
@@ -697,8 +702,7 @@ class VibeVoiceService:
                     "gap_seconds": options.line_gap,
                     "warnings": warnings,
                     "speaker_scripts": {
-                        str(speaker): _directed_script_for_lines(speaker_lines, output_speaker=1)
-                        for speaker, speaker_lines in lines_by_speaker.items()
+                        str(speaker): speaker_scripts[speaker] for speaker in lines_by_speaker
                     },
                     "asr_segments": {str(speaker): rows for speaker, rows in asr_segments_by_speaker.items()},
                     "asr_words": {str(speaker): rows for speaker, rows in asr_words_by_speaker.items()},
@@ -715,6 +719,7 @@ class VibeVoiceService:
                             "line_index": audio_range.line_index,
                             "speaker": audio_range.speaker,
                             "text": audio_range.text,
+                            "matched_text": audio_range.matched_text,
                             "start": audio_range.start,
                             "end": audio_range.end,
                         }
@@ -1318,24 +1323,38 @@ def _audio_ranges_from_words(
 ) -> list[VibeVoiceAudioRange]:
     if not words:
         return _audio_ranges_by_target_text_ratio(lines, rows=[], duration=duration)
-    word_lengths = [max(1, len(_alignment_text(str(word.get("text", ""))))) for word in words]
-    total_word_length = max(1, sum(word_lengths))
-    target_lengths = [max(1, len(_alignment_text(line.text))) for line in lines]
-    total_target_length = max(1, sum(target_lengths))
+    normalized_words: list[str] = []
+    source_word_indices: list[int] = []
+    for index, word in enumerate(words):
+        normalized = _alignment_text(str(word.get("text", "")))
+        if not normalized:
+            continue
+        normalized_words.append(normalized)
+        source_word_indices.append(index)
+    target_texts = [_alignment_text(line.text) for line in lines]
+    target_joined = "".join(target_texts)
+    asr_joined = "".join(normalized_words)
+    if not target_joined or not asr_joined:
+        return _audio_ranges_by_target_text_ratio(lines, rows=words, duration=duration)
+
+    asr_spans = _word_text_spans(normalized_words)
+    target_boundaries = _target_text_boundaries(target_texts)
+    asr_boundaries = [
+        _map_target_offset_to_asr_offset(target_joined, asr_joined, boundary)
+        for boundary in target_boundaries
+    ]
+    asr_boundaries = _monotonic_offsets(asr_boundaries, maximum=len(asr_joined))
+
     ranges: list[VibeVoiceAudioRange] = []
-    word_index = 0
-    consumed_words = 0
-    target_cumulative = 0
-    for line, target_length in zip(lines, target_lengths, strict=True):
-        start_index = min(word_index, len(words) - 1)
-        target_cumulative += target_length
-        target_word_cumulative = target_cumulative / total_target_length * total_word_length
-        while word_index < len(words) - 1 and consumed_words + word_lengths[word_index] < target_word_cumulative:
-            consumed_words += word_lengths[word_index]
-            word_index += 1
-        end_index = min(word_index, len(words) - 1)
-        start = float(words[start_index]["start"])
-        end = float(words[end_index]["end"])
+    for index, line in enumerate(lines):
+        start_offset = asr_boundaries[index]
+        end_offset = asr_boundaries[index + 1]
+        start_word_index = _word_index_for_range_start(asr_spans, start_offset)
+        end_word_index = max(start_word_index, _word_index_for_range_end(asr_spans, end_offset))
+        source_start_index = source_word_indices[start_word_index]
+        source_end_index = source_word_indices[end_word_index]
+        start = float(words[source_start_index]["start"])
+        end = float(words[source_end_index]["end"])
         if end <= start:
             end = min(duration, start + 0.05)
         ranges.append(
@@ -1345,12 +1364,79 @@ def _audio_ranges_from_words(
                 text=line.text,
                 start=max(0.0, min(start, duration)),
                 end=max(0.0, min(end, duration)),
+                matched_text="".join(str(word.get("text", "")) for word in words[source_start_index : source_end_index + 1]),
             )
         )
-        if word_index < len(words) - 1:
-            consumed_words += word_lengths[word_index]
-            word_index += 1
     return ranges
+
+
+def _target_text_boundaries(texts: Sequence[str]) -> list[int]:
+    boundaries = [0]
+    cursor = 0
+    for text in texts:
+        cursor += len(text)
+        boundaries.append(cursor)
+    return boundaries
+
+
+def _word_text_spans(texts: Sequence[str]) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for text in texts:
+        start = cursor
+        cursor += len(text)
+        spans.append((start, cursor))
+    return spans
+
+
+def _map_target_offset_to_asr_offset(target_text: str, asr_text: str, target_offset: int) -> int:
+    if target_offset <= 0:
+        return 0
+    if target_offset >= len(target_text):
+        return len(asr_text)
+    matcher = SequenceMatcher(None, target_text, asr_text, autojunk=False)
+    previous_asr_end = 0
+    for _tag, target_start, target_end, asr_start, asr_end in matcher.get_opcodes():
+        if target_offset < target_start:
+            return previous_asr_end
+        if target_start <= target_offset <= target_end:
+            if target_end <= target_start:
+                return asr_end
+            ratio = (target_offset - target_start) / (target_end - target_start)
+            return int(round(asr_start + ratio * (asr_end - asr_start)))
+        previous_asr_end = asr_end
+    return len(asr_text)
+
+
+def _monotonic_offsets(offsets: Sequence[int], *, maximum: int) -> list[int]:
+    monotonic: list[int] = []
+    previous = 0
+    for index, offset in enumerate(offsets):
+        if index == 0:
+            value = 0
+        elif index == len(offsets) - 1:
+            value = maximum
+        else:
+            value = max(previous, min(int(offset), maximum))
+        monotonic.append(value)
+        previous = value
+    return monotonic
+
+
+def _word_index_for_range_start(spans: Sequence[tuple[int, int]], offset: int) -> int:
+    for index, (_start, end) in enumerate(spans):
+        if end > offset:
+            return index
+    return max(0, len(spans) - 1)
+
+
+def _word_index_for_range_end(spans: Sequence[tuple[int, int]], offset: int) -> int:
+    if offset <= 0:
+        return 0
+    for index, (_start, end) in enumerate(spans):
+        if offset <= end:
+            return index
+    return max(0, len(spans) - 1)
 
 
 def _audio_ranges_by_target_text_ratio(
@@ -1422,6 +1508,7 @@ def _directed_audio_artifacts(
     lines: Sequence[VibeVoiceDirectedLine],
     speaker_vibevoice_outputs: dict[int, Path],
     speaker_outputs: dict[int, Path],
+    speaker_scripts: dict[int, str],
     ranges_by_line: dict[int, VibeVoiceAudioRange],
     include_voice_conversion: bool,
 ) -> list[dict[str, object]]:
@@ -1433,6 +1520,8 @@ def _directed_audio_artifacts(
                 kind="speaker_vibevoice",
                 label=f"Speaker {speaker} VibeVoice",
                 speaker=speaker,
+                text=speaker_scripts.get(speaker, ""),
+                line_indices=[line.index for line in lines if line.speaker == speaker],
                 duration_seconds=_wav_duration(path),
             )
         )
@@ -1444,6 +1533,8 @@ def _directed_audio_artifacts(
                     kind="speaker_voice_conversion",
                     label=f"Speaker {speaker} Seed-VC",
                     speaker=speaker,
+                    text=speaker_scripts.get(speaker, ""),
+                    line_indices=[line.index for line in lines if line.speaker == speaker],
                     duration_seconds=_wav_duration(path),
                 )
             )
@@ -1462,6 +1553,7 @@ def _directed_audio_artifacts(
                 speaker=line.speaker,
                 line_index=line.index,
                 text=line.text,
+                matched_text=audio_range.matched_text,
                 start=audio_range.start,
                 end=audio_range.end,
                 duration_seconds=max(0.0, audio_range.end - audio_range.start),

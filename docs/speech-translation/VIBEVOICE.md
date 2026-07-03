@@ -73,9 +73,11 @@ Large候補の [aoi-ot/VibeVoice-Large](https://huggingface.co/aoi-ot/VibeVoice-
 
 指定台詞向けモードのASRは、既定では `MO_VIBEVOICE_DIRECTED_ASR_PROVIDER=openai` と `MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL=whisper-1` を使う。これはVibeVoice LargeとSeed-VCを同じRunPod workerで扱う時に、faster-whisperをGPUへ追加ロードしてVRAMを圧迫しないためである。OpenAI経路では `OPENAI_API_KEY` が必要で、外部API課金が発生する。ローカルまたはGPU余裕のある環境で自前ASRを使う場合だけ、`MO_VIBEVOICE_DIRECTED_ASR_PROVIDER=faster-whisper` を明示する。`MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE` は既定 `auto` で、必要に応じて `ja-JP`、`zh-CN`、`en-US`、`hi-IN` などを指定する。Seed-VCは既定で `MO_VIBEVOICE_DIRECTED_VC_ENABLED=1`、`MO_VIBEVOICE_DIRECTED_VC_BACKEND=seed-vc` として有効にする。
 
-この再配置はASR結果に依存するため、ASR誤認識、台詞の脱落、生成順のずれ、長尺生成の途中終了があると切り出し位置がずれる。現在はword timestampがあれば台本行の文字数比でword範囲を割り当て、wordが無ければsegment数一致または文字数比でfallbackする。最終的な実用化では、対応付け結果をUIに出して、ユーザーが台詞行ごとに採用区間を調整できる必要がある。
+この再配置はASR結果に依存するため、ASR誤認識、台詞の脱落、生成順のずれ、長尺生成の途中終了があると切り出し位置がずれる。現在はword timestampがあればASR transcriptと元台本の正規化文字列を整列してword範囲を割り当て、wordが無ければsegment数一致または文字数比でfallbackする。最終的な実用化では、対応付け結果をUIに出して、ユーザーが台詞行ごとに採用区間を調整できる必要がある。
 
-指定台詞向けモードの結果確認では、最終音声だけでなく、話者ごとのVibeVoice出力、話者ごとのSeed-VC後出力、台本行ごとの切り出し音声をUI上で再生できるようにする。これにより、VibeVoice側で台詞が脱落したのか、Seed-VCで音質や音量が崩れたのか、ASR timestampの分割/対応付けが誤ったのかを分けて確認する。機械的な文字数比分割だけでは、日本語ASRの誤認識、言い換え、脱落、途中終了を正しく扱えないため、今後はASR transcriptと元台本の対応付けにテキスト類似度またはLLM補助を使い、対応できない行は別フレーズを無理に割り当てず警告として表示する。
+指定台詞向けモードの結果確認では、最終音声だけでなく、話者ごとのVibeVoice出力、話者ごとのSeed-VC後出力、台本行ごとの切り出し音声をUI上で再生できるようにする。話者ごとの中間音声には、実際にVibeVoiceへ渡した1行化テキストも表示する。これにより、VibeVoice側で台詞が脱落したのか、Seed-VCで音質や音量が崩れたのか、ASR timestampの分割/対応付けが誤ったのかを分けて確認する。話者別に結合する台詞の行境界は、後段で切り出しやすいように弱い読点ではなく句点相当で区切る。
+
+機械的な文字数比分割だけでは、日本語ASRの誤認識、言い換え、脱落、途中終了を正しく扱えない。`zhskit` のFunASR分割モードは、元台本へ厳密に戻すのではなく、ASRが切った自然なセグメントを正として後段へ渡す設計だった。指定台詞向けモードでは元台本順への再構成が必要なため、ASR transcriptと元台本をテキスト整列して範囲推定し、それでも対応できない行は別フレーズを無理に割り当てず警告として表示する必要がある。
 
 ## 関連モデルの扱い
 

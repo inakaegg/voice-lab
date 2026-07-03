@@ -855,6 +855,12 @@ function renderArtifacts(artifacts) {
       text.textContent = artifact.text;
       item.append(text);
     }
+    if (artifact.matched_text) {
+      const matchedText = document.createElement("p");
+      matchedText.className = "vibevoice-artifact-text";
+      matchedText.textContent = `ASR: ${artifact.matched_text}`;
+      item.append(matchedText);
+    }
     item.append(player);
     artifactsContainer.append(item);
     renderedCount += 1;
