@@ -81,7 +81,9 @@ Large候補の [aoi-ot/VibeVoice-Large](https://huggingface.co/aoi-ot/VibeVoice-
 
 指定台詞向けモードの1行化テキストは、話者ごとに短すぎても長すぎても崩れやすい。現時点の経験則では、VibeVoiceへ実際に渡す採用対象テキストは話者ごとにおおむね140〜260文字程度を実用範囲として扱う。140文字未満の場合は、末尾欠落対策のガード文を必要長まで増やす。260文字を超える場合は、ガード文を追加せず、将来は話者内でも複数チャンクへ分割する。これは固定の品質保証ではなく暫定境界値であり、診断情報には話者ごとの採用対象文字数、ガード文字数、最終投入文字数、範囲外フラグを残す。
 
-RunPod Serverless経由では、長尺の指定台詞向けモードで中間音声をすべて `artifacts[].audio_base64` としてjob resultへ載せると、最終音声、話者別VV/VC音声、行ごとの切り出し音声が重複して巨大化し、RunPodの結果返却段階で失敗し得る。そのためRunPod handlerは既定では中間音声をinline返却せず、最終音声と診断情報だけを返す。さらにRunPod handlerから返す最終音声は、既定でWAVからMP3へ圧縮して `audio/mpeg` として返す。互換検証では `response_audio_format=wav` または `MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT=wav` を指定できる。M4A/AACを試す場合は `m4a` を指定する。圧縮に失敗した場合はWAVへfallbackし、`diagnostics.runpod_audio_response` に要求形式、実返却形式、元サイズ、返却サイズ、エラーを残す。短い検証で中間音声が必要な場合だけ `return_artifacts=true` または `MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS=1` を使い、`artifact_response_max_items` と `artifact_response_max_base64_chars` で上限をかける。長尺でも中間音声を常時確認したい場合は、RunPod job outputではなく、永続Volumeやオブジェクトストレージへartifactを保存し、UIはURLや履歴APIから取得する構成に分ける。
+RunPod Serverless経由では、長尺の指定台詞向けモードで中間音声をすべて `artifacts[].audio_base64` としてjob resultへ載せると、最終音声、話者別VV/VC音声、行ごとの切り出し音声が重複して巨大化し、RunPodの結果返却段階で失敗し得る。そのためRunPod handlerは、最終音声を既定でWAVからMP3へ圧縮して `audio/mpeg` として返す。互換検証では `response_audio_format=wav` または `MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT=wav` を指定できる。M4A/AACを試す場合は `m4a` を指定する。圧縮に失敗した場合はWAVへfallbackし、`diagnostics.runpod_audio_response` に要求形式、実返却形式、元サイズ、返却サイズ、エラーを残す。
+
+中間音声は原因確認に必要なため、RunPod handlerは既定で「返却上限内に入る分だけ」inline返却する。ただしVC前の話者別VibeVoice出力 `speaker_vibevoice` は既定で除外し、話者別Seed-VC後出力と台本行ごとの切り出し音声を優先する。中間音声も既定ではMP3へ圧縮し、`artifact_response_max_items` と `artifact_response_max_base64_chars` の範囲で入るものだけを返す。完全に省略したい場合は `return_artifacts=false` または `MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS=0` を指定する。VC前音声まで含めたい場合は `artifact_response_exclude_kinds` を空にする。長尺でも中間音声を常時確認したい場合は、RunPod job outputではなく、永続Volumeやオブジェクトストレージへartifactを保存し、UIはURLや履歴APIから取得する構成に分ける。
 
 再構成時は、台本行ごとに切り出したWAV区間へ軽いDC offset除去、RMS正規化、peak制限をかけてから結合する。これは参照音声やSeed-VC後出力の音量差、切り出し区間ごとの過大peakによる音割れを減らすための後処理であり、VibeVoiceが誤った台詞を生成した場合の内容修正ではない。話者ごとの中間音声は原因確認のため元の出力を保持し、最終出力と台本行ごとの切り出し音声で正規化後の音を確認できるようにする。
 
@@ -242,7 +244,7 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 - timeout: VibeVoiceはSeed-VCより長くなる可能性があるため、RunPod job timeoutとAPI側timeoutを分けて管理する。
 - GPU選定: VRAM使用量、生成速度、課金単価を記録し、A4500/RTX 2000 Ada/16GB級GPUで足りるかを確認する。
 - 失敗ログ: RunPod job id、handler stderr末尾、モデル検出状態、生成パラメータをAPIレスポンスの診断情報として扱う。
-- result size: RunPod job outputには最終音声を載せる。VibeVoiceのRunPod handlerは最終音声を既定でMP3へ圧縮して返す。指定台詞向けモードの中間音声はサイズが大きいため既定では省略し、diagnosticsの `runpod_artifacts` に件数、base64文字数、省略理由を残す。
+- result size: RunPod job outputには最終音声を載せる。VibeVoiceのRunPod handlerは最終音声と中間音声を既定でMP3へ圧縮して返す。指定台詞向けモードの中間音声はVC前出力を既定で除外し、返却上限内に入るものだけを返す。diagnosticsの `runpod_artifacts` に件数、base64文字数、省略理由、除外kindを残す。
 
 本番デモでは、ブラウザへRunPod API keyを渡さず、FastAPIまたはCloudflare Workerなどのサーバー側からRunPod jobを作る構成を維持する。
 

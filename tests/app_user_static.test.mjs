@@ -175,6 +175,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /id="vibevoice-progress-log"/);
   assert.match(vibevoiceHtml, /id="vibevoice-audio"/);
   assert.match(vibevoiceHtml, /id="vibevoice-download"[^>]*download="vibevoice-output\.wav"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-copy-diagnostics"/);
   assert.match(vibevoiceHtml, /id="vibevoice-speaker-scripts"/);
   assert.match(vibevoiceHtml, /id="vibevoice-artifacts"/);
   assert.match(vibevoiceHtml, /\/static\/app_vibevoice\.js/);
@@ -190,6 +191,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /function extensionForMimeType/);
   assert.match(vibevoiceSource, /downloadLink\.download = `vibevoice-output\.\$\{extensionForMimeType\(audioMimeType\)\}`/);
   assert.match(vibevoiceSource, /audio\/mpeg/);
+  assert.match(vibevoiceSource, /copyDiagnosticsButton\?\.addEventListener\("click", copyDiagnosticsToClipboard\)/);
+  assert.match(vibevoiceSource, /navigator\.clipboard\.writeText/);
+  assert.match(vibevoiceSource, /copyTextWithFallback/);
   assert.match(vibevoiceSource, /runpod_artifacts/);
   assert.match(vibevoiceSource, /返却サイズを抑えるため/);
   assert.match(vibevoiceSource, /handleScriptFileChange/);

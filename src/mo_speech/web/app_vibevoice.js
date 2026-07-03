@@ -8,6 +8,7 @@ const audio = document.querySelector("#vibevoice-audio");
 const downloadLink = document.querySelector("#vibevoice-download");
 const normalizedScript = document.querySelector("#vibevoice-normalized-script");
 const diagnostics = document.querySelector("#vibevoice-diagnostics");
+const copyDiagnosticsButton = document.querySelector("#vibevoice-copy-diagnostics");
 const speakerScriptsContainer = document.querySelector("#vibevoice-speaker-scripts");
 const artifactsContainer = document.querySelector("#vibevoice-artifacts");
 const cancelButton = document.querySelector("#vibevoice-cancel-button");
@@ -71,6 +72,7 @@ let currentJobId = "";
 let jobPollTimer = 0;
 let elapsedTimer = 0;
 let jobStartedAt = 0;
+let copyDiagnosticsResetTimer = 0;
 let lineByLineUserPreference = lineByLineControl?.checked === true;
 let generationBusy = false;
 let referenceUrlFetching = false;
@@ -78,6 +80,7 @@ let referenceUrlFetching = false;
 form.addEventListener("submit", handleGenerate);
 cancelButton.addEventListener("click", cancelVibeVoiceJob);
 resetSettingsButton.addEventListener("click", resetVibeVoiceGenerationSettings);
+copyDiagnosticsButton?.addEventListener("click", copyDiagnosticsToClipboard);
 referenceUrlButton?.addEventListener("click", handleReferenceUrlFetch);
 scriptInput.addEventListener("input", () => {
   updateLineByLineAutoState();
@@ -955,6 +958,7 @@ function renderResult(payload) {
     null,
     2,
   );
+  updateCopyDiagnosticsButtonState();
   renderSpeakerScripts(directedDiagnostics.speaker_scripts || {});
   renderArtifacts(payload.artifacts || [], payload.diagnostics?.runpod_artifacts || null);
   resultPanel.hidden = false;
@@ -1004,9 +1008,65 @@ function clearResult() {
   downloadLink.href = "#";
   normalizedScript.textContent = "";
   diagnostics.textContent = "";
+  updateCopyDiagnosticsButtonState();
   speakerScriptsContainer.replaceChildren();
   artifactsContainer.replaceChildren();
   resultPanel.hidden = true;
+}
+
+async function copyDiagnosticsToClipboard() {
+  const text = diagnostics.textContent || "";
+  if (!text.trim()) {
+    return;
+  }
+  try {
+    await copyTextWithFallback(text);
+    setCopyDiagnosticsButtonLabel("コピー済み");
+  } catch (error) {
+    setCopyDiagnosticsButtonLabel("失敗");
+    message.dataset.state = "error";
+    message.textContent = `診断をコピーできませんでした: ${error.message || error}`;
+  }
+}
+
+function updateCopyDiagnosticsButtonState() {
+  if (!copyDiagnosticsButton) {
+    return;
+  }
+  copyDiagnosticsButton.disabled = !(diagnostics.textContent || "").trim();
+}
+
+function setCopyDiagnosticsButtonLabel(label) {
+  if (!copyDiagnosticsButton) {
+    return;
+  }
+  copyDiagnosticsButton.textContent = label;
+  window.clearTimeout(copyDiagnosticsResetTimer);
+  copyDiagnosticsResetTimer = window.setTimeout(() => {
+    copyDiagnosticsButton.textContent = "コピー";
+    updateCopyDiagnosticsButtonState();
+  }, 1600);
+}
+
+async function copyTextWithFallback(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.insetBlockStart = "-1000px";
+  textarea.style.inlineSize = "1px";
+  textarea.style.blockSize = "1px";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("Clipboard API is unavailable");
+  }
 }
 
 function renderSpeakerScripts(speakerScripts) {

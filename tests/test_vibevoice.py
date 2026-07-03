@@ -412,6 +412,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     assert result.providers["vibevoice_directed_asr"] == "fake-directed-asr"
     assert result.providers["vibevoice_directed_vc"] == "fake-directed-vc"
     assert result.diagnostics["directed_line_mode"]["line_count"] == 4
+    assert result.diagnostics["directed_line_mode"]["voice_conversion_settings"] == {"backend_id": "seed-vc"}
     assert len(result.diagnostics["directed_line_mode"]["ranges"]) == 4
     assert result.diagnostics["directed_line_mode"]["speaker_target_scripts"] == {"1": f"Speaker 1: {target_script}"}
     assert result.diagnostics["directed_line_mode"]["speaker_tail_guards"] == {"1": expected_tail_guard}

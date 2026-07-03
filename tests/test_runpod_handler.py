@@ -354,7 +354,84 @@ def test_runpod_handler_falls_back_to_wav_when_vibevoice_audio_compression_fails
     assert any("MP3" in warning or "圧縮" in warning for warning in payload["warnings"])
 
 
-def test_runpod_handler_omits_vibevoice_artifacts_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runpod_handler_returns_limited_vibevoice_artifacts_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options):
+            return type(
+                "FakeVibeVoiceResult",
+                (),
+                {
+                    "audio_bytes": b"vv audio",
+                    "audio_mime_type": "audio/wav",
+                    "normalized_script": script_text,
+                    "timings_ms": {"vibevoice": 1.0},
+                    "providers": {"vibevoice": "fake-vibevoice"},
+                    "diagnostics": {},
+                    "artifacts": [
+                        {
+                            "kind": "speaker_vibevoice",
+                            "label": "Speaker 1 VibeVoice",
+                            "audio_mime_type": "audio/wav",
+                            "audio_base64": base64.b64encode(b"before vc").decode("ascii"),
+                            "size_bytes": 9,
+                        },
+                        {
+                            "kind": "speaker_voice_conversion",
+                            "label": "Speaker 1 Seed-VC",
+                            "audio_mime_type": "audio/wav",
+                            "audio_base64": base64.b64encode(b"after vc").decode("ascii"),
+                            "size_bytes": 8,
+                        },
+                        {
+                            "kind": "line_segment",
+                            "label": "Line 1",
+                            "audio_mime_type": "audio/wav",
+                            "audio_base64": base64.b64encode(b"x" * 1024).decode("ascii"),
+                            "size_bytes": 1024,
+                        }
+                    ],
+                },
+            )()
+
+    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    monkeypatch.setattr(
+        runpod_handler,
+        "_encode_runpod_response_audio_with_ffmpeg",
+        lambda audio_bytes, **kwargs: (b"mp3:" + audio_bytes, "audio/mpeg"),
+    )
+    monkeypatch.delenv("MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS", raising=False)
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "vibevoice",
+                "response_audio_format": "wav",
+                "artifact_response_max_base64_chars": 3000,
+                "script": "Speaker 1: 你好。",
+                "voices": [
+                    {
+                        "speaker": 1,
+                        "filename": "voice.wav",
+                        "audio_mime_type": "audio/wav",
+                        "audio_base64": base64.b64encode(b"voice").decode("ascii"),
+                    }
+                ],
+            }
+        }
+    )
+
+    assert [artifact["kind"] for artifact in payload["artifacts"]] == ["speaker_voice_conversion", "line_segment"]
+    assert payload["artifacts"][0]["audio_mime_type"] == "audio/mpeg"
+    assert base64.b64decode(payload["artifacts"][0]["audio_base64"]) == b"mp3:after vc"
+    assert payload["diagnostics"]["runpod_artifacts"]["total_available"] == 3
+    assert payload["diagnostics"]["runpod_artifacts"]["available"] == 2
+    assert payload["diagnostics"]["runpod_artifacts"]["returned"] == 2
+    assert payload["diagnostics"]["runpod_artifacts"]["omitted"] == 0
+    assert payload["diagnostics"]["runpod_artifacts"]["excluded_kinds"] == ["speaker_vibevoice"]
+    assert payload["diagnostics"]["runpod_artifacts"]["filtered_out"] == 1
+
+
+def test_runpod_handler_can_disable_vibevoice_artifacts(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeVibeVoiceService:
         def generate(self, *, script_text, voice_paths, options):
             return type(
@@ -380,13 +457,13 @@ def test_runpod_handler_omits_vibevoice_artifacts_by_default(monkeypatch: pytest
             )()
 
     monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
-    monkeypatch.delenv("MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS", raising=False)
 
     payload = runpod_handler.handler(
         {
             "input": {
                 "operation_mode": "vibevoice",
                 "response_audio_format": "wav",
+                "return_artifacts": False,
                 "script": "Speaker 1: 你好。",
                 "voices": [
                     {
@@ -446,6 +523,7 @@ def test_runpod_handler_can_return_limited_vibevoice_artifacts(monkeypatch: pyte
             "input": {
                 "operation_mode": "vibevoice",
                 "response_audio_format": "wav",
+                "artifact_response_audio_format": "wav",
                 "script": "Speaker 1: 你好。",
                 "return_artifacts": True,
                 "artifact_response_max_items": 1,
@@ -462,10 +540,12 @@ def test_runpod_handler_can_return_limited_vibevoice_artifacts(monkeypatch: pyte
         }
     )
 
-    assert [artifact["kind"] for artifact in payload["artifacts"]] == ["speaker_vibevoice"]
-    assert payload["diagnostics"]["runpod_artifacts"]["available"] == 2
+    assert [artifact["kind"] for artifact in payload["artifacts"]] == ["line_segment"]
+    assert payload["diagnostics"]["runpod_artifacts"]["total_available"] == 2
+    assert payload["diagnostics"]["runpod_artifacts"]["available"] == 1
     assert payload["diagnostics"]["runpod_artifacts"]["returned"] == 1
-    assert payload["diagnostics"]["runpod_artifacts"]["omitted"] == 1
+    assert payload["diagnostics"]["runpod_artifacts"]["omitted"] == 0
+    assert payload["diagnostics"]["runpod_artifacts"]["filtered_out"] == 1
 
 
 def test_runpod_handler_releases_voice_conversion_before_vibevoice(monkeypatch: pytest.MonkeyPatch) -> None:

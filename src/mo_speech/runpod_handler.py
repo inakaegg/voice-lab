@@ -40,6 +40,10 @@ _VIBEVOICE_SERVICE_LOAD_MS: float | None = None
 _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT = "mp3"
 _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE = "96k"
 _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_TIMEOUT_SECONDS = 60.0
+_DEFAULT_RUNPOD_VIBEVOICE_ARTIFACT_AUDIO_FORMAT = "mp3"
+_DEFAULT_RUNPOD_VIBEVOICE_MAX_ARTIFACTS = 64
+_DEFAULT_RUNPOD_VIBEVOICE_MAX_ARTIFACT_BASE64_CHARS = 2_000_000
+_DEFAULT_RUNPOD_VIBEVOICE_EXCLUDE_ARTIFACT_KINDS = ("speaker_vibevoice",)
 
 
 def handler(event: dict[str, Any]) -> dict[str, object]:
@@ -533,26 +537,43 @@ def _vibevoice_artifacts_for_runpod_response(
     payload: dict[str, object],
     artifacts_value: object,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
-    artifacts = (
+    all_artifacts = (
         [dict(item) for item in artifacts_value if isinstance(item, dict)]
         if isinstance(artifacts_value, list)
         else []
     )
-    total_base64_chars = sum(_artifact_audio_base64_chars(artifact) for artifact in artifacts)
-    total_size_bytes = sum(_artifact_size_bytes(artifact) for artifact in artifacts)
+    excluded_kinds = _runpod_artifact_excluded_kinds(payload)
+    artifacts = [
+        artifact
+        for artifact in all_artifacts
+        if str(artifact.get("kind") or "").strip() not in excluded_kinds
+    ]
+    total_base64_chars = sum(_artifact_audio_base64_chars(artifact) for artifact in all_artifacts)
+    total_size_bytes = sum(_artifact_size_bytes(artifact) for artifact in all_artifacts)
+    available_base64_chars = sum(_artifact_audio_base64_chars(artifact) for artifact in artifacts)
+    available_size_bytes = sum(_artifact_size_bytes(artifact) for artifact in artifacts)
     include_artifacts = _optional_bool(payload.get("return_artifacts"))
     if include_artifacts is None:
-        include_artifacts = _optional_bool(os.getenv("MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS")) is True
+        env_include_artifacts = _optional_bool(os.getenv("MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS"))
+        include_artifacts = env_include_artifacts if env_include_artifacts is not None else True
     summary: dict[str, object] = {
+        "total_available": len(all_artifacts),
+        "total_audio_base64_chars": total_base64_chars,
+        "total_size_bytes": total_size_bytes,
         "available": len(artifacts),
         "returned": 0,
         "omitted": len(artifacts),
         "include_requested": include_artifacts,
-        "available_audio_base64_chars": total_base64_chars,
-        "available_size_bytes": total_size_bytes,
+        "available_audio_base64_chars": available_base64_chars,
+        "available_size_bytes": available_size_bytes,
+        "filtered_out": len(all_artifacts) - len(artifacts),
+        "excluded_kinds": sorted(excluded_kinds),
     }
-    if not artifacts:
+    if not all_artifacts:
         summary["omitted_reason"] = ""
+        return [], summary
+    if not artifacts:
+        summary["omitted_reason"] = "filtered"
         return [], summary
     if not include_artifacts:
         summary["omitted_reason"] = "disabled"
@@ -562,7 +583,7 @@ def _vibevoice_artifacts_for_runpod_response(
         _payload_value_or_env(payload, "artifact_response_max_items", "MO_RUNPOD_VIBEVOICE_MAX_ARTIFACTS"),
         0,
         1000,
-        8,
+        _DEFAULT_RUNPOD_VIBEVOICE_MAX_ARTIFACTS,
     )
     max_base64_chars = _bounded_int(
         _payload_value_or_env(
@@ -572,17 +593,45 @@ def _vibevoice_artifacts_for_runpod_response(
         ),
         0,
         100_000_000,
-        750_000,
+        _DEFAULT_RUNPOD_VIBEVOICE_MAX_ARTIFACT_BASE64_CHARS,
     )
+    artifact_audio_format = _runpod_artifact_response_audio_format(payload)
     returned: list[dict[str, object]] = []
     returned_base64_chars = 0
+    encode_failures = 0
     for artifact in artifacts:
         if max_items == 0 or len(returned) >= max_items:
             break
-        audio_base64_chars = _artifact_audio_base64_chars(artifact)
+        response_artifact, encoded, encode_error = _runpod_response_artifact(
+            artifact,
+            output_format=artifact_audio_format,
+            bitrate=str(
+                _payload_value_or_env(
+                    payload,
+                    "artifact_response_audio_bitrate",
+                    "MO_RUNPOD_VIBEVOICE_ARTIFACT_AUDIO_BITRATE",
+                )
+                or _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE
+            ).strip()
+            or _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE,
+            timeout_seconds=_bounded_float(
+                _payload_value_or_env(
+                    payload,
+                    "artifact_response_audio_timeout_seconds",
+                    "MO_RUNPOD_VIBEVOICE_ARTIFACT_AUDIO_TIMEOUT_SECONDS",
+                ),
+                1.0,
+                300.0,
+                _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_TIMEOUT_SECONDS,
+            ),
+        )
+        if encode_error:
+            encode_failures += 1
+        audio_base64_chars = _artifact_audio_base64_chars(response_artifact)
         if max_base64_chars > 0 and returned_base64_chars + audio_base64_chars > max_base64_chars:
             continue
-        returned.append(artifact)
+        response_artifact["response_audio_encoded"] = encoded
+        returned.append(response_artifact)
         returned_base64_chars += audio_base64_chars
     summary.update(
         {
@@ -592,9 +641,70 @@ def _vibevoice_artifacts_for_runpod_response(
             "returned_audio_base64_chars": returned_base64_chars,
             "max_items": max_items,
             "max_audio_base64_chars": max_base64_chars,
+            "response_audio_format": artifact_audio_format,
+            "audio_encode_failures": encode_failures,
         }
     )
     return returned, summary
+
+
+def _runpod_artifact_excluded_kinds(payload: dict[str, object]) -> set[str]:
+    raw_value = _payload_value_or_env(
+        payload,
+        "artifact_response_exclude_kinds",
+        "MO_RUNPOD_VIBEVOICE_EXCLUDE_ARTIFACT_KINDS",
+    )
+    if raw_value is None:
+        return set(_DEFAULT_RUNPOD_VIBEVOICE_EXCLUDE_ARTIFACT_KINDS)
+    if isinstance(raw_value, (list, tuple, set)):
+        return {str(item).strip() for item in raw_value if str(item).strip()}
+    raw_text = str(raw_value).strip()
+    if raw_text == "":
+        return set()
+    if raw_text.lower() in {"none", "false", "0"}:
+        return set()
+    return {part.strip() for part in raw_text.split(",") if part.strip()}
+
+
+def _runpod_artifact_response_audio_format(payload: dict[str, object]) -> str:
+    raw_value = _payload_value_or_env(
+        payload,
+        "artifact_response_audio_format",
+        "MO_RUNPOD_VIBEVOICE_ARTIFACT_AUDIO_FORMAT",
+    )
+    return _normalize_runpod_audio_format(raw_value, default=_DEFAULT_RUNPOD_VIBEVOICE_ARTIFACT_AUDIO_FORMAT)
+
+
+def _runpod_response_artifact(
+    artifact: dict[str, object],
+    *,
+    output_format: str,
+    bitrate: str,
+    timeout_seconds: float,
+) -> tuple[dict[str, object], bool, str]:
+    response_artifact = dict(artifact)
+    audio_base64 = response_artifact.get("audio_base64")
+    if not isinstance(audio_base64, str) or audio_base64 == "" or output_format == "wav":
+        return response_artifact, False, ""
+    source_mime_type = str(response_artifact.get("audio_mime_type") or "audio/wav")
+    try:
+        source_audio_bytes = base64.b64decode(audio_base64)
+        encoded_bytes, encoded_mime_type = _encode_runpod_response_audio_with_ffmpeg(
+            source_audio_bytes,
+            source_mime_type=source_mime_type,
+            output_format=output_format,
+            bitrate=bitrate,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        response_artifact["response_audio_error"] = str(exc)
+        return response_artifact, False, str(exc)
+    response_artifact["source_audio_mime_type"] = source_mime_type
+    response_artifact["source_size_bytes"] = response_artifact.get("size_bytes", len(source_audio_bytes))
+    response_artifact["audio_mime_type"] = encoded_mime_type
+    response_artifact["audio_base64"] = base64.b64encode(encoded_bytes).decode("ascii")
+    response_artifact["size_bytes"] = len(encoded_bytes)
+    return response_artifact, True, ""
 
 
 def _vibevoice_response_audio_for_runpod(
@@ -674,14 +784,18 @@ def _runpod_response_audio_format(payload: dict[str, object]) -> str:
         "response_audio_format",
         "MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT",
     )
-    normalized = str(raw_value or _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT).strip().lower()
+    return _normalize_runpod_audio_format(raw_value, default=_DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT)
+
+
+def _normalize_runpod_audio_format(value: object, *, default: str) -> str:
+    normalized = str(value or default).strip().lower()
     if normalized in {"", "mp3", "mpeg", "audio/mpeg"}:
         return "mp3"
     if normalized in {"m4a", "mp4", "aac", "audio/mp4", "audio/aac"}:
         return "m4a"
     if normalized in {"wav", "wave", "audio/wav"}:
         return "wav"
-    return _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT
+    return default
 
 
 def _encode_runpod_response_audio_with_ffmpeg(

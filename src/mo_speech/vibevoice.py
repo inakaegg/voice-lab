@@ -664,6 +664,7 @@ class VibeVoiceService:
         asr_total_ms = 0.0
         asr_name = ""
         voice_conversion_name = ""
+        voice_conversion_settings: dict[str, object] = {}
 
         self._release_directed_asr_provider()
         self._release_directed_voice_conversion_service()
@@ -711,6 +712,7 @@ class VibeVoiceService:
 
             if _directed_voice_conversion_enabled():
                 vc_service = self._get_directed_voice_conversion_service()
+                voice_conversion_settings = _directed_voice_conversion_settings_diagnostics(vc_service)
                 try:
                     for speaker_index, speaker in enumerate(lines_by_speaker, start=1):
                         _raise_if_cancelled(cancel_event)
@@ -810,6 +812,7 @@ class VibeVoiceService:
                     "line_count": len(lines),
                     "asr_provider": asr_name,
                     "voice_conversion_provider": voice_conversion_name,
+                    "voice_conversion_settings": voice_conversion_settings,
                     "gap_seconds": options.line_gap,
                     "output_normalization": {
                         "target_rms": DIRECTED_OUTPUT_TARGET_RMS,
@@ -1368,6 +1371,21 @@ def _convert_directed_voice(voice_conversion_service, *, source_audio_path: Path
             seed_vc_settings=SeedVcRuntimeSettings(),
         )
     )
+
+
+def _directed_voice_conversion_settings_diagnostics(voice_conversion_service) -> dict[str, object]:
+    settings: dict[str, object] = {"backend_id": _directed_voice_conversion_backend()}
+    for name in (
+        "diffusion_steps",
+        "length_adjust",
+        "inference_cfg_rate",
+        "reference_max_seconds",
+        "reference_auto_select",
+    ):
+        value = getattr(voice_conversion_service, name, None)
+        if value is not None:
+            settings[name] = value
+    return settings
 
 
 def _directed_asr_language() -> str:
