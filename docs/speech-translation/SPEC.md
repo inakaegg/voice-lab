@@ -298,11 +298,12 @@ OpenAI Realtime翻訳の扱い:
 - `cfg_scale`、`inference_steps`、`seed`、`temperature`、`top_p`、`top_k`、`do_sample`、`max_voice_seconds`: VibeVoice CLIへ渡す生成パラメータ。
 - `line_by_line`: `true` の場合、VibeVoice CLIのline-by-line concatモードを使う。
 - `line_gap`: line-by-line concat時の行間無音秒数。
+- `response_audio_format`: RunPod Serverless handlerで最終音声を返す形式。`mp3`、`m4a`、`wav` を受け、未指定時はRunPod handler側の既定値を使う。
 
 レスポンス:
 
-- `audio_mime_type`: 初期実装では `audio/wav`。
-- `audio_base64`: 生成WAV。
+- `audio_mime_type`: ローカル実行では原則 `audio/wav`。RunPod ServerlessのVibeVoice handlerでは既定で `audio/mpeg` に圧縮し、設定により `audio/wav` または `audio/mp4` へ切り替えられる。
+- `audio_base64`: 生成音声。
 - `normalized_script`: 実際にVibeVoiceへ渡した台本。
 - `providers`: `vibevoice` provider名とCLIパス。
 - `timings_ms`: 生成時間。

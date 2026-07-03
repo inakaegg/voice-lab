@@ -937,10 +937,13 @@ function withSavedVoiceStore(mode, callback) {
 
 function renderResult(payload) {
   const audioBytes = base64ToBytes(payload.audio_base64 || "");
-  const blob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
+  const audioMimeType = payload.audio_mime_type || "audio/wav";
+  const blob = new Blob([audioBytes], { type: audioMimeType });
   currentAudioUrl = URL.createObjectURL(blob);
   audio.src = currentAudioUrl;
   downloadLink.href = currentAudioUrl;
+  downloadLink.download = `vibevoice-output.${extensionForMimeType(audioMimeType)}`;
+  downloadLink.textContent = `${labelForMimeType(audioMimeType)}を保存`;
   normalizedScript.textContent = payload.normalized_script || "";
   const directedDiagnostics = payload.diagnostics?.directed_line_mode || {};
   diagnostics.textContent = JSON.stringify(
@@ -956,6 +959,37 @@ function renderResult(payload) {
   renderArtifacts(payload.artifacts || [], payload.diagnostics?.runpod_artifacts || null);
   resultPanel.hidden = false;
   audio.play().catch(() => {});
+}
+
+function extensionForMimeType(mimeType) {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("audio/mpeg") || normalized.includes("mp3")) {
+    return "mp3";
+  }
+  if (normalized.includes("mp4") || normalized.includes("m4a") || normalized.includes("aac")) {
+    return "m4a";
+  }
+  if (normalized.includes("wav")) {
+    return "wav";
+  }
+  if (normalized.includes("webm")) {
+    return "webm";
+  }
+  return "audio";
+}
+
+function labelForMimeType(mimeType) {
+  const extension = extensionForMimeType(mimeType);
+  if (extension === "mp3") {
+    return "MP3";
+  }
+  if (extension === "m4a") {
+    return "M4A";
+  }
+  if (extension === "wav") {
+    return "WAV";
+  }
+  return "音声";
 }
 
 function clearResult() {

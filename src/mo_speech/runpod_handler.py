@@ -5,6 +5,7 @@ import gc
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -36,6 +37,9 @@ _VOICE_CONVERSION_SERVICE: VoiceConversionService | None = None
 _VOICE_CONVERSION_SERVICE_LOAD_MS: float | None = None
 _VIBEVOICE_SERVICE: VibeVoiceService | None = None
 _VIBEVOICE_SERVICE_LOAD_MS: float | None = None
+_DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT = "mp3"
+_DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE = "96k"
+_DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_TIMEOUT_SECONDS = 60.0
 
 
 def handler(event: dict[str, Any]) -> dict[str, object]:
@@ -312,15 +316,20 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
     diagnostics = dict(result.diagnostics)
     if artifact_summary["available"] or artifact_summary["include_requested"]:
         diagnostics["runpod_artifacts"] = artifact_summary
+    response_audio_bytes, response_audio_mime_type, response_audio_diagnostics, response_audio_warnings = (
+        _vibevoice_response_audio_for_runpod(payload, result.audio_bytes, result.audio_mime_type)
+    )
+    diagnostics["runpod_audio_response"] = response_audio_diagnostics
 
     response: dict[str, object] = {
-        "audio_mime_type": result.audio_mime_type,
-        "audio_base64": base64.b64encode(result.audio_bytes).decode("ascii"),
+        "audio_mime_type": response_audio_mime_type,
+        "audio_base64": base64.b64encode(response_audio_bytes).decode("ascii"),
         "normalized_script": result.normalized_script,
         "timings_ms": result.timings_ms,
         "providers": result.providers,
         "diagnostics": diagnostics,
         "artifacts": response_artifacts,
+        "warnings": response_audio_warnings,
     }
     _attach_serverless_metrics(
         response,
@@ -588,6 +597,144 @@ def _vibevoice_artifacts_for_runpod_response(
     return returned, summary
 
 
+def _vibevoice_response_audio_for_runpod(
+    payload: dict[str, object],
+    audio_bytes: bytes,
+    source_mime_type: str,
+) -> tuple[bytes, str, dict[str, object], list[str]]:
+    requested_format = _runpod_response_audio_format(payload)
+    bitrate = str(
+        _payload_value_or_env(
+            payload,
+            "response_audio_bitrate",
+            "MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE",
+        )
+        or _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE
+    ).strip() or _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE
+    timeout_seconds = _bounded_float(
+        _payload_value_or_env(
+            payload,
+            "response_audio_timeout_seconds",
+            "MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_TIMEOUT_SECONDS",
+        ),
+        1.0,
+        300.0,
+        _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_TIMEOUT_SECONDS,
+    )
+    diagnostics: dict[str, object] = {
+        "requested_format": requested_format,
+        "source_audio_mime_type": source_mime_type,
+        "source_size_bytes": len(audio_bytes),
+        "bitrate": bitrate,
+        "encoded": False,
+    }
+    if requested_format == "wav":
+        diagnostics.update(
+            {
+                "audio_mime_type": source_mime_type or "audio/wav",
+                "size_bytes": len(audio_bytes),
+            }
+        )
+        return audio_bytes, source_mime_type or "audio/wav", diagnostics, []
+
+    try:
+        encoded_bytes, encoded_mime_type = _encode_runpod_response_audio_with_ffmpeg(
+            audio_bytes,
+            source_mime_type=source_mime_type,
+            output_format=requested_format,
+            bitrate=bitrate,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        diagnostics.update(
+            {
+                "audio_mime_type": source_mime_type or "audio/wav",
+                "size_bytes": len(audio_bytes),
+                "error": str(exc),
+            }
+        )
+        return audio_bytes, source_mime_type or "audio/wav", diagnostics, [
+            f"RunPod返却音声の圧縮に失敗したためWAVで返しました: {exc}"
+        ]
+
+    diagnostics.update(
+        {
+            "audio_mime_type": encoded_mime_type,
+            "size_bytes": len(encoded_bytes),
+            "encoded": True,
+            "compression_ratio": round(len(encoded_bytes) / max(1, len(audio_bytes)), 6),
+        }
+    )
+    return encoded_bytes, encoded_mime_type, diagnostics, []
+
+
+def _runpod_response_audio_format(payload: dict[str, object]) -> str:
+    raw_value = _payload_value_or_env(
+        payload,
+        "response_audio_format",
+        "MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT",
+    )
+    normalized = str(raw_value or _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT).strip().lower()
+    if normalized in {"", "mp3", "mpeg", "audio/mpeg"}:
+        return "mp3"
+    if normalized in {"m4a", "mp4", "aac", "audio/mp4", "audio/aac"}:
+        return "m4a"
+    if normalized in {"wav", "wave", "audio/wav"}:
+        return "wav"
+    return _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT
+
+
+def _encode_runpod_response_audio_with_ffmpeg(
+    audio_bytes: bytes,
+    *,
+    source_mime_type: str,
+    output_format: str,
+    bitrate: str,
+    timeout_seconds: float,
+) -> tuple[bytes, str]:
+    if output_format not in {"mp3", "m4a"}:
+        raise ValueError(f"unsupported response audio format: {output_format}")
+    with TemporaryDirectory() as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        input_path = temp_dir / f"input{_audio_suffix(source_mime_type)}"
+        output_path = temp_dir / f"output.{output_format}"
+        input_path.write_bytes(audio_bytes)
+        command = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(input_path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "24000",
+            "-b:a",
+            bitrate,
+        ]
+        if output_format == "mp3":
+            command.extend(["-codec:a", "libmp3lame", str(output_path)])
+            mime_type = "audio/mpeg"
+        else:
+            command.extend(["-codec:a", "aac", "-movflags", "+faststart", str(output_path)])
+            mime_type = "audio/mp4"
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(_tail_text(completed.stderr) or f"ffmpeg exited with {completed.returncode}")
+        if not output_path.is_file() or output_path.stat().st_size == 0:
+            raise RuntimeError("ffmpeg did not produce response audio")
+        return output_path.read_bytes(), mime_type
+
+
 def _payload_value_or_env(payload: dict[str, object], payload_key: str, env_key: str) -> object:
     if payload_key in payload:
         return payload[payload_key]
@@ -646,6 +793,16 @@ def _bounded_int(value: object, minimum: int, maximum: int, fallback: int) -> in
         return fallback
     try:
         number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, number))
+
+
+def _bounded_float(value: object, minimum: float, maximum: float, fallback: float) -> float:
+    if value is None or value == "":
+        return fallback
+    try:
+        number = float(value)
     except (TypeError, ValueError):
         return fallback
     return max(minimum, min(maximum, number))
@@ -737,6 +894,13 @@ def _audio_suffix(audio_mime_type: object) -> str:
     if normalized_mime_type == "audio/mpeg":
         return ".mp3"
     return ".wav"
+
+
+def _tail_text(text: str | None, *, max_chars: int = 4000) -> str:
+    value = str(text or "").strip()
+    if len(value) <= max_chars:
+        return value
+    return value[-max_chars:]
 
 
 def _elapsed_ms(started: float) -> float:

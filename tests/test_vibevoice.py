@@ -165,6 +165,30 @@ def test_normalize_vibevoice_directed_line_script_collapses_one_speaker_with_pun
     ) == "Speaker 1: あっ。小鸡さん。こんにちは〜。こんにちは。ご無沙汰してます。最近。北海道に移住したって聞きました。"
 
 
+def test_directed_speaker_script_extends_short_text_to_target_minimum() -> None:
+    lines = [vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="一番目です")]
+
+    script = vibevoice_module._directed_speaker_script_for_lines(lines, include_tail_guard=True)
+
+    assert script.target_text == "一番目です。"
+    assert len(script.full_text) >= vibevoice_module.DIRECTED_TARGET_MIN_CHARS
+    assert script.full_text.startswith(script.target_text)
+    assert script.tail_guard_text == script.target_text * (
+        math.ceil(vibevoice_module.DIRECTED_TARGET_MIN_CHARS / len(script.target_text)) - 1
+    )
+
+
+def test_directed_speaker_script_skips_tail_guard_for_overlong_target() -> None:
+    text = "あ" * (vibevoice_module.DIRECTED_TARGET_MAX_CHARS + 1)
+    lines = [vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text=text)]
+
+    script = vibevoice_module._directed_speaker_script_for_lines(lines, include_tail_guard=True)
+
+    assert len(script.target_text) > vibevoice_module.DIRECTED_TARGET_MAX_CHARS
+    assert script.tail_guard_text == ""
+    assert script.full_text == script.target_text
+
+
 def test_directed_audio_ranges_align_words_by_text_instead_of_raw_ratio() -> None:
     lines = [
         vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=3, text="清掃時間ですX"),
@@ -374,7 +398,9 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
 
     command = calls[0]
     target_script = "あっ。こんにちは。最近。北海道に移住したって聞きました。温泉も近くにありますか。お仕事は何ですか。"
-    assert script_texts[0] == f"Speaker 1: {target_script}{target_script}"
+    target_repeat_count = math.ceil(vibevoice_module.DIRECTED_TARGET_MIN_CHARS / len(target_script))
+    expected_tail_guard = target_script * (target_repeat_count - 1)
+    assert script_texts[0] == f"Speaker 1: {target_script}{expected_tail_guard}"
     assert result.normalized_script == "\n".join(
         [
             "Speaker 1: あっ、こんにちは",
@@ -388,7 +414,18 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     assert result.diagnostics["directed_line_mode"]["line_count"] == 4
     assert len(result.diagnostics["directed_line_mode"]["ranges"]) == 4
     assert result.diagnostics["directed_line_mode"]["speaker_target_scripts"] == {"1": f"Speaker 1: {target_script}"}
-    assert result.diagnostics["directed_line_mode"]["speaker_tail_guards"] == {"1": target_script}
+    assert result.diagnostics["directed_line_mode"]["speaker_tail_guards"] == {"1": expected_tail_guard}
+    assert result.diagnostics["directed_line_mode"]["script_char_limits"] == {
+        "target_min": vibevoice_module.DIRECTED_TARGET_MIN_CHARS,
+        "target_max": vibevoice_module.DIRECTED_TARGET_MAX_CHARS,
+    }
+    assert result.diagnostics["directed_line_mode"]["speaker_script_lengths"]["1"] == {
+        "target_chars": len(target_script),
+        "tail_guard_chars": len(expected_tail_guard),
+        "full_chars": len(f"{target_script}{expected_tail_guard}"),
+        "below_target_min": True,
+        "above_target_max": False,
+    }
     assert [artifact["kind"] for artifact in result.artifacts] == [
         "speaker_vibevoice",
         "speaker_voice_conversion",
@@ -465,9 +502,13 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
         options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
     )
 
+    speaker1_target = "一番目です。三番目です。"
+    speaker2_target = "二番目です。四番目です。"
+    speaker1_full = speaker1_target * math.ceil(vibevoice_module.DIRECTED_TARGET_MIN_CHARS / len(speaker1_target))
+    speaker2_full = speaker2_target * math.ceil(vibevoice_module.DIRECTED_TARGET_MIN_CHARS / len(speaker2_target))
     assert script_texts == [
-        "Speaker 1: 一番目です。三番目です。一番目です。三番目です。",
-        "Speaker 1: 二番目です。四番目です。二番目です。四番目です。",
+        f"Speaker 1: {speaker1_full}",
+        f"Speaker 1: {speaker2_full}",
     ]
     assert events == [
         "vv:1",

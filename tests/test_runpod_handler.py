@@ -222,6 +222,7 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     event = {
         "input": {
             "operation_mode": "vibevoice",
+            "response_audio_format": "wav",
             "script": "Speaker 1: 你好。",
             "voices": [
                 {
@@ -242,6 +243,115 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     assert payload["normalized_script"] == "Speaker 1: 你好。"
     assert payload["providers"]["vibevoice"] == "fake-vibevoice"
     assert payload["serverless"]["operation_mode"] == "vibevoice"
+
+
+def test_runpod_handler_compresses_vibevoice_audio_to_mp3_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options):
+            return type(
+                "FakeVibeVoiceResult",
+                (),
+                {
+                    "audio_bytes": b"RIFF fake wav",
+                    "audio_mime_type": "audio/wav",
+                    "normalized_script": script_text,
+                    "timings_ms": {"vibevoice": 1.0},
+                    "providers": {"vibevoice": "fake-vibevoice"},
+                    "diagnostics": {},
+                    "artifacts": [],
+                },
+            )()
+
+    def fake_encode(audio_bytes, *, source_mime_type, output_format, bitrate, timeout_seconds):
+        captured["audio_bytes"] = audio_bytes
+        captured["source_mime_type"] = source_mime_type
+        captured["output_format"] = output_format
+        captured["bitrate"] = bitrate
+        captured["timeout_seconds"] = timeout_seconds
+        return b"mp3 audio", "audio/mpeg"
+
+    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    monkeypatch.setattr(runpod_handler, "_encode_runpod_response_audio_with_ffmpeg", fake_encode)
+    monkeypatch.delenv("MO_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT", raising=False)
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "vibevoice",
+                "script": "Speaker 1: 你好。",
+                "voices": [
+                    {
+                        "speaker": 1,
+                        "filename": "voice.wav",
+                        "audio_mime_type": "audio/wav",
+                        "audio_base64": base64.b64encode(b"voice").decode("ascii"),
+                    }
+                ],
+            }
+        }
+    )
+
+    assert captured["audio_bytes"] == b"RIFF fake wav"
+    assert captured["source_mime_type"] == "audio/wav"
+    assert captured["output_format"] == "mp3"
+    assert captured["bitrate"] == "96k"
+    assert payload["audio_mime_type"] == "audio/mpeg"
+    assert base64.b64decode(payload["audio_base64"]) == b"mp3 audio"
+    assert payload["diagnostics"]["runpod_audio_response"]["encoded"] is True
+    assert payload["diagnostics"]["runpod_audio_response"]["requested_format"] == "mp3"
+    assert payload["diagnostics"]["runpod_audio_response"]["source_size_bytes"] == len(b"RIFF fake wav")
+    assert payload["diagnostics"]["runpod_audio_response"]["size_bytes"] == len(b"mp3 audio")
+
+
+def test_runpod_handler_falls_back_to_wav_when_vibevoice_audio_compression_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options):
+            return type(
+                "FakeVibeVoiceResult",
+                (),
+                {
+                    "audio_bytes": b"RIFF fake wav",
+                    "audio_mime_type": "audio/wav",
+                    "normalized_script": script_text,
+                    "timings_ms": {"vibevoice": 1.0},
+                    "providers": {"vibevoice": "fake-vibevoice"},
+                    "diagnostics": {},
+                    "artifacts": [],
+                },
+            )()
+
+    def fake_encode(*args, **kwargs):
+        raise RuntimeError("ffmpeg failed")
+
+    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    monkeypatch.setattr(runpod_handler, "_encode_runpod_response_audio_with_ffmpeg", fake_encode)
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "vibevoice",
+                "script": "Speaker 1: 你好。",
+                "voices": [
+                    {
+                        "speaker": 1,
+                        "filename": "voice.wav",
+                        "audio_mime_type": "audio/wav",
+                        "audio_base64": base64.b64encode(b"voice").decode("ascii"),
+                    }
+                ],
+            }
+        }
+    )
+
+    assert payload["audio_mime_type"] == "audio/wav"
+    assert base64.b64decode(payload["audio_base64"]) == b"RIFF fake wav"
+    assert payload["diagnostics"]["runpod_audio_response"]["encoded"] is False
+    assert payload["diagnostics"]["runpod_audio_response"]["error"] == "ffmpeg failed"
+    assert any("MP3" in warning or "圧縮" in warning for warning in payload["warnings"])
 
 
 def test_runpod_handler_omits_vibevoice_artifacts_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,6 +386,7 @@ def test_runpod_handler_omits_vibevoice_artifacts_by_default(monkeypatch: pytest
         {
             "input": {
                 "operation_mode": "vibevoice",
+                "response_audio_format": "wav",
                 "script": "Speaker 1: 你好。",
                 "voices": [
                     {
@@ -334,6 +445,7 @@ def test_runpod_handler_can_return_limited_vibevoice_artifacts(monkeypatch: pyte
         {
             "input": {
                 "operation_mode": "vibevoice",
+                "response_audio_format": "wav",
                 "script": "Speaker 1: 你好。",
                 "return_artifacts": True,
                 "artifact_response_max_items": 1,
@@ -387,6 +499,7 @@ def test_runpod_handler_releases_voice_conversion_before_vibevoice(monkeypatch: 
     event = {
         "input": {
             "operation_mode": "vibevoice",
+            "response_audio_format": "wav",
             "script": "Speaker 1: 你好。",
             "voices": [
                 {

@@ -33,6 +33,8 @@ SHORT_SPEAKER_TAG_MAX = 4
 AUTO_LINE_BY_LINE_MIN_LINES = 4
 AUTO_LINE_BY_LINE_MIN_CHARS = 180
 DIRECTED_TAIL_GUARD_MAX_CHARS = 120
+DIRECTED_TARGET_MIN_CHARS = 140
+DIRECTED_TARGET_MAX_CHARS = 260
 DIRECTED_OUTPUT_TARGET_RMS = 0.10
 DIRECTED_OUTPUT_PEAK_LIMIT = 0.92
 DIRECTED_OUTPUT_MAX_GAIN = 2.5
@@ -303,7 +305,15 @@ def _directed_speaker_script_for_lines(
         raise ValueError("script is required")
     separator = _directed_line_separator("\n".join(line.text for line in lines))
     target_text = _join_directed_line_phrases([line.text for line in lines], separator=separator)
-    tail_guard_text = _directed_tail_guard_text(target_text) if include_tail_guard else ""
+    tail_guard_text = (
+        _directed_tail_guard_text(
+            target_text,
+            target_min_chars=DIRECTED_TARGET_MIN_CHARS,
+            target_max_chars=DIRECTED_TARGET_MAX_CHARS,
+        )
+        if include_tail_guard
+        else ""
+    )
     return _DirectedSpeakerScript(
         full_text=f"{target_text}{tail_guard_text}",
         target_text=target_text,
@@ -391,17 +401,44 @@ def _ensure_sentence_end(text: str, *, separator: str) -> str:
     return value
 
 
-def _directed_tail_guard_text(target_text: str) -> str:
+def _directed_tail_guard_text(
+    target_text: str,
+    *,
+    target_min_chars: int = 0,
+    target_max_chars: int = 0,
+) -> str:
     value = str(target_text or "").strip()
     if not value:
         return ""
+    if target_max_chars > 0 and len(value) > target_max_chars:
+        return ""
     if len(value) <= DIRECTED_TAIL_GUARD_MAX_CHARS:
-        return value
-    prefix = value[:DIRECTED_TAIL_GUARD_MAX_CHARS]
-    boundary = max(prefix.rfind(mark) for mark in ("。", ".", "？", "?", "！", "!", "…"))
-    if boundary >= max(12, DIRECTED_TAIL_GUARD_MAX_CHARS // 3):
-        return prefix[: boundary + 1]
-    return _ensure_sentence_end(prefix, separator="。" if _directed_line_separator(value) == "。" else ".")
+        guard = value
+    else:
+        prefix = value[:DIRECTED_TAIL_GUARD_MAX_CHARS]
+        boundary = max(prefix.rfind(mark) for mark in ("。", ".", "？", "?", "！", "!", "…"))
+        if boundary >= max(12, DIRECTED_TAIL_GUARD_MAX_CHARS // 3):
+            guard = prefix[: boundary + 1]
+        else:
+            guard = _ensure_sentence_end(prefix, separator="。" if _directed_line_separator(value) == "。" else ".")
+    if not guard or target_min_chars <= 0:
+        return guard
+    repeated_guard = guard
+    while len(value) + len(repeated_guard) < target_min_chars:
+        repeated_guard += guard
+    return repeated_guard
+
+
+def _directed_speaker_script_length_diagnostics(script: _DirectedSpeakerScript) -> dict[str, object]:
+    target_chars = len(script.target_text)
+    tail_guard_chars = len(script.tail_guard_text)
+    return {
+        "target_chars": target_chars,
+        "tail_guard_chars": tail_guard_chars,
+        "full_chars": len(script.full_text),
+        "below_target_min": target_chars < DIRECTED_TARGET_MIN_CHARS,
+        "above_target_max": target_chars > DIRECTED_TARGET_MAX_CHARS,
+    }
 
 
 def _ends_with_sentence_punctuation(text: str) -> bool:
@@ -616,6 +653,7 @@ class VibeVoiceService:
         speaker_scripts: dict[int, str] = {}
         speaker_target_scripts: dict[int, str] = {}
         speaker_tail_guards: dict[int, str] = {}
+        speaker_script_lengths: dict[int, dict[str, object]] = {}
         asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
         asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
         vc_results_by_speaker: dict[int, object] = {}
@@ -639,6 +677,17 @@ class VibeVoiceService:
                 speaker_scripts[speaker] = speaker_script
                 speaker_target_scripts[speaker] = f"Speaker 1: {speaker_script_parts.target_text}"
                 speaker_tail_guards[speaker] = speaker_script_parts.tail_guard_text
+                speaker_script_lengths[speaker] = _directed_speaker_script_length_diagnostics(speaker_script_parts)
+                if speaker_script_lengths[speaker]["below_target_min"]:
+                    warnings.append(
+                        f"Speaker {speaker}: VV投入テキストが短いため末尾ガードを増やしました "
+                        f"({speaker_script_lengths[speaker]['target_chars']} chars)"
+                    )
+                if speaker_script_lengths[speaker]["above_target_max"]:
+                    warnings.append(
+                        f"Speaker {speaker}: VV投入テキストが長いため末尾ガードを追加しませんでした "
+                        f"({speaker_script_lengths[speaker]['target_chars']} chars)"
+                    )
                 speaker_options = replace(options, directed_line_mode=False, line_by_line=False)
                 _report_vibevoice_progress(
                     progress_callback,
@@ -767,6 +816,10 @@ class VibeVoiceService:
                         "peak_limit": DIRECTED_OUTPUT_PEAK_LIMIT,
                         "max_gain": DIRECTED_OUTPUT_MAX_GAIN,
                     },
+                    "script_char_limits": {
+                        "target_min": DIRECTED_TARGET_MIN_CHARS,
+                        "target_max": DIRECTED_TARGET_MAX_CHARS,
+                    },
                     "warnings": warnings,
                     "speaker_scripts": {
                         str(speaker): speaker_scripts[speaker] for speaker in lines_by_speaker
@@ -776,6 +829,9 @@ class VibeVoiceService:
                     },
                     "speaker_tail_guards": {
                         str(speaker): speaker_tail_guards[speaker] for speaker in lines_by_speaker
+                    },
+                    "speaker_script_lengths": {
+                        str(speaker): speaker_script_lengths[speaker] for speaker in lines_by_speaker
                     },
                     "asr_segments": {str(speaker): rows for speaker, rows in asr_segments_by_speaker.items()},
                     "asr_words": {str(speaker): rows for speaker, rows in asr_words_by_speaker.items()},
