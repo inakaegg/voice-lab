@@ -27,6 +27,7 @@ const directedLineModeControl = form.elements.directed_line_mode;
 const directedLineModeSwitch = directedLineModeControl?.closest(".vibevoice-switch");
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
 const savedVoiceLabels = Array.from(document.querySelectorAll("[data-saved-voice-slot]"));
+const savedVoicePreviews = Array.from(document.querySelectorAll("[data-saved-voice-preview-slot]"));
 const referenceUrlSlotSelect = document.querySelector("#vibevoice-reference-url-slot");
 const referenceUrlInput = document.querySelector("#vibevoice-reference-url");
 const referenceUrlStartInput = document.querySelector("#vibevoice-reference-url-start");
@@ -64,6 +65,7 @@ const savedVoiceFilesBySlot = new Map();
 
 let currentAudioUrl = "";
 let artifactAudioUrls = [];
+const savedVoicePreviewUrls = new Map();
 let savedVoiceFilesReady = Promise.resolve();
 let currentJobId = "";
 let jobPollTimer = 0;
@@ -122,6 +124,10 @@ persistedControls.forEach((control) => {
 });
 voiceFileInputs.forEach((input) => {
   input.addEventListener("change", () => handleVoiceFileChange(input));
+});
+savedVoicePreviews.forEach((preview) => {
+  preview.addEventListener("click", stopPreviewEventPropagation);
+  preview.addEventListener("pointerdown", stopPreviewEventPropagation);
 });
 loadVibeVoiceDraft();
 updateModelAvailability();
@@ -504,7 +510,7 @@ async function handleReferenceUrlFetch() {
     }
     setReferenceUrlStatus(referenceUrlSuccessMessage(slot, payload), "ready");
     message.dataset.state = "ready";
-    message.textContent = `Speaker ${slot} の参照音声をURLから保存しました。`;
+    message.textContent = `Speaker ${slot} の参照音声をURLから保存しました。Speaker枠で再生確認できます。`;
   } catch (error) {
     setReferenceUrlStatus(String(error.message || error), "error");
     message.dataset.state = "error";
@@ -544,7 +550,7 @@ function referenceUrlSuccessMessage(slot, payload) {
   if (Number.isFinite(duration)) {
     parts.push(`${formatSeconds(duration)}取得`);
   }
-  return `${parts.join(" / ")}。`;
+  return `${parts.join(" / ")}。Speaker枠で再生確認できます。`;
 }
 
 async function appendVoiceFiles(body, requiredSlots = null) {
@@ -811,14 +817,51 @@ async function loadSavedVoiceFiles() {
 
 function renderSavedVoiceFile(slot, record) {
   const label = savedVoiceLabels.find((element) => element.dataset.savedVoiceSlot === String(slot));
-  if (!label) {
+  const preview = savedVoicePreviews.find((element) => element.dataset.savedVoicePreviewSlot === String(slot));
+  if (!label && !preview) {
     return;
   }
   if (!record) {
-    label.textContent = "未保存";
+    if (label) {
+      label.textContent = "未保存";
+    }
+    renderSavedVoicePreview(slot, preview, null);
     return;
   }
-  label.textContent = `保存済み: ${record.name || `voice-${slot}`} (${formatBytes(record.size || record.blob?.size || 0)})`;
+  if (label) {
+    label.textContent = `保存済み: ${record.name || `voice-${slot}`} (${formatBytes(record.size || record.blob?.size || 0)})`;
+  }
+  renderSavedVoicePreview(slot, preview, record);
+}
+
+function renderSavedVoicePreview(slot, preview, record) {
+  revokeSavedVoicePreviewUrl(slot);
+  if (!preview || !record?.blob) {
+    if (preview) {
+      preview.hidden = true;
+      preview.removeAttribute("src");
+      preview.load();
+    }
+    return;
+  }
+  const url = URL.createObjectURL(record.blob);
+  savedVoicePreviewUrls.set(String(slot), url);
+  preview.src = url;
+  preview.hidden = false;
+  preview.load();
+}
+
+function revokeSavedVoicePreviewUrl(slot) {
+  const key = String(slot);
+  const url = savedVoicePreviewUrls.get(key);
+  if (url) {
+    URL.revokeObjectURL(url);
+    savedVoicePreviewUrls.delete(key);
+  }
+}
+
+function stopPreviewEventPropagation(event) {
+  event.stopPropagation();
 }
 
 function voiceSlotFromInput(input) {

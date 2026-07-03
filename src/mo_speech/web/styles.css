@@ -2334,6 +2334,17 @@ audio {
   overflow-wrap: anywhere;
 }
 
+.vibevoice-saved-voice-preview {
+  block-size: 34px;
+  grid-column: 1 / 4;
+  inline-size: 100%;
+  min-width: 0;
+}
+
+.vibevoice-saved-voice-preview[hidden] {
+  display: none;
+}
+
 .vibevoice-reference-url-panel {
   border-top: 1px solid #dbe5f2;
   display: grid;
