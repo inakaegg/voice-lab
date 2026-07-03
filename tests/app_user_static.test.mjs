@@ -184,6 +184,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /audio_base64/);
   assert.match(vibevoiceSource, /renderSpeakerScripts/);
   assert.match(vibevoiceSource, /renderArtifacts/);
+  assert.match(vibevoiceSource, /runpod_artifacts/);
+  assert.match(vibevoiceSource, /返却サイズを抑えるため/);
   assert.match(vibevoiceSource, /handleScriptFileChange/);
   assert.match(vibevoiceSource, /file\.text\(\)/);
   assert.match(vibevoiceSource, /indexedDB\.open/);

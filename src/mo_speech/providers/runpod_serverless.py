@@ -116,6 +116,12 @@ class RunpodServerlessClient:
         if output is None and _looks_like_handler_output(body):
             output = body
         if not isinstance(output, dict):
+            if status == "COMPLETED":
+                raise RuntimeError(
+                    "RunPod job completed but did not return an output object. "
+                    "The worker may have failed to return job results, often because the response payload was too large. "
+                    f"Check worker logs for 'Failed to return job results'. Response: {body}"
+                )
             raise RuntimeError(f"RunPod response did not include an object output: {body}")
         return output
 

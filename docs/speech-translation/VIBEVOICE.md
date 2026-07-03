@@ -79,6 +79,8 @@ Large候補の [aoi-ot/VibeVoice-Large](https://huggingface.co/aoi-ot/VibeVoice-
 
 指定台詞向けモードの結果確認では、最終音声だけでなく、話者ごとのVibeVoice出力、話者ごとのSeed-VC後出力、台本行ごとの切り出し音声をUI上で再生できるようにする。話者ごとの中間音声には、実際にVibeVoiceへ渡した1行化テキストも表示する。これにより、VibeVoice側で台詞が脱落したのか、Seed-VCで音質や音量が崩れたのか、ASR timestampの分割/対応付けが誤ったのかを分けて確認する。話者別に結合する台詞は、弱い読点ではなく句点相当で区切り、入力内の読点も原則として句点へ寄せる。VibeVoiceは末尾側の発話が欠落しやすいことがあるため、生成用テキストの末尾には採用対象外のガード文として冒頭側のテキストを再度付け足す。ASR再配置では元台本行だけを採用対象にし、ガード文は末尾欠落を吸収するための余白として扱う。ASR transcriptと元台本を整列する時も、対象台本の終端を最終境界にし、ガード文側の単語を最終出力へ含めない。
 
+RunPod Serverless経由では、長尺の指定台詞向けモードで中間音声をすべて `artifacts[].audio_base64` としてjob resultへ載せると、最終音声、話者別VV/VC音声、行ごとの切り出し音声が重複して巨大化し、RunPodの結果返却段階で失敗し得る。そのためRunPod handlerは既定では中間音声をinline返却せず、最終音声と診断情報だけを返す。短い検証で必要な場合だけ `return_artifacts=true` または `MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS=1` を使い、`artifact_response_max_items` と `artifact_response_max_base64_chars` で上限をかける。長尺でも中間音声を常時確認したい場合は、RunPod job outputではなく、永続Volumeやオブジェクトストレージへartifactを保存し、UIはURLや履歴APIから取得する構成に分ける。
+
 再構成時は、台本行ごとに切り出したWAV区間へ軽いDC offset除去、RMS正規化、peak制限をかけてから結合する。これは参照音声やSeed-VC後出力の音量差、切り出し区間ごとの過大peakによる音割れを減らすための後処理であり、VibeVoiceが誤った台詞を生成した場合の内容修正ではない。話者ごとの中間音声は原因確認のため元の出力を保持し、最終出力と台本行ごとの切り出し音声で正規化後の音を確認できるようにする。
 
 機械的な文字数比分割だけでは、日本語ASRの誤認識、言い換え、脱落、途中終了を正しく扱えない。`zhskit` のFunASR分割モードは、元台本へ厳密に戻すのではなく、ASRが切った自然なセグメントを正として後段へ渡す設計だった。指定台詞向けモードでは元台本順への再構成が必要なため、ASR transcriptと元台本をテキスト整列して範囲推定し、それでも対応できない行は別フレーズを無理に割り当てず警告として表示する必要がある。
@@ -238,6 +240,7 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 - timeout: VibeVoiceはSeed-VCより長くなる可能性があるため、RunPod job timeoutとAPI側timeoutを分けて管理する。
 - GPU選定: VRAM使用量、生成速度、課金単価を記録し、A4500/RTX 2000 Ada/16GB級GPUで足りるかを確認する。
 - 失敗ログ: RunPod job id、handler stderr末尾、モデル検出状態、生成パラメータをAPIレスポンスの診断情報として扱う。
+- result size: RunPod job outputには最終音声を載せる。指定台詞向けモードの中間音声はサイズが大きいため既定では省略し、diagnosticsの `runpod_artifacts` に件数、base64文字数、省略理由を残す。
 
 本番デモでは、ブラウザへRunPod API keyを渡さず、FastAPIまたはCloudflare Workerなどのサーバー側からRunPod jobを作る構成を維持する。
 

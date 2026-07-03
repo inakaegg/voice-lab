@@ -305,14 +305,22 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
             options=_vibevoice_options_from_payload(payload.get("generation")),
         )
 
+    response_artifacts, artifact_summary = _vibevoice_artifacts_for_runpod_response(
+        payload,
+        getattr(result, "artifacts", []),
+    )
+    diagnostics = dict(result.diagnostics)
+    if artifact_summary["available"] or artifact_summary["include_requested"]:
+        diagnostics["runpod_artifacts"] = artifact_summary
+
     response: dict[str, object] = {
         "audio_mime_type": result.audio_mime_type,
         "audio_base64": base64.b64encode(result.audio_bytes).decode("ascii"),
         "normalized_script": result.normalized_script,
         "timings_ms": result.timings_ms,
         "providers": result.providers,
-        "diagnostics": result.diagnostics,
-        "artifacts": list(getattr(result, "artifacts", [])),
+        "diagnostics": diagnostics,
+        "artifacts": response_artifacts,
     }
     _attach_serverless_metrics(
         response,
@@ -510,6 +518,93 @@ def _attach_serverless_metrics(
         "operation_mode": operation_mode,
         "worker_cold": worker_cold,
     }
+
+
+def _vibevoice_artifacts_for_runpod_response(
+    payload: dict[str, object],
+    artifacts_value: object,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    artifacts = (
+        [dict(item) for item in artifacts_value if isinstance(item, dict)]
+        if isinstance(artifacts_value, list)
+        else []
+    )
+    total_base64_chars = sum(_artifact_audio_base64_chars(artifact) for artifact in artifacts)
+    total_size_bytes = sum(_artifact_size_bytes(artifact) for artifact in artifacts)
+    include_artifacts = _optional_bool(payload.get("return_artifacts"))
+    if include_artifacts is None:
+        include_artifacts = _optional_bool(os.getenv("MO_RUNPOD_VIBEVOICE_RETURN_ARTIFACTS")) is True
+    summary: dict[str, object] = {
+        "available": len(artifacts),
+        "returned": 0,
+        "omitted": len(artifacts),
+        "include_requested": include_artifacts,
+        "available_audio_base64_chars": total_base64_chars,
+        "available_size_bytes": total_size_bytes,
+    }
+    if not artifacts:
+        summary["omitted_reason"] = ""
+        return [], summary
+    if not include_artifacts:
+        summary["omitted_reason"] = "disabled"
+        return [], summary
+
+    max_items = _bounded_int(
+        _payload_value_or_env(payload, "artifact_response_max_items", "MO_RUNPOD_VIBEVOICE_MAX_ARTIFACTS"),
+        0,
+        1000,
+        8,
+    )
+    max_base64_chars = _bounded_int(
+        _payload_value_or_env(
+            payload,
+            "artifact_response_max_base64_chars",
+            "MO_RUNPOD_VIBEVOICE_MAX_ARTIFACT_BASE64_CHARS",
+        ),
+        0,
+        100_000_000,
+        750_000,
+    )
+    returned: list[dict[str, object]] = []
+    returned_base64_chars = 0
+    for artifact in artifacts:
+        if max_items == 0 or len(returned) >= max_items:
+            break
+        audio_base64_chars = _artifact_audio_base64_chars(artifact)
+        if max_base64_chars > 0 and returned_base64_chars + audio_base64_chars > max_base64_chars:
+            continue
+        returned.append(artifact)
+        returned_base64_chars += audio_base64_chars
+    summary.update(
+        {
+            "returned": len(returned),
+            "omitted": len(artifacts) - len(returned),
+            "omitted_reason": "limit" if len(returned) < len(artifacts) else "",
+            "returned_audio_base64_chars": returned_base64_chars,
+            "max_items": max_items,
+            "max_audio_base64_chars": max_base64_chars,
+        }
+    )
+    return returned, summary
+
+
+def _payload_value_or_env(payload: dict[str, object], payload_key: str, env_key: str) -> object:
+    if payload_key in payload:
+        return payload[payload_key]
+    return os.getenv(env_key)
+
+
+def _artifact_audio_base64_chars(artifact: dict[str, object]) -> int:
+    audio_base64 = artifact.get("audio_base64")
+    return len(audio_base64) if isinstance(audio_base64, str) else 0
+
+
+def _artifact_size_bytes(artifact: dict[str, object]) -> int:
+    value = artifact.get("size_bytes")
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _seed_vc_settings_from_payload(payload: dict[str, object]) -> SeedVcRuntimeSettings:

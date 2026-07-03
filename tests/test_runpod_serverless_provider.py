@@ -184,6 +184,19 @@ def test_runpod_client_polls_async_job_until_completed() -> None:
     ]
 
 
+def test_runpod_client_explains_completed_job_without_output() -> None:
+    client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
+
+    with pytest.raises(RuntimeError, match="completed but did not return an output object"):
+        client._completed_output(
+            {
+                "id": "job-1",
+                "status": "COMPLETED",
+                "workerId": "worker-1",
+            }
+        )
+
+
 def test_runpod_runtime_status_reports_missing_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)

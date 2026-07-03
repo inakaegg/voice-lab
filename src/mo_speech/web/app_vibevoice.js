@@ -910,7 +910,7 @@ function renderResult(payload) {
     2,
   );
   renderSpeakerScripts(directedDiagnostics.speaker_scripts || {});
-  renderArtifacts(payload.artifacts || []);
+  renderArtifacts(payload.artifacts || [], payload.diagnostics?.runpod_artifacts || null);
   resultPanel.hidden = false;
   audio.play().catch(() => {});
 }
@@ -957,12 +957,12 @@ function renderSpeakerScripts(speakerScripts) {
   }
 }
 
-function renderArtifacts(artifacts) {
+function renderArtifacts(artifacts, runpodArtifactSummary = null) {
   revokeArtifactAudioUrls();
   artifactsContainer.replaceChildren();
   const items = Array.isArray(artifacts) ? artifacts : [];
   if (items.length === 0) {
-    renderArtifactsEmpty();
+    renderArtifactsEmpty(runpodArtifactSummary);
     return;
   }
   let renderedCount = 0;
@@ -1007,14 +1007,18 @@ function renderArtifacts(artifacts) {
     renderedCount += 1;
   }
   if (renderedCount === 0) {
-    renderArtifactsEmpty();
+    renderArtifactsEmpty(runpodArtifactSummary);
   }
 }
 
-function renderArtifactsEmpty() {
+function renderArtifactsEmpty(runpodArtifactSummary = null) {
   const empty = document.createElement("p");
   empty.className = "vibevoice-artifacts-empty";
-  empty.textContent = "中間音声はありません。";
+  if (Number(runpodArtifactSummary?.available || 0) > 0 && Number(runpodArtifactSummary?.omitted || 0) > 0) {
+    empty.textContent = `RunPodの返却サイズを抑えるため、中間音声 ${runpodArtifactSummary.omitted}/${runpodArtifactSummary.available} 件を省略しました。`;
+  } else {
+    empty.textContent = "中間音声はありません。";
+  }
   artifactsContainer.append(empty);
 }
 
