@@ -600,6 +600,7 @@ def _serialize_vibevoice_result(result: VibeVoiceResult) -> dict[str, object]:
         "providers": result.providers,
         "timings_ms": result.timings_ms,
         "diagnostics": result.diagnostics,
+        "artifacts": list(getattr(result, "artifacts", [])),
     }
 
 

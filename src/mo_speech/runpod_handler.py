@@ -312,6 +312,7 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         "timings_ms": result.timings_ms,
         "providers": result.providers,
         "diagnostics": result.diagnostics,
+        "artifacts": list(getattr(result, "artifacts", [])),
     }
     _attach_serverless_metrics(
         response,

@@ -281,6 +281,16 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     assert result.providers["vibevoice_directed_vc"] == "fake-directed-vc"
     assert result.diagnostics["directed_line_mode"]["line_count"] == 4
     assert len(result.diagnostics["directed_line_mode"]["ranges"]) == 4
+    assert [artifact["kind"] for artifact in result.artifacts] == [
+        "speaker_vibevoice",
+        "speaker_voice_conversion",
+        "line_segment",
+        "line_segment",
+        "line_segment",
+        "line_segment",
+    ]
+    assert result.artifacts[0]["label"] == "Speaker 1 VibeVoice"
+    assert result.artifacts[2]["line_index"] == 1
     assert "--line_by_line" not in command
     output = tmp_path / "directed-output.wav"
     output.write_bytes(result.audio_bytes)

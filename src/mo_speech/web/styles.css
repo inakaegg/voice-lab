@@ -2564,6 +2564,64 @@ audio {
   inline-size: 100%;
 }
 
+.vibevoice-artifacts-section {
+  border-top: 1px solid #dbe5f2;
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.vibevoice-artifacts-section h3 {
+  color: #17395f;
+  font-size: 14px;
+  font-weight: 900;
+  margin: 0;
+}
+
+.vibevoice-artifacts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vibevoice-artifact,
+.vibevoice-artifacts-empty {
+  background: #f7faff;
+  border: 1px solid #d8e5f4;
+  border-radius: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 10px;
+}
+
+.vibevoice-artifact {
+  display: grid;
+  gap: 7px;
+}
+
+.vibevoice-artifact h4 {
+  color: #17395f;
+  font-size: 13px;
+  font-weight: 900;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.vibevoice-artifact-meta,
+.vibevoice-artifact-text,
+.vibevoice-artifacts-empty {
+  color: #556984;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.vibevoice-artifact-meta,
+.vibevoice-artifact-text {
+  margin: 0;
+}
+
 .vibevoice-result-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2636,6 +2694,7 @@ audio {
 
   .vibevoice-voice-grid,
   .vibevoice-settings-grid,
+  .vibevoice-artifacts,
   .vibevoice-result-grid {
     grid-template-columns: 1fr;
   }

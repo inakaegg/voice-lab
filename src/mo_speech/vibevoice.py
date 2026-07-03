@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import logging
 import mimetypes
 import os
@@ -155,6 +156,7 @@ class VibeVoiceResult:
     providers: dict[str, object]
     timings_ms: dict[str, float]
     diagnostics: dict[str, object] = field(default_factory=dict)
+    artifacts: list[dict[str, object]] = field(default_factory=list)
 
 
 class VibeVoiceError(RuntimeError):
@@ -555,6 +557,7 @@ class VibeVoiceService:
         asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
         asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
         vc_results_by_speaker: dict[int, object] = {}
+        artifacts: list[dict[str, object]] = []
         warnings: list[str] = []
         generation_total_ms = 0.0
         voice_conversion_total_ms = 0.0
@@ -658,6 +661,13 @@ class VibeVoiceService:
             )
             audio_bytes = output_path.read_bytes()
             reconstruct_ms = _elapsed_ms(reconstruct_started)
+            artifacts = _directed_audio_artifacts(
+                lines=lines,
+                speaker_vibevoice_outputs=speaker_vibevoice_outputs,
+                speaker_outputs=speaker_outputs,
+                ranges_by_line=ranges_by_line,
+                include_voice_conversion=bool(vc_results_by_speaker),
+            )
 
         total_ms = _elapsed_ms(directed_started)
         first_result = next(iter(speaker_results.values()))
@@ -715,6 +725,7 @@ class VibeVoiceService:
                     str(speaker): result.diagnostics for speaker, result in sorted(speaker_results.items())
                 },
             },
+            artifacts=artifacts,
         )
 
     def _get_directed_asr_provider(self):
@@ -1406,6 +1417,79 @@ def _compose_directed_wav(
         output.writeframes(b"".join(frames))
 
 
+def _directed_audio_artifacts(
+    *,
+    lines: Sequence[VibeVoiceDirectedLine],
+    speaker_vibevoice_outputs: dict[int, Path],
+    speaker_outputs: dict[int, Path],
+    ranges_by_line: dict[int, VibeVoiceAudioRange],
+    include_voice_conversion: bool,
+) -> list[dict[str, object]]:
+    artifacts: list[dict[str, object]] = []
+    for speaker, path in sorted(speaker_vibevoice_outputs.items()):
+        artifacts.append(
+            _audio_artifact_from_bytes(
+                path.read_bytes(),
+                kind="speaker_vibevoice",
+                label=f"Speaker {speaker} VibeVoice",
+                speaker=speaker,
+                duration_seconds=_wav_duration(path),
+            )
+        )
+    if include_voice_conversion:
+        for speaker, path in sorted(speaker_outputs.items()):
+            artifacts.append(
+                _audio_artifact_from_bytes(
+                    path.read_bytes(),
+                    kind="speaker_voice_conversion",
+                    label=f"Speaker {speaker} Seed-VC",
+                    speaker=speaker,
+                    duration_seconds=_wav_duration(path),
+                )
+            )
+    for line in lines:
+        audio_range = ranges_by_line[line.index]
+        segment_bytes = _wav_bytes_for_range(
+            speaker_outputs[line.speaker],
+            start=audio_range.start,
+            end=audio_range.end,
+        )
+        artifacts.append(
+            _audio_artifact_from_bytes(
+                segment_bytes,
+                kind="line_segment",
+                label=f"Line {line.index} / Speaker {line.speaker}",
+                speaker=line.speaker,
+                line_index=line.index,
+                text=line.text,
+                start=audio_range.start,
+                end=audio_range.end,
+                duration_seconds=max(0.0, audio_range.end - audio_range.start),
+            )
+        )
+    return artifacts
+
+
+def _audio_artifact_from_bytes(audio_bytes: bytes, **metadata: object) -> dict[str, object]:
+    return {
+        **metadata,
+        "audio_mime_type": "audio/wav",
+        "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+        "size_bytes": len(audio_bytes),
+    }
+
+
+def _wav_bytes_for_range(path: Path, *, start: float, end: float) -> bytes:
+    params = _wav_params(path)
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(params["channels"])
+        output.setsampwidth(params["sample_width"])
+        output.setframerate(params["frame_rate"])
+        output.writeframes(_read_wav_frames(path, start=start, end=end))
+    return buffer.getvalue()
+
+
 def _wav_params(path: Path) -> dict[str, int]:
     with wave.open(str(path), "rb") as wav:
         return {
@@ -1594,6 +1678,7 @@ def _vibevoice_result_from_output(
         providers=_dict_or_empty(output.get("providers")),
         timings_ms=timings_ms,
         diagnostics=_dict_or_empty(output.get("diagnostics")),
+        artifacts=_list_of_dicts(output.get("artifacts")),
     )
 
 
@@ -1603,6 +1688,12 @@ def _audio_mime_type(path: Path) -> str:
 
 def _dict_or_empty(value: object) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _list_of_dicts(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def _float_dict(value: object) -> dict[str, float]:

@@ -666,6 +666,7 @@ def create_app(
             "providers": vibevoice_result.providers,
             "timings_ms": vibevoice_result.timings_ms,
             "diagnostics": vibevoice_result.diagnostics,
+            "artifacts": list(getattr(vibevoice_result, "artifacts", [])),
         }
 
     @app.post("/api/vibevoice/jobs")

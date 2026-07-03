@@ -202,6 +202,14 @@ def test_vibevoice_generate_api_returns_audio() -> None:
         timings_ms = {"vibevoice": 12.0, "total": 12.0}
         diagnostics = {"stdout_tail": "ok", "stderr_tail": ""}
         providers = {"vibevoice": "fake-vibevoice"}
+        artifacts = [
+            {
+                "kind": "speaker_vibevoice",
+                "label": "Speaker 1 VibeVoice",
+                "audio_mime_type": "audio/wav",
+                "audio_base64": base64.b64encode(b"speaker wav").decode("ascii"),
+            }
+        ]
 
     class FakeVibeVoiceService:
         def __init__(self):
@@ -233,6 +241,7 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert payload["audio_mime_type"] == "audio/wav"
     assert payload["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
     assert payload["normalized_script"] == "Speaker 1: 你好。"
+    assert payload["artifacts"][0]["label"] == "Speaker 1 VibeVoice"
     assert payload["providers"]["vibevoice"] == "fake-vibevoice"
     assert len(service.calls) == 1
     assert service.calls[0][2].model_id == "vibevoice-1.5b-latest"

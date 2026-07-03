@@ -8,6 +8,7 @@ const audio = document.querySelector("#vibevoice-audio");
 const downloadLink = document.querySelector("#vibevoice-download");
 const normalizedScript = document.querySelector("#vibevoice-normalized-script");
 const diagnostics = document.querySelector("#vibevoice-diagnostics");
+const artifactsContainer = document.querySelector("#vibevoice-artifacts");
 const cancelButton = document.querySelector("#vibevoice-cancel-button");
 const jobProgress = document.querySelector("#vibevoice-job-progress");
 const timingLabel = document.querySelector("#vibevoice-timing");
@@ -55,6 +56,7 @@ const defaultGenerationSettings = Object.fromEntries(
 const savedVoiceFilesBySlot = new Map();
 
 let currentAudioUrl = "";
+let artifactAudioUrls = [];
 let savedVoiceFilesReady = Promise.resolve();
 let currentJobId = "";
 let jobPollTimer = 0;
@@ -793,6 +795,7 @@ function renderResult(payload) {
     null,
     2,
   );
+  renderArtifacts(payload.artifacts || []);
   resultPanel.hidden = false;
   audio.play().catch(() => {});
 }
@@ -804,11 +807,95 @@ function clearResult() {
     URL.revokeObjectURL(currentAudioUrl);
     currentAudioUrl = "";
   }
+  revokeArtifactAudioUrls();
   audio.removeAttribute("src");
   downloadLink.href = "#";
   normalizedScript.textContent = "";
   diagnostics.textContent = "";
+  artifactsContainer.replaceChildren();
   resultPanel.hidden = true;
+}
+
+function renderArtifacts(artifacts) {
+  revokeArtifactAudioUrls();
+  artifactsContainer.replaceChildren();
+  const items = Array.isArray(artifacts) ? artifacts : [];
+  if (items.length === 0) {
+    renderArtifactsEmpty();
+    return;
+  }
+  let renderedCount = 0;
+  for (const artifact of items) {
+    const audioBase64 = artifact?.audio_base64 || "";
+    if (!audioBase64) {
+      continue;
+    }
+    const item = document.createElement("article");
+    item.className = "vibevoice-artifact";
+
+    const title = document.createElement("h4");
+    title.textContent = artifact.label || artifact.kind || "Audio";
+
+    const meta = document.createElement("p");
+    meta.className = "vibevoice-artifact-meta";
+    meta.textContent = artifactMetaText(artifact);
+
+    const player = document.createElement("audio");
+    player.controls = true;
+    const audioBytes = base64ToBytes(audioBase64);
+    const blob = new Blob([audioBytes], { type: artifact.audio_mime_type || "audio/wav" });
+    const url = URL.createObjectURL(blob);
+    artifactAudioUrls.push(url);
+    player.src = url;
+
+    item.append(title, meta);
+    if (artifact.text) {
+      const text = document.createElement("p");
+      text.className = "vibevoice-artifact-text";
+      text.textContent = artifact.text;
+      item.append(text);
+    }
+    item.append(player);
+    artifactsContainer.append(item);
+    renderedCount += 1;
+  }
+  if (renderedCount === 0) {
+    renderArtifactsEmpty();
+  }
+}
+
+function renderArtifactsEmpty() {
+  const empty = document.createElement("p");
+  empty.className = "vibevoice-artifacts-empty";
+  empty.textContent = "中間音声はありません。";
+  artifactsContainer.append(empty);
+}
+
+function artifactMetaText(artifact) {
+  const parts = [];
+  if (artifact.kind) {
+    parts.push(String(artifact.kind));
+  }
+  if (artifact.speaker) {
+    parts.push(`Speaker ${artifact.speaker}`);
+  }
+  if (artifact.line_index) {
+    parts.push(`Line ${artifact.line_index}`);
+  }
+  if (Number.isFinite(Number(artifact.duration_seconds))) {
+    parts.push(`${Number(artifact.duration_seconds).toFixed(2)}s`);
+  }
+  if (Number.isFinite(Number(artifact.size_bytes))) {
+    parts.push(formatBytes(artifact.size_bytes));
+  }
+  return parts.join(" / ");
+}
+
+function revokeArtifactAudioUrls() {
+  for (const url of artifactAudioUrls) {
+    URL.revokeObjectURL(url);
+  }
+  artifactAudioUrls = [];
 }
 
 function setBusy(busy, text) {
