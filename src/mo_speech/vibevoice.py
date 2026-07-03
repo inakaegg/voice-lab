@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from array import array
 import base64
 from difflib import SequenceMatcher
 from io import BytesIO
 import logging
+import math
 import mimetypes
 import os
 from queue import Empty, Queue
@@ -31,6 +33,10 @@ SHORT_SPEAKER_TAG_MAX = 4
 AUTO_LINE_BY_LINE_MIN_LINES = 4
 AUTO_LINE_BY_LINE_MIN_CHARS = 180
 DIRECTED_TAIL_GUARD_MAX_CHARS = 120
+DIRECTED_OUTPUT_TARGET_RMS = 0.10
+DIRECTED_OUTPUT_PEAK_LIMIT = 0.92
+DIRECTED_OUTPUT_MAX_GAIN = 2.5
+DIRECTED_OUTPUT_MIN_RMS = 0.0001
 _SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _VIBEVOICE_TQDM_RE = re.compile(
@@ -756,6 +762,11 @@ class VibeVoiceService:
                     "asr_provider": asr_name,
                     "voice_conversion_provider": voice_conversion_name,
                     "gap_seconds": options.line_gap,
+                    "output_normalization": {
+                        "target_rms": DIRECTED_OUTPUT_TARGET_RMS,
+                        "peak_limit": DIRECTED_OUTPUT_PEAK_LIMIT,
+                        "max_gain": DIRECTED_OUTPUT_MAX_GAIN,
+                    },
                     "warnings": warnings,
                     "speaker_scripts": {
                         str(speaker): speaker_scripts[speaker] for speaker in lines_by_speaker
@@ -1454,7 +1465,7 @@ def _word_text_spans(texts: Sequence[str]) -> list[tuple[int, int]]:
 def _map_target_offset_to_asr_offset(target_text: str, asr_text: str, target_offset: int) -> int:
     if target_offset <= 0:
         return 0
-    if target_offset >= len(target_text):
+    if target_offset > len(target_text):
         return len(asr_text)
     matcher = SequenceMatcher(None, target_text, asr_text, autojunk=False)
     previous_asr_end = 0
@@ -1476,8 +1487,6 @@ def _monotonic_offsets(offsets: Sequence[int], *, maximum: int) -> list[int]:
     for index, offset in enumerate(offsets):
         if index == 0:
             value = 0
-        elif index == len(offsets) - 1:
-            value = maximum
         else:
             value = max(previous, min(int(offset), maximum))
         monotonic.append(value)
@@ -1555,7 +1564,8 @@ def _compose_directed_wav(
         source_path = speaker_outputs[line.speaker]
         if _wav_params(source_path) != params:
             raise VibeVoiceError("指定台詞モードの話者別WAV形式が一致しません。")
-        frames.append(_read_wav_frames(source_path, start=audio_range.start, end=audio_range.end))
+        segment_frames = _read_wav_frames(source_path, start=audio_range.start, end=audio_range.end)
+        frames.append(_normalize_directed_wav_frames(segment_frames, params=params))
         if index < len(lines) - 1 and gap_seconds > 0:
             frames.append(_silence_frames(params=params, seconds=gap_seconds))
     with wave.open(str(output_path), "wb") as output:
@@ -1635,12 +1645,14 @@ def _audio_artifact_from_bytes(audio_bytes: bytes, **metadata: object) -> dict[s
 
 def _wav_bytes_for_range(path: Path, *, start: float, end: float) -> bytes:
     params = _wav_params(path)
+    frames = _read_wav_frames(path, start=start, end=end)
+    frames = _normalize_directed_wav_frames(frames, params=params)
     buffer = BytesIO()
     with wave.open(buffer, "wb") as output:
         output.setnchannels(params["channels"])
         output.setsampwidth(params["sample_width"])
         output.setframerate(params["frame_rate"])
-        output.writeframes(_read_wav_frames(path, start=start, end=end))
+        output.writeframes(frames)
     return buffer.getvalue()
 
 
@@ -1664,6 +1676,44 @@ def _read_wav_frames(path: Path, *, start: float, end: float) -> bytes:
         if data:
             return data
         return b"\x00" * frame_width
+
+
+def _normalize_directed_wav_frames(frames: bytes, *, params: dict[str, int]) -> bytes:
+    if not frames or params.get("sample_width") != 2:
+        return frames
+    if len(frames) % 2 != 0:
+        return frames
+    samples = array("h")
+    samples.frombytes(frames)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return frames
+
+    mean = sum(samples) / len(samples)
+    squared_sum = 0.0
+    peak = 0.0
+    for sample in samples:
+        centered = float(sample) - mean
+        squared_sum += centered * centered
+        peak = max(peak, abs(centered))
+    rms = math.sqrt(squared_sum / len(samples)) / 32768.0
+    if rms < DIRECTED_OUTPUT_MIN_RMS or peak <= 0.0:
+        return frames
+
+    peak_ratio = peak / 32768.0
+    gain = min(
+        DIRECTED_OUTPUT_TARGET_RMS / rms,
+        DIRECTED_OUTPUT_PEAK_LIMIT / peak_ratio,
+        DIRECTED_OUTPUT_MAX_GAIN,
+    )
+    normalized = array("h")
+    for sample in samples:
+        value = int(round((float(sample) - mean) * gain))
+        normalized.append(max(-32768, min(32767, value)))
+    if sys.byteorder != "little":
+        normalized.byteswap()
+    return normalized.tobytes()
 
 
 def _silence_frames(*, params: dict[str, int], seconds: float) -> bytes:

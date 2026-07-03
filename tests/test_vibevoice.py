@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from array import array
+import math
 import subprocess
 import sys
 import wave
@@ -82,9 +84,37 @@ def _write_test_wav(path: Path, *, seconds: float = 1.0, sample_value: int = 120
         wav.writeframes(frame * frame_count)
 
 
+def _write_test_waveform(path: Path, *, seconds: float = 1.0, sample_value: int = 1200, sample_rate: int = 1000) -> None:
+    frame_count = max(1, int(seconds * sample_rate))
+    samples = array("h", (sample_value if index % 2 == 0 else -sample_value for index in range(frame_count)))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(samples.tobytes())
+
+
 def _wav_duration(path: Path) -> float:
     with wave.open(str(path), "rb") as wav:
         return wav.getnframes() / wav.getframerate()
+
+
+def _read_test_samples(path: Path) -> list[int]:
+    with wave.open(str(path), "rb") as wav:
+        assert wav.getsampwidth() == 2
+        assert wav.getnchannels() == 1
+        data = wav.readframes(wav.getnframes())
+    samples = array("h")
+    samples.frombytes(data)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return list(samples)
+
+
+def _sample_rms(samples: list[int]) -> float:
+    return math.sqrt(sum(sample * sample for sample in samples) / max(1, len(samples))) / 32768.0
 
 
 def test_normalize_vibevoice_script_adds_speaker_tag_per_plain_line() -> None:
@@ -155,6 +185,61 @@ def test_directed_audio_ranges_align_words_by_text_instead_of_raw_ratio() -> Non
     assert ranges[0].matched_text == "清掃時間です"
     assert ranges[1].start == 1.0
     assert ranges[1].end == 2.0
+
+
+def test_directed_audio_ranges_do_not_include_tail_guard_words() -> None:
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="あっこんにちは"),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text="お仕事は何ですか"),
+    ]
+    ranges = vibevoice_module._audio_ranges_from_words(
+        lines,
+        [
+            {"text": "あっこんにちは", "start": 0.0, "end": 1.0},
+            {"text": "お仕事は何ですか", "start": 1.0, "end": 2.0},
+            {"text": "あっこんにちは", "start": 2.0, "end": 3.0},
+        ],
+        duration=3.0,
+    )
+
+    assert ranges[0].start == 0.0
+    assert ranges[0].end == 1.0
+    assert ranges[1].start == 1.0
+    assert ranges[1].end == 2.0
+    assert ranges[1].matched_text == "お仕事は何ですか"
+
+
+def test_compose_directed_wav_normalizes_line_segment_volume(tmp_path: Path) -> None:
+    loud = tmp_path / "speaker-1.wav"
+    quiet = tmp_path / "speaker-2.wav"
+    output = tmp_path / "directed-output.wav"
+    _write_test_waveform(loud, seconds=0.2, sample_value=32000)
+    _write_test_waveform(quiet, seconds=0.2, sample_value=1800)
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="大きい音"),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=2, text="小さい音"),
+    ]
+    ranges_by_line = {
+        1: vibevoice_module.VibeVoiceAudioRange(speaker=1, line_index=1, text="大きい音", start=0.0, end=0.2),
+        2: vibevoice_module.VibeVoiceAudioRange(speaker=2, line_index=2, text="小さい音", start=0.0, end=0.2),
+    }
+
+    vibevoice_module._compose_directed_wav(
+        lines,
+        ranges_by_line=ranges_by_line,
+        speaker_outputs={1: loud, 2: quiet},
+        output_path=output,
+        gap_seconds=0.0,
+    )
+
+    samples = _read_test_samples(output)
+    first_rms = _sample_rms(samples[:200])
+    second_rms = _sample_rms(samples[200:])
+    peak_limit = int(vibevoice_module.DIRECTED_OUTPUT_PEAK_LIMIT * 32767) + 1
+    assert max(abs(sample) for sample in samples) <= peak_limit
+    assert abs(first_rms - second_rms) <= 0.02
+    assert 0.07 <= first_rms <= 0.12
+    assert 0.07 <= second_rms <= 0.12
 
 
 def test_normalize_vibevoice_directed_line_script_rejects_multiple_speakers() -> None:
