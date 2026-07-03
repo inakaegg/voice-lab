@@ -132,7 +132,7 @@ def test_normalize_vibevoice_directed_line_script_collapses_one_speaker_with_pun
                 "1 最近、北海道に移住したって聞きました",
             ]
         )
-    ) == "Speaker 1: あっ、小鸡さん、こんにちは〜。こんにちは。ご無沙汰してます。最近、北海道に移住したって聞きました"
+    ) == "Speaker 1: あっ。小鸡さん。こんにちは〜。こんにちは。ご無沙汰してます。最近。北海道に移住したって聞きました。"
 
 
 def test_directed_audio_ranges_align_words_by_text_instead_of_raw_ratio() -> None:
@@ -288,9 +288,8 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     )
 
     command = calls[0]
-    assert script_texts[0] == (
-        "Speaker 1: あっ、こんにちは。最近、北海道に移住したって聞きました。温泉も近くにありますか。お仕事は何ですか"
-    )
+    target_script = "あっ。こんにちは。最近。北海道に移住したって聞きました。温泉も近くにありますか。お仕事は何ですか。"
+    assert script_texts[0] == f"Speaker 1: {target_script}{target_script}"
     assert result.normalized_script == "\n".join(
         [
             "Speaker 1: あっ、こんにちは",
@@ -303,6 +302,8 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     assert result.providers["vibevoice_directed_vc"] == "fake-directed-vc"
     assert result.diagnostics["directed_line_mode"]["line_count"] == 4
     assert len(result.diagnostics["directed_line_mode"]["ranges"]) == 4
+    assert result.diagnostics["directed_line_mode"]["speaker_target_scripts"] == {"1": f"Speaker 1: {target_script}"}
+    assert result.diagnostics["directed_line_mode"]["speaker_tail_guards"] == {"1": target_script}
     assert [artifact["kind"] for artifact in result.artifacts] == [
         "speaker_vibevoice",
         "speaker_voice_conversion",
@@ -380,8 +381,8 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
     )
 
     assert script_texts == [
-        "Speaker 1: 一番目です。三番目です",
-        "Speaker 1: 二番目です。四番目です",
+        "Speaker 1: 一番目です。三番目です。一番目です。三番目です。",
+        "Speaker 1: 二番目です。四番目です。二番目です。四番目です。",
     ]
     assert events == [
         "vv:1",

@@ -30,6 +30,7 @@ SHORT_SPEAKER_TAG_MIN = 1
 SHORT_SPEAKER_TAG_MAX = 4
 AUTO_LINE_BY_LINE_MIN_LINES = 4
 AUTO_LINE_BY_LINE_MIN_CHARS = 180
+DIRECTED_TAIL_GUARD_MAX_CHARS = 120
 _SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _VIBEVOICE_TQDM_RE = re.compile(
@@ -148,6 +149,13 @@ class VibeVoiceAudioRange:
     start: float
     end: float
     matched_text: str = ""
+
+
+@dataclass(frozen=True)
+class _DirectedSpeakerScript:
+    full_text: str
+    target_text: str
+    tail_guard_text: str
 
 
 @dataclass(frozen=True)
@@ -276,11 +284,25 @@ def parse_vibevoice_directed_script_lines(text: str, *, max_bytes: int = 200_000
 
 
 def _directed_script_for_lines(lines: Sequence[VibeVoiceDirectedLine], *, output_speaker: int = 1) -> str:
+    script = _directed_speaker_script_for_lines(lines, include_tail_guard=False)
+    return f"Speaker {output_speaker}: {script.full_text}"
+
+
+def _directed_speaker_script_for_lines(
+    lines: Sequence[VibeVoiceDirectedLine],
+    *,
+    include_tail_guard: bool,
+) -> _DirectedSpeakerScript:
     if not lines:
         raise ValueError("script is required")
     separator = _directed_line_separator("\n".join(line.text for line in lines))
-    joined = _join_directed_line_phrases([line.text for line in lines], separator=separator)
-    return f"Speaker {output_speaker}: {joined}"
+    target_text = _join_directed_line_phrases([line.text for line in lines], separator=separator)
+    tail_guard_text = _directed_tail_guard_text(target_text) if include_tail_guard else ""
+    return _DirectedSpeakerScript(
+        full_text=f"{target_text}{tail_guard_text}",
+        target_text=target_text,
+        tail_guard_text=tail_guard_text,
+    )
 
 
 def _has_speaker_tag(line: str) -> bool:
@@ -336,7 +358,8 @@ def _directed_line_separator(text: str) -> str:
 
 
 def _join_directed_line_phrases(phrases: Sequence[str], *, separator: str) -> str:
-    non_empty = [phrase.strip() for phrase in phrases if phrase.strip()]
+    non_empty = [_normalize_directed_vv_phrase(phrase, separator=separator) for phrase in phrases if phrase.strip()]
+    non_empty = [phrase for phrase in non_empty if phrase]
     if not non_empty:
         raise ValueError("script is required")
     parts: list[str] = []
@@ -344,11 +367,39 @@ def _join_directed_line_phrases(phrases: Sequence[str], *, separator: str) -> st
         parts.append(phrase)
         if index < len(non_empty) - 1 and not _ends_with_sentence_punctuation(phrase):
             parts.append(separator)
-    return "".join(parts)
+    return _ensure_sentence_end("".join(parts), separator=separator)
+
+
+def _normalize_directed_vv_phrase(text: str, *, separator: str) -> str:
+    normalized = _collapse_directed_line_spacing(text)
+    if separator == "。":
+        normalized = re.sub(r"[、。，，,.]+", "。", normalized)
+        normalized = re.sub(r"。+", "。", normalized)
+    return normalized.strip()
+
+
+def _ensure_sentence_end(text: str, *, separator: str) -> str:
+    value = str(text or "").strip()
+    if value and not _ends_with_sentence_punctuation(value):
+        value += separator
+    return value
+
+
+def _directed_tail_guard_text(target_text: str) -> str:
+    value = str(target_text or "").strip()
+    if not value:
+        return ""
+    if len(value) <= DIRECTED_TAIL_GUARD_MAX_CHARS:
+        return value
+    prefix = value[:DIRECTED_TAIL_GUARD_MAX_CHARS]
+    boundary = max(prefix.rfind(mark) for mark in ("。", ".", "？", "?", "！", "!", "…"))
+    if boundary >= max(12, DIRECTED_TAIL_GUARD_MAX_CHARS // 3):
+        return prefix[: boundary + 1]
+    return _ensure_sentence_end(prefix, separator="。" if _directed_line_separator(value) == "。" else ".")
 
 
 def _ends_with_sentence_punctuation(text: str) -> bool:
-    return bool(re.search(r"[、。，，,.!?！？…]$", str(text or "").strip()))
+    return bool(re.search(r"[。.!?！？…]$", str(text or "").strip()))
 
 
 class VibeVoiceService:
@@ -557,6 +608,8 @@ class VibeVoiceService:
         speaker_results: dict[int, VibeVoiceResult] = {}
         speaker_vibevoice_outputs: dict[int, Path] = {}
         speaker_scripts: dict[int, str] = {}
+        speaker_target_scripts: dict[int, str] = {}
+        speaker_tail_guards: dict[int, str] = {}
         asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
         asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
         vc_results_by_speaker: dict[int, object] = {}
@@ -575,8 +628,11 @@ class VibeVoiceService:
             temp_dir = Path(temp_dir_raw)
             for speaker_index, (speaker, speaker_lines) in enumerate(lines_by_speaker.items(), start=1):
                 _raise_if_cancelled(cancel_event)
-                speaker_script = _directed_script_for_lines(speaker_lines, output_speaker=1)
+                speaker_script_parts = _directed_speaker_script_for_lines(speaker_lines, include_tail_guard=True)
+                speaker_script = f"Speaker 1: {speaker_script_parts.full_text}"
                 speaker_scripts[speaker] = speaker_script
+                speaker_target_scripts[speaker] = f"Speaker 1: {speaker_script_parts.target_text}"
+                speaker_tail_guards[speaker] = speaker_script_parts.tail_guard_text
                 speaker_options = replace(options, directed_line_mode=False, line_by_line=False)
                 _report_vibevoice_progress(
                     progress_callback,
@@ -703,6 +759,12 @@ class VibeVoiceService:
                     "warnings": warnings,
                     "speaker_scripts": {
                         str(speaker): speaker_scripts[speaker] for speaker in lines_by_speaker
+                    },
+                    "speaker_target_scripts": {
+                        str(speaker): speaker_target_scripts[speaker] for speaker in lines_by_speaker
+                    },
+                    "speaker_tail_guards": {
+                        str(speaker): speaker_tail_guards[speaker] for speaker in lines_by_speaker
                     },
                     "asr_segments": {str(speaker): rows for speaker, rows in asr_segments_by_speaker.items()},
                     "asr_words": {str(speaker): rows for speaker, rows in asr_words_by_speaker.items()},
