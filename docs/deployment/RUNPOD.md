@@ -172,6 +172,8 @@ scripts/runpod_deploy_serverless_image.sh
 
 既定のimage tagは `runpod-vibevoice-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
 
+同じcommitでdeployを再実行した場合、template名も同じになる。前回実行でtemplate作成後にendpoint更新、worker起動、diagnostics、残高不足などで失敗した場合でも、deployスクリプトは同名の自分のtemplateを検索し、既存templateを `runpodctl template update` して再利用する。RunPod側の `Template name must be unique` が出た場合は、まず最新のdeployスクリプトで同じcommitのまま再実行する。
+
 スクリプトは、現在のHEADがupstreamへpush済みであることを確認する。push前のローカルcommitを指定してActionsを起動してもGitHub側ではそのcommitをcheckoutできないため、通常は先にpushする。確認だけしたい場合はdry-runを使う。
 
 ```bash

@@ -276,3 +276,13 @@ def test_runpod_deploy_serverless_image_dry_run_orchestrates_unique_tag(tmp_path
     assert "secret-key" not in output
     assert "secret-openai" not in output
     assert "RUNPOD_IMAGE=docker.io/example/mo-speech:old" in env_file.read_text(encoding="utf-8")
+
+
+def test_runpod_deploy_serverless_image_reuses_existing_template_name() -> None:
+    script = Path("scripts/runpod_deploy_serverless_image.sh").read_text(encoding="utf-8")
+
+    assert "find_existing_template_id" in script
+    assert "runpodctl template list --type user" in script
+    assert "template already exists; reusing" in script
+    assert "runpodctl template update" in script
+    assert 'template_id="$(create_or_update_template)"' in script

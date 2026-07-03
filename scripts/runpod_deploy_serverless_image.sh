@@ -158,6 +158,112 @@ print(template_id)
 ' <<< "${template_json}"
 }
 
+find_existing_template_id() {
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    return 0
+  fi
+  local templates_json
+  templates_json="$(runpodctl template list --type user --limit "${RUNPOD_DEPLOY_TEMPLATE_LIST_LIMIT:-1000}")" || return 0
+  python3 -c '
+import json
+import sys
+
+
+def iter_items(value):
+    if isinstance(value, list):
+        yield from value
+        return
+    if not isinstance(value, dict):
+        return
+    for key in ("templates", "items", "data", "results"):
+        child = value.get(key)
+        if isinstance(child, list):
+            yield from child
+            return
+    yield value
+
+
+target_name = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+for item in iter_items(data):
+    if not isinstance(item, dict):
+        continue
+    name = item.get("name") or item.get("templateName")
+    template_id = item.get("id") or item.get("templateId")
+    if name == target_name and template_id:
+        print(template_id)
+        raise SystemExit(0)
+' "${template_name}" <<< "${templates_json}"
+}
+
+update_template() {
+  local template_id="$1"
+  export RUNPOD_IMAGE="${new_image}"
+  export RUNPOD_SERVERLESS_TEMPLATE_NAME="${template_name}"
+  set_default_runpod_app_env
+
+  local env_json
+  env_json="$(runpod_env_json "${RUNPOD_APP_ENV_KEYS[@]}")"
+  local cmd=(
+    runpodctl template update
+    "${template_id}"
+    --image "${RUNPOD_IMAGE}"
+    --container-disk-in-gb "${RUNPOD_CONTAINER_DISK_GB:-60}"
+    --env "${env_json}"
+  )
+
+  { print_command "${cmd[@]}"; } >&2
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    return 0
+  fi
+
+  local template_json
+  template_json="$("${cmd[@]}")"
+  python3 -c '
+import json
+import re
+import sys
+
+SECRET_KEY_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+SECRET_KEYS = {"OPENAI_API_KEY"}
+
+
+def is_secret_key(key):
+    return key in SECRET_KEYS or key.endswith(SECRET_KEY_SUFFIXES)
+
+
+def redact(value):
+    if isinstance(value, dict):
+        return {key: ("<redacted>" if is_secret_key(key) else redact(item)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
+
+text = sys.stdin.read()
+try:
+    print(json.dumps(redact(json.loads(text)), ensure_ascii=False, indent=2), file=sys.stderr)
+except json.JSONDecodeError:
+    text = re.sub(r"([A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)[\"=:\s]+)[^\",\s]+", r"\1<redacted>", text)
+    print(text, end="", file=sys.stderr)
+' <<< "${template_json}"
+}
+
+create_or_update_template() {
+  local existing_template_id
+  existing_template_id="$(find_existing_template_id)"
+  if [[ -n "${existing_template_id}" ]]; then
+    echo "template already exists; reusing ${template_name} (${existing_template_id})" >&2
+    update_template "${existing_template_id}"
+    printf '%s\n' "${existing_template_id}"
+    return 0
+  fi
+  create_template
+}
+
 update_endpoint() {
   local template_id="$1"
   local max_workers="$2"
@@ -306,7 +412,7 @@ if [[ "${DRY_RUN}" != "1" && "${RUNPOD_DEPLOY_WAIT_WORKFLOW:-1}" != "0" ]]; then
   gh run watch "${run_id}" --exit-status
 fi
 
-template_id="$(create_template)"
+template_id="$(create_or_update_template)"
 update_endpoint "${template_id}" 0 5
 if [[ "${DRY_RUN}" != "1" ]]; then
   sleep "${drain_seconds}"
