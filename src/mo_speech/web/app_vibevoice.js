@@ -41,6 +41,7 @@ const savedVoiceStoreName = "voice-files";
 const vibevoiceSettingsStorageKey = "mo-speech-vibevoice-draft";
 const autoLineByLineMinLines = 4;
 const autoLineByLineMinChars = 180;
+const directedTargetMaxChars = 180;
 const persistedFieldNames = [
   "backend",
   "model_id",
@@ -320,6 +321,141 @@ function speakerTextFromScriptLine(line) {
   return speakerTag ? speakerTag[1].trim() : String(line || "").trim();
 }
 
+function validateDirectedLineModeScript(scriptText) {
+  const parsedLines = parseDirectedPreflightLines(scriptText);
+  if (parsedLines.length === 0) {
+    return { ok: true, summary: "" };
+  }
+  const errors = [];
+  const linesBySpeaker = new Map();
+  for (const line of parsedLines) {
+    const lineTargetText = directedTargetTextForLines([line.text]);
+    if (lineTargetText.length > directedTargetMaxChars) {
+      errors.push(
+        `Speaker ${line.speaker} Line ${line.index} の台詞が長すぎます。1行だけで${lineTargetText.length}文字です。${directedTargetMaxChars}文字以内に分けてください。`,
+      );
+    }
+    if (!linesBySpeaker.has(line.speaker)) {
+      linesBySpeaker.set(line.speaker, []);
+    }
+    linesBySpeaker.get(line.speaker).push(line);
+  }
+  if (errors.length > 0) {
+    return { ok: false, message: errors.join("\n") };
+  }
+  const chunkSummaries = [];
+  for (const [speaker, lines] of linesBySpeaker.entries()) {
+    const chunkCount = directedPreflightChunkCount(lines);
+    if (chunkCount > 1) {
+      chunkSummaries.push(`Speaker ${speaker}: ${chunkCount}チャンク`);
+    }
+  }
+  if (chunkSummaries.length > 0) {
+    return {
+      ok: true,
+      summary: `指定台詞を${chunkSummaries.join("、")}に分割して生成します。`,
+    };
+  }
+  return { ok: true, summary: "" };
+}
+
+function parseDirectedPreflightLines(scriptText) {
+  const parsed = [];
+  const rawLines = String(scriptText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  for (const rawLine of rawLines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    parsed.push({
+      index: parsed.length + 1,
+      ...directedPreflightLineFromText(line),
+    });
+  }
+  return parsed;
+}
+
+function directedPreflightLineFromText(line) {
+  const speakerMatch = line.match(/^Speaker\s+([1-4])\s*:\s*(.*)$/i);
+  if (speakerMatch) {
+    return {
+      speaker: speakerMatch[1],
+      text: speakerMatch[2].trim(),
+    };
+  }
+  const shortMatch = line.match(/^([1-4]|[A-Da-d]):?\s+(.+)$/);
+  if (shortMatch) {
+    return {
+      speaker: slotFromShortTag(shortMatch[1]),
+      text: shortMatch[2].trim(),
+    };
+  }
+  return {
+    speaker: "1",
+    text: line.trim(),
+  };
+}
+
+function directedPreflightChunkCount(lines) {
+  let chunkCount = 0;
+  let current = [];
+  for (const line of lines) {
+    const candidate = current.concat(line);
+    if (
+      current.length > 0 &&
+      directedTargetTextForLines(candidate.map((item) => item.text)).length > directedTargetMaxChars
+    ) {
+      chunkCount += 1;
+      current = [line];
+      continue;
+    }
+    current = candidate;
+  }
+  if (current.length > 0) {
+    chunkCount += 1;
+  }
+  return chunkCount;
+}
+
+function directedTargetTextForLines(texts) {
+  const joinedSource = texts.join("\n");
+  const separator = /[ぁ-んァ-ン一-龯、。]/.test(joinedSource) ? "。" : ".";
+  const phrases = texts
+    .map((text) => normalizeDirectedPreflightPhrase(text, separator))
+    .filter(Boolean);
+  const parts = [];
+  for (let index = 0; index < phrases.length; index += 1) {
+    const phrase = phrases[index];
+    parts.push(phrase);
+    if (index < phrases.length - 1 && !endsWithDirectedSentencePunctuation(phrase)) {
+      parts.push(separator);
+    }
+  }
+  return ensureDirectedSentenceEnd(parts.join(""), separator);
+}
+
+function normalizeDirectedPreflightPhrase(text, separator) {
+  let normalized = String(text || "").trim().replace(/\s+/g, " ");
+  normalized = normalized.replace(/\s+([、。，，,.!?！？])/g, "$1");
+  normalized = normalized.replace(/([、。，，,.!?！？])\s+/g, "$1");
+  if (separator === "。") {
+    normalized = normalized.replace(/[、。，，,.]+/g, "。").replace(/。+/g, "。");
+  }
+  return normalized.trim();
+}
+
+function ensureDirectedSentenceEnd(text, separator) {
+  const value = String(text || "").trim();
+  if (!value || endsWithDirectedSentencePunctuation(value)) {
+    return value;
+  }
+  return `${value}${separator}`;
+}
+
+function endsWithDirectedSentencePunctuation(text) {
+  return /[。.!?！？…]$/.test(String(text || "").trim());
+}
+
 async function loadStatus() {
   try {
     const response = await fetch("/api/vibevoice/status");
@@ -396,8 +532,16 @@ async function handleGenerate(event) {
   updateModelAvailability();
   updateLineByLineAutoState();
   saveVibeVoiceDraft();
+  const directedPreflight = directedLineModeControl.checked
+    ? validateDirectedLineModeScript(scriptInput.value)
+    : { ok: true, summary: "" };
+  if (!directedPreflight.ok) {
+    message.dataset.state = "error";
+    message.textContent = directedPreflight.message;
+    return;
+  }
   clearResult();
-  setBusy(true, "生成中です。初回はモデルロードに時間がかかります。");
+  setBusy(true, directedPreflight.summary || "生成中です。初回はモデルロードに時間がかかります。");
   try {
     const body = new FormData(form);
     const requiredSlots = requiredVoiceSlotsFromScript(scriptInput.value);

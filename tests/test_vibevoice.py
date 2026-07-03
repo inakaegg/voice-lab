@@ -189,6 +189,26 @@ def test_directed_speaker_script_skips_tail_guard_for_overlong_target() -> None:
     assert script.full_text == script.target_text
 
 
+def test_directed_line_chunks_split_speaker_without_splitting_lines() -> None:
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="あ" * 70),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text="い" * 70),
+        vibevoice_module.VibeVoiceDirectedLine(index=3, speaker=1, text="う" * 70),
+    ]
+
+    chunks = vibevoice_module._directed_line_chunks_for_speaker(lines)
+
+    assert [[line.index for line in chunk.lines] for chunk in chunks] == [[1, 2], [3]]
+    assert [chunk.chunk_index for chunk in chunks] == [1, 2]
+
+
+def test_directed_line_chunks_reject_single_overlong_line() -> None:
+    lines = [vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="あ" * 181)]
+
+    with pytest.raises(ValueError, match="Speaker 1.*Line 1.*180"):
+        vibevoice_module._directed_line_chunks_for_speaker(lines)
+
+
 def test_directed_audio_ranges_align_words_by_text_instead_of_raw_ratio() -> None:
     lines = [
         vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=3, text="清掃時間ですX"),
@@ -419,6 +439,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     assert result.diagnostics["directed_line_mode"]["script_char_limits"] == {
         "target_min": vibevoice_module.DIRECTED_TARGET_MIN_CHARS,
         "target_max": vibevoice_module.DIRECTED_TARGET_MAX_CHARS,
+        "full_max": vibevoice_module.DIRECTED_FULL_MAX_CHARS,
     }
     assert result.diagnostics["directed_line_mode"]["speaker_script_lengths"]["1"] == {
         "target_chars": len(target_script),
@@ -426,6 +447,7 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
         "full_chars": len(f"{target_script}{expected_tail_guard}"),
         "below_target_min": True,
         "above_target_max": False,
+        "above_full_max": False,
     }
     assert [artifact["kind"] for artifact in result.artifacts] == [
         "speaker_vibevoice",
@@ -532,6 +554,63 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
     output = tmp_path / "directed-multi-output.wav"
     output.write_bytes(result.audio_bytes)
     assert 0.65 <= _wav_duration(output) <= 0.75
+
+
+def test_vibevoice_service_directed_line_mode_splits_long_speaker_into_chunks(tmp_path: Path) -> None:
+    script_texts: list[str] = []
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        script_texts.append(Path(command[command.index("--text_file") + 1]).read_text(encoding="utf-8"))
+        output_index = command.index("--output") + 1
+        _write_test_wav(Path(command[output_index]), seconds=1.0)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    line1 = "あ" * 70
+    line2 = "い" * 70
+    line3 = "う" * 70
+    asr = FakeDirectedAsrProvider(
+        [
+            [
+                {"text": line1, "start": 0.0, "end": 0.2},
+                {"text": line2, "start": 0.3, "end": 0.5},
+            ],
+            [
+                {"text": line3, "start": 0.0, "end": 0.2},
+            ],
+        ]
+    )
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+        directed_asr_provider=asr,
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(),
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    result = service.generate(
+        script_text=f"1 {line1}\n1 {line2}\n1 {line3}",
+        voice_paths=[VibeVoiceVoiceSample(slot=1, path=voice)],
+        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
+    )
+
+    assert len(script_texts) == 2
+    assert result.diagnostics["directed_line_mode"]["chunk_count"] == 2
+    assert [
+        chunk["line_indices"] for chunk in result.diagnostics["directed_line_mode"]["chunks"]
+    ] == [[1, 2], [3]]
+    ranges = result.diagnostics["directed_line_mode"]["ranges"]
+    assert [item["line_index"] for item in ranges] == [1, 2, 3]
+    assert [item["chunk_index"] for item in ranges] == [1, 1, 2]
 
 
 def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcription(

@@ -34,7 +34,8 @@ AUTO_LINE_BY_LINE_MIN_LINES = 4
 AUTO_LINE_BY_LINE_MIN_CHARS = 180
 DIRECTED_TAIL_GUARD_MAX_CHARS = 120
 DIRECTED_TARGET_MIN_CHARS = 140
-DIRECTED_TARGET_MAX_CHARS = 260
+DIRECTED_TARGET_MAX_CHARS = 180
+DIRECTED_FULL_MAX_CHARS = 280
 DIRECTED_OUTPUT_TARGET_RMS = 0.10
 DIRECTED_OUTPUT_PEAK_LIMIT = 0.92
 DIRECTED_OUTPUT_MAX_GAIN = 2.5
@@ -157,6 +158,7 @@ class VibeVoiceAudioRange:
     start: float
     end: float
     matched_text: str = ""
+    chunk_index: int = 1
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,13 @@ class _DirectedSpeakerScript:
     full_text: str
     target_text: str
     tail_guard_text: str
+
+
+@dataclass(frozen=True)
+class _DirectedLineChunk:
+    speaker: int
+    chunk_index: int
+    lines: tuple[VibeVoiceDirectedLine, ...]
 
 
 @dataclass(frozen=True)
@@ -310,6 +319,7 @@ def _directed_speaker_script_for_lines(
             target_text,
             target_min_chars=DIRECTED_TARGET_MIN_CHARS,
             target_max_chars=DIRECTED_TARGET_MAX_CHARS,
+            full_max_chars=DIRECTED_FULL_MAX_CHARS,
         )
         if include_tail_guard
         else ""
@@ -406,6 +416,7 @@ def _directed_tail_guard_text(
     *,
     target_min_chars: int = 0,
     target_max_chars: int = 0,
+    full_max_chars: int = 0,
 ) -> str:
     value = str(target_text or "").strip()
     if not value:
@@ -426,7 +437,30 @@ def _directed_tail_guard_text(
     repeated_guard = guard
     while len(value) + len(repeated_guard) < target_min_chars:
         repeated_guard += guard
+    if full_max_chars > 0 and len(value) + len(repeated_guard) > full_max_chars:
+        repeated_guard = _trim_directed_tail_guard(
+            repeated_guard,
+            max_chars=max(0, full_max_chars - len(value)),
+            separator="。" if _directed_line_separator(value) == "。" else ".",
+        )
     return repeated_guard
+
+
+def _trim_directed_tail_guard(text: str, *, max_chars: int, separator: str) -> str:
+    if max_chars <= 0:
+        return ""
+    value = str(text or "").strip()
+    if len(value) <= max_chars:
+        return value
+    trimmed = value[:max_chars].strip()
+    boundary = max(trimmed.rfind(mark) for mark in ("。", ".", "？", "?", "！", "!", "…"))
+    if boundary >= max(12, max_chars // 3):
+        return trimmed[: boundary + 1]
+    if _ends_with_sentence_punctuation(trimmed):
+        return trimmed
+    if max_chars <= len(separator):
+        return separator[:max_chars]
+    return f"{trimmed[: max_chars - len(separator)].rstrip()}{separator}"
 
 
 def _directed_speaker_script_length_diagnostics(script: _DirectedSpeakerScript) -> dict[str, object]:
@@ -438,6 +472,7 @@ def _directed_speaker_script_length_diagnostics(script: _DirectedSpeakerScript) 
         "full_chars": len(script.full_text),
         "below_target_min": target_chars < DIRECTED_TARGET_MIN_CHARS,
         "above_target_max": target_chars > DIRECTED_TARGET_MAX_CHARS,
+        "above_full_max": len(script.full_text) > DIRECTED_FULL_MAX_CHARS,
     }
 
 
@@ -646,17 +681,22 @@ class VibeVoiceService:
             raise ValueError(f"Speaker {', '.join(str(slot) for slot in missing_slots)} の参照音声を指定してください。")
 
         lines_by_speaker = _directed_lines_by_speaker(lines)
-        speaker_outputs: dict[int, Path] = {}
+        chunks_by_speaker = {
+            speaker: _directed_line_chunks_for_speaker(speaker_lines)
+            for speaker, speaker_lines in lines_by_speaker.items()
+        }
+        chunks = [chunk for speaker in lines_by_speaker for chunk in chunks_by_speaker[speaker]]
+        chunk_outputs: dict[tuple[int, int], Path] = {}
         ranges_by_line: dict[int, VibeVoiceAudioRange] = {}
-        speaker_results: dict[int, VibeVoiceResult] = {}
-        speaker_vibevoice_outputs: dict[int, Path] = {}
-        speaker_scripts: dict[int, str] = {}
-        speaker_target_scripts: dict[int, str] = {}
-        speaker_tail_guards: dict[int, str] = {}
-        speaker_script_lengths: dict[int, dict[str, object]] = {}
-        asr_segments_by_speaker: dict[int, list[dict[str, object]]] = {}
-        asr_words_by_speaker: dict[int, list[dict[str, object]]] = {}
-        vc_results_by_speaker: dict[int, object] = {}
+        chunk_results: dict[str, VibeVoiceResult] = {}
+        chunk_vibevoice_outputs: dict[tuple[int, int], Path] = {}
+        chunk_scripts: dict[str, str] = {}
+        chunk_target_scripts: dict[str, str] = {}
+        chunk_tail_guards: dict[str, str] = {}
+        chunk_script_lengths: dict[str, dict[str, object]] = {}
+        asr_segments_by_chunk: dict[str, list[dict[str, object]]] = {}
+        asr_words_by_chunk: dict[str, list[dict[str, object]]] = {}
+        vc_results_by_chunk: dict[str, object] = {}
         artifacts: list[dict[str, object]] = []
         warnings: list[str] = []
         generation_total_ms = 0.0
@@ -671,96 +711,105 @@ class VibeVoiceService:
         _report_vibevoice_progress(progress_callback, "prepare", "指定台詞モード準備")
         with TemporaryDirectory(prefix="mo-vibevoice-directed-") as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
-            for speaker_index, (speaker, speaker_lines) in enumerate(lines_by_speaker.items(), start=1):
+            for chunk_index, chunk in enumerate(chunks, start=1):
                 _raise_if_cancelled(cancel_event)
-                speaker_script_parts = _directed_speaker_script_for_lines(speaker_lines, include_tail_guard=True)
+                chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
+                chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
+                chunk_audio_stem = _directed_chunk_audio_stem(chunk, chunks_by_speaker)
+                speaker_script_parts = _directed_speaker_script_for_lines(chunk.lines, include_tail_guard=True)
                 speaker_script = f"Speaker 1: {speaker_script_parts.full_text}"
-                speaker_scripts[speaker] = speaker_script
-                speaker_target_scripts[speaker] = f"Speaker 1: {speaker_script_parts.target_text}"
-                speaker_tail_guards[speaker] = speaker_script_parts.tail_guard_text
-                speaker_script_lengths[speaker] = _directed_speaker_script_length_diagnostics(speaker_script_parts)
-                if speaker_script_lengths[speaker]["below_target_min"]:
+                chunk_scripts[chunk_key] = speaker_script
+                chunk_target_scripts[chunk_key] = f"Speaker 1: {speaker_script_parts.target_text}"
+                chunk_tail_guards[chunk_key] = speaker_script_parts.tail_guard_text
+                chunk_script_lengths[chunk_key] = _directed_speaker_script_length_diagnostics(speaker_script_parts)
+                if chunk_script_lengths[chunk_key]["below_target_min"]:
                     warnings.append(
-                        f"Speaker {speaker}: VV投入テキストが短いため末尾ガードを増やしました "
-                        f"({speaker_script_lengths[speaker]['target_chars']} chars)"
+                        f"{chunk_label}: VV投入テキストが短いため末尾ガードを増やしました "
+                        f"({chunk_script_lengths[chunk_key]['target_chars']} chars)"
                     )
-                if speaker_script_lengths[speaker]["above_target_max"]:
+                if chunk_script_lengths[chunk_key]["above_target_max"]:
                     warnings.append(
-                        f"Speaker {speaker}: VV投入テキストが長いため末尾ガードを追加しませんでした "
-                        f"({speaker_script_lengths[speaker]['target_chars']} chars)"
+                        f"{chunk_label}: VV投入テキストが長いため末尾ガードを追加しませんでした "
+                        f"({chunk_script_lengths[chunk_key]['target_chars']} chars)"
                     )
                 speaker_options = replace(options, directed_line_mode=False, line_by_line=False)
                 _report_vibevoice_progress(
                     progress_callback,
                     "generation",
-                    f"指定台詞 話者{speaker}生成 {speaker_index}/{len(lines_by_speaker)}",
+                    f"指定台詞 {chunk_label} 生成 {chunk_index}/{len(chunks)}",
                 )
                 speaker_result = self._generate_single_pass(
                     script_text=speaker_script,
-                    voice_samples=[VibeVoiceVoiceSample(slot=1, path=samples_by_slot[speaker].path)],
+                    voice_samples=[VibeVoiceVoiceSample(slot=1, path=samples_by_slot[chunk.speaker].path)],
                     options=speaker_options,
                     progress_callback=progress_callback,
                     cancel_event=cancel_event,
                     allow_auto_line_by_line=False,
                 )
                 generation_total_ms += float(speaker_result.timings_ms.get("total", 0.0))
-                speaker_results[speaker] = speaker_result
-                speaker_output = temp_dir / f"speaker-{speaker}.wav"
+                chunk_results[chunk_key] = speaker_result
+                speaker_output = temp_dir / f"{chunk_audio_stem}.wav"
                 speaker_output.write_bytes(speaker_result.audio_bytes)
-                speaker_vibevoice_outputs[speaker] = speaker_output
-                speaker_outputs[speaker] = speaker_output
+                chunk_vibevoice_outputs[(chunk.speaker, chunk.chunk_index)] = speaker_output
+                chunk_outputs[(chunk.speaker, chunk.chunk_index)] = speaker_output
 
             if _directed_voice_conversion_enabled():
                 vc_service = self._get_directed_voice_conversion_service()
                 voice_conversion_settings = _directed_voice_conversion_settings_diagnostics(vc_service)
                 try:
-                    for speaker_index, speaker in enumerate(lines_by_speaker, start=1):
+                    for chunk_index, chunk in enumerate(chunks, start=1):
                         _raise_if_cancelled(cancel_event)
+                        chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
+                        chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
+                        chunk_audio_stem = _directed_chunk_audio_stem(chunk, chunks_by_speaker)
                         _report_vibevoice_progress(
                             progress_callback,
                             "voice_conversion",
-                            f"指定台詞 話者{speaker} VC {speaker_index}/{len(lines_by_speaker)}",
+                            f"指定台詞 {chunk_label} VC {chunk_index}/{len(chunks)}",
                         )
                         vc_started = perf_counter()
                         vc_result = _convert_directed_voice(
                             vc_service,
-                            source_audio_path=speaker_vibevoice_outputs[speaker],
-                            reference_audio_path=samples_by_slot[speaker].path,
+                            source_audio_path=chunk_vibevoice_outputs[(chunk.speaker, chunk.chunk_index)],
+                            reference_audio_path=samples_by_slot[chunk.speaker].path,
                         )
                         voice_conversion_total_ms += _elapsed_ms(vc_started)
-                        vc_results_by_speaker[speaker] = vc_result
+                        vc_results_by_chunk[chunk_key] = vc_result
                         voice_conversion_name = str(
                             getattr(vc_result, "providers", {}).get("voice_conversion", "")
                             or voice_conversion_name
                             or "voice_conversion"
                         )
-                        vc_output = temp_dir / f"speaker-{speaker}-vc.wav"
+                        vc_output = temp_dir / f"{chunk_audio_stem}-vc.wav"
                         vc_output.write_bytes(getattr(vc_result, "output_audio_bytes"))
-                        speaker_outputs[speaker] = vc_output
+                        chunk_outputs[(chunk.speaker, chunk.chunk_index)] = vc_output
                 finally:
                     self._release_directed_voice_conversion_service()
 
             asr_provider = self._get_directed_asr_provider()
             asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
             try:
-                for speaker_index, (speaker, speaker_lines) in enumerate(lines_by_speaker.items(), start=1):
+                for chunk_index, chunk in enumerate(chunks, start=1):
                     _raise_if_cancelled(cancel_event)
+                    chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
+                    chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
                     _report_vibevoice_progress(
                         progress_callback,
                         "asr",
-                        f"指定台詞 話者{speaker} ASR分割 {speaker_index}/{len(lines_by_speaker)}",
+                        f"指定台詞 {chunk_label} ASR分割 {chunk_index}/{len(chunks)}",
                     )
                     asr_started = perf_counter()
-                    transcription = _transcribe_directed_audio(asr_provider, speaker_outputs[speaker])
+                    transcription = _transcribe_directed_audio(asr_provider, chunk_outputs[(chunk.speaker, chunk.chunk_index)])
                     asr_total_ms += _elapsed_ms(asr_started)
-                    asr_segments_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "segments", []))
-                    asr_words_by_speaker[speaker] = _timestamp_rows(getattr(transcription, "words", []))
+                    asr_segments_by_chunk[chunk_key] = _timestamp_rows(getattr(transcription, "segments", []))
+                    asr_words_by_chunk[chunk_key] = _timestamp_rows(getattr(transcription, "words", []))
                     ranges, range_warnings = _audio_ranges_for_directed_lines(
-                        speaker_lines,
+                        chunk.lines,
                         transcription,
-                        speaker_outputs[speaker],
+                        chunk_outputs[(chunk.speaker, chunk.chunk_index)],
+                        chunk_index=chunk.chunk_index,
                     )
-                    warnings.extend(f"Speaker {speaker}: {warning}" for warning in range_warnings)
+                    warnings.extend(f"{chunk_label}: {warning}" for warning in range_warnings)
                     ranges_by_line.update({audio_range.line_index: audio_range for audio_range in ranges})
             finally:
                 self._release_directed_asr_provider()
@@ -772,7 +821,7 @@ class VibeVoiceService:
             _compose_directed_wav(
                 lines,
                 ranges_by_line=ranges_by_line,
-                speaker_outputs=speaker_outputs,
+                speaker_outputs=chunk_outputs,
                 output_path=output_path,
                 gap_seconds=options.line_gap,
             )
@@ -780,20 +829,32 @@ class VibeVoiceService:
             reconstruct_ms = _elapsed_ms(reconstruct_started)
             artifacts = _directed_audio_artifacts(
                 lines=lines,
-                speaker_vibevoice_outputs=speaker_vibevoice_outputs,
-                speaker_outputs=speaker_outputs,
-                speaker_scripts=speaker_scripts,
+                chunks=chunks,
+                chunks_by_speaker=chunks_by_speaker,
+                speaker_vibevoice_outputs=chunk_vibevoice_outputs,
+                speaker_outputs=chunk_outputs,
+                speaker_scripts=chunk_scripts,
                 ranges_by_line=ranges_by_line,
-                include_voice_conversion=bool(vc_results_by_speaker),
+                include_voice_conversion=bool(vc_results_by_chunk),
             )
 
         total_ms = _elapsed_ms(directed_started)
-        first_result = next(iter(speaker_results.values()))
+        first_result = next(iter(chunk_results.values()))
         providers = dict(first_result.providers)
         providers["vibevoice_directed_asr"] = asr_name
         providers["vibevoice_directed_mode"] = "asr_reconstruct"
         if voice_conversion_name:
             providers["vibevoice_directed_vc"] = voice_conversion_name
+        chunks_diagnostics = [
+            {
+                "key": _directed_chunk_key(chunk, chunks_by_speaker),
+                "speaker": chunk.speaker,
+                "chunk_index": chunk.chunk_index,
+                "line_indices": [line.index for line in chunk.lines],
+                **chunk_script_lengths[_directed_chunk_key(chunk, chunks_by_speaker)],
+            }
+            for chunk in chunks
+        ]
         return VibeVoiceResult(
             audio_bytes=audio_bytes,
             audio_mime_type=self.audio_mime_type,
@@ -810,6 +871,8 @@ class VibeVoiceService:
                 "directed_line_mode": {
                     "speakers": sorted(lines_by_speaker),
                     "line_count": len(lines),
+                    "chunk_count": len(chunks),
+                    "chunks": chunks_diagnostics,
                     "asr_provider": asr_name,
                     "voice_conversion_provider": voice_conversion_name,
                     "voice_conversion_settings": voice_conversion_settings,
@@ -822,34 +885,28 @@ class VibeVoiceService:
                     "script_char_limits": {
                         "target_min": DIRECTED_TARGET_MIN_CHARS,
                         "target_max": DIRECTED_TARGET_MAX_CHARS,
+                        "full_max": DIRECTED_FULL_MAX_CHARS,
                     },
                     "warnings": warnings,
-                    "speaker_scripts": {
-                        str(speaker): speaker_scripts[speaker] for speaker in lines_by_speaker
-                    },
-                    "speaker_target_scripts": {
-                        str(speaker): speaker_target_scripts[speaker] for speaker in lines_by_speaker
-                    },
-                    "speaker_tail_guards": {
-                        str(speaker): speaker_tail_guards[speaker] for speaker in lines_by_speaker
-                    },
-                    "speaker_script_lengths": {
-                        str(speaker): speaker_script_lengths[speaker] for speaker in lines_by_speaker
-                    },
-                    "asr_segments": {str(speaker): rows for speaker, rows in asr_segments_by_speaker.items()},
-                    "asr_words": {str(speaker): rows for speaker, rows in asr_words_by_speaker.items()},
+                    "speaker_scripts": chunk_scripts,
+                    "speaker_target_scripts": chunk_target_scripts,
+                    "speaker_tail_guards": chunk_tail_guards,
+                    "speaker_script_lengths": chunk_script_lengths,
+                    "asr_segments": asr_segments_by_chunk,
+                    "asr_words": asr_words_by_chunk,
                     "voice_conversion": {
-                        str(speaker): {
+                        key: {
                             "timings_ms": getattr(result, "timings_ms", {}),
                             "providers": getattr(result, "providers", {}),
                             "warnings": getattr(result, "warnings", []),
                         }
-                        for speaker, result in sorted(vc_results_by_speaker.items())
+                        for key, result in sorted(vc_results_by_chunk.items())
                     },
                     "ranges": [
                         {
                             "line_index": audio_range.line_index,
                             "speaker": audio_range.speaker,
+                            "chunk_index": audio_range.chunk_index,
                             "text": audio_range.text,
                             "matched_text": audio_range.matched_text,
                             "start": audio_range.start,
@@ -859,7 +916,7 @@ class VibeVoiceService:
                     ],
                 },
                 "speaker_results": {
-                    str(speaker): result.diagnostics for speaker, result in sorted(speaker_results.items())
+                    key: result.diagnostics for key, result in sorted(chunk_results.items())
                 },
             },
             artifacts=artifacts,
@@ -1399,6 +1456,63 @@ def _directed_lines_by_speaker(lines: Sequence[VibeVoiceDirectedLine]) -> dict[i
     return dict(sorted(grouped.items(), key=lambda item: min(line.index for line in item[1])))
 
 
+def _directed_line_chunks_for_speaker(
+    lines: Sequence[VibeVoiceDirectedLine],
+    *,
+    target_max_chars: int = DIRECTED_TARGET_MAX_CHARS,
+) -> list[_DirectedLineChunk]:
+    if not lines:
+        return []
+    speaker = lines[0].speaker
+    chunks: list[_DirectedLineChunk] = []
+    current: list[VibeVoiceDirectedLine] = []
+    for line in lines:
+        line_script = _directed_speaker_script_for_lines([line], include_tail_guard=False)
+        if len(line_script.target_text) > target_max_chars:
+            raise ValueError(
+                f"Speaker {line.speaker} Line {line.index} の台詞が長すぎます "
+                f"({len(line_script.target_text)} chars)。{target_max_chars}文字以内に分けてください。"
+            )
+        candidate = [*current, line]
+        candidate_script = _directed_speaker_script_for_lines(candidate, include_tail_guard=False)
+        if current and len(candidate_script.target_text) > target_max_chars:
+            chunks.append(
+                _DirectedLineChunk(
+                    speaker=speaker,
+                    chunk_index=len(chunks) + 1,
+                    lines=tuple(current),
+                )
+            )
+            current = [line]
+        else:
+            current = candidate
+    if current:
+        chunks.append(
+            _DirectedLineChunk(
+                speaker=speaker,
+                chunk_index=len(chunks) + 1,
+                lines=tuple(current),
+            )
+        )
+    return chunks
+
+
+def _directed_chunk_key(chunk: _DirectedLineChunk, chunks_by_speaker: dict[int, list[_DirectedLineChunk]]) -> str:
+    return str(chunk.speaker) if len(chunks_by_speaker.get(chunk.speaker, [])) == 1 else f"{chunk.speaker}-{chunk.chunk_index}"
+
+
+def _directed_chunk_label(chunk: _DirectedLineChunk, chunks_by_speaker: dict[int, list[_DirectedLineChunk]]) -> str:
+    if len(chunks_by_speaker.get(chunk.speaker, [])) == 1:
+        return f"Speaker {chunk.speaker}"
+    return f"Speaker {chunk.speaker} chunk {chunk.chunk_index}"
+
+
+def _directed_chunk_audio_stem(chunk: _DirectedLineChunk, chunks_by_speaker: dict[int, list[_DirectedLineChunk]]) -> str:
+    if len(chunks_by_speaker.get(chunk.speaker, [])) == 1:
+        return f"speaker-{chunk.speaker}"
+    return f"speaker-{chunk.speaker}-chunk-{chunk.chunk_index}"
+
+
 def _transcribe_directed_audio(asr_provider, audio_path: Path):
     transcribe_detail = getattr(asr_provider, "transcribe_detail", None)
     if transcribe_detail is None:
@@ -1435,13 +1549,15 @@ def _audio_ranges_for_directed_lines(
     lines: Sequence[VibeVoiceDirectedLine],
     transcription,
     audio_path: Path,
+    *,
+    chunk_index: int = 1,
 ) -> tuple[list[VibeVoiceAudioRange], list[str]]:
     duration = _wav_duration(audio_path)
     warnings: list[str] = []
     words = _timestamp_rows(getattr(transcription, "words", []))
     segments = _timestamp_rows(getattr(transcription, "segments", []))
     if words:
-        ranges = _audio_ranges_from_words(lines, words, duration=duration)
+        ranges = _audio_ranges_from_words(lines, words, duration=duration, chunk_index=chunk_index)
         if len(words) < len(lines):
             warnings.append("ASR word数が台詞行数より少ないため、範囲推定が粗くなる可能性があります。")
         return ranges, warnings
@@ -1454,11 +1570,12 @@ def _audio_ranges_for_directed_lines(
                     text=line.text,
                     start=max(0.0, min(float(segment["start"]), duration)),
                     end=max(0.0, min(float(segment["end"]), duration)),
+                    chunk_index=chunk_index,
                 )
                 for line, segment in zip(lines, segments, strict=True)
             ], warnings
         warnings.append("ASR segment数と台詞行数が一致しないため、文字数比で範囲を推定しました。")
-        return _audio_ranges_by_target_text_ratio(lines, rows=segments, duration=duration), warnings
+        return _audio_ranges_by_target_text_ratio(lines, rows=segments, duration=duration, chunk_index=chunk_index), warnings
     raise ValueError("指定台詞モードのASR timestampが空でした。")
 
 
@@ -1467,9 +1584,10 @@ def _audio_ranges_from_words(
     words: Sequence[dict[str, object]],
     *,
     duration: float,
+    chunk_index: int = 1,
 ) -> list[VibeVoiceAudioRange]:
     if not words:
-        return _audio_ranges_by_target_text_ratio(lines, rows=[], duration=duration)
+        return _audio_ranges_by_target_text_ratio(lines, rows=[], duration=duration, chunk_index=chunk_index)
     normalized_words: list[str] = []
     source_word_indices: list[int] = []
     for index, word in enumerate(words):
@@ -1482,7 +1600,7 @@ def _audio_ranges_from_words(
     target_joined = "".join(target_texts)
     asr_joined = "".join(normalized_words)
     if not target_joined or not asr_joined:
-        return _audio_ranges_by_target_text_ratio(lines, rows=words, duration=duration)
+        return _audio_ranges_by_target_text_ratio(lines, rows=words, duration=duration, chunk_index=chunk_index)
 
     asr_spans = _word_text_spans(normalized_words)
     target_boundaries = _target_text_boundaries(target_texts)
@@ -1512,6 +1630,7 @@ def _audio_ranges_from_words(
                 start=max(0.0, min(start, duration)),
                 end=max(0.0, min(end, duration)),
                 matched_text="".join(str(word.get("text", "")) for word in words[source_start_index : source_end_index + 1]),
+                chunk_index=chunk_index,
             )
         )
     return ranges
@@ -1589,6 +1708,7 @@ def _audio_ranges_by_target_text_ratio(
     *,
     rows: Sequence[dict[str, object]],
     duration: float,
+    chunk_index: int = 1,
 ) -> list[VibeVoiceAudioRange]:
     if rows:
         start_time = max(0.0, min(float(rows[0]["start"]), duration))
@@ -1611,6 +1731,7 @@ def _audio_ranges_by_target_text_ratio(
                 text=line.text,
                 start=max(0.0, min(cursor, duration)),
                 end=max(0.0, min(end, duration)),
+                chunk_index=chunk_index,
             )
         )
         cursor = end
@@ -1625,17 +1746,18 @@ def _compose_directed_wav(
     lines: Sequence[VibeVoiceDirectedLine],
     *,
     ranges_by_line: dict[int, VibeVoiceAudioRange],
-    speaker_outputs: dict[int, Path],
+    speaker_outputs: dict[object, Path],
     output_path: Path,
     gap_seconds: float,
 ) -> None:
     if not lines:
         raise ValueError("script is required")
-    params = _wav_params(speaker_outputs[lines[0].speaker])
+    first_range = ranges_by_line[lines[0].index]
+    params = _wav_params(_directed_output_path_for_range(speaker_outputs, first_range))
     frames: list[bytes] = []
     for index, line in enumerate(lines):
         audio_range = ranges_by_line[line.index]
-        source_path = speaker_outputs[line.speaker]
+        source_path = _directed_output_path_for_range(speaker_outputs, audio_range)
         if _wav_params(source_path) != params:
             raise VibeVoiceError("指定台詞モードの話者別WAV形式が一致しません。")
         segment_frames = _read_wav_frames(source_path, start=audio_range.start, end=audio_range.end)
@@ -1649,45 +1771,64 @@ def _compose_directed_wav(
         output.writeframes(b"".join(frames))
 
 
+def _directed_output_path_for_range(speaker_outputs: dict[object, Path], audio_range: VibeVoiceAudioRange) -> Path:
+    chunk_key = (audio_range.speaker, audio_range.chunk_index)
+    if chunk_key in speaker_outputs:
+        return speaker_outputs[chunk_key]
+    return speaker_outputs[audio_range.speaker]
+
+
 def _directed_audio_artifacts(
     *,
     lines: Sequence[VibeVoiceDirectedLine],
-    speaker_vibevoice_outputs: dict[int, Path],
-    speaker_outputs: dict[int, Path],
-    speaker_scripts: dict[int, str],
+    chunks: Sequence[_DirectedLineChunk],
+    chunks_by_speaker: dict[int, list[_DirectedLineChunk]],
+    speaker_vibevoice_outputs: dict[tuple[int, int], Path],
+    speaker_outputs: dict[tuple[int, int], Path],
+    speaker_scripts: dict[str, str],
     ranges_by_line: dict[int, VibeVoiceAudioRange],
     include_voice_conversion: bool,
 ) -> list[dict[str, object]]:
     artifacts: list[dict[str, object]] = []
-    for speaker, path in sorted(speaker_vibevoice_outputs.items()):
+    for chunk in chunks:
+        key = (chunk.speaker, chunk.chunk_index)
+        path = speaker_vibevoice_outputs[key]
+        chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
+        chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
         artifacts.append(
             _audio_artifact_from_bytes(
                 path.read_bytes(),
                 kind="speaker_vibevoice",
-                label=f"Speaker {speaker} VibeVoice",
-                speaker=speaker,
-                text=speaker_scripts.get(speaker, ""),
-                line_indices=[line.index for line in lines if line.speaker == speaker],
+                label=f"{chunk_label} VibeVoice",
+                speaker=chunk.speaker,
+                chunk_index=chunk.chunk_index,
+                text=speaker_scripts.get(chunk_key, ""),
+                line_indices=[line.index for line in chunk.lines],
                 duration_seconds=_wav_duration(path),
             )
         )
     if include_voice_conversion:
-        for speaker, path in sorted(speaker_outputs.items()):
+        for chunk in chunks:
+            key = (chunk.speaker, chunk.chunk_index)
+            path = speaker_outputs[key]
+            chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
+            chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
             artifacts.append(
                 _audio_artifact_from_bytes(
                     path.read_bytes(),
                     kind="speaker_voice_conversion",
-                    label=f"Speaker {speaker} Seed-VC",
-                    speaker=speaker,
-                    text=speaker_scripts.get(speaker, ""),
-                    line_indices=[line.index for line in lines if line.speaker == speaker],
+                    label=f"{chunk_label} Seed-VC",
+                    speaker=chunk.speaker,
+                    chunk_index=chunk.chunk_index,
+                    text=speaker_scripts.get(chunk_key, ""),
+                    line_indices=[line.index for line in chunk.lines],
                     duration_seconds=_wav_duration(path),
                 )
             )
     for line in lines:
         audio_range = ranges_by_line[line.index]
         segment_bytes = _wav_bytes_for_range(
-            speaker_outputs[line.speaker],
+            _directed_output_path_for_range(speaker_outputs, audio_range),
             start=audio_range.start,
             end=audio_range.end,
         )
@@ -1697,6 +1838,7 @@ def _directed_audio_artifacts(
                 kind="line_segment",
                 label=f"Line {line.index} / Speaker {line.speaker}",
                 speaker=line.speaker,
+                chunk_index=audio_range.chunk_index,
                 line_index=line.index,
                 text=line.text,
                 matched_text=audio_range.matched_text,
