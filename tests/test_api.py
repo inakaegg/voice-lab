@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mo_speech.api import create_app
+from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from mo_speech.providers.voice import (
@@ -284,6 +285,41 @@ def test_vibevoice_generate_api_preserves_voice_slots() -> None:
     assert len(voice_samples) == 1
     assert voice_samples[0].slot == 2
     assert service.voice_bytes == b"voice2"
+
+
+def test_vibevoice_reference_audio_from_url_api_returns_wav() -> None:
+    class FakeReferenceAudioExtractor:
+        def __init__(self):
+            self.calls = []
+
+        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
+            self.calls.append((url, start_seconds, duration_seconds))
+            return ReferenceAudioClip(
+                audio_bytes=b"RIFFurlwav",
+                audio_mime_type="audio/wav",
+                filename="reference_url_s75_d5.wav",
+                source_url=url,
+                start_seconds=75.0 if start_seconds is None else start_seconds,
+                detected_start_seconds=75.0,
+                duration_seconds=duration_seconds,
+            )
+
+    extractor = FakeReferenceAudioExtractor()
+    client = TestClient(create_app(reference_audio_extractor=extractor))
+
+    response = client.post(
+        "/api/vibevoice/reference-audio-from-url",
+        data={"url": "https://youtu.be/example?t=75", "duration_seconds": "5"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["audio_mime_type"] == "audio/wav"
+    assert payload["audio_base64"] == base64.b64encode(b"RIFFurlwav").decode("ascii")
+    assert payload["filename"] == "reference_url_s75_d5.wav"
+    assert payload["start_seconds"] == 75.0
+    assert payload["detected_start_seconds"] == 75.0
+    assert extractor.calls == [("https://youtu.be/example?t=75", None, 5.0)]
 
 
 def test_vibevoice_generate_api_can_use_runpod_backend() -> None:

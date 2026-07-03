@@ -136,6 +136,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /name="voice_file_4"/);
   assert.match(vibevoiceHtml, /data-saved-voice-slot="1"/);
   assert.match(vibevoiceHtml, /data-saved-voice-slot="4"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-reference-url"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-reference-url-start"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-reference-url-duration"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-reference-url-button"/);
   assert.match(vibevoiceHtml, /name="cfg_scale"/);
   assert.match(vibevoiceHtml, /class="vibevoice-workspace"/);
   assert.match(vibevoiceHtml, /class="vibevoice-control-stack"/);
@@ -186,6 +190,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /savedVoiceFilesBySlot/);
   assert.match(vibevoiceSource, /appendVoiceFiles/);
   assert.match(vibevoiceSource, /body\.set\(input\.name,\s*saved\.blob/s);
+  assert.match(vibevoiceSource, /\/api\/vibevoice\/reference-audio-from-url/);
+  assert.match(vibevoiceSource, /handleReferenceUrlFetch/);
+  assert.match(vibevoiceSource, /saveVoiceBlob/);
   assert.match(vibevoiceSource, /data-vibevoice-range/);
   assert.match(vibevoiceSource, /renderRangeValue/);
   assert.match(vibevoiceSource, /vibevoiceSettingsStorageKey/);
@@ -210,6 +217,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-shell/);
   assert.match(styles, /\.vibevoice-workspace/);
   assert.match(styles, /\.vibevoice-range-control/);
+  assert.match(styles, /\.vibevoice-reference-url-panel/);
   assert.match(styles, /\.vibevoice-parameter-guide/);
   assert.match(styles, /\.vibevoice-debug-runtime/);
   assert.match(styles, /\.vibevoice-progress-bar/);

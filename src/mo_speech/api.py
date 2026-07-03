@@ -48,6 +48,7 @@ from .factory import (
     create_realtime_translation_pipeline,
     create_runpod_serverless_pipeline,
 )
+from .media_reference import MediaReferenceAudioExtractor
 from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
 from .practice import (
@@ -238,6 +239,24 @@ def _float_form_value(value: str | None, default: float) -> float:
         return default
 
 
+def _optional_float_form_value(value: str | None) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError("start_seconds must be a number") from exc
+
+
+def _required_float_form_value(value: str | None, name: str) -> float:
+    if value is None or str(value).strip() == "":
+        raise ValueError(f"{name} is required")
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+
+
 def _int_form_value(value: str | None, default: int) -> int:
     if value is None or str(value).strip() == "":
         return default
@@ -387,6 +406,7 @@ def create_app(
     voice_conversion_service: VoiceConversionService | None = None,
     vibevoice_service: VibeVoiceService | None = None,
     runpod_vibevoice_service: VibeVoiceGenerator | None = None,
+    reference_audio_extractor: MediaReferenceAudioExtractor | None = None,
     audio_history_store: AudioHistoryStore | None = None,
     user_settings_store: UserSettingsStore | None = None,
 ) -> FastAPI:
@@ -405,6 +425,7 @@ def create_app(
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     active_vibevoice_service = vibevoice_service or VibeVoiceService.from_env()
     active_runpod_vibevoice_service = runpod_vibevoice_service or RunpodServerlessVibeVoiceService.from_env()
+    active_reference_audio_extractor = reference_audio_extractor or MediaReferenceAudioExtractor()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
@@ -470,6 +491,32 @@ def create_app(
                 "local": local_status,
                 "runpod_serverless": active_runpod_vibevoice_service.status(),
             },
+        }
+
+    @app.post("/api/vibevoice/reference-audio-from-url")
+    async def vibevoice_reference_audio_from_url(
+        url: Annotated[str, Form()] = "",
+        start_seconds: Annotated[str | None, Form()] = None,
+        duration_seconds: Annotated[str, Form()] = "5",
+    ) -> dict[str, object]:
+        try:
+            clip = active_reference_audio_extractor.extract_from_url(
+                url,
+                start_seconds=_optional_float_form_value(start_seconds),
+                duration_seconds=_required_float_form_value(duration_seconds, "duration_seconds"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {
+            "audio_mime_type": clip.audio_mime_type,
+            "audio_base64": base64.b64encode(clip.audio_bytes).decode("ascii"),
+            "filename": clip.filename,
+            "source_url": clip.source_url,
+            "start_seconds": clip.start_seconds,
+            "detected_start_seconds": clip.detected_start_seconds,
+            "duration_seconds": clip.duration_seconds,
         }
 
     @app.get("/api/user-settings")

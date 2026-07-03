@@ -37,6 +37,7 @@ vibevoice = [
   "soundfile",
   "tokenizers",
   "tqdm",
+  "yt-dlp[curl-cffi]",
 ]
 vc-compare = [
   "chatterbox-tts>=0.1.7",

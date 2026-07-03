@@ -22,6 +22,8 @@
 
 参照音声はブラウザのIndexedDBへ保存し、次回以降は同じSpeaker枠の既定音声として再利用する。ブラウザの制約によりfile inputへ前回ファイルを直接セットすることはできないため、保存済みファイル名をSpeaker枠内に表示し、生成時に保存済みBlobを送信する。生成時は台本から必要なSpeaker枠を判定し、不要な保存済み音声を送らない。APIからVibeVoice CLIへ渡す時もSpeaker枠番号を保持し、`Speaker 2` の参照音声が `Speaker 1` として詰め直されないようにする。
 
+参照音声は、ローカルファイルに加えて動画/音声URLから取得できる。URL取得はブラウザではなくローカルFastAPI側で行い、`yt-dlp` で対象メディアを取得し、`ffmpeg` で24kHz mono PCM WAVへ切り出す。YouTubeなどの `t=`, `start=`, `time_continue=`, `#t=` に含まれる再生開始時刻を開始秒として扱い、UIで開始秒を明示した場合はその値を優先する。取得秒数はUIで指定し、既定は5秒とする。取得に成功したWAVは選択したSpeaker枠の保存済み参照音声としてIndexedDBへ入れ、以後の生成ではファイル選択した参照音声と同じ扱いにする。認証が必要なURL、playlist一括取得、長尺全体の保存は扱わない。
+
 台本テキストと生成設定はブラウザの `localStorage` へ保存し、次回の `/vibevoice` 表示時に復元する。保存対象は、台本本文、実行先backend、モデル、`cfg_scale`、`inference_steps`、`seed`、`temperature`、`top_p`、`top_k`、`max_voice_seconds`、`line_gap`、`do_sample`、`line_by_line`、`directed_line_mode` とする。台本ファイルを読み込んだ場合も、読み込み後のtextarea内容を保存対象にする。生成設定のリセット操作は、台本本文とIndexedDBの参照音声を残したまま、保存対象の生成設定だけを画面初期値へ戻す。保存は同じブラウザ内の作業再開用であり、履歴管理や別端末同期は今後の生成履歴機能で扱う。
 
 長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。ローカル実行ではVibeVoice CLIの `tqdm` 出力に含まれる実進捗値を取り込み、プログレスバーを数値進捗へ切り替える。進捗値がまだ取れない初期化や未知ステージだけ、処理中インジケータとしてアニメーション表示する。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。
