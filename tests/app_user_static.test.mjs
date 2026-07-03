@@ -168,6 +168,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /id="vibevoice-timing"/);
   assert.match(vibevoiceHtml, /id="vibevoice-progress-log"/);
   assert.match(vibevoiceHtml, /id="vibevoice-audio"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-speaker-scripts"/);
   assert.match(vibevoiceHtml, /id="vibevoice-artifacts"/);
   assert.match(vibevoiceHtml, /\/static\/app_vibevoice\.js/);
   assert.match(vibevoiceSource, /\/api\/vibevoice\/status/);
@@ -177,6 +178,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /runpod_serverless/);
   assert.match(vibevoiceSource, /Sync Timeout/);
   assert.match(vibevoiceSource, /audio_base64/);
+  assert.match(vibevoiceSource, /renderSpeakerScripts/);
   assert.match(vibevoiceSource, /renderArtifacts/);
   assert.match(vibevoiceSource, /handleScriptFileChange/);
   assert.match(vibevoiceSource, /file\.text\(\)/);

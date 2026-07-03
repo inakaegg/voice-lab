@@ -8,6 +8,7 @@ const audio = document.querySelector("#vibevoice-audio");
 const downloadLink = document.querySelector("#vibevoice-download");
 const normalizedScript = document.querySelector("#vibevoice-normalized-script");
 const diagnostics = document.querySelector("#vibevoice-diagnostics");
+const speakerScriptsContainer = document.querySelector("#vibevoice-speaker-scripts");
 const artifactsContainer = document.querySelector("#vibevoice-artifacts");
 const cancelButton = document.querySelector("#vibevoice-cancel-button");
 const jobProgress = document.querySelector("#vibevoice-job-progress");
@@ -786,6 +787,7 @@ function renderResult(payload) {
   audio.src = currentAudioUrl;
   downloadLink.href = currentAudioUrl;
   normalizedScript.textContent = payload.normalized_script || "";
+  const directedDiagnostics = payload.diagnostics?.directed_line_mode || {};
   diagnostics.textContent = JSON.stringify(
     {
       providers: payload.providers || {},
@@ -795,6 +797,7 @@ function renderResult(payload) {
     null,
     2,
   );
+  renderSpeakerScripts(directedDiagnostics.speaker_scripts || {});
   renderArtifacts(payload.artifacts || []);
   resultPanel.hidden = false;
   audio.play().catch(() => {});
@@ -812,8 +815,34 @@ function clearResult() {
   downloadLink.href = "#";
   normalizedScript.textContent = "";
   diagnostics.textContent = "";
+  speakerScriptsContainer.replaceChildren();
   artifactsContainer.replaceChildren();
   resultPanel.hidden = true;
+}
+
+function renderSpeakerScripts(speakerScripts) {
+  speakerScriptsContainer.replaceChildren();
+  const entries = Object.entries(speakerScripts || {}).sort(([left], [right]) => Number(left) - Number(right));
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "vibevoice-speaker-scripts-empty";
+    empty.textContent = "VV入力テキストはありません。";
+    speakerScriptsContainer.append(empty);
+    return;
+  }
+  for (const [speaker, textValue] of entries) {
+    const item = document.createElement("article");
+    item.className = "vibevoice-speaker-script";
+
+    const title = document.createElement("h4");
+    title.textContent = `Speaker ${speaker}`;
+
+    const text = document.createElement("p");
+    text.textContent = String(textValue || "");
+
+    item.append(title, text);
+    speakerScriptsContainer.append(item);
+  }
 }
 
 function renderArtifacts(artifacts) {
