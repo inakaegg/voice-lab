@@ -528,7 +528,6 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     }
     assert [artifact["kind"] for artifact in result.artifacts] == [
         "speaker_vibevoice",
-        "speaker_voice_conversion",
         "line_segment",
         "line_segment",
         "line_segment",
@@ -536,8 +535,14 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
     ]
     assert result.artifacts[0]["label"] == "Speaker 1 VibeVoice"
     assert result.artifacts[0]["text"] == script_texts[0]
-    assert result.artifacts[1]["text"] == script_texts[0]
-    assert result.artifacts[2]["line_index"] == 1
+    assert result.artifacts[1]["line_index"] == 1
+    assert result.diagnostics["directed_line_mode"]["voice_conversion_granularity"] == "selected_line_segments"
+    assert sorted(result.diagnostics["directed_line_mode"]["voice_conversion"]) == [
+        "line-1",
+        "line-2",
+        "line-3",
+        "line-4",
+    ]
     assert "--line_by_line" not in command
     output = tmp_path / "directed-output.wav"
     output.write_bytes(result.audio_bytes)
@@ -613,10 +618,12 @@ def test_vibevoice_service_directed_line_mode_generates_per_speaker_and_reorders
     assert events == [
         "vv:1",
         "vv:2",
-        "vc:speaker-1.wav",
-        "vc:speaker-2.wav",
-        "asr:speaker-1-vc.wav",
-        "asr:speaker-2-vc.wav",
+        "asr:speaker-1.wav",
+        "asr:speaker-2.wav",
+        "vc:line-1-speaker-1-vv-clip.wav",
+        "vc:line-2-speaker-2-vv-clip.wav",
+        "vc:line-3-speaker-1-vv-clip.wav",
+        "vc:line-4-speaker-2-vv-clip.wav",
     ]
     assert result.normalized_script == "\n".join(
         [
@@ -781,10 +788,12 @@ def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_pa
     home.mkdir()
     module_dir.mkdir()
     script_texts: list[str] = []
+    events: list[str] = []
 
     def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
         script_index = command.index("--text_file") + 1
         script_texts.append(Path(command[script_index]).read_text(encoding="utf-8"))
+        events.append(f"vv:{len(script_texts)}")
         output_index = command.index("--output") + 1
         _write_test_wav(Path(command[output_index]), seconds=1.0)
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
@@ -804,7 +813,8 @@ def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_pa
             [
                 {"text": line2, "start": 0.0, "end": 0.3},
             ],
-        ]
+        ],
+        events=events,
     )
     service = VibeVoiceService(
         python="python3",
@@ -813,7 +823,7 @@ def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_pa
         comfyui_vibevoice_path=module_dir,
         subprocess_run=fake_run,
         directed_asr_provider=asr,
-        directed_voice_conversion_service=FakeDirectedVoiceConversionService(),
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(events=events),
     )
     voice = tmp_path / "voice.wav"
     voice.write_bytes(b"voice")
@@ -842,6 +852,16 @@ def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_pa
     assert retry["attempted_line_indices"] == [2]
     assert retry["selected_line_indices"] == [2]
     assert result.diagnostics["directed_line_mode"]["retry_seeds"] == {"1-retry-2": 1043}
+    assert events == [
+        "vv:1",
+        "vv:2",
+        "asr:speaker-1-chunk-1.wav",
+        "asr:speaker-1-chunk-2.wav",
+        "vv:3",
+        "asr:speaker-1-retry-line-2.wav",
+        "vc:line-1-speaker-1-vv-clip.wav",
+        "vc:line-2-speaker-1-vv-clip.wav",
+    ]
     line2_candidates = [
         item
         for item in result.diagnostics["directed_line_mode"]["range_candidates"]
@@ -929,7 +949,12 @@ def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcrip
         options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
     )
 
-    assert events == ["vv", "vc:speaker-1.wav", "asr:speaker-1-vc.wav", "release-asr"]
+    assert events == [
+        "vv",
+        "asr:speaker-1.wav",
+        "release-asr",
+        "vc:line-1-speaker-1-vv-clip.wav",
+    ]
     assert service._directed_asr_provider_instance is None
 
 
@@ -974,7 +999,13 @@ def test_vibevoice_service_directed_line_mode_releases_owned_voice_conversion(
         options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
     )
 
-    assert events == ["vv", "vc:speaker-1.wav", "release-vc", "asr:speaker-1-vc.wav", "release-asr"]
+    assert events == [
+        "vv",
+        "asr:speaker-1.wav",
+        "release-asr",
+        "vc:line-1-speaker-1-vv-clip.wav",
+        "release-vc",
+    ]
     assert service._directed_voice_conversion_service_instance is None
 
 

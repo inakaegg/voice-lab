@@ -757,6 +757,7 @@ class VibeVoiceService:
         asr_words_by_chunk: dict[str, list[dict[str, object]]] = {}
         asr_texts_by_chunk: dict[str, dict[str, object]] = {}
         vc_results_by_chunk: dict[str, object] = {}
+        voice_conversion_durations: dict[str, dict[str, float]] = {}
         retry_results: dict[str, VibeVoiceResult] = {}
         artifacts: list[dict[str, object]] = []
         warnings: list[str] = []
@@ -825,39 +826,6 @@ class VibeVoiceService:
                 chunk_vibevoice_outputs[(chunk.speaker, chunk.chunk_index)] = speaker_output
                 chunk_outputs[(chunk.speaker, chunk.chunk_index)] = speaker_output
 
-            if _directed_voice_conversion_enabled():
-                vc_service = self._get_directed_voice_conversion_service()
-                voice_conversion_settings = _directed_voice_conversion_settings_diagnostics(vc_service)
-                try:
-                    for chunk_index, chunk in enumerate(chunks, start=1):
-                        _raise_if_cancelled(cancel_event)
-                        chunk_key = _directed_chunk_key(chunk, chunks_by_speaker)
-                        chunk_label = _directed_chunk_label(chunk, chunks_by_speaker)
-                        chunk_audio_stem = _directed_chunk_audio_stem(chunk, chunks_by_speaker)
-                        _report_vibevoice_progress(
-                            progress_callback,
-                            "voice_conversion",
-                            f"指定台詞 {chunk_label} VC {chunk_index}/{len(chunks)}",
-                        )
-                        vc_started = perf_counter()
-                        vc_result = _convert_directed_voice(
-                            vc_service,
-                            source_audio_path=chunk_vibevoice_outputs[(chunk.speaker, chunk.chunk_index)],
-                            reference_audio_path=samples_by_slot[chunk.speaker].path,
-                        )
-                        voice_conversion_total_ms += _elapsed_ms(vc_started)
-                        vc_results_by_chunk[chunk_key] = vc_result
-                        voice_conversion_name = str(
-                            getattr(vc_result, "providers", {}).get("voice_conversion", "")
-                            or voice_conversion_name
-                            or "voice_conversion"
-                        )
-                        vc_output = temp_dir / f"{chunk_audio_stem}-vc.wav"
-                        vc_output.write_bytes(getattr(vc_result, "output_audio_bytes"))
-                        chunk_outputs[(chunk.speaker, chunk.chunk_index)] = vc_output
-                finally:
-                    self._release_directed_voice_conversion_service()
-
             asr_provider = self._get_directed_asr_provider()
             asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
             try:
@@ -915,9 +883,6 @@ class VibeVoiceService:
                 if retry_lines:
                     asr_provider = self._get_directed_asr_provider()
                     asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
-                    vc_service = self._get_directed_voice_conversion_service() if _directed_voice_conversion_enabled() else None
-                    if vc_service is not None and not voice_conversion_settings:
-                        voice_conversion_settings = _directed_voice_conversion_settings_diagnostics(vc_service)
                     try:
                         for retry_number, line in enumerate(retry_lines, start=1):
                             _raise_if_cancelled(cancel_event)
@@ -956,27 +921,6 @@ class VibeVoiceService:
                             retry_vibevoice_output = temp_dir / f"{retry_audio_stem}.wav"
                             retry_vibevoice_output.write_bytes(retry_result.audio_bytes)
                             retry_output = retry_vibevoice_output
-                            if vc_service is not None:
-                                _report_vibevoice_progress(
-                                    progress_callback,
-                                    "voice_conversion",
-                                    f"指定台詞 Line {line.index} 低スコア再生成VC {retry_number}/{len(retry_lines)}",
-                                )
-                                vc_started = perf_counter()
-                                vc_result = _convert_directed_voice(
-                                    vc_service,
-                                    source_audio_path=retry_vibevoice_output,
-                                    reference_audio_path=samples_by_slot[line.speaker].path,
-                                )
-                                voice_conversion_total_ms += _elapsed_ms(vc_started)
-                                vc_results_by_chunk[retry_key] = vc_result
-                                voice_conversion_name = str(
-                                    getattr(vc_result, "providers", {}).get("voice_conversion", "")
-                                    or voice_conversion_name
-                                    or "voice_conversion"
-                                )
-                                retry_output = temp_dir / f"{retry_audio_stem}-vc.wav"
-                                retry_output.write_bytes(getattr(vc_result, "output_audio_bytes"))
                             chunk_outputs[(line.speaker, retry_chunk_index)] = retry_output
                             _report_vibevoice_progress(
                                 progress_callback,
@@ -1001,8 +945,6 @@ class VibeVoiceService:
                             for audio_range in ranges:
                                 range_candidates_by_line.setdefault(audio_range.line_index, []).append(audio_range)
                     finally:
-                        if vc_service is not None:
-                            self._release_directed_voice_conversion_service()
                         self._release_directed_asr_provider()
                     ranges_by_line, candidate_warnings = _select_best_directed_range_candidates(lines, range_candidates_by_line)
             low_score_retry_diagnostics["selected_line_indices"] = [
@@ -1011,14 +953,70 @@ class VibeVoiceService:
                 if ranges_by_line[line.index].candidate_role == "retry_target"
             ]
             warnings.extend(candidate_warnings)
+            composition_outputs: dict[object, Path] = dict(chunk_outputs)
+            composition_ranges_by_line = ranges_by_line
+            if _directed_voice_conversion_enabled():
+                vc_service = self._get_directed_voice_conversion_service()
+                voice_conversion_settings = _directed_voice_conversion_settings_diagnostics(vc_service)
+                composition_outputs = {}
+                composition_ranges_by_line = {}
+                try:
+                    for line_index, line in enumerate(lines, start=1):
+                        _raise_if_cancelled(cancel_event)
+                        selected_range = ranges_by_line[line.index]
+                        source_path = _directed_output_path_for_range(chunk_outputs, selected_range)
+                        clip_input = temp_dir / f"line-{line.index}-speaker-{line.speaker}-vv-clip.wav"
+                        _write_wav_range(
+                            source_path,
+                            start=selected_range.start,
+                            end=selected_range.end,
+                            output_path=clip_input,
+                            normalize=False,
+                        )
+                        _report_vibevoice_progress(
+                            progress_callback,
+                            "voice_conversion",
+                            f"指定台詞 Line {line.index} VC {line_index}/{len(lines)}",
+                        )
+                        vc_started = perf_counter()
+                        vc_result = _convert_directed_voice(
+                            vc_service,
+                            source_audio_path=clip_input,
+                            reference_audio_path=samples_by_slot[line.speaker].path,
+                        )
+                        voice_conversion_total_ms += _elapsed_ms(vc_started)
+                        vc_key = f"line-{line.index}"
+                        vc_results_by_chunk[vc_key] = vc_result
+                        voice_conversion_name = str(
+                            getattr(vc_result, "providers", {}).get("voice_conversion", "")
+                            or voice_conversion_name
+                            or "voice_conversion"
+                        )
+                        vc_output = temp_dir / f"line-{line.index}-speaker-{line.speaker}-vc.wav"
+                        vc_output.write_bytes(getattr(vc_result, "output_audio_bytes"))
+                        vv_duration = _wav_duration(clip_input)
+                        vc_duration = _wav_duration(vc_output)
+                        voice_conversion_durations[vc_key] = {
+                            "vv_clip_duration": vv_duration,
+                            "vc_clip_duration": vc_duration,
+                            "duration_delta": vc_duration - vv_duration,
+                        }
+                        composition_outputs[line.index] = vc_output
+                        composition_ranges_by_line[line.index] = replace(
+                            selected_range,
+                            start=0.0,
+                            end=vc_duration,
+                        )
+                finally:
+                    self._release_directed_voice_conversion_service()
             _raise_if_cancelled(cancel_event)
             _report_vibevoice_progress(progress_callback, "reconstruct", "指定台詞 音声再配置")
             reconstruct_started = perf_counter()
             output_path = temp_dir / "directed-vibevoice-output.wav"
             _compose_directed_wav(
                 lines,
-                ranges_by_line=ranges_by_line,
-                speaker_outputs=chunk_outputs,
+                ranges_by_line=composition_ranges_by_line,
+                speaker_outputs=composition_outputs,
                 output_path=output_path,
                 gap_seconds=options.line_gap,
             )
@@ -1029,10 +1027,10 @@ class VibeVoiceService:
                 chunks=chunks,
                 chunks_by_speaker=chunks_by_speaker,
                 speaker_vibevoice_outputs=chunk_vibevoice_outputs,
-                speaker_outputs=chunk_outputs,
+                speaker_outputs=composition_outputs,
                 speaker_scripts=chunk_scripts,
-                ranges_by_line=ranges_by_line,
-                include_voice_conversion=bool(vc_results_by_chunk),
+                ranges_by_line=composition_ranges_by_line,
+                include_voice_conversion=False,
             )
 
         total_ms = _elapsed_ms(directed_started)
@@ -1111,6 +1109,8 @@ class VibeVoiceService:
                         }
                         for key, result in sorted(vc_results_by_chunk.items())
                     },
+                    "voice_conversion_granularity": "selected_line_segments" if vc_results_by_chunk else "",
+                    "voice_conversion_durations": voice_conversion_durations,
                     "ranges": [
                         {
                             "line_index": audio_range.line_index,
@@ -2418,6 +2418,8 @@ def _compose_directed_wav(
 
 
 def _directed_output_path_for_range(speaker_outputs: dict[object, Path], audio_range: VibeVoiceAudioRange) -> Path:
+    if audio_range.line_index in speaker_outputs:
+        return speaker_outputs[audio_range.line_index]
     chunk_key = (audio_range.speaker, audio_range.chunk_index)
     if chunk_key in speaker_outputs:
         return speaker_outputs[chunk_key]
@@ -2516,6 +2518,25 @@ def _wav_bytes_for_range(path: Path, *, start: float, end: float) -> bytes:
         output.setframerate(params["frame_rate"])
         output.writeframes(frames)
     return buffer.getvalue()
+
+
+def _write_wav_range(
+    path: Path,
+    *,
+    start: float,
+    end: float,
+    output_path: Path,
+    normalize: bool,
+) -> None:
+    params = _wav_params(path)
+    frames = _read_wav_frames(path, start=start, end=end)
+    if normalize:
+        frames = _normalize_directed_wav_frames(frames, params=params)
+    with wave.open(str(output_path), "wb") as output:
+        output.setnchannels(params["channels"])
+        output.setsampwidth(params["sample_width"])
+        output.setframerate(params["frame_rate"])
+        output.writeframes(frames)
 
 
 def _wav_params(path: Path) -> dict[str, int]:
