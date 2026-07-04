@@ -4,6 +4,8 @@
 
 音声翻訳Webアプリの公開MVPでは、静的UI、API gateway、GPU推論を分離し、GPUリソースをAI処理にだけ使う。ローカル開発ではFastAPIがUIとAPIを同時に提供してよいが、本番寄りの低アクセス構成では同じ形にこだわらない。
 
+発音練習アプリとVibeVoiceスキット作成アプリは、当面は同一リポジトリ内に置きつつ、デプロイ単位、secret、保存先、公開URLを分ける。2アプリ化の判断とCloudflare上の扱いは [APP_SPLIT.md](APP_SPLIT.md) を正とする。
+
 ## 推奨構成
 
 最初のGPUスモーク確認では、構成を分けすぎず、FastAPIのWeb UIとAPIをまとめてGPU環境へ載せる。これにより、モデルロード、GPU実行、録音またはアップロードから出力音声までの一通りの動作を先に確認する。
@@ -44,8 +46,9 @@ Browser
 
 1. ローカル開発: FastAPIが静的UIとAPIを同時に提供する。
 2. GPUスモーク確認: FastAPIのWeb UIとAPIを同じGPU環境で動かし、短い音声で一通りの推論を確認する。
-3. 公開MVP: Cloudflare Worker Static Assetsへ静的UIを置き、同じWorkerからOpenAI APIとRunPod Seed-VC APIを呼ぶ。初回デモの詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。
-4. 低遅延化: GPU側を常駐worker化し、可能ならASR、翻訳、TTS、声質変換をstreamingまたは段階的jobに分ける。
+3. アプリ分離: 同一repo内で発音練習アプリとVibeVoiceスキット作成アプリのUI入口、API、履歴、管理画面を分ける。
+4. 公開MVP: Cloudflare Worker Static Assetsへ静的UIを置き、発音練習アプリとVibeVoiceアプリを別projectまたは別Workerとしてデプロイする。初回デモの詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。
+5. 低遅延化: GPU側を常駐worker化し、可能ならASR、翻訳、TTS、声質変換をstreamingまたは段階的jobに分ける。
 
 ## 実装への影響
 
