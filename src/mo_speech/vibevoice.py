@@ -752,6 +752,7 @@ class VibeVoiceService:
         retry_target_scripts: dict[str, str] = {}
         retry_tail_guards: dict[str, str] = {}
         retry_script_lengths: dict[str, dict[str, object]] = {}
+        retry_seeds: dict[str, int] = {}
         asr_segments_by_chunk: dict[str, list[dict[str, object]]] = {}
         asr_words_by_chunk: dict[str, list[dict[str, object]]] = {}
         asr_texts_by_chunk: dict[str, dict[str, object]] = {}
@@ -936,6 +937,7 @@ class VibeVoiceService:
                                 line_by_line=False,
                                 seed=int(options.seed) + 1000 + retry_number,
                             )
+                            retry_seeds[retry_key] = retry_options.seed
                             _report_vibevoice_progress(
                                 progress_callback,
                                 "generation",
@@ -1097,6 +1099,7 @@ class VibeVoiceService:
                     "retry_target_scripts": retry_target_scripts,
                     "retry_tail_guards": retry_tail_guards,
                     "retry_script_lengths": retry_script_lengths,
+                    "retry_seeds": retry_seeds,
                     "asr_texts": asr_texts_by_chunk,
                     "asr_segments": asr_segments_by_chunk,
                     "asr_words": asr_words_by_chunk,
@@ -2030,6 +2033,11 @@ def _score_directed_candidate_range(
     if duration < 0.05:
         audio_penalty += 0.2
         reasons.append("too_short")
+    expected_min_duration = _directed_min_duration_for_text(target_text)
+    if expected_min_duration > 0 and duration < expected_min_duration:
+        short_ratio = (expected_min_duration - duration) / expected_min_duration
+        audio_penalty += min(0.3, short_ratio * 0.3)
+        reasons.append(f"duration_short_for_text={duration:.2f}/{expected_min_duration:.2f}")
     rms = float(metrics.get("rms", 0.0) or 0.0)
     peak = float(metrics.get("peak", 0.0) or 0.0)
     clip_ratio = float(metrics.get("clip_ratio", 0.0) or 0.0)
@@ -2056,6 +2064,13 @@ def _score_directed_candidate_range(
         candidate_score=round(score, 6),
         candidate_reasons=tuple(reasons),
     )
+
+
+def _directed_min_duration_for_text(normalized_text: str) -> float:
+    char_count = len(str(normalized_text or ""))
+    if char_count < 6:
+        return 0.0
+    return min(4.0, max(0.5, char_count * 0.06))
 
 
 def _directed_audio_range_metrics(audio_path: Path, *, start: float, end: float) -> dict[str, float]:

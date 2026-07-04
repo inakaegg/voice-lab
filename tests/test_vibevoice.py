@@ -841,6 +841,7 @@ def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_pa
     assert retry["initial_low_score_line_indices"] == [2]
     assert retry["attempted_line_indices"] == [2]
     assert retry["selected_line_indices"] == [2]
+    assert result.diagnostics["directed_line_mode"]["retry_seeds"] == {"1-retry-2": 1043}
     line2_candidates = [
         item
         for item in result.diagnostics["directed_line_mode"]["range_candidates"]
@@ -848,6 +849,44 @@ def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_pa
     ]
     assert [item["candidate_role"] for item in line2_candidates] == ["guard", "target", "retry_target"]
     assert line2_candidates[-1]["selected"] is True
+
+
+def test_directed_candidate_score_penalizes_too_short_text_range(tmp_path: Path) -> None:
+    audio_path = tmp_path / "candidate.wav"
+    _write_test_wav(audio_path, seconds=4.0)
+    text = "あっ、しゃおじいさん、こんにちは〜"
+
+    target = vibevoice_module._score_directed_candidate_range(
+        vibevoice_module.VibeVoiceAudioRange(
+            speaker=1,
+            line_index=1,
+            text=text,
+            matched_text="あ、シチーさん、こんちわーい",
+            start=0.0,
+            end=3.42,
+            chunk_index=1,
+        ),
+        role="target",
+        role_position=0,
+        audio_path=audio_path,
+    )
+    retry = vibevoice_module._score_directed_candidate_range(
+        vibevoice_module.VibeVoiceAudioRange(
+            speaker=1,
+            line_index=1,
+            text=text,
+            matched_text="こんにちは",
+            start=1.8,
+            end=2.2,
+            chunk_index=10001,
+        ),
+        role="retry_target",
+        role_position=0,
+        audio_path=audio_path,
+    )
+
+    assert target.candidate_score > retry.candidate_score
+    assert any(reason.startswith("duration_short_for_text=") for reason in retry.candidate_reasons)
 
 
 def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcription(
