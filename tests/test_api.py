@@ -1,4 +1,5 @@
 import base64
+import json
 import sys
 from pathlib import Path
 from threading import Event
@@ -24,6 +25,7 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "default-audio-history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
+    monkeypatch.setenv("MO_VIBEVOICE_DEBUG_RESULT_DIR", str(tmp_path / "vibevoice-debug"))
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
@@ -395,7 +397,7 @@ def test_vibevoice_job_api_rejects_runpod_only_model_on_local_backend() -> None:
     assert "runpod_serverless" in response.json()["detail"]
 
 
-def test_vibevoice_job_api_reports_elapsed_and_result() -> None:
+def test_vibevoice_job_api_reports_elapsed_and_result(tmp_path: Path) -> None:
     class FakeVibeVoiceResult:
         audio_bytes = b"RIFFfakewav"
         audio_mime_type = "audio/wav"
@@ -433,6 +435,11 @@ def test_vibevoice_job_api_reports_elapsed_and_result() -> None:
     assert status_payload["elapsed_ms"] >= 0
     assert status_payload["result"]["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
     assert any("16/32" in item["label"] for item in status_payload["progress_log"])
+    debug_payload = json.loads((tmp_path / "vibevoice-debug" / "last-result.json").read_text(encoding="utf-8"))
+    assert debug_payload["job_id"] == job_id
+    assert debug_payload["result"]["audio_base64_chars"] == len(base64.b64encode(b"RIFFfakewav").decode("ascii"))
+    assert "audio_base64" not in debug_payload["result"]
+    assert debug_payload["result"]["diagnostics"] == FakeVibeVoiceResult.diagnostics
 
 
 def test_vibevoice_job_api_can_request_cancel() -> None:

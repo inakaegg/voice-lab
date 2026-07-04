@@ -271,6 +271,54 @@ def test_directed_audio_ranges_do_not_include_tail_guard_words() -> None:
     assert ranges[1].matched_text == "お仕事は何ですか"
 
 
+def test_directed_audio_ranges_trim_misaligned_tail_guard_words() -> None:
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="そうなんですね"),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text="どうですか北海道は"),
+    ]
+
+    ranges = vibevoice_module._audio_ranges_from_words(
+        lines,
+        [
+            {"text": "そうなんですね", "start": 0.0, "end": 1.0},
+            {"text": "どうですか", "start": 1.0, "end": 2.0},
+            {"text": "ところで", "start": 2.0, "end": 3.0},
+            {"text": "お仕事は", "start": 3.0, "end": 4.0},
+            {"text": "どうですか", "start": 4.0, "end": 5.0},
+            {"text": "北海道は", "start": 5.0, "end": 6.0},
+        ],
+        duration=6.0,
+    )
+
+    assert ranges[0].matched_text == "そうなんですね"
+    assert ranges[1].start == 1.0
+    assert ranges[1].end == 2.0
+    assert ranges[1].matched_text == "どうですか"
+
+
+def test_directed_asr_text_diagnostics_reports_ignored_tail_guard() -> None:
+    lines = [
+        vibevoice_module.VibeVoiceDirectedLine(index=1, speaker=1, text="そうなんですね"),
+        vibevoice_module.VibeVoiceDirectedLine(index=2, speaker=1, text="どうですか北海道は"),
+    ]
+    words = [
+        {"text": "そうなんですね", "start": 0.0, "end": 1.0},
+        {"text": "どうですか", "start": 1.0, "end": 2.0},
+        {"text": "ところで", "start": 2.0, "end": 3.0},
+        {"text": "お仕事は", "start": 3.0, "end": 4.0},
+        {"text": "どうですか", "start": 4.0, "end": 5.0},
+        {"text": "北海道は", "start": 5.0, "end": 6.0},
+    ]
+
+    diagnostics = vibevoice_module._directed_asr_text_diagnostics(lines, words=words, segments=[])
+
+    assert diagnostics["full_text"] == "そうなんですねどうですかところでお仕事はどうですか北海道は"
+    assert diagnostics["target_prefix_text"] == "そうなんですねどうですか"
+    assert diagnostics["ignored_tail_text"] == "ところでお仕事はどうですか北海道は"
+    assert diagnostics["target_prefix_word_count"] == 2
+    assert diagnostics["ignored_tail_word_count"] == 4
+
+
 def test_compose_directed_wav_normalizes_line_segment_volume(tmp_path: Path) -> None:
     loud = tmp_path / "speaker-1.wav"
     quiet = tmp_path / "speaker-2.wav"
@@ -467,6 +515,16 @@ def test_vibevoice_service_directed_line_mode_sends_single_line_without_line_by_
         "below_target_min": True,
         "above_target_max": False,
         "above_full_max": False,
+    }
+    assert result.diagnostics["directed_line_mode"]["asr_texts"]["1"] == {
+        "target_text": target_script,
+        "full_text": "あっこんにちは北海道温泉仕事",
+        "target_prefix_text": "あっこんにちは北海道温泉仕事",
+        "ignored_tail_text": "",
+        "word_count": 4,
+        "target_prefix_word_count": 4,
+        "ignored_tail_word_count": 0,
+        "source": "words",
     }
     assert [artifact["kind"] for artifact in result.artifacts] == [
         "speaker_vibevoice",

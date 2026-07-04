@@ -740,6 +740,7 @@ class VibeVoiceService:
         chunk_script_lengths: dict[str, dict[str, object]] = {}
         asr_segments_by_chunk: dict[str, list[dict[str, object]]] = {}
         asr_words_by_chunk: dict[str, list[dict[str, object]]] = {}
+        asr_texts_by_chunk: dict[str, dict[str, object]] = {}
         vc_results_by_chunk: dict[str, object] = {}
         artifacts: list[dict[str, object]] = []
         warnings: list[str] = []
@@ -847,12 +848,13 @@ class VibeVoiceService:
                     asr_total_ms += _elapsed_ms(asr_started)
                     asr_segments_by_chunk[chunk_key] = _timestamp_rows(getattr(transcription, "segments", []))
                     asr_words_by_chunk[chunk_key] = _timestamp_rows(getattr(transcription, "words", []))
-                    ranges, range_warnings = _audio_ranges_for_directed_lines(
+                    ranges, range_warnings, asr_text_diagnostics = _audio_ranges_for_directed_lines(
                         chunk.lines,
                         transcription,
                         chunk_outputs[(chunk.speaker, chunk.chunk_index)],
                         chunk_index=chunk.chunk_index,
                     )
+                    asr_texts_by_chunk[chunk_key] = asr_text_diagnostics
                     warnings.extend(f"{chunk_label}: {warning}" for warning in range_warnings)
                     ranges_by_line.update({audio_range.line_index: audio_range for audio_range in ranges})
             finally:
@@ -941,6 +943,7 @@ class VibeVoiceService:
                     "speaker_target_scripts": chunk_target_scripts,
                     "speaker_tail_guards": chunk_tail_guards,
                     "speaker_script_lengths": chunk_script_lengths,
+                    "asr_texts": asr_texts_by_chunk,
                     "asr_segments": asr_segments_by_chunk,
                     "asr_words": asr_words_by_chunk,
                     "voice_conversion": {
@@ -1653,22 +1656,104 @@ def _timestamp_rows(rows: object) -> list[dict[str, object]]:
     return normalized
 
 
+def _timestamp_text(rows: Sequence[dict[str, object]]) -> str:
+    return "".join(str(row.get("text", "")) for row in rows)
+
+
+def _directed_target_prefix_words(
+    lines: Sequence[VibeVoiceDirectedLine],
+    words: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not words:
+        return []
+    normalized_target = "".join(_alignment_text(line.text) for line in lines)
+    if not normalized_target:
+        return list(words)
+
+    normalized_word_items: list[tuple[int, str]] = []
+    for index, word in enumerate(words):
+        normalized = _alignment_text(str(word.get("text", "")))
+        if normalized:
+            normalized_word_items.append((index, normalized))
+    if not normalized_word_items:
+        return list(words)
+
+    target_length = len(normalized_target)
+    prefix_text = ""
+    best_end_index = normalized_word_items[-1][0] + 1
+    best_score: tuple[int, int, int, int] | None = None
+    for source_index, normalized_word in normalized_word_items:
+        prefix_text += normalized_word
+        matcher = SequenceMatcher(None, normalized_target, prefix_text, autojunk=False)
+        matched_length = sum(block.size for block in matcher.get_matching_blocks())
+        if matched_length <= 0:
+            continue
+        missing_target_chars = max(0, target_length - matched_length)
+        extra_asr_chars = max(0, len(prefix_text) - matched_length)
+        # The generated chunk is target-first and guard-later. Prefer missing a
+        # tail fragment over swallowing unrelated guard words into the target.
+        score = (missing_target_chars + extra_asr_chars * 2, extra_asr_chars, missing_target_chars, source_index)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_end_index = source_index + 1
+    return list(words[:best_end_index])
+
+
+def _directed_asr_text_diagnostics(
+    lines: Sequence[VibeVoiceDirectedLine],
+    *,
+    words: Sequence[dict[str, object]],
+    segments: Sequence[dict[str, object]],
+) -> dict[str, object]:
+    target_text = _directed_speaker_script_for_lines(lines, include_tail_guard=False).target_text
+    if words:
+        target_words = _directed_target_prefix_words(lines, words)
+        ignored_tail_words = list(words[len(target_words) :])
+        return {
+            "target_text": target_text,
+            "full_text": _timestamp_text(words),
+            "target_prefix_text": _timestamp_text(target_words),
+            "ignored_tail_text": _timestamp_text(ignored_tail_words),
+            "word_count": len(words),
+            "target_prefix_word_count": len(target_words),
+            "ignored_tail_word_count": len(ignored_tail_words),
+            "source": "words",
+        }
+    return {
+        "target_text": target_text,
+        "full_text": _timestamp_text(segments),
+        "target_prefix_text": _timestamp_text(segments),
+        "ignored_tail_text": "",
+        "word_count": 0,
+        "target_prefix_word_count": 0,
+        "ignored_tail_word_count": 0,
+        "source": "segments",
+    }
+
+
 def _audio_ranges_for_directed_lines(
     lines: Sequence[VibeVoiceDirectedLine],
     transcription,
     audio_path: Path,
     *,
     chunk_index: int = 1,
-) -> tuple[list[VibeVoiceAudioRange], list[str]]:
+) -> tuple[list[VibeVoiceAudioRange], list[str], dict[str, object]]:
     duration = _wav_duration(audio_path)
     warnings: list[str] = []
     words = _timestamp_rows(getattr(transcription, "words", []))
     segments = _timestamp_rows(getattr(transcription, "segments", []))
+    asr_text_diagnostics = _directed_asr_text_diagnostics(lines, words=words, segments=segments)
     if words:
-        ranges = _audio_ranges_from_words(lines, words, duration=duration, chunk_index=chunk_index)
+        target_words = _directed_target_prefix_words(lines, words)
+        ranges = _audio_ranges_from_words(lines, target_words, duration=duration, chunk_index=chunk_index)
         if len(words) < len(lines):
             warnings.append("ASR word数が台詞行数より少ないため、範囲推定が粗くなる可能性があります。")
-        return ranges, warnings
+        ignored_tail_word_count = int(asr_text_diagnostics.get("ignored_tail_word_count", 0) or 0)
+        if ignored_tail_word_count > 0:
+            warnings.append(
+                f"ASR word末尾 {ignored_tail_word_count} 件をガード部分として最終再構成から除外しました。"
+            )
+        return ranges, warnings, asr_text_diagnostics
     if segments:
         if len(segments) == len(lines):
             return [
@@ -1681,9 +1766,13 @@ def _audio_ranges_for_directed_lines(
                     chunk_index=chunk_index,
                 )
                 for line, segment in zip(lines, segments, strict=True)
-            ], warnings
+            ], warnings, asr_text_diagnostics
         warnings.append("ASR segment数と台詞行数が一致しないため、文字数比で範囲を推定しました。")
-        return _audio_ranges_by_target_text_ratio(lines, rows=segments, duration=duration, chunk_index=chunk_index), warnings
+        return (
+            _audio_ranges_by_target_text_ratio(lines, rows=segments, duration=duration, chunk_index=chunk_index),
+            warnings,
+            asr_text_diagnostics,
+        )
     raise ValueError("指定台詞モードのASR timestampが空でした。")
 
 
@@ -1696,6 +1785,7 @@ def _audio_ranges_from_words(
 ) -> list[VibeVoiceAudioRange]:
     if not words:
         return _audio_ranges_by_target_text_ratio(lines, rows=[], duration=duration, chunk_index=chunk_index)
+    words = _directed_target_prefix_words(lines, words)
     normalized_words: list[str] = []
     source_word_indices: list[int] = []
     for index, word in enumerate(words):

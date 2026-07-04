@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import inspect
+import json
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -438,10 +440,12 @@ class VibeVoiceJobStore:
                 progress_callback=report_progress,
                 cancel_event=self.jobs[job_id].cancel_event,
             )
+            serialized_result = _serialize_vibevoice_result(result)
+            _write_vibevoice_debug_result(job_id, serialized_result)
             with self.lock:
                 job = self.jobs[job_id]
                 job.status = "cancelled" if job.cancel_event.is_set() else "succeeded"
-                job.result = None if job.status == "cancelled" else _serialize_vibevoice_result(result)
+                job.result = None if job.status == "cancelled" else serialized_result
                 job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
                 job.progress_log.append(job.current_stage)
                 job.finished_at = perf_counter()
@@ -602,6 +606,38 @@ def _serialize_vibevoice_result(result: VibeVoiceResult) -> dict[str, object]:
         "diagnostics": result.diagnostics,
         "artifacts": list(getattr(result, "artifacts", [])),
     }
+
+
+def _write_vibevoice_debug_result(job_id: str, result: dict[str, object]) -> None:
+    raw_dir = os.environ.get("MO_VIBEVOICE_DEBUG_RESULT_DIR", "tmp/vibevoice-debug").strip()
+    if raw_dir.lower() in {"", "0", "false", "off", "none"}:
+        return
+    try:
+        output_dir = Path(raw_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "job_id": job_id,
+            "result": _without_audio_base64(result),
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+        (output_dir / f"{job_id}.json").write_text(encoded + "\n", encoding="utf-8")
+        (output_dir / "last-result.json").write_text(encoded + "\n", encoding="utf-8")
+    except Exception:
+        LOGGER.warning("failed to write VibeVoice debug result: job_id=%s", job_id, exc_info=True)
+
+
+def _without_audio_base64(value):
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            if key == "audio_base64" and isinstance(item, str):
+                sanitized["audio_base64_chars"] = len(item)
+            else:
+                sanitized[key] = _without_audio_base64(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_without_audio_base64(item) for item in value]
+    return value
 
 
 def _elapsed_vibevoice_job_ms(job: VibeVoiceJob) -> float:
