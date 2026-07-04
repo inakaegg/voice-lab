@@ -217,10 +217,10 @@ def _vibevoice_generation_options(
         max_voice_seconds=max(0.0, _float_form_value(max_voice_seconds, 5.0)),
         line_by_line=_bool_form_value(line_by_line, default=False),
         line_gap=max(0.0, _float_form_value(line_gap, 1.0)),
-        directed_line_mode=_bool_form_value(directed_line_mode, default=False),
-        directed_retry_low_score=_bool_form_value(directed_retry_low_score, default=False),
+        directed_line_mode=_bool_form_value(directed_line_mode, default=True),
+        directed_retry_low_score=_bool_form_value(directed_retry_low_score, default=True),
         directed_retry_score_threshold=max(0.0, min(1.0, _float_form_value(directed_retry_score_threshold, 0.65))),
-        directed_retry_max_lines=max(0, _int_form_value(directed_retry_max_lines, 3)),
+        directed_retry_max_lines=max(0, _int_form_value(directed_retry_max_lines, 6)),
     )
 
 
@@ -460,6 +460,11 @@ def create_app(
     def vibevoice() -> FileResponse:
         return FileResponse(WEB_DIR / "vibevoice.html")
 
+    @app.get("/vibevoice/simple")
+    @app.get("/vibevoice/simple/")
+    def vibevoice_simple() -> FileResponse:
+        return FileResponse(WEB_DIR / "vibevoice_simple.html")
+
     @app.get("/seed-vc")
     def seed_vc_direct() -> FileResponse:
         return FileResponse(WEB_DIR / "seed_vc.html")
@@ -672,10 +677,10 @@ def create_app(
         max_voice_seconds: Annotated[str, Form()] = "5",
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
-        directed_line_mode: Annotated[str, Form()] = "false",
-        directed_retry_low_score: Annotated[str, Form()] = "false",
+        directed_line_mode: Annotated[str, Form()] = "true",
+        directed_retry_low_score: Annotated[str, Form()] = "true",
         directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
-        directed_retry_max_lines: Annotated[str, Form()] = "3",
+        directed_retry_max_lines: Annotated[str, Form()] = "6",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
@@ -746,10 +751,10 @@ def create_app(
         max_voice_seconds: Annotated[str, Form()] = "5",
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
-        directed_line_mode: Annotated[str, Form()] = "false",
-        directed_retry_low_score: Annotated[str, Form()] = "false",
+        directed_line_mode: Annotated[str, Form()] = "true",
+        directed_retry_low_score: Annotated[str, Form()] = "true",
         directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
-        directed_retry_max_lines: Annotated[str, Form()] = "3",
+        directed_retry_max_lines: Annotated[str, Form()] = "6",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:

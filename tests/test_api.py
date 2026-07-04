@@ -164,6 +164,19 @@ def test_vibevoice_serves_local_skit_ui() -> None:
     assert "/static/app_vibevoice.js" in response.text
 
 
+def test_vibevoice_serves_simple_user_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/vibevoice/simple")
+
+    assert response.status_code == 200
+    assert "かんたん生成" in response.text
+    assert 'data-vibevoice-mode="simple"' in response.text
+    assert 'value="runpod_serverless" selected' in response.text
+    assert 'name="directed_retry_max_lines" type="hidden" value="6"' in response.text
+    assert "/static/app_vibevoice.js" in response.text
+
+
 def test_seed_vc_serves_direct_conversion_ui() -> None:
     client = TestClient(create_app())
 
@@ -257,6 +270,41 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert service.calls[0][2].directed_retry_low_score is True
     assert service.calls[0][2].directed_retry_score_threshold == 0.7
     assert service.calls[0][2].directed_retry_max_lines == 4
+
+
+def test_vibevoice_generate_api_defaults_to_directed_retry_mode() -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            return FakeVibeVoiceResult()
+
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={"script": "你好。"},
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    options = service.calls[0][2]
+    assert options.directed_line_mode is True
+    assert options.directed_retry_low_score is True
+    assert options.directed_retry_score_threshold == 0.65
+    assert options.directed_retry_max_lines == 6
 
 
 def test_vibevoice_generate_api_preserves_voice_slots() -> None:

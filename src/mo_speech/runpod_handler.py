@@ -892,13 +892,13 @@ def _vibevoice_options_from_payload(value: object) -> VibeVoiceGenerationOptions
         max_voice_seconds=max(0.0, float(generation.get("max_voice_seconds", 5.0))),
         line_by_line=_optional_bool(generation.get("line_by_line")) is True,
         line_gap=max(0.0, float(generation.get("line_gap", 1.0))),
-        directed_line_mode=_optional_bool(generation.get("directed_line_mode")) is True,
-        directed_retry_low_score=_optional_bool(generation.get("directed_retry_low_score")) is True,
+        directed_line_mode=_optional_bool(generation.get("directed_line_mode")) is not False,
+        directed_retry_low_score=_optional_bool(generation.get("directed_retry_low_score")) is not False,
         directed_retry_score_threshold=max(
             0.0,
             min(1.0, float(generation.get("directed_retry_score_threshold", 0.65))),
         ),
-        directed_retry_max_lines=max(0, int(generation.get("directed_retry_max_lines", 3))),
+        directed_retry_max_lines=max(0, int(generation.get("directed_retry_max_lines", 6))),
     )
 
 

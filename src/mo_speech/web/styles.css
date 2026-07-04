@@ -2164,6 +2164,14 @@ audio {
   gap: 0;
 }
 
+.vibevoice-simple-shell {
+  max-inline-size: 1100px;
+}
+
+.vibevoice-simple-body .vibevoice-form {
+  gap: 18px;
+}
+
 .vibevoice-workspace {
   align-items: start;
   display: grid;
@@ -2542,6 +2550,35 @@ audio {
   overflow-wrap: anywhere;
 }
 
+.vibevoice-simple-mode-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.vibevoice-simple-mode-summary div {
+  background: #f7faff;
+  border: 1px solid #d8e5f4;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.vibevoice-simple-mode-summary dt {
+  color: #17395f;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.vibevoice-simple-mode-summary dd {
+  color: #556984;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .vibevoice-actions {
   align-items: center;
   background: #ffffff;
@@ -2773,6 +2810,22 @@ audio {
   padding-top: 10px;
 }
 
+.vibevoice-simple-debug {
+  border-top: 1px solid #dbe5f2;
+  padding-top: 12px;
+}
+
+.vibevoice-simple-debug summary {
+  color: #17395f;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.vibevoice-simple-debug[open] summary {
+  margin-bottom: 10px;
+}
+
 @media (max-width: 980px) {
   .vibevoice-shell {
     padding: 12px;
@@ -2812,6 +2865,7 @@ audio {
 
   .vibevoice-voice-grid,
   .vibevoice-settings-grid,
+  .vibevoice-simple-mode-summary,
   .vibevoice-speaker-scripts,
   .vibevoice-artifacts,
   .vibevoice-result-grid {

@@ -9,6 +9,7 @@ const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice
 const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_admin.html", import.meta.url), "utf8");
 const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_practice_history.js", import.meta.url), "utf8");
 const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
+const vibevoiceSimpleHtml = await readFile(new URL("../src/mo_speech/web/vibevoice_simple.html", import.meta.url), "utf8");
 const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
 const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.html", import.meta.url), "utf8");
 const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
@@ -129,6 +130,7 @@ test("practice history admin uses separated practice history API", () => {
 
 test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /VibeVoice/);
+  assert.match(vibevoiceHtml, /href="\/vibevoice\/simple"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
@@ -164,6 +166,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /name="directed_retry_low_score"/);
   assert.match(vibevoiceHtml, /name="directed_retry_score_threshold"/);
   assert.match(vibevoiceHtml, /name="directed_retry_max_lines"/);
+  assert.match(vibevoiceHtml, /id="vibevoice-directed-line-mode"[^>]*checked/s);
+  assert.match(vibevoiceHtml, /id="vibevoice-directed-retry-low-score"[^>]*checked/s);
+  assert.match(vibevoiceHtml, /id="vibevoice-directed-retry-max-lines"[^>]*value="6"/s);
   assert.match(vibevoiceHtml, /指定台詞を1行生成してASR再配置/);
   assert.match(vibevoiceHtml, /低スコア行だけ再生成/);
   assert.match(vibevoiceHtml, /パラメータ目安/);
@@ -172,6 +177,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /まず 0\.75-0\.95/);
   assert.match(vibevoiceHtml, /基本 0、不安定なら 30-50/);
   assert.match(vibevoiceHtml, /自然会話は 0\.4-0\.7秒/);
+  assert.match(vibevoiceHtml, /再生成スコア閾値/);
+  assert.match(vibevoiceHtml, /品質優先なら 0\.70-0\.75/);
+  assert.match(vibevoiceHtml, /最大再生成行数/);
+  assert.match(vibevoiceHtml, /既定 6/);
   assert.match(vibevoiceHtml, /id="vibevoice-generate-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-cancel-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-job-progress"/);
@@ -215,6 +224,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /data-vibevoice-range/);
   assert.match(vibevoiceSource, /renderRangeValue/);
   assert.match(vibevoiceSource, /vibevoiceSettingsStorageKey/);
+  assert.match(vibevoiceSource, /dataset\.vibevoiceMode/);
+  assert.match(vibevoiceSource, /mo-speech-vibevoice-simple-draft/);
   assert.match(vibevoiceSource, /loadVibeVoiceDraft/);
   assert.match(vibevoiceSource, /saveVibeVoiceDraft/);
   assert.match(vibevoiceSource, /progress_log/);
@@ -251,6 +262,34 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-progress-bar/);
   assert.match(styles, /\.vibevoice-progress-log/);
   assert.match(styles, /\.vibevoice-saved-voice/);
+});
+
+test("vibevoice simple page hides advanced controls behind fixed practical defaults", () => {
+  assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
+  assert.match(vibevoiceSimpleHtml, /かんたん生成/);
+  assert.match(vibevoiceSimpleHtml, /href="\/vibevoice">詳細設定/);
+  assert.match(vibevoiceSimpleHtml, /name="backend"/);
+  assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);
+  assert.match(vibevoiceSimpleHtml, /name="model_id"/);
+  assert.match(vibevoiceSimpleHtml, /value="vibevoice-large-aoi-pinned"[^>]*selected/s);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-script"/);
+  assert.match(vibevoiceSimpleHtml, /name="voice_file_1"/);
+  assert.match(vibevoiceSimpleHtml, /name="voice_file_4"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url"/);
+  assert.match(vibevoiceSimpleHtml, /name="directed_retry_score_threshold" type="hidden" value="0\.65"/);
+  assert.match(vibevoiceSimpleHtml, /name="directed_retry_max_lines" type="hidden" value="6"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-line-mode"[^>]*checked/s);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-retry-low-score"[^>]*checked/s);
+  assert.match(vibevoiceSimpleHtml, /ASRスコアが0\.65未満の行を最大6行まで再生成/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-button"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-job-progress"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-audio"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-artifacts"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-copy-diagnostics"/);
+  assert.match(vibevoiceSimpleHtml, /\/static\/app_vibevoice\.js/);
+  assert.match(styles, /\.vibevoice-simple-shell/);
+  assert.match(styles, /\.vibevoice-simple-mode-summary/);
+  assert.match(styles, /\.vibevoice-simple-debug/);
 });
 
 test("vibevoice auto line-by-line state is reflected in the UI without overwriting the saved preference", () => {

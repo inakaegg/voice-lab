@@ -149,6 +149,7 @@ def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
     assert "--vibevoice-directed-retry-low-score" in script
     assert "--vibevoice-directed-retry-score-threshold" in script
     assert "--vibevoice-directed-retry-max-lines" in script
+    assert 'RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES", "6"' in script
     assert "--vibevoice-line-gap" in script
     assert 'generation_payload["cfg_scale"] = args.vibevoice_cfg_scale' in script
     assert 'generation_payload["do_sample"] = False' in script

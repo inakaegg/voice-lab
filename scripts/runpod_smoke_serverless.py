@@ -100,7 +100,7 @@ def main() -> int:
     parser.add_argument(
         "--vibevoice-directed-retry-max-lines",
         type=int,
-        default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES", "3")),
+        default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES", "6")),
     )
     parser.add_argument(
         "--vibevoice-line-gap",

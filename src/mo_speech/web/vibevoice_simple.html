@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VibeVoice かんたん生成</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="vibevoice-body vibevoice-simple-body" data-vibevoice-mode="simple">
+    <main class="vibevoice-shell vibevoice-simple-shell" aria-label="VibeVoice かんたん生成">
+      <header class="vibevoice-header">
+        <div>
+          <p class="vibevoice-kicker">VibeVoice</p>
+          <h1>かんたん生成</h1>
+          <p>台本と参照音声から、指定した声でセリフ音声を生成します。</p>
+        </div>
+        <nav class="vibevoice-nav" aria-label="関連画面">
+          <a href="/">ユーザー画面</a>
+          <a href="/vibevoice">詳細設定</a>
+          <a href="/practice">発音練習</a>
+        </nav>
+      </header>
+
+      <form id="vibevoice-form" class="vibevoice-form">
+        <section class="vibevoice-panel vibevoice-script-panel" aria-label="台本">
+          <div class="vibevoice-panel-header">
+            <div>
+              <p class="vibevoice-section-label">Script</p>
+              <h2>台本</h2>
+            </div>
+            <label class="vibevoice-file-button">
+              <span>テキストファイル</span>
+              <input id="vibevoice-script-file" type="file" name="script_file" accept=".txt,text/plain" />
+            </label>
+          </div>
+          <textarea
+            id="vibevoice-script"
+            name="script"
+            rows="12"
+            placeholder="1 あっ、こんにちは〜&#10;2 こんにちは。ご無沙汰してます&#10;1 最近どうですか？"
+          ></textarea>
+          <p class="vibevoice-help">行頭に 1-4 / A-D を付けると話者を指定できます。話者ごとに対応する参照音声を指定してください。</p>
+        </section>
+
+        <section class="vibevoice-panel vibevoice-voice-panel" aria-label="参照音声">
+          <div class="vibevoice-panel-header">
+            <div>
+              <p class="vibevoice-section-label">Voices</p>
+              <h2>参照音声</h2>
+            </div>
+          </div>
+          <div class="vibevoice-voice-grid">
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">1</span>
+              <strong>Speaker 1</strong>
+              <input type="file" name="voice_file_1" accept="audio/*,video/*" />
+              <span class="vibevoice-upload-action">選択</span>
+              <small class="vibevoice-saved-voice" data-saved-voice-slot="1">未保存</small>
+              <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="1" controls preload="metadata" hidden aria-label="Speaker 1 参照音声プレビュー"></audio>
+            </label>
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">2</span>
+              <strong>Speaker 2</strong>
+              <input type="file" name="voice_file_2" accept="audio/*,video/*" />
+              <span class="vibevoice-upload-action">選択</span>
+              <small class="vibevoice-saved-voice" data-saved-voice-slot="2">未保存</small>
+              <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="2" controls preload="metadata" hidden aria-label="Speaker 2 参照音声プレビュー"></audio>
+            </label>
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">3</span>
+              <strong>Speaker 3</strong>
+              <input type="file" name="voice_file_3" accept="audio/*,video/*" />
+              <span class="vibevoice-upload-action">選択</span>
+              <small class="vibevoice-saved-voice" data-saved-voice-slot="3">未保存</small>
+              <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="3" controls preload="metadata" hidden aria-label="Speaker 3 参照音声プレビュー"></audio>
+            </label>
+            <label class="vibevoice-upload-slot">
+              <span class="vibevoice-upload-index">4</span>
+              <strong>Speaker 4</strong>
+              <input type="file" name="voice_file_4" accept="audio/*,video/*" />
+              <span class="vibevoice-upload-action">選択</span>
+              <small class="vibevoice-saved-voice" data-saved-voice-slot="4">未保存</small>
+              <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="4" controls preload="metadata" hidden aria-label="Speaker 4 参照音声プレビュー"></audio>
+            </label>
+          </div>
+          <section class="vibevoice-reference-url-panel" aria-label="URLから参照音声を取得">
+            <div>
+              <h3>URLから取得</h3>
+              <p>動画/音声URLの指定位置から参照音声を作成します。</p>
+            </div>
+            <div class="vibevoice-reference-url-grid">
+              <label class="vibevoice-url-field vibevoice-url-field-slot">
+                Speaker
+                <select id="vibevoice-reference-url-slot">
+                  <option value="1">Speaker 1</option>
+                  <option value="2">Speaker 2</option>
+                  <option value="3">Speaker 3</option>
+                  <option value="4">Speaker 4</option>
+                </select>
+              </label>
+              <label class="vibevoice-url-field vibevoice-url-field-main">
+                動画/音声URL
+                <input id="vibevoice-reference-url" type="url" placeholder="https://youtu.be/...?...&t=1m15s" />
+              </label>
+              <label class="vibevoice-url-field">
+                開始秒
+                <input id="vibevoice-reference-url-start" type="number" min="0" step="0.1" placeholder="URLの時刻" />
+              </label>
+              <label class="vibevoice-url-field">
+                取得秒数
+                <input id="vibevoice-reference-url-duration" type="number" min="0.5" max="30" step="0.5" value="5" />
+              </label>
+              <button id="vibevoice-reference-url-button" class="vibevoice-reference-url-button" type="button">取得</button>
+            </div>
+            <p id="vibevoice-reference-url-status" class="vibevoice-reference-url-status" role="status" aria-live="polite"></p>
+          </section>
+        </section>
+
+        <section class="vibevoice-panel vibevoice-simple-settings-panel" aria-label="生成設定">
+          <div class="vibevoice-panel-header">
+            <div>
+              <p class="vibevoice-section-label">Mode</p>
+              <h2>生成モード</h2>
+            </div>
+            <button id="vibevoice-reset-settings-button" class="vibevoice-reset-settings-button" type="button">初期設定に戻す</button>
+          </div>
+          <dl class="vibevoice-simple-mode-summary">
+            <div>
+              <dt>指定台詞モード</dt>
+              <dd>ON。話者ごとに1行生成し、ASRで台本順へ再配置します。</dd>
+            </div>
+            <div>
+              <dt>低スコア行の再生成</dt>
+              <dd>ON。ASRスコアが0.65未満の行を最大6行まで再生成します。</dd>
+            </div>
+          </dl>
+          <div class="vibevoice-simple-hidden-settings" hidden>
+            <select name="backend" id="vibevoice-backend">
+              <option value="local">ローカル</option>
+              <option value="runpod_serverless" selected>RunPod Serverless</option>
+            </select>
+            <select name="model_id" id="vibevoice-model-id">
+              <option value="vibevoice-1.5b-pinned">VibeVoice 1.5B 固定版</option>
+              <option value="vibevoice-1.5b-latest">VibeVoice 1.5B 最新</option>
+              <option value="vibevoice-large-aoi-pinned" data-vibevoice-backends="runpod_serverless" data-vibevoice-auto-line-by-line="false" selected>VibeVoice Large (RunPod)</option>
+            </select>
+            <input name="cfg_scale" type="hidden" value="1.3" />
+            <input name="inference_steps" type="hidden" value="10" />
+            <input name="seed" type="hidden" value="42" />
+            <input name="temperature" type="hidden" value="0.95" />
+            <input name="top_p" type="hidden" value="0.95" />
+            <input name="top_k" type="hidden" value="0" />
+            <input name="max_voice_seconds" type="hidden" value="5" />
+            <input name="line_gap" type="hidden" value="1" />
+            <input name="directed_retry_score_threshold" type="hidden" value="0.65" />
+            <input name="directed_retry_max_lines" type="hidden" value="6" />
+            <label><input name="do_sample" type="checkbox" checked /> do_sample</label>
+            <label><input id="vibevoice-line-by-line" name="line_by_line" type="checkbox" /> line_by_line</label>
+            <label><input id="vibevoice-directed-line-mode" name="directed_line_mode" type="checkbox" checked /> directed_line_mode</label>
+            <label><input id="vibevoice-directed-retry-low-score" name="directed_retry_low_score" type="checkbox" checked /> directed_retry_low_score</label>
+          </div>
+          <div class="vibevoice-actions">
+            <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
+            <button id="vibevoice-cancel-button" class="vibevoice-cancel-button" type="button" hidden>キャンセル</button>
+            <p id="vibevoice-message" class="vibevoice-message" role="status" aria-live="polite"></p>
+            <div id="vibevoice-job-progress" class="vibevoice-job-progress" hidden>
+              <div class="vibevoice-progress-bar" role="progressbar" aria-label="生成進捗" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+              <p id="vibevoice-timing" class="vibevoice-timing"></p>
+              <pre id="vibevoice-progress-log" class="vibevoice-progress-log" aria-live="polite"></pre>
+            </div>
+          </div>
+        </section>
+      </form>
+
+      <section id="vibevoice-result" class="vibevoice-result" aria-label="生成結果" hidden>
+        <div class="vibevoice-panel-header">
+          <div>
+            <p class="vibevoice-section-label">Result</p>
+            <h2>生成結果</h2>
+          </div>
+          <a id="vibevoice-download" class="vibevoice-download" href="#" download="vibevoice-output.wav">音声を保存</a>
+        </div>
+        <audio id="vibevoice-audio" controls></audio>
+        <section class="vibevoice-artifacts-section" aria-label="中間音声">
+          <h3>行ごとの音声</h3>
+          <div id="vibevoice-artifacts" class="vibevoice-artifacts"></div>
+        </section>
+        <details class="vibevoice-simple-debug">
+          <summary>診断とVV入力</summary>
+          <section class="vibevoice-speaker-scripts-section" aria-label="VV入力テキスト">
+            <h3>VV入力テキスト</h3>
+            <div id="vibevoice-speaker-scripts" class="vibevoice-speaker-scripts"></div>
+          </section>
+          <div class="vibevoice-result-grid">
+            <section>
+              <h3>正規化後の台本</h3>
+              <pre id="vibevoice-normalized-script"></pre>
+            </section>
+            <section>
+              <div class="vibevoice-result-section-header">
+                <h3>診断</h3>
+                <button id="vibevoice-copy-diagnostics" class="vibevoice-copy-button" type="button">コピー</button>
+              </div>
+              <pre id="vibevoice-diagnostics"></pre>
+            </section>
+          </div>
+        </details>
+      </section>
+
+      <details class="vibevoice-debug-runtime">
+        <summary>
+          <span>実行環境</span>
+          <span id="vibevoice-runtime-status" class="vibevoice-runtime-status" role="status" aria-live="polite">確認中...</span>
+        </summary>
+        <dl id="vibevoice-runtime-details" class="vibevoice-runtime-details"></dl>
+      </details>
+    </main>
+    <script src="/static/app_vibevoice.js" defer></script>
+  </body>
+</html>

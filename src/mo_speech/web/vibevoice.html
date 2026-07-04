@@ -16,6 +16,7 @@
         </div>
         <nav class="vibevoice-nav" aria-label="関連画面">
           <a href="/">ユーザー画面</a>
+          <a href="/vibevoice/simple">かんたん生成</a>
           <a href="/admin">管理画面</a>
           <a href="/practice">発音練習</a>
         </nav>
@@ -208,9 +209,9 @@
                 <label class="vibevoice-range-control" data-directed-retry-setting>
                   <span class="vibevoice-range-label">
                     <span>最大再生成行数</span>
-                    <output for="vibevoice-directed-retry-max-lines" data-vibevoice-range-output="directed_retry_max_lines">3</output>
+                    <output for="vibevoice-directed-retry-max-lines" data-vibevoice-range-output="directed_retry_max_lines">6</output>
                   </span>
-                  <input id="vibevoice-directed-retry-max-lines" name="directed_retry_max_lines" type="range" min="1" max="20" step="1" value="3" data-vibevoice-range />
+                  <input id="vibevoice-directed-retry-max-lines" name="directed_retry_max_lines" type="range" min="1" max="20" step="1" value="6" data-vibevoice-range />
                 </label>
               </div>
               <div class="vibevoice-switch-row">
@@ -223,11 +224,11 @@
                   <span>行ごとに生成して結合</span>
                 </label>
                 <label class="vibevoice-switch" data-directed-line-mode="false">
-                  <input id="vibevoice-directed-line-mode" name="directed_line_mode" type="checkbox" />
+                  <input id="vibevoice-directed-line-mode" name="directed_line_mode" type="checkbox" checked />
                   <span>指定台詞を1行生成してASR再配置</span>
                 </label>
                 <label class="vibevoice-switch" data-directed-retry-low-score="false">
-                  <input id="vibevoice-directed-retry-low-score" name="directed_retry_low_score" type="checkbox" />
+                  <input id="vibevoice-directed-retry-low-score" name="directed_retry_low_score" type="checkbox" checked />
                   <span>低スコア行だけ再生成</span>
                 </label>
               </div>
@@ -269,6 +270,14 @@
                   <div>
                     <dt>指定台詞</dt>
                     <dd>話者ごとに1行生成し、ASR区間を元台本順へ再配置する。</dd>
+                  </div>
+                  <div>
+                    <dt>再生成スコア閾値</dt>
+                    <dd>採用候補のASRスコアがこの値未満なら再生成候補を作る。既定 0.65。品質優先なら 0.70-0.75、費用優先なら下げる。</dd>
+                  </div>
+                  <div>
+                    <dt>最大再生成行数</dt>
+                    <dd>低スコア行のうち再生成する上限。前回の18行診断では6行が対象だったため既定 6。</dd>
                   </div>
                   <div>
                     <dt>行間秒数</dt>

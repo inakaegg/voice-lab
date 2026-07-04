@@ -41,7 +41,9 @@ const referenceUrlStatus = document.querySelector("#vibevoice-reference-url-stat
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
-const vibevoiceSettingsStorageKey = "mo-speech-vibevoice-draft";
+const vibevoicePageMode = document.body?.dataset.vibevoiceMode || "advanced";
+const vibevoiceSettingsStorageKey =
+  vibevoicePageMode === "simple" ? "mo-speech-vibevoice-simple-draft" : "mo-speech-vibevoice-draft";
 const autoLineByLineMinLines = 4;
 const autoLineByLineMinChars = 180;
 const directedTargetMaxChars = 120;
