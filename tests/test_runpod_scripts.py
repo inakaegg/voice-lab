@@ -149,7 +149,8 @@ def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
     assert "--vibevoice-directed-retry-low-score" in script
     assert "--vibevoice-directed-retry-score-threshold" in script
     assert "--vibevoice-directed-retry-max-lines" in script
-    assert 'RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES", "6"' in script
+    assert "--vibevoice-directed-retry-max-multiplier" in script
+    assert 'RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_MULTIPLIER", "1"' in script
     assert "--vibevoice-line-gap" in script
     assert 'generation_payload["cfg_scale"] = args.vibevoice_cfg_scale' in script
     assert 'generation_payload["do_sample"] = False' in script
@@ -157,7 +158,8 @@ def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
     assert '"directed_line_mode": args.vibevoice_directed_line_mode' in script
     assert '"directed_retry_low_score": args.vibevoice_directed_retry_low_score' in script
     assert '"directed_retry_score_threshold": args.vibevoice_directed_retry_score_threshold' in script
-    assert '"directed_retry_max_lines": args.vibevoice_directed_retry_max_lines' in script
+    assert '"directed_retry_max_multiplier": args.vibevoice_directed_retry_max_multiplier' in script
+    assert 'generation_payload["directed_retry_max_lines"] = args.vibevoice_directed_retry_max_lines' in script
     assert '"line_gap": args.vibevoice_line_gap' in script
 
 

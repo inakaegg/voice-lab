@@ -22,7 +22,12 @@ from .providers.voice import (
     VoiceConversionService,
     create_voice_conversion_service_from_env,
 )
-from .vibevoice import VibeVoiceGenerationOptions, VibeVoiceService, VibeVoiceVoiceSample
+from .vibevoice import (
+    VibeVoiceGenerationOptions,
+    VibeVoiceService,
+    VibeVoiceVoiceSample,
+    directed_retry_max_lines_for_script,
+)
 
 _WORKER_STARTED_AT = perf_counter()
 _PIPELINE: SpeechTranslationPipeline | None = None
@@ -310,7 +315,7 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         result = service.generate(
             script_text=script,
             voice_paths=voice_paths,
-            options=_vibevoice_options_from_payload(payload.get("generation")),
+            options=_vibevoice_options_from_payload(payload.get("generation"), script_text=script),
         )
 
     response_artifacts, artifact_summary = _vibevoice_artifacts_for_runpod_response(
@@ -878,8 +883,9 @@ def _seed_vc_settings_from_payload(payload: dict[str, object]) -> SeedVcRuntimeS
     )
 
 
-def _vibevoice_options_from_payload(value: object) -> VibeVoiceGenerationOptions:
+def _vibevoice_options_from_payload(value: object, *, script_text: str = "") -> VibeVoiceGenerationOptions:
     generation = value if isinstance(value, dict) else {}
+    retry_max_lines = _directed_retry_max_lines_from_generation(generation, script_text=script_text)
     return VibeVoiceGenerationOptions(
         model_id=str(generation.get("model_id") or "vibevoice-1.5b-pinned"),
         cfg_scale=float(generation.get("cfg_scale", 1.3)),
@@ -898,8 +904,16 @@ def _vibevoice_options_from_payload(value: object) -> VibeVoiceGenerationOptions
             0.0,
             min(1.0, float(generation.get("directed_retry_score_threshold", 0.65))),
         ),
-        directed_retry_max_lines=max(0, int(generation.get("directed_retry_max_lines", 6))),
+        directed_retry_max_lines=retry_max_lines,
     )
+
+
+def _directed_retry_max_lines_from_generation(generation: dict[str, object], *, script_text: str) -> int:
+    raw_max_lines = generation.get("directed_retry_max_lines")
+    if raw_max_lines not in (None, "", "auto"):
+        return max(0, int(raw_max_lines))
+    multiplier = float(generation.get("directed_retry_max_multiplier", 1.0))
+    return directed_retry_max_lines_for_script(script_text, multiplier=multiplier)
 
 
 def _optional_int(value: object) -> int | None:

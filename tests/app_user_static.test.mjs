@@ -130,7 +130,7 @@ test("practice history admin uses separated practice history API", () => {
 
 test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /VibeVoice/);
-  assert.match(vibevoiceHtml, /href="\/vibevoice\/simple"/);
+  assert.match(vibevoiceHtml, /href="\/vibevoice"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
@@ -165,10 +165,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /name="directed_line_mode"/);
   assert.match(vibevoiceHtml, /name="directed_retry_low_score"/);
   assert.match(vibevoiceHtml, /name="directed_retry_score_threshold"/);
-  assert.match(vibevoiceHtml, /name="directed_retry_max_lines"/);
+  assert.match(vibevoiceHtml, /name="directed_retry_max_multiplier"/);
   assert.match(vibevoiceHtml, /id="vibevoice-directed-line-mode"[^>]*checked/s);
   assert.match(vibevoiceHtml, /id="vibevoice-directed-retry-low-score"[^>]*checked/s);
-  assert.match(vibevoiceHtml, /id="vibevoice-directed-retry-max-lines"[^>]*value="6"/s);
+  assert.match(vibevoiceHtml, /id="vibevoice-directed-retry-max-multiplier"[^>]*value="1"/s);
   assert.match(vibevoiceHtml, /指定台詞を1行生成してASR再配置/);
   assert.match(vibevoiceHtml, /低スコア行だけ再生成/);
   assert.match(vibevoiceHtml, /パラメータ目安/);
@@ -179,8 +179,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /自然会話は 0\.4-0\.7秒/);
   assert.match(vibevoiceHtml, /再生成スコア閾値/);
   assert.match(vibevoiceHtml, /品質優先なら 0\.70-0\.75/);
-  assert.match(vibevoiceHtml, /最大再生成行数/);
-  assert.match(vibevoiceHtml, /既定 6/);
+  assert.match(vibevoiceHtml, /再生成強度/);
+  assert.match(vibevoiceHtml, /11行台本なら1\.0で6行、2\.0で12行/);
   assert.match(vibevoiceHtml, /id="vibevoice-generate-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-cancel-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-job-progress"/);
@@ -250,7 +250,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /"directed_line_mode"/);
   assert.match(vibevoiceSource, /"directed_retry_low_score"/);
   assert.match(vibevoiceSource, /"directed_retry_score_threshold"/);
-  assert.match(vibevoiceSource, /"directed_retry_max_lines"/);
+  assert.match(vibevoiceSource, /"directed_retry_max_multiplier"/);
   assert.match(vibevoiceSource, /body\.set\("directed_line_mode",\s*directedLineModeControl\.checked \? "true" : "false"\)/);
   assert.match(vibevoiceSource, /body\.set\("directed_retry_low_score",\s*effectiveDirectedRetryLowScoreEnabled\(\) \? "true" : "false"\)/);
   assert.match(styles, /\.vibevoice-shell/);
@@ -267,7 +267,7 @@ test("vibevoice page provides local skit generation controls", () => {
 test("vibevoice simple page hides advanced controls behind fixed practical defaults", () => {
   assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
   assert.match(vibevoiceSimpleHtml, /かんたん生成/);
-  assert.match(vibevoiceSimpleHtml, /href="\/vibevoice">詳細設定/);
+  assert.match(vibevoiceSimpleHtml, /href="\/vibevoice\/admin">詳細設定/);
   assert.match(vibevoiceSimpleHtml, /name="backend"/);
   assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);
   assert.match(vibevoiceSimpleHtml, /name="model_id"/);
@@ -277,10 +277,10 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /name="voice_file_4"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url"/);
   assert.match(vibevoiceSimpleHtml, /name="directed_retry_score_threshold" type="hidden" value="0\.65"/);
-  assert.match(vibevoiceSimpleHtml, /name="directed_retry_max_lines" type="hidden" value="6"/);
+  assert.match(vibevoiceSimpleHtml, /name="directed_retry_max_multiplier" type="hidden" value="1"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-line-mode"[^>]*checked/s);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-retry-low-score"[^>]*checked/s);
-  assert.match(vibevoiceSimpleHtml, /ASRスコアが0\.65未満の行を最大6行まで再生成/);
+  assert.match(vibevoiceSimpleHtml, /台本行数から自動算出した上限まで再生成/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-button"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-job-progress"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-audio"/);

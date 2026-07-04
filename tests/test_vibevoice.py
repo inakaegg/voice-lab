@@ -19,6 +19,7 @@ from mo_speech.vibevoice import (
     VibeVoiceError,
     VibeVoiceService,
     VibeVoiceVoiceSample,
+    directed_retry_max_lines_for_script,
     is_vibevoice_model_supported_by_backend,
     resolve_vibevoice_model_preset,
     normalize_vibevoice_directed_line_script,
@@ -115,6 +116,15 @@ def _read_test_samples(path: Path) -> list[int]:
 
 def _sample_rms(samples: list[int]) -> float:
     return math.sqrt(sum(sample * sample for sample in samples) / max(1, len(samples))) / 32768.0
+
+
+def test_directed_retry_max_lines_for_script_scales_from_line_count() -> None:
+    script = "\n".join(f"1 台詞{i}" for i in range(1, 12))
+
+    assert directed_retry_max_lines_for_script(script) == 6
+    assert directed_retry_max_lines_for_script(script, multiplier=2.0) == 12
+    assert directed_retry_max_lines_for_script(script, multiplier=0.5) == 3
+    assert directed_retry_max_lines_for_script(script, multiplier=0.0) == 0
 
 
 def test_normalize_vibevoice_script_adds_speaker_tag_per_plain_line() -> None:

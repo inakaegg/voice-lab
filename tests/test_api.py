@@ -152,19 +152,33 @@ def test_practice_admin_serves_practice_history_ui() -> None:
     assert "/static/app_practice_history.js" in response.text
 
 
-def test_vibevoice_serves_local_skit_ui() -> None:
+def test_vibevoice_serves_simple_user_ui() -> None:
     client = TestClient(create_app())
 
     response = client.get("/vibevoice")
 
     assert response.status_code == 200
-    assert "VibeVoice" in response.text
+    assert "かんたん生成" in response.text
+    assert 'data-vibevoice-mode="simple"' in response.text
     assert "vibevoice-script" in response.text
     assert "voice_file_1" in response.text
+    assert 'name="directed_retry_max_multiplier" type="hidden" value="1"' in response.text
     assert "/static/app_vibevoice.js" in response.text
 
 
-def test_vibevoice_serves_simple_user_ui() -> None:
+def test_vibevoice_serves_admin_skit_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/vibevoice/admin")
+
+    assert response.status_code == 200
+    assert "VibeVoice" in response.text
+    assert "vibevoice-script" in response.text
+    assert 'name="directed_retry_max_multiplier"' in response.text
+    assert "/static/app_vibevoice.js" in response.text
+
+
+def test_vibevoice_simple_alias_still_serves_user_ui() -> None:
     client = TestClient(create_app())
 
     response = client.get("/vibevoice/simple")
@@ -172,9 +186,6 @@ def test_vibevoice_serves_simple_user_ui() -> None:
     assert response.status_code == 200
     assert "かんたん生成" in response.text
     assert 'data-vibevoice-mode="simple"' in response.text
-    assert 'value="runpod_serverless" selected' in response.text
-    assert 'name="directed_retry_max_lines" type="hidden" value="6"' in response.text
-    assert "/static/app_vibevoice.js" in response.text
 
 
 def test_seed_vc_serves_direct_conversion_ui() -> None:
@@ -294,7 +305,7 @@ def test_vibevoice_generate_api_defaults_to_directed_retry_mode() -> None:
 
     response = client.post(
         "/api/vibevoice/generate",
-        data={"script": "你好。"},
+        data={"script": "\n".join(f"1 你好{i}。" for i in range(1, 12))},
         files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
     )
 
@@ -305,6 +316,39 @@ def test_vibevoice_generate_api_defaults_to_directed_retry_mode() -> None:
     assert options.directed_retry_low_score is True
     assert options.directed_retry_score_threshold == 0.65
     assert options.directed_retry_max_lines == 6
+
+
+def test_vibevoice_generate_api_scales_retry_max_lines_from_multiplier() -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            return FakeVibeVoiceResult()
+
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={
+            "script": "\n".join(f"1 你好{i}。" for i in range(1, 12)),
+            "directed_retry_max_multiplier": "2",
+        },
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert service.calls[0][2].directed_retry_max_lines == 12
 
 
 def test_vibevoice_generate_api_preserves_voice_slots() -> None:

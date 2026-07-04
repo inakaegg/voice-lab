@@ -83,6 +83,7 @@ from .vibevoice import (
     VibeVoiceGenerationOptions,
     VibeVoiceService,
     VibeVoiceVoiceSample,
+    directed_retry_max_lines_for_script,
     normalize_vibevoice_backend,
     validate_vibevoice_model_backend,
 )
@@ -189,6 +190,7 @@ async def _save_vibevoice_voice_uploads(uploads: list[UploadFile | None], direct
 
 def _vibevoice_generation_options(
     *,
+    script_text: str,
     model_id: str,
     cfg_scale: str,
     inference_steps: str,
@@ -204,7 +206,13 @@ def _vibevoice_generation_options(
     directed_retry_low_score: str,
     directed_retry_score_threshold: str,
     directed_retry_max_lines: str,
+    directed_retry_max_multiplier: str,
 ) -> VibeVoiceGenerationOptions:
+    retry_max_lines = _directed_retry_max_lines_form_value(
+        script_text=script_text,
+        directed_retry_max_lines=directed_retry_max_lines,
+        directed_retry_max_multiplier=directed_retry_max_multiplier,
+    )
     return VibeVoiceGenerationOptions(
         model_id=model_id,
         cfg_scale=_float_form_value(cfg_scale, 1.3),
@@ -220,8 +228,21 @@ def _vibevoice_generation_options(
         directed_line_mode=_bool_form_value(directed_line_mode, default=True),
         directed_retry_low_score=_bool_form_value(directed_retry_low_score, default=True),
         directed_retry_score_threshold=max(0.0, min(1.0, _float_form_value(directed_retry_score_threshold, 0.65))),
-        directed_retry_max_lines=max(0, _int_form_value(directed_retry_max_lines, 6)),
+        directed_retry_max_lines=retry_max_lines,
     )
+
+
+def _directed_retry_max_lines_form_value(
+    *,
+    script_text: str,
+    directed_retry_max_lines: str | None,
+    directed_retry_max_multiplier: str | None,
+) -> int:
+    value = str(directed_retry_max_lines or "").strip()
+    if value and value.lower() != "auto":
+        return max(0, _int_form_value(value, 0))
+    multiplier = _float_form_value(directed_retry_max_multiplier, 1.0)
+    return directed_retry_max_lines_for_script(script_text, multiplier=multiplier)
 
 
 def _select_vibevoice_generator(
@@ -457,7 +478,13 @@ def create_app(
         return FileResponse(WEB_DIR / "practice_admin.html")
 
     @app.get("/vibevoice")
+    @app.get("/vibevoice/")
     def vibevoice() -> FileResponse:
+        return FileResponse(WEB_DIR / "vibevoice_simple.html")
+
+    @app.get("/vibevoice/admin")
+    @app.get("/vibevoice/admin/")
+    def vibevoice_admin() -> FileResponse:
         return FileResponse(WEB_DIR / "vibevoice.html")
 
     @app.get("/vibevoice/simple")
@@ -680,13 +707,15 @@ def create_app(
         directed_line_mode: Annotated[str, Form()] = "true",
         directed_retry_low_score: Annotated[str, Form()] = "true",
         directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
-        directed_retry_max_lines: Annotated[str, Form()] = "6",
+        directed_retry_max_lines: Annotated[str, Form()] = "auto",
+        directed_retry_max_multiplier: Annotated[str, Form()] = "1",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
         try:
             script_text = await _read_vibevoice_script(script, script_file)
             options = _vibevoice_generation_options(
+                script_text=script_text,
                 model_id=model_id,
                 cfg_scale=cfg_scale,
                 inference_steps=inference_steps,
@@ -702,6 +731,7 @@ def create_app(
                 directed_retry_low_score=directed_retry_low_score,
                 directed_retry_score_threshold=directed_retry_score_threshold,
                 directed_retry_max_lines=directed_retry_max_lines,
+                directed_retry_max_multiplier=directed_retry_max_multiplier,
             )
             with TemporaryDirectory(prefix="mo-vibevoice-api-") as temp_dir:
                 voice_paths = await _save_vibevoice_voice_uploads(
@@ -754,7 +784,8 @@ def create_app(
         directed_line_mode: Annotated[str, Form()] = "true",
         directed_retry_low_score: Annotated[str, Form()] = "true",
         directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
-        directed_retry_max_lines: Annotated[str, Form()] = "6",
+        directed_retry_max_lines: Annotated[str, Form()] = "auto",
+        directed_retry_max_multiplier: Annotated[str, Form()] = "1",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
@@ -762,6 +793,7 @@ def create_app(
         try:
             script_text = await _read_vibevoice_script(script, script_file)
             options = _vibevoice_generation_options(
+                script_text=script_text,
                 model_id=model_id,
                 cfg_scale=cfg_scale,
                 inference_steps=inference_steps,
@@ -777,6 +809,7 @@ def create_app(
                 directed_retry_low_score=directed_retry_low_score,
                 directed_retry_score_threshold=directed_retry_score_threshold,
                 directed_retry_max_lines=directed_retry_max_lines,
+                directed_retry_max_multiplier=directed_retry_max_multiplier,
             )
             voice_paths = await _save_vibevoice_voice_uploads(
                 [voice_file_1, voice_file_2, voice_file_3, voice_file_4],

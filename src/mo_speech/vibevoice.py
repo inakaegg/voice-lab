@@ -43,6 +43,7 @@ DIRECTED_OUTPUT_MAX_GAIN = 2.5
 DIRECTED_OUTPUT_MIN_RMS = 0.0001
 DIRECTED_RETRY_SCORE_THRESHOLD = 0.65
 DIRECTED_RETRY_MAX_LINES = 6
+DIRECTED_RETRY_MAX_MULTIPLIER = 1.0
 DIRECTED_RETRY_CHUNK_INDEX_OFFSET = 10_000
 _SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -308,6 +309,15 @@ def parse_vibevoice_directed_script_lines(text: str, *, max_bytes: int = 200_000
     if not speaker_lines:
         raise ValueError("script is required")
     return speaker_lines
+
+
+def directed_retry_max_lines_for_script(text: str, *, multiplier: float = DIRECTED_RETRY_MAX_MULTIPLIER) -> int:
+    lines = parse_vibevoice_directed_script_lines(text)
+    retry_multiplier = max(0.0, float(multiplier))
+    if retry_multiplier == 0:
+        return 0
+    base_lines = max(1, math.ceil(len(lines) / 2))
+    return max(0, math.ceil(base_lines * retry_multiplier))
 
 
 def _directed_script_for_lines(lines: Sequence[VibeVoiceDirectedLine], *, output_speaker: int = 1) -> str:

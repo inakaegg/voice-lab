@@ -64,7 +64,7 @@ const persistedFieldNames = [
   "directed_line_mode",
   "directed_retry_low_score",
   "directed_retry_score_threshold",
-  "directed_retry_max_lines",
+  "directed_retry_max_multiplier",
 ];
 const persistedControls = persistedFieldNames
   .map((name) => form.elements[name])

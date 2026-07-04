@@ -16,7 +16,7 @@
         </div>
         <nav class="vibevoice-nav" aria-label="関連画面">
           <a href="/">ユーザー画面</a>
-          <a href="/vibevoice/simple">かんたん生成</a>
+          <a href="/vibevoice">かんたん生成</a>
           <a href="/admin">管理画面</a>
           <a href="/practice">発音練習</a>
         </nav>
@@ -208,10 +208,10 @@
                 </label>
                 <label class="vibevoice-range-control" data-directed-retry-setting>
                   <span class="vibevoice-range-label">
-                    <span>最大再生成行数</span>
-                    <output for="vibevoice-directed-retry-max-lines" data-vibevoice-range-output="directed_retry_max_lines">6</output>
+                    <span>再生成強度</span>
+                    <output for="vibevoice-directed-retry-max-multiplier" data-vibevoice-range-output="directed_retry_max_multiplier">1</output>
                   </span>
-                  <input id="vibevoice-directed-retry-max-lines" name="directed_retry_max_lines" type="range" min="1" max="20" step="1" value="6" data-vibevoice-range />
+                  <input id="vibevoice-directed-retry-max-multiplier" name="directed_retry_max_multiplier" type="range" min="0" max="3" step="0.25" value="1" data-vibevoice-range />
                 </label>
               </div>
               <div class="vibevoice-switch-row">
@@ -276,8 +276,8 @@
                     <dd>採用候補のASRスコアがこの値未満なら再生成候補を作る。既定 0.65。品質優先なら 0.70-0.75、費用優先なら下げる。</dd>
                   </div>
                   <div>
-                    <dt>最大再生成行数</dt>
-                    <dd>低スコア行のうち再生成する上限。前回の18行診断では6行が対象だったため既定 6。</dd>
+                    <dt>再生成強度</dt>
+                    <dd>台本有効行数の半分を基準にする倍率。既定 1.0。11行台本なら1.0で6行、2.0で12行まで再生成候補を作る。</dd>
                   </div>
                   <div>
                     <dt>行間秒数</dt>

@@ -100,7 +100,12 @@ def main() -> int:
     parser.add_argument(
         "--vibevoice-directed-retry-max-lines",
         type=int,
-        default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES", "6")),
+        default=_optional_int_env("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES"),
+    )
+    parser.add_argument(
+        "--vibevoice-directed-retry-max-multiplier",
+        type=float,
+        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_MULTIPLIER", "1")),
     )
     parser.add_argument(
         "--vibevoice-line-gap",
@@ -150,9 +155,11 @@ def main() -> int:
             "directed_line_mode": args.vibevoice_directed_line_mode,
             "directed_retry_low_score": args.vibevoice_directed_retry_low_score,
             "directed_retry_score_threshold": args.vibevoice_directed_retry_score_threshold,
-            "directed_retry_max_lines": args.vibevoice_directed_retry_max_lines,
+            "directed_retry_max_multiplier": args.vibevoice_directed_retry_max_multiplier,
             "line_gap": args.vibevoice_line_gap,
         }
+        if args.vibevoice_directed_retry_max_lines is not None:
+            generation_payload["directed_retry_max_lines"] = args.vibevoice_directed_retry_max_lines
         if args.vibevoice_cfg_scale is not None:
             generation_payload["cfg_scale"] = args.vibevoice_cfg_scale
         if args.vibevoice_no_sample:
