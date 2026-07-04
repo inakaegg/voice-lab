@@ -78,16 +78,32 @@ def test_media_reference_extractor_explicit_start_overrides_url_start(tmp_path: 
     assert "*12.500-20.500" in calls[0]
 
 
-def test_media_reference_extractor_falls_back_to_full_download_when_section_download_fails() -> None:
+def test_media_reference_extractor_does_not_full_download_when_section_download_fails() -> None:
     calls: list[list[str]] = []
 
     def fake_run(command, *, capture_output, text, timeout, check):
         calls.append(list(command))
         if command[0] == "yt-dlp":
-            if "--download-sections" in command:
-                return subprocess.CompletedProcess(command, 1, stdout="", stderr="ERROR: ffmpeg exited with code 8: 403 Forbidden")
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="ERROR: ffmpeg exited with code 8: 403 Forbidden")
+        raise AssertionError("ffmpeg should not run when yt-dlp section download fails")
+
+    extractor = MediaReferenceAudioExtractor(runner=fake_run)
+    with pytest.raises(RuntimeError, match="403 Forbidden"):
+        extractor.extract_from_url("https://youtu.be/example?t=1m15s", duration_seconds=5)
+
+    assert len(calls) == 1
+    assert "--download-sections" in calls[0]
+    assert "*75.000-80.000" in calls[0]
+
+
+def test_media_reference_extractor_accepts_section_downloaded_combined_media() -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command, *, capture_output, text, timeout, check):
+        calls.append(list(command))
+        if command[0] == "yt-dlp":
             template = command[command.index("-o") + 1]
-            Path(template.replace("%(ext)s", "webm")).write_bytes(b"downloaded full media")
+            Path(template.replace("%(ext)s", "mp4")).write_bytes(b"downloaded section media")
         elif command[0] == "ffmpeg":
             Path(command[-1]).write_bytes(b"RIFFurlwav")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -97,9 +113,8 @@ def test_media_reference_extractor_falls_back_to_full_download_when_section_down
 
     assert result.audio_bytes == b"RIFFurlwav"
     assert "--download-sections" in calls[0]
-    assert "--download-sections" not in calls[1]
-    assert calls[2][:2] == ["ffmpeg", "-y"]
-    assert calls[2][2:4] == ["-ss", "75.000"]
+    assert calls[1][:2] == ["ffmpeg", "-y"]
+    assert "-ss" not in calls[1]
 
 
 def test_media_reference_extractor_rejects_non_http_url() -> None:

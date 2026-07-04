@@ -60,44 +60,21 @@ class MediaReferenceAudioExtractor:
             temp_dir = Path(temp_dir_raw)
             source_template = temp_dir / "source.%(ext)s"
             section = f"*{start:.3f}-{end:.3f}"
-            section_downloaded = True
-            try:
-                self._run_command(
-                    _yt_dlp_download_command(
-                        self._yt_dlp_command,
-                        source_url,
-                        output_template=source_template,
-                        section=section,
-                    ),
-                    "yt-dlp",
-                )
-            except RuntimeError as section_error:
-                _clear_downloaded_media(temp_dir)
-                section_downloaded = False
-                try:
-                    self._run_command(
-                        _yt_dlp_download_command(
-                            self._yt_dlp_command,
-                            source_url,
-                            output_template=source_template,
-                            section=None,
-                        ),
-                        "yt-dlp",
-                    )
-                except RuntimeError as fallback_error:
-                    raise RuntimeError(
-                        "yt-dlp によるURL参照音声取得に失敗しました。"
-                        f" section取得: {_runtime_message(section_error)}"
-                        f" / 通常取得: {_runtime_message(fallback_error)}"
-                    ) from fallback_error
+            self._run_command(
+                _yt_dlp_download_command(
+                    self._yt_dlp_command,
+                    source_url,
+                    output_template=source_template,
+                    section=section,
+                ),
+                "yt-dlp",
+            )
             source_path = _find_downloaded_media(temp_dir)
             output_path = temp_dir / "reference.wav"
             ffmpeg_command = [
                 self._ffmpeg_command,
                 "-y",
             ]
-            if not section_downloaded and start > 0:
-                ffmpeg_command.extend(["-ss", f"{start:.3f}"])
             ffmpeg_command.extend(
                 [
                     "-i",
@@ -156,23 +133,20 @@ def _yt_dlp_download_command(
     source_url: str,
     *,
     output_template: Path,
-    section: str | None,
+    section: str,
 ) -> list[str]:
-    command = [
+    return [
         yt_dlp_command,
         "--no-playlist",
+        "--download-sections",
+        section,
+        "--force-keyframes-at-cuts",
         "-f",
         "bestaudio/best",
         "-o",
         str(output_template),
+        source_url,
     ]
-    if section is not None:
-        command[2:2] = [
-            "--download-sections",
-            section,
-            "--force-keyframes-at-cuts",
-        ]
-    return [*command, source_url]
 
 
 def parse_media_url_start_seconds(url: str) -> float | None:
@@ -270,16 +244,6 @@ def _find_downloaded_media(directory: Path) -> Path:
     if not candidates:
         raise RuntimeError("yt-dlpの出力ファイルが見つかりませんでした。")
     return max(candidates, key=lambda path: path.stat().st_mtime)
-
-
-def _clear_downloaded_media(directory: Path) -> None:
-    for path in directory.iterdir():
-        if path.is_file() and path.name.startswith("source."):
-            path.unlink(missing_ok=True)
-
-
-def _runtime_message(error: RuntimeError) -> str:
-    return str(error).strip() or error.__class__.__name__
 
 
 def _reference_audio_filename(url: str, start_seconds: float, duration_seconds: float) -> str:
