@@ -234,6 +234,9 @@ def test_vibevoice_generate_api_returns_audio() -> None:
             "inference_steps": "3",
             "line_by_line": "true",
             "directed_line_mode": "true",
+            "directed_retry_low_score": "true",
+            "directed_retry_score_threshold": "0.7",
+            "directed_retry_max_lines": "4",
             "model_id": "vibevoice-1.5b-latest",
         },
         files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
@@ -251,6 +254,9 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert service.calls[0][2].inference_steps == 3
     assert service.calls[0][2].line_by_line is True
     assert service.calls[0][2].directed_line_mode is True
+    assert service.calls[0][2].directed_retry_low_score is True
+    assert service.calls[0][2].directed_retry_score_threshold == 0.7
+    assert service.calls[0][2].directed_retry_max_lines == 4
 
 
 def test_vibevoice_generate_api_preserves_voice_slots() -> None:

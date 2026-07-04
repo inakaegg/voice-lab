@@ -88,6 +88,21 @@ def main() -> int:
         default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_LINE_MODE") == "1",
     )
     parser.add_argument(
+        "--vibevoice-directed-retry-low-score",
+        action="store_true",
+        default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_LOW_SCORE") == "1",
+    )
+    parser.add_argument(
+        "--vibevoice-directed-retry-score-threshold",
+        type=float,
+        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_SCORE_THRESHOLD", "0.65")),
+    )
+    parser.add_argument(
+        "--vibevoice-directed-retry-max-lines",
+        type=int,
+        default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES", "3")),
+    )
+    parser.add_argument(
         "--vibevoice-line-gap",
         type=float,
         default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_LINE_GAP", "1")),
@@ -133,6 +148,9 @@ def main() -> int:
             "max_voice_seconds": args.vibevoice_max_voice_seconds,
             "line_by_line": args.vibevoice_line_by_line,
             "directed_line_mode": args.vibevoice_directed_line_mode,
+            "directed_retry_low_score": args.vibevoice_directed_retry_low_score,
+            "directed_retry_score_threshold": args.vibevoice_directed_retry_score_threshold,
+            "directed_retry_max_lines": args.vibevoice_directed_retry_max_lines,
             "line_gap": args.vibevoice_line_gap,
         }
         if args.vibevoice_cfg_scale is not None:

@@ -41,6 +41,9 @@ DIRECTED_OUTPUT_TARGET_RMS = 0.10
 DIRECTED_OUTPUT_PEAK_LIMIT = 0.92
 DIRECTED_OUTPUT_MAX_GAIN = 2.5
 DIRECTED_OUTPUT_MIN_RMS = 0.0001
+DIRECTED_RETRY_SCORE_THRESHOLD = 0.65
+DIRECTED_RETRY_MAX_LINES = 3
+DIRECTED_RETRY_CHUNK_INDEX_OFFSET = 10_000
 _SHORT_SPEAKER_TAG_RE = re.compile(r"^([0-9]+|[A-Za-z]):? (.+)$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _VIBEVOICE_TQDM_RE = re.compile(
@@ -135,6 +138,9 @@ class VibeVoiceGenerationOptions:
     line_by_line: bool = False
     line_gap: float = 1.0
     directed_line_mode: bool = False
+    directed_retry_low_score: bool = False
+    directed_retry_score_threshold: float = DIRECTED_RETRY_SCORE_THRESHOLD
+    directed_retry_max_lines: int = DIRECTED_RETRY_MAX_LINES
     model_id: str = DEFAULT_VIBEVOICE_MODEL_ID
 
 
@@ -742,10 +748,15 @@ class VibeVoiceService:
         chunk_target_scripts: dict[str, str] = {}
         chunk_tail_guards: dict[str, str] = {}
         chunk_script_lengths: dict[str, dict[str, object]] = {}
+        retry_scripts: dict[str, str] = {}
+        retry_target_scripts: dict[str, str] = {}
+        retry_tail_guards: dict[str, str] = {}
+        retry_script_lengths: dict[str, dict[str, object]] = {}
         asr_segments_by_chunk: dict[str, list[dict[str, object]]] = {}
         asr_words_by_chunk: dict[str, list[dict[str, object]]] = {}
         asr_texts_by_chunk: dict[str, dict[str, object]] = {}
         vc_results_by_chunk: dict[str, object] = {}
+        retry_results: dict[str, VibeVoiceResult] = {}
         artifacts: list[dict[str, object]] = []
         warnings: list[str] = []
         generation_total_ms = 0.0
@@ -754,6 +765,17 @@ class VibeVoiceService:
         asr_name = ""
         voice_conversion_name = ""
         voice_conversion_settings: dict[str, object] = {}
+        retry_score_threshold = max(0.0, min(1.0, float(options.directed_retry_score_threshold)))
+        retry_max_lines = max(0, int(options.directed_retry_max_lines))
+        low_score_retry_diagnostics: dict[str, object] = {
+            "enabled": options.directed_retry_low_score,
+            "score_threshold": retry_score_threshold,
+            "max_lines": retry_max_lines,
+            "initial_low_score_line_indices": [],
+            "attempted_line_indices": [],
+            "skipped_line_indices": [],
+            "selected_line_indices": [],
+        }
 
         self._release_directed_asr_provider()
         self._release_directed_voice_conversion_service()
@@ -867,11 +889,129 @@ class VibeVoiceService:
             finally:
                 self._release_directed_asr_provider()
 
+            ranges_by_line, candidate_warnings = _select_best_directed_range_candidates(lines, range_candidates_by_line)
+            if options.directed_retry_low_score and retry_max_lines > 0:
+                all_low_score_line_indices = [
+                    line.index
+                    for line in lines
+                    if ranges_by_line[line.index].candidate_score < retry_score_threshold
+                ]
+                retry_lines = _directed_low_score_retry_lines(
+                    lines,
+                    ranges_by_line,
+                    score_threshold=retry_score_threshold,
+                    max_lines=retry_max_lines,
+                )
+                attempted_indices = [line.index for line in retry_lines]
+                attempted_index_set = set(attempted_indices)
+                low_score_retry_diagnostics["initial_low_score_line_indices"] = all_low_score_line_indices
+                low_score_retry_diagnostics["attempted_line_indices"] = attempted_indices
+                low_score_retry_diagnostics["skipped_line_indices"] = [
+                    line_index
+                    for line_index in all_low_score_line_indices
+                    if line_index not in attempted_index_set
+                ]
+                if retry_lines:
+                    asr_provider = self._get_directed_asr_provider()
+                    asr_name = str(getattr(asr_provider, "name", asr_provider.__class__.__name__))
+                    vc_service = self._get_directed_voice_conversion_service() if _directed_voice_conversion_enabled() else None
+                    if vc_service is not None and not voice_conversion_settings:
+                        voice_conversion_settings = _directed_voice_conversion_settings_diagnostics(vc_service)
+                    try:
+                        for retry_number, line in enumerate(retry_lines, start=1):
+                            _raise_if_cancelled(cancel_event)
+                            retry_key = f"{line.speaker}-retry-{line.index}"
+                            retry_chunk_index = _directed_retry_chunk_index(line)
+                            retry_audio_stem = f"speaker-{line.speaker}-retry-line-{line.index}"
+                            retry_script_parts = _directed_retry_script_for_line(line, lines_by_speaker[line.speaker])
+                            retry_script = f"Speaker 1: {retry_script_parts.full_text}"
+                            retry_scripts[retry_key] = retry_script
+                            retry_target_scripts[retry_key] = f"Speaker 1: {retry_script_parts.target_text}"
+                            retry_tail_guards[retry_key] = retry_script_parts.tail_guard_text
+                            retry_script_lengths[retry_key] = _directed_speaker_script_length_diagnostics(retry_script_parts)
+                            retry_options = replace(
+                                options,
+                                directed_line_mode=False,
+                                directed_retry_low_score=False,
+                                line_by_line=False,
+                                seed=int(options.seed) + 1000 + retry_number,
+                            )
+                            _report_vibevoice_progress(
+                                progress_callback,
+                                "generation",
+                                f"指定台詞 Line {line.index} 低スコア再生成 {retry_number}/{len(retry_lines)}",
+                            )
+                            retry_result = self._generate_single_pass(
+                                script_text=retry_script,
+                                voice_samples=[VibeVoiceVoiceSample(slot=1, path=samples_by_slot[line.speaker].path)],
+                                options=retry_options,
+                                progress_callback=progress_callback,
+                                cancel_event=cancel_event,
+                                allow_auto_line_by_line=False,
+                            )
+                            generation_total_ms += float(retry_result.timings_ms.get("total", 0.0))
+                            retry_results[retry_key] = retry_result
+                            retry_vibevoice_output = temp_dir / f"{retry_audio_stem}.wav"
+                            retry_vibevoice_output.write_bytes(retry_result.audio_bytes)
+                            retry_output = retry_vibevoice_output
+                            if vc_service is not None:
+                                _report_vibevoice_progress(
+                                    progress_callback,
+                                    "voice_conversion",
+                                    f"指定台詞 Line {line.index} 低スコア再生成VC {retry_number}/{len(retry_lines)}",
+                                )
+                                vc_started = perf_counter()
+                                vc_result = _convert_directed_voice(
+                                    vc_service,
+                                    source_audio_path=retry_vibevoice_output,
+                                    reference_audio_path=samples_by_slot[line.speaker].path,
+                                )
+                                voice_conversion_total_ms += _elapsed_ms(vc_started)
+                                vc_results_by_chunk[retry_key] = vc_result
+                                voice_conversion_name = str(
+                                    getattr(vc_result, "providers", {}).get("voice_conversion", "")
+                                    or voice_conversion_name
+                                    or "voice_conversion"
+                                )
+                                retry_output = temp_dir / f"{retry_audio_stem}-vc.wav"
+                                retry_output.write_bytes(getattr(vc_result, "output_audio_bytes"))
+                            chunk_outputs[(line.speaker, retry_chunk_index)] = retry_output
+                            _report_vibevoice_progress(
+                                progress_callback,
+                                "asr",
+                                f"指定台詞 Line {line.index} 低スコア再生成ASR {retry_number}/{len(retry_lines)}",
+                            )
+                            asr_started = perf_counter()
+                            transcription = _transcribe_directed_audio(asr_provider, retry_output)
+                            asr_total_ms += _elapsed_ms(asr_started)
+                            asr_segments_by_chunk[retry_key] = _timestamp_rows(getattr(transcription, "segments", []))
+                            asr_words_by_chunk[retry_key] = _timestamp_rows(getattr(transcription, "words", []))
+                            ranges, range_warnings, asr_text_diagnostics = _audio_range_candidates_for_directed_chunk(
+                                target_lines=[line],
+                                guard_lines=[],
+                                transcription=transcription,
+                                audio_path=retry_output,
+                                chunk_index=retry_chunk_index,
+                                target_role="retry_target",
+                            )
+                            asr_texts_by_chunk[retry_key] = asr_text_diagnostics
+                            warnings.extend(f"Line {line.index} 低スコア再生成: {warning}" for warning in range_warnings)
+                            for audio_range in ranges:
+                                range_candidates_by_line.setdefault(audio_range.line_index, []).append(audio_range)
+                    finally:
+                        if vc_service is not None:
+                            self._release_directed_voice_conversion_service()
+                        self._release_directed_asr_provider()
+                    ranges_by_line, candidate_warnings = _select_best_directed_range_candidates(lines, range_candidates_by_line)
+            low_score_retry_diagnostics["selected_line_indices"] = [
+                line.index
+                for line in lines
+                if ranges_by_line[line.index].candidate_role == "retry_target"
+            ]
+            warnings.extend(candidate_warnings)
             _raise_if_cancelled(cancel_event)
             _report_vibevoice_progress(progress_callback, "reconstruct", "指定台詞 音声再配置")
             reconstruct_started = perf_counter()
-            ranges_by_line, candidate_warnings = _select_best_directed_range_candidates(lines, range_candidates_by_line)
-            warnings.extend(candidate_warnings)
             output_path = temp_dir / "directed-vibevoice-output.wav"
             _compose_directed_wav(
                 lines,
@@ -947,11 +1087,16 @@ class VibeVoiceService:
                         "line_max": DIRECTED_LINE_MAX_CHARS,
                         "full_max": DIRECTED_FULL_MAX_CHARS,
                     },
+                    "low_score_retry": low_score_retry_diagnostics,
                     "warnings": warnings,
                     "speaker_scripts": chunk_scripts,
                     "speaker_target_scripts": chunk_target_scripts,
                     "speaker_tail_guards": chunk_tail_guards,
                     "speaker_script_lengths": chunk_script_lengths,
+                    "retry_scripts": retry_scripts,
+                    "retry_target_scripts": retry_target_scripts,
+                    "retry_tail_guards": retry_tail_guards,
+                    "retry_script_lengths": retry_script_lengths,
                     "asr_texts": asr_texts_by_chunk,
                     "asr_segments": asr_segments_by_chunk,
                     "asr_words": asr_words_by_chunk,
@@ -985,6 +1130,9 @@ class VibeVoiceService:
                 },
                 "speaker_results": {
                     key: result.diagnostics for key, result in sorted(chunk_results.items())
+                },
+                "retry_results": {
+                    key: result.diagnostics for key, result in sorted(retry_results.items())
                 },
             },
             artifacts=artifacts,
@@ -1624,6 +1772,50 @@ def _directed_guard_lines_for_chunk(
     ]
 
 
+def _directed_retry_script_for_line(
+    line: VibeVoiceDirectedLine,
+    speaker_lines: Sequence[VibeVoiceDirectedLine],
+) -> _DirectedSpeakerScript:
+    target_script = _directed_speaker_script_for_lines([line], include_tail_guard=False)
+    following = [candidate for candidate in speaker_lines if candidate.index > line.index]
+    leading = [candidate for candidate in speaker_lines if candidate.index < line.index]
+    guard_lines = [*following, *leading] or [line]
+    guard_script = _directed_speaker_script_for_lines(guard_lines, include_tail_guard=False)
+    tail_guard_text = _directed_rotated_guard_text(
+        target_script.target_text,
+        guard_script.target_text,
+        target_min_chars=DIRECTED_TARGET_MIN_CHARS,
+        full_max_chars=DIRECTED_FULL_MAX_CHARS,
+    )
+    return _DirectedSpeakerScript(
+        full_text=f"{target_script.target_text}{tail_guard_text}",
+        target_text=target_script.target_text,
+        tail_guard_text=tail_guard_text,
+    )
+
+
+def _directed_low_score_retry_lines(
+    lines: Sequence[VibeVoiceDirectedLine],
+    ranges_by_line: dict[int, VibeVoiceAudioRange],
+    *,
+    score_threshold: float,
+    max_lines: int,
+) -> list[VibeVoiceDirectedLine]:
+    if max_lines <= 0:
+        return []
+    low_score_lines = [
+        line
+        for line in lines
+        if ranges_by_line[line.index].candidate_score < score_threshold
+    ]
+    low_score_lines.sort(key=lambda line: (ranges_by_line[line.index].candidate_score, line.index))
+    return low_score_lines[:max_lines]
+
+
+def _directed_retry_chunk_index(line: VibeVoiceDirectedLine) -> int:
+    return DIRECTED_RETRY_CHUNK_INDEX_OFFSET + line.index
+
+
 def _directed_chunk_key(chunk: _DirectedLineChunk, chunks_by_speaker: dict[int, list[_DirectedLineChunk]]) -> str:
     return str(chunk.speaker) if len(chunks_by_speaker.get(chunk.speaker, [])) == 1 else f"{chunk.speaker}-{chunk.chunk_index}"
 
@@ -1754,9 +1946,11 @@ def _audio_range_candidates_for_directed_chunk(
     transcription,
     audio_path: Path,
     chunk_index: int = 1,
+    target_role: str = "target",
+    guard_role: str = "guard",
 ) -> tuple[list[VibeVoiceAudioRange], list[str], dict[str, object]]:
     lines = [*target_lines, *guard_lines]
-    roles = ["target" for _ in target_lines] + ["guard" for _ in guard_lines]
+    roles = [target_role for _ in target_lines] + [guard_role for _ in guard_lines]
     if not lines:
         return [], [], {}
 
@@ -1794,7 +1988,7 @@ def _audio_range_candidates_for_directed_chunk(
         return [
             _score_directed_candidate_range(
                 audio_range,
-                role="target",
+                role=target_role,
                 role_position=position,
                 audio_path=audio_path,
             )
@@ -1845,7 +2039,12 @@ def _score_directed_candidate_range(
     if peak > 0.98 or clip_ratio > 0.01:
         audio_penalty += 0.12
         reasons.append("peak_clip")
-    role_penalty = 0.0 if role == "target" else 0.03
+    role_penalty = {
+        "target": 0.0,
+        "retry_target": 0.0,
+        "guard": 0.03,
+        "retry_guard": 0.03,
+    }.get(role, 0.03)
     position_penalty = max(0, role_position) * 0.002
     score = text_score - audio_penalty - role_penalty - position_penalty
     reasons.append(f"rms={rms:.4f}")
@@ -1906,18 +2105,36 @@ def _select_best_directed_range_candidates(
             candidates,
             key=lambda item: (
                 item.candidate_score,
-                1 if item.candidate_role == "target" else 0,
+                _directed_candidate_role_priority(item.candidate_role),
                 -item.chunk_index,
                 -(item.end - item.start),
             ),
         )
         selected[line.index] = best
-        if best.candidate_role != "target":
+        if best.candidate_role == "guard":
             warnings.append(
                 f"Line {line.index}: target候補よりguard候補のASRスコアが高いため、"
                 f"Speaker {best.speaker} chunk {best.chunk_index} のguard区間を採用しました。"
             )
+        elif best.candidate_role == "retry_target":
+            warnings.append(
+                f"Line {line.index}: 初回候補のASRスコアが低いため、"
+                f"低スコア再生成候補を採用しました。"
+            )
+        elif best.candidate_role != "target":
+            warnings.append(
+                f"Line {line.index}: target候補ではなく {best.candidate_role} 候補を採用しました。"
+            )
     return selected, warnings
+
+
+def _directed_candidate_role_priority(role: str) -> int:
+    return {
+        "target": 3,
+        "retry_target": 2,
+        "guard": 1,
+        "retry_guard": 0,
+    }.get(role, 0)
 
 
 def _directed_range_candidate_diagnostics(
@@ -2489,6 +2706,9 @@ def _options_payload(options: VibeVoiceGenerationOptions) -> dict[str, object]:
         "line_by_line": options.line_by_line,
         "line_gap": options.line_gap,
         "directed_line_mode": options.directed_line_mode,
+        "directed_retry_low_score": options.directed_retry_low_score,
+        "directed_retry_score_threshold": options.directed_retry_score_threshold,
+        "directed_retry_max_lines": options.directed_retry_max_lines,
     }
 
 

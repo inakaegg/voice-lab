@@ -26,6 +26,9 @@ const lineByLineControl = form.elements.line_by_line;
 const lineByLineSwitch = lineByLineControl?.closest(".vibevoice-switch");
 const directedLineModeControl = form.elements.directed_line_mode;
 const directedLineModeSwitch = directedLineModeControl?.closest(".vibevoice-switch");
+const directedRetryLowScoreControl = form.elements.directed_retry_low_score;
+const directedRetryLowScoreSwitch = directedRetryLowScoreControl?.closest(".vibevoice-switch");
+const directedRetrySettingControls = Array.from(form.querySelectorAll("[data-directed-retry-setting] input"));
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
 const savedVoiceLabels = Array.from(document.querySelectorAll("[data-saved-voice-slot]"));
 const savedVoicePreviews = Array.from(document.querySelectorAll("[data-saved-voice-preview-slot]"));
@@ -57,6 +60,9 @@ const persistedFieldNames = [
   "do_sample",
   "line_by_line",
   "directed_line_mode",
+  "directed_retry_low_score",
+  "directed_retry_score_threshold",
+  "directed_retry_max_lines",
 ];
 const persistedControls = persistedFieldNames
   .map((name) => form.elements[name])
@@ -101,6 +107,13 @@ persistedControls.forEach((control) => {
     return;
   }
   if (control === directedLineModeControl) {
+    control.addEventListener("change", () => {
+      updateDirectedLineModeState();
+      saveVibeVoiceDraft();
+    });
+    return;
+  }
+  if (control === directedRetryLowScoreControl) {
     control.addEventListener("change", () => {
       updateDirectedLineModeState();
       saveVibeVoiceDraft();
@@ -282,15 +295,30 @@ function updateLineByLineAutoState() {
 
 function updateDirectedLineModeState() {
   const directedLineModeEnabled = directedLineModeControl?.checked === true;
+  const retryLowScoreEnabled = directedLineModeEnabled && directedRetryLowScoreControl?.checked === true;
   if (directedLineModeSwitch) {
     directedLineModeSwitch.dataset.directedLineMode = directedLineModeEnabled ? "true" : "false";
   }
+  if (directedRetryLowScoreControl) {
+    directedRetryLowScoreControl.disabled = !directedLineModeEnabled;
+  }
+  if (directedRetryLowScoreSwitch) {
+    directedRetryLowScoreSwitch.dataset.directedRetryLowScore = retryLowScoreEnabled ? "true" : "false";
+  }
+  directedRetrySettingControls.forEach((control) => {
+    control.disabled = !retryLowScoreEnabled;
+  });
   updateLineByLineAutoState();
 }
 
 function effectiveLineByLineEnabled() {
   updateLineByLineAutoState();
   return lineByLineControl?.checked === true;
+}
+
+function effectiveDirectedRetryLowScoreEnabled() {
+  updateDirectedLineModeState();
+  return directedLineModeControl?.checked === true && directedRetryLowScoreControl?.checked === true;
 }
 
 function shouldAutoLineByLine(script) {
@@ -556,6 +584,7 @@ async function handleGenerate(event) {
     body.set("do_sample", form.elements.do_sample.checked ? "true" : "false");
     body.set("line_by_line", effectiveLineByLineEnabled() ? "true" : "false");
     body.set("directed_line_mode", directedLineModeControl.checked ? "true" : "false");
+    body.set("directed_retry_low_score", effectiveDirectedRetryLowScoreEnabled() ? "true" : "false");
     const response = await fetch("/api/vibevoice/jobs", {
       method: "POST",
       body,

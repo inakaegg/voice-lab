@@ -161,7 +161,11 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /id="vibevoice-reset-settings-button"/);
   assert.match(vibevoiceHtml, /class="vibevoice-parameter-guide"/);
   assert.match(vibevoiceHtml, /name="directed_line_mode"/);
+  assert.match(vibevoiceHtml, /name="directed_retry_low_score"/);
+  assert.match(vibevoiceHtml, /name="directed_retry_score_threshold"/);
+  assert.match(vibevoiceHtml, /name="directed_retry_max_lines"/);
   assert.match(vibevoiceHtml, /指定台詞を1行生成してASR再配置/);
+  assert.match(vibevoiceHtml, /低スコア行だけ再生成/);
   assert.match(vibevoiceHtml, /パラメータ目安/);
   assert.match(vibevoiceHtml, /まず 1\.1-1\.5/);
   assert.match(vibevoiceHtml, /試作は 10-15/);
@@ -233,7 +237,11 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /"cfg_scale"/);
   assert.match(vibevoiceSource, /"line_by_line"/);
   assert.match(vibevoiceSource, /"directed_line_mode"/);
+  assert.match(vibevoiceSource, /"directed_retry_low_score"/);
+  assert.match(vibevoiceSource, /"directed_retry_score_threshold"/);
+  assert.match(vibevoiceSource, /"directed_retry_max_lines"/);
   assert.match(vibevoiceSource, /body\.set\("directed_line_mode",\s*directedLineModeControl\.checked \? "true" : "false"\)/);
+  assert.match(vibevoiceSource, /body\.set\("directed_retry_low_score",\s*effectiveDirectedRetryLowScoreEnabled\(\) \? "true" : "false"\)/);
   assert.match(styles, /\.vibevoice-shell/);
   assert.match(styles, /\.vibevoice-workspace/);
   assert.match(styles, /\.vibevoice-range-control/);

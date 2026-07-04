@@ -201,6 +201,9 @@ def _vibevoice_generation_options(
     line_by_line: str,
     line_gap: str,
     directed_line_mode: str,
+    directed_retry_low_score: str,
+    directed_retry_score_threshold: str,
+    directed_retry_max_lines: str,
 ) -> VibeVoiceGenerationOptions:
     return VibeVoiceGenerationOptions(
         model_id=model_id,
@@ -215,6 +218,9 @@ def _vibevoice_generation_options(
         line_by_line=_bool_form_value(line_by_line, default=False),
         line_gap=max(0.0, _float_form_value(line_gap, 1.0)),
         directed_line_mode=_bool_form_value(directed_line_mode, default=False),
+        directed_retry_low_score=_bool_form_value(directed_retry_low_score, default=False),
+        directed_retry_score_threshold=max(0.0, min(1.0, _float_form_value(directed_retry_score_threshold, 0.65))),
+        directed_retry_max_lines=max(0, _int_form_value(directed_retry_max_lines, 3)),
     )
 
 
@@ -667,6 +673,9 @@ def create_app(
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
         directed_line_mode: Annotated[str, Form()] = "false",
+        directed_retry_low_score: Annotated[str, Form()] = "false",
+        directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
+        directed_retry_max_lines: Annotated[str, Form()] = "3",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
@@ -685,6 +694,9 @@ def create_app(
                 line_by_line=line_by_line,
                 line_gap=line_gap,
                 directed_line_mode=directed_line_mode,
+                directed_retry_low_score=directed_retry_low_score,
+                directed_retry_score_threshold=directed_retry_score_threshold,
+                directed_retry_max_lines=directed_retry_max_lines,
             )
             with TemporaryDirectory(prefix="mo-vibevoice-api-") as temp_dir:
                 voice_paths = await _save_vibevoice_voice_uploads(
@@ -735,6 +747,9 @@ def create_app(
         line_by_line: Annotated[str, Form()] = "false",
         line_gap: Annotated[str, Form()] = "1",
         directed_line_mode: Annotated[str, Form()] = "false",
+        directed_retry_low_score: Annotated[str, Form()] = "false",
+        directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
+        directed_retry_max_lines: Annotated[str, Form()] = "3",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
@@ -754,6 +769,9 @@ def create_app(
                 line_by_line=line_by_line,
                 line_gap=line_gap,
                 directed_line_mode=directed_line_mode,
+                directed_retry_low_score=directed_retry_low_score,
+                directed_retry_score_threshold=directed_retry_score_threshold,
+                directed_retry_max_lines=directed_retry_max_lines,
             )
             voice_paths = await _save_vibevoice_voice_uploads(
                 [voice_file_1, voice_file_2, voice_file_3, voice_file_4],

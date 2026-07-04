@@ -773,6 +773,83 @@ def test_vibevoice_service_directed_line_mode_selects_better_guard_candidate(tmp
     ]
 
 
+def test_vibevoice_service_directed_line_mode_retries_low_score_candidate(tmp_path: Path) -> None:
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+    script_texts: list[str] = []
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        script_index = command.index("--text_file") + 1
+        script_texts.append(Path(command[script_index]).read_text(encoding="utf-8"))
+        output_index = command.index("--output") + 1
+        _write_test_wav(Path(command[output_index]), seconds=1.0)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    line1 = "あ" * 70
+    line2 = "い" * 70
+    asr = FakeDirectedAsrProvider(
+        [
+            [
+                {"text": line1, "start": 0.0, "end": 0.2},
+                {"text": "壊れたガード", "start": 0.2, "end": 0.4},
+            ],
+            [
+                {"text": "壊れた音声", "start": 0.0, "end": 0.2},
+                {"text": line1, "start": 0.2, "end": 0.4},
+            ],
+            [
+                {"text": line2, "start": 0.0, "end": 0.3},
+            ],
+        ]
+    )
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+        directed_asr_provider=asr,
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(),
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    result = service.generate(
+        script_text=f"1 {line1}\n1 {line2}",
+        voice_paths=[VibeVoiceVoiceSample(slot=1, path=voice)],
+        options=VibeVoiceGenerationOptions(
+            directed_line_mode=True,
+            directed_retry_low_score=True,
+            directed_retry_score_threshold=0.65,
+            directed_retry_max_lines=2,
+            line_gap=0.1,
+        ),
+    )
+
+    assert len(script_texts) == 3
+    assert script_texts[2].startswith(f"Speaker 1: {line2}")
+    ranges = result.diagnostics["directed_line_mode"]["ranges"]
+    line2_range = next(item for item in ranges if item["line_index"] == 2)
+    assert line2_range["candidate_role"] == "retry_target"
+    assert line2_range["matched_text"] == line2
+    retry = result.diagnostics["directed_line_mode"]["low_score_retry"]
+    assert retry["enabled"] is True
+    assert retry["initial_low_score_line_indices"] == [2]
+    assert retry["attempted_line_indices"] == [2]
+    assert retry["selected_line_indices"] == [2]
+    line2_candidates = [
+        item
+        for item in result.diagnostics["directed_line_mode"]["range_candidates"]
+        if item["line_index"] == 2
+    ]
+    assert [item["candidate_role"] for item in line2_candidates] == ["guard", "target", "retry_target"]
+    assert line2_candidates[-1]["selected"] is True
+
+
 def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcription(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1358,6 +1435,9 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
             model_id="vibevoice-large-aoi-pinned",
             inference_steps=2,
             do_sample=False,
+            directed_retry_low_score=True,
+            directed_retry_score_threshold=0.7,
+            directed_retry_max_lines=4,
         ),
     )
 
@@ -1367,6 +1447,9 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     assert client.payload["generation"]["inference_steps"] == 2
     assert client.payload["generation"]["do_sample"] is False
     assert client.payload["generation"]["model_id"] == "vibevoice-large-aoi-pinned"
+    assert client.payload["generation"]["directed_retry_low_score"] is True
+    assert client.payload["generation"]["directed_retry_score_threshold"] == 0.7
+    assert client.payload["generation"]["directed_retry_max_lines"] == 4
     assert client.payload["voices"][0]["audio_base64"] != ""
     assert client.payload["voices"][0]["speaker"] == 1
 

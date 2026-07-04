@@ -198,6 +198,20 @@
                   </span>
                   <input id="vibevoice-line-gap" name="line_gap" type="range" min="0" max="5" step="0.1" value="1" data-vibevoice-range />
                 </label>
+                <label class="vibevoice-range-control" data-directed-retry-setting>
+                  <span class="vibevoice-range-label">
+                    <span>再生成スコア閾値</span>
+                    <output for="vibevoice-directed-retry-score-threshold" data-vibevoice-range-output="directed_retry_score_threshold">0.65</output>
+                  </span>
+                  <input id="vibevoice-directed-retry-score-threshold" name="directed_retry_score_threshold" type="range" min="0" max="1" step="0.05" value="0.65" data-vibevoice-range />
+                </label>
+                <label class="vibevoice-range-control" data-directed-retry-setting>
+                  <span class="vibevoice-range-label">
+                    <span>最大再生成行数</span>
+                    <output for="vibevoice-directed-retry-max-lines" data-vibevoice-range-output="directed_retry_max_lines">3</output>
+                  </span>
+                  <input id="vibevoice-directed-retry-max-lines" name="directed_retry_max_lines" type="range" min="1" max="10" step="1" value="3" data-vibevoice-range />
+                </label>
               </div>
               <div class="vibevoice-switch-row">
                 <label class="vibevoice-switch">
@@ -211,6 +225,10 @@
                 <label class="vibevoice-switch" data-directed-line-mode="false">
                   <input id="vibevoice-directed-line-mode" name="directed_line_mode" type="checkbox" />
                   <span>指定台詞を1行生成してASR再配置</span>
+                </label>
+                <label class="vibevoice-switch" data-directed-retry-low-score="false">
+                  <input id="vibevoice-directed-retry-low-score" name="directed_retry_low_score" type="checkbox" />
+                  <span>低スコア行だけ再生成</span>
                 </label>
               </div>
               <section class="vibevoice-parameter-guide" aria-label="生成パラメータの目安">
