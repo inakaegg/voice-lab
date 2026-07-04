@@ -78,6 +78,30 @@ def test_media_reference_extractor_explicit_start_overrides_url_start(tmp_path: 
     assert "*12.500-20.500" in calls[0]
 
 
+def test_media_reference_extractor_falls_back_to_full_download_when_section_download_fails() -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command, *, capture_output, text, timeout, check):
+        calls.append(list(command))
+        if command[0] == "yt-dlp":
+            if "--download-sections" in command:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="ERROR: ffmpeg exited with code 8: 403 Forbidden")
+            template = command[command.index("-o") + 1]
+            Path(template.replace("%(ext)s", "webm")).write_bytes(b"downloaded full media")
+        elif command[0] == "ffmpeg":
+            Path(command[-1]).write_bytes(b"RIFFurlwav")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    extractor = MediaReferenceAudioExtractor(runner=fake_run)
+    result = extractor.extract_from_url("https://youtu.be/example?t=1m15s", duration_seconds=5)
+
+    assert result.audio_bytes == b"RIFFurlwav"
+    assert "--download-sections" in calls[0]
+    assert "--download-sections" not in calls[1]
+    assert calls[2][:2] == ["ffmpeg", "-y"]
+    assert calls[2][2:4] == ["-ss", "75.000"]
+
+
 def test_media_reference_extractor_rejects_non_http_url() -> None:
     extractor = MediaReferenceAudioExtractor(runner=lambda *args, **kwargs: None)
 
