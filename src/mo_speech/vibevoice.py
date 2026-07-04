@@ -160,6 +160,9 @@ class VibeVoiceAudioRange:
     end: float
     matched_text: str = ""
     chunk_index: int = 1
+    candidate_role: str = "target"
+    candidate_score: float = 0.0
+    candidate_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -732,6 +735,7 @@ class VibeVoiceService:
         chunks = [chunk for speaker in lines_by_speaker for chunk in chunks_by_speaker[speaker]]
         chunk_outputs: dict[tuple[int, int], Path] = {}
         ranges_by_line: dict[int, VibeVoiceAudioRange] = {}
+        range_candidates_by_line: dict[int, list[VibeVoiceAudioRange]] = {}
         chunk_results: dict[str, VibeVoiceResult] = {}
         chunk_vibevoice_outputs: dict[tuple[int, int], Path] = {}
         chunk_scripts: dict[str, str] = {}
@@ -848,21 +852,26 @@ class VibeVoiceService:
                     asr_total_ms += _elapsed_ms(asr_started)
                     asr_segments_by_chunk[chunk_key] = _timestamp_rows(getattr(transcription, "segments", []))
                     asr_words_by_chunk[chunk_key] = _timestamp_rows(getattr(transcription, "words", []))
-                    ranges, range_warnings, asr_text_diagnostics = _audio_ranges_for_directed_lines(
-                        chunk.lines,
-                        transcription,
-                        chunk_outputs[(chunk.speaker, chunk.chunk_index)],
+                    guard_lines = _directed_guard_lines_for_chunk(chunk, chunks_by_speaker[chunk.speaker])
+                    ranges, range_warnings, asr_text_diagnostics = _audio_range_candidates_for_directed_chunk(
+                        target_lines=chunk.lines,
+                        guard_lines=guard_lines,
+                        transcription=transcription,
+                        audio_path=chunk_outputs[(chunk.speaker, chunk.chunk_index)],
                         chunk_index=chunk.chunk_index,
                     )
                     asr_texts_by_chunk[chunk_key] = asr_text_diagnostics
                     warnings.extend(f"{chunk_label}: {warning}" for warning in range_warnings)
-                    ranges_by_line.update({audio_range.line_index: audio_range for audio_range in ranges})
+                    for audio_range in ranges:
+                        range_candidates_by_line.setdefault(audio_range.line_index, []).append(audio_range)
             finally:
                 self._release_directed_asr_provider()
 
             _raise_if_cancelled(cancel_event)
             _report_vibevoice_progress(progress_callback, "reconstruct", "指定台詞 音声再配置")
             reconstruct_started = perf_counter()
+            ranges_by_line, candidate_warnings = _select_best_directed_range_candidates(lines, range_candidates_by_line)
+            warnings.extend(candidate_warnings)
             output_path = temp_dir / "directed-vibevoice-output.wav"
             _compose_directed_wav(
                 lines,
@@ -961,11 +970,18 @@ class VibeVoiceService:
                             "chunk_index": audio_range.chunk_index,
                             "text": audio_range.text,
                             "matched_text": audio_range.matched_text,
+                            "candidate_role": audio_range.candidate_role,
+                            "candidate_score": audio_range.candidate_score,
+                            "candidate_reasons": list(audio_range.candidate_reasons),
                             "start": audio_range.start,
                             "end": audio_range.end,
                         }
                         for audio_range in sorted(ranges_by_line.values(), key=lambda item: item.line_index)
                     ],
+                    "range_candidates": _directed_range_candidate_diagnostics(
+                        range_candidates_by_line,
+                        selected_by_line=ranges_by_line,
+                    ),
                 },
                 "speaker_results": {
                     key: result.diagnostics for key, result in sorted(chunk_results.items())
@@ -1729,6 +1745,206 @@ def _directed_asr_text_diagnostics(
         "ignored_tail_word_count": 0,
         "source": "segments",
     }
+
+
+def _audio_range_candidates_for_directed_chunk(
+    *,
+    target_lines: Sequence[VibeVoiceDirectedLine],
+    guard_lines: Sequence[VibeVoiceDirectedLine],
+    transcription,
+    audio_path: Path,
+    chunk_index: int = 1,
+) -> tuple[list[VibeVoiceAudioRange], list[str], dict[str, object]]:
+    lines = [*target_lines, *guard_lines]
+    roles = ["target" for _ in target_lines] + ["guard" for _ in guard_lines]
+    if not lines:
+        return [], [], {}
+
+    duration = _wav_duration(audio_path)
+    warnings: list[str] = []
+    words = _timestamp_rows(getattr(transcription, "words", []))
+    segments = _timestamp_rows(getattr(transcription, "segments", []))
+    asr_text_diagnostics = _directed_asr_text_diagnostics(target_lines, words=words, segments=segments)
+    if words:
+        ranges = _audio_ranges_from_words(lines, words, duration=duration, chunk_index=chunk_index)
+        scored_ranges = [
+            _score_directed_candidate_range(
+                audio_range,
+                role=role,
+                role_position=position,
+                audio_path=audio_path,
+            )
+            for position, (audio_range, role) in enumerate(zip(ranges, roles, strict=True))
+        ]
+        if len(words) < len(target_lines):
+            warnings.append("ASR word数が台詞行数より少ないため、範囲推定が粗くなる可能性があります。")
+        ignored_tail_word_count = int(asr_text_diagnostics.get("ignored_tail_word_count", 0) or 0)
+        if ignored_tail_word_count > 0:
+            warnings.append(
+                f"ASR word末尾 {ignored_tail_word_count} 件をtarget外候補として扱いました。"
+            )
+        return scored_ranges, warnings, asr_text_diagnostics
+    if segments:
+        target_ranges, range_warnings, asr_text_diagnostics = _audio_ranges_for_directed_lines(
+            target_lines,
+            transcription,
+            audio_path,
+            chunk_index=chunk_index,
+        )
+        return [
+            _score_directed_candidate_range(
+                audio_range,
+                role="target",
+                role_position=position,
+                audio_path=audio_path,
+            )
+            for position, audio_range in enumerate(target_ranges)
+        ], range_warnings, asr_text_diagnostics
+    raise ValueError("指定台詞モードのASR timestampが空でした。")
+
+
+def _score_directed_candidate_range(
+    audio_range: VibeVoiceAudioRange,
+    *,
+    role: str,
+    role_position: int,
+    audio_path: Path,
+) -> VibeVoiceAudioRange:
+    target_text = _alignment_text(audio_range.text)
+    matched_text = _alignment_text(audio_range.matched_text)
+    if target_text and matched_text:
+        matcher = SequenceMatcher(None, target_text, matched_text, autojunk=False)
+        matching_chars = sum(block.size for block in matcher.get_matching_blocks())
+        coverage = matching_chars / len(target_text)
+        extra_ratio = max(0, len(matched_text) - matching_chars) / len(target_text)
+        missing_ratio = max(0, len(target_text) - matching_chars) / len(target_text)
+        text_score = coverage - extra_ratio * 0.5 - missing_ratio * 0.7
+    else:
+        coverage = 0.0
+        extra_ratio = 1.0
+        missing_ratio = 1.0
+        text_score = -1.0
+
+    metrics = _directed_audio_range_metrics(audio_path, start=audio_range.start, end=audio_range.end)
+    audio_penalty = 0.0
+    reasons = [
+        f"coverage={coverage:.3f}",
+        f"extra={extra_ratio:.3f}",
+        f"missing={missing_ratio:.3f}",
+    ]
+    duration = max(0.0, audio_range.end - audio_range.start)
+    if duration < 0.05:
+        audio_penalty += 0.2
+        reasons.append("too_short")
+    rms = float(metrics.get("rms", 0.0) or 0.0)
+    peak = float(metrics.get("peak", 0.0) or 0.0)
+    clip_ratio = float(metrics.get("clip_ratio", 0.0) or 0.0)
+    if rms < 0.003:
+        audio_penalty += 0.15
+        reasons.append("low_rms")
+    if peak > 0.98 or clip_ratio > 0.01:
+        audio_penalty += 0.12
+        reasons.append("peak_clip")
+    role_penalty = 0.0 if role == "target" else 0.03
+    position_penalty = max(0, role_position) * 0.002
+    score = text_score - audio_penalty - role_penalty - position_penalty
+    reasons.append(f"rms={rms:.4f}")
+    reasons.append(f"peak={peak:.4f}")
+    reasons.append(f"role={role}")
+    return replace(
+        audio_range,
+        candidate_role=role,
+        candidate_score=round(score, 6),
+        candidate_reasons=tuple(reasons),
+    )
+
+
+def _directed_audio_range_metrics(audio_path: Path, *, start: float, end: float) -> dict[str, float]:
+    try:
+        params = _wav_params(audio_path)
+        if params["sample_width"] != 2:
+            return {}
+        frames = _read_wav_frames(audio_path, start=start, end=end)
+    except Exception:
+        return {}
+    if not frames:
+        return {"rms": 0.0, "peak": 0.0, "clip_ratio": 0.0}
+    samples = array("h")
+    samples.frombytes(frames)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return {"rms": 0.0, "peak": 0.0, "clip_ratio": 0.0}
+    squared = 0.0
+    peak = 0
+    clipped = 0
+    for sample in samples:
+        absolute = abs(int(sample))
+        peak = max(peak, absolute)
+        squared += absolute * absolute
+        if absolute >= 32760:
+            clipped += 1
+    count = len(samples)
+    return {
+        "rms": math.sqrt(squared / count) / 32768.0,
+        "peak": peak / 32768.0,
+        "clip_ratio": clipped / count,
+    }
+
+
+def _select_best_directed_range_candidates(
+    lines: Sequence[VibeVoiceDirectedLine],
+    candidates_by_line: dict[int, list[VibeVoiceAudioRange]],
+) -> tuple[dict[int, VibeVoiceAudioRange], list[str]]:
+    selected: dict[int, VibeVoiceAudioRange] = {}
+    warnings: list[str] = []
+    for line in lines:
+        candidates = candidates_by_line.get(line.index, [])
+        if not candidates:
+            raise ValueError(f"Line {line.index} のASR候補が見つかりませんでした。")
+        best = max(
+            candidates,
+            key=lambda item: (
+                item.candidate_score,
+                1 if item.candidate_role == "target" else 0,
+                -item.chunk_index,
+                -(item.end - item.start),
+            ),
+        )
+        selected[line.index] = best
+        if best.candidate_role != "target":
+            warnings.append(
+                f"Line {line.index}: target候補よりguard候補のASRスコアが高いため、"
+                f"Speaker {best.speaker} chunk {best.chunk_index} のguard区間を採用しました。"
+            )
+    return selected, warnings
+
+
+def _directed_range_candidate_diagnostics(
+    candidates_by_line: dict[int, list[VibeVoiceAudioRange]],
+    *,
+    selected_by_line: dict[int, VibeVoiceAudioRange],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for line_index, candidates in sorted(candidates_by_line.items()):
+        selected = selected_by_line.get(line_index)
+        for candidate in sorted(candidates, key=lambda item: (item.chunk_index, item.candidate_role, item.start)):
+            rows.append(
+                {
+                    "line_index": candidate.line_index,
+                    "speaker": candidate.speaker,
+                    "chunk_index": candidate.chunk_index,
+                    "candidate_role": candidate.candidate_role,
+                    "candidate_score": candidate.candidate_score,
+                    "candidate_reasons": list(candidate.candidate_reasons),
+                    "selected": candidate == selected,
+                    "text": candidate.text,
+                    "matched_text": candidate.matched_text,
+                    "start": candidate.start,
+                    "end": candidate.end,
+                }
+            )
+    return rows
 
 
 def _audio_ranges_for_directed_lines(

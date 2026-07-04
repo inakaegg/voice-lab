@@ -711,6 +711,68 @@ def test_vibevoice_service_directed_line_mode_splits_long_speaker_into_chunks(tm
     assert [item["chunk_index"] for item in ranges] == [1, 2, 3]
 
 
+def test_vibevoice_service_directed_line_mode_selects_better_guard_candidate(tmp_path: Path) -> None:
+    cli = tmp_path / "vibevoice.py"
+    cli.write_text("# cli", encoding="utf-8")
+    home = tmp_path / "models"
+    module_dir = tmp_path / "ComfyUI-VibeVoice"
+    home.mkdir()
+    module_dir.mkdir()
+
+    def fake_run(command, *, env, cwd, capture_output, text, timeout, check):
+        output_index = command.index("--output") + 1
+        _write_test_wav(Path(command[output_index]), seconds=1.0)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    line1 = "あ" * 70
+    line2 = "い" * 70
+    asr = FakeDirectedAsrProvider(
+        [
+            [
+                {"text": line1, "start": 0.0, "end": 0.2},
+                {"text": line2, "start": 0.2, "end": 0.4},
+            ],
+            [
+                {"text": "壊れた音声", "start": 0.0, "end": 0.2},
+                {"text": line1, "start": 0.2, "end": 0.4},
+            ],
+        ]
+    )
+    service = VibeVoiceService(
+        python="python3",
+        cli_path=cli,
+        vibevoice_home=home,
+        comfyui_vibevoice_path=module_dir,
+        subprocess_run=fake_run,
+        directed_asr_provider=asr,
+        directed_voice_conversion_service=FakeDirectedVoiceConversionService(),
+    )
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+
+    result = service.generate(
+        script_text=f"1 {line1}\n1 {line2}",
+        voice_paths=[VibeVoiceVoiceSample(slot=1, path=voice)],
+        options=VibeVoiceGenerationOptions(directed_line_mode=True, line_gap=0.1),
+    )
+
+    ranges = result.diagnostics["directed_line_mode"]["ranges"]
+    line2_range = next(item for item in ranges if item["line_index"] == 2)
+    assert line2_range["chunk_index"] == 1
+    assert line2_range["candidate_role"] == "guard"
+    assert line2_range["matched_text"] == line2
+
+    line2_candidates = [
+        item
+        for item in result.diagnostics["directed_line_mode"]["range_candidates"]
+        if item["line_index"] == 2
+    ]
+    assert [(item["chunk_index"], item["candidate_role"], item["selected"]) for item in line2_candidates] == [
+        (1, "guard", True),
+        (2, "target", False),
+    ]
+
+
 def test_vibevoice_service_directed_line_mode_releases_owned_asr_after_transcription(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
