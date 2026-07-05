@@ -80,8 +80,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /value="gpt-4o-mini-transcribe"/);
   assert.match(practiceHtml, /value="whisper-1"/);
   assert.match(practiceHtml, /gpt-4o（推奨）/);
-  assert.match(practiceHtml, /mini は軽量・低コスト寄り/);
-  assert.match(practiceHtml, /タイムスタンプ確認用/);
+  assert.match(practiceHtml, /採点は gpt-4o 推奨/);
+  assert.match(practiceHtml, /gpt-4o\/mini は全体比較再生/);
+  assert.match(practiceHtml, /whisper-1 はタイムスタンプ取得時だけ文ごと比較再生/);
   assert.match(practiceHtml, /id="practice-speed-slider"/);
   assert.match(practiceHtml, /min="0\.25"/);
   assert.match(practiceHtml, /max="2"/);
@@ -131,6 +132,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /practice-diff-missing/);
   assert.match(practiceSource, /repeatAudio\.src/);
   assert.match(practiceSource, /splitPracticeSentences/);
+  assert.match(practiceSource, /全体比較再生/);
+  assert.match(practiceSource, /文ごと比較再生/);
+  assert.match(practiceSource, /canUseSentenceComparisonPlayback/);
   assert.match(practiceSource, /playAudioSegmentToEnd/);
   assert.match(styles, /\.practice-shell\s*\{[^}]*min-height:\s*100svh/s);
   assert.match(styles, /\.practice-language-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3/s);

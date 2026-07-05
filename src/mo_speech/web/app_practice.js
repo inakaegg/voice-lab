@@ -443,7 +443,23 @@ function syncPlayButton() {
   playModelButton.classList.toggle("is-playing", isPlaying);
   playModelButton.querySelector("span:last-child").textContent = isPlaying
     ? "停止"
-    : (shouldUseComparisonPlayback() ? "比較再生" : "再生");
+    : playbackButtonLabel();
+}
+
+function playbackButtonLabel() {
+  if (!shouldUseComparisonPlayback()) {
+    return "再生";
+  }
+  return canUseSentenceComparisonPlayback() ? "文ごと比較再生" : "全体比較再生";
+}
+
+function canUseSentenceComparisonPlayback() {
+  const sentences = splitPracticeSentences(currentTargetText, practiceSegmentMode());
+  return (
+    sentences.length > 1 &&
+    canUseSegmentComparison(sentences) &&
+    Boolean(currentAttemptAsrTimestamps?.available)
+  );
 }
 
 function syncModelAudioSpeed() {
