@@ -57,6 +57,23 @@ def test_practice_attempt_aligns_target_phrases_to_recognized_positions() -> Non
     assert result["phrase_matches"][2]["recognized_start"] >= result["phrase_matches"][1]["recognized_end"]
 
 
+def test_practice_attempt_splits_colon_phrases_like_worker() -> None:
+    result = evaluate_practice_attempt(
+        "A: 我想要咖啡。B: 明天天气好吗？",
+        "我想要咖啡。明天天气好吗？",
+        "zh-CN",
+    )
+
+    assert [match["target"] for match in result["phrase_matches"]] == [
+        "A:",
+        "我想要咖啡。",
+        "B:",
+        "明天天气好吗？",
+    ]
+    assert result["phrase_matches"][1]["matched"] is True
+    assert result["phrase_matches"][3]["matched"] is True
+
+
 def test_practice_recording_classifier_prefers_attempt_for_target_language_repeat() -> None:
     result = classify_practice_recording(
         target_text="我想要咖啡。",

@@ -188,7 +188,7 @@ def split_practice_phrases(text: str) -> list[str]:
     normalized = str(text or "").replace("\r", "\n").strip()
     if not normalized:
         return []
-    phrases = [match.group(0).strip() for match in re.finditer(r"[^。！？!?.,，、；;\n]+[。！？!?.,，、；;]?", normalized)]
+    phrases = [match.group(0).strip() for match in re.finditer(r"[^。！？!?.,，、；;：:\n]+[。！？!?.,，、；;：:]?", normalized)]
     return [phrase for phrase in phrases if phrase]
 
 
