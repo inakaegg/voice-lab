@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(new URL("../src/mo_speech/web/app_user.js", import.meta.url), "utf8");
+const portalHtml = await readFile(new URL("../src/mo_speech/web/portal.html", import.meta.url), "utf8");
 const userHtml = await readFile(new URL("../src/mo_speech/web/user.html", import.meta.url), "utf8");
 const practiceHtml = await readFile(new URL("../src/mo_speech/web/practice.html", import.meta.url), "utf8");
 const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
@@ -16,6 +17,20 @@ const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
+
+test("portal page links to SkitVoice and SpeakLoop only", () => {
+  assert.match(portalHtml, /Voice Lab/);
+  assert.match(portalHtml, /SkitVoice/);
+  assert.match(portalHtml, /かんたんスキット生成/);
+  assert.match(portalHtml, /SpeakLoop/);
+  assert.match(portalHtml, /言いたいことを話す練習/);
+  assert.match(portalHtml, /href="\/skitvoice"/);
+  assert.match(portalHtml, /href="\/speakloop"/);
+  assert.doesNotMatch(portalHtml, /へんな へんかん アプリ/);
+  assert.doesNotMatch(portalHtml, /href="\/fun"/);
+  assert.match(styles, /\.portal-shell/);
+  assert.match(styles, /\.portal-apps/);
+});
 
 test("user page only shows warmup as a passive status dot", () => {
   assert.match(userHtml, /id="user-warmup-status"/);
@@ -42,7 +57,8 @@ test("admin page can start RunPod warmup manually", () => {
 });
 
 test("practice page keeps pronunciation training separate from conversion demo", () => {
-  assert.match(practiceHtml, /発音練習/);
+  assert.match(practiceHtml, /SpeakLoop/);
+  assert.match(practiceHtml, /言いたいことを話す練習/);
   assert.match(practiceHtml, /Pronunciation Practice/);
   assert.match(practiceHtml, /发音练习/);
   assert.match(practiceHtml, /言いたいことを話す/);
@@ -120,7 +136,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
 });
 
 test("practice history admin uses separated practice history API", () => {
-  assert.match(practiceAdminHtml, /発音練習履歴/);
+  assert.match(practiceAdminHtml, /SpeakLoop 履歴/);
   assert.match(practiceAdminHtml, /id="practice-history-recordings"/);
   assert.match(practiceAdminHtml, /id="practice-history-outputs"/);
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
@@ -130,7 +146,7 @@ test("practice history admin uses separated practice history API", () => {
 
 test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /VibeVoice/);
-  assert.match(vibevoiceHtml, /href="\/vibevoice"/);
+  assert.match(vibevoiceHtml, /href="\/skitvoice"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
@@ -268,7 +284,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
   assert.match(vibevoiceSimpleHtml, /SkitVoice/);
   assert.match(vibevoiceSimpleHtml, /かんたんスキット生成/);
-  assert.match(vibevoiceSimpleHtml, /href="\/vibevoice\/admin">管理/);
+  assert.match(vibevoiceSimpleHtml, /href="\/skitvoice\/admin">管理/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/practice"/);
   assert.match(vibevoiceSimpleHtml, /name="backend"/);
   assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);

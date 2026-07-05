@@ -467,21 +467,38 @@ def create_app(
 
     @app.get("/")
     def index() -> FileResponse:
+        return FileResponse(WEB_DIR / "portal.html")
+
+    @app.get("/fun")
+    @app.get("/fun/")
+    @app.get("/user")
+    @app.get("/user/")
+    def fun() -> FileResponse:
         return FileResponse(WEB_DIR / "user.html")
 
     @app.get("/practice")
+    @app.get("/practice/")
+    @app.get("/speakloop")
+    @app.get("/speakloop/")
     def practice() -> FileResponse:
         return FileResponse(WEB_DIR / "practice.html")
 
     @app.get("/practice/admin")
+    @app.get("/practice/admin/")
+    @app.get("/speakloop/admin")
+    @app.get("/speakloop/admin/")
     def practice_admin() -> FileResponse:
         return FileResponse(WEB_DIR / "practice_admin.html")
 
+    @app.get("/skitvoice")
+    @app.get("/skitvoice/")
     @app.get("/vibevoice")
     @app.get("/vibevoice/")
     def vibevoice() -> FileResponse:
         return FileResponse(WEB_DIR / "vibevoice_simple.html")
 
+    @app.get("/skitvoice/admin")
+    @app.get("/skitvoice/admin/")
     @app.get("/vibevoice/admin")
     @app.get("/vibevoice/admin/")
     def vibevoice_admin() -> FileResponse:

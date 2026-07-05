@@ -3,6 +3,35 @@ import test from "node:test";
 
 import { handleRequest } from "../cloudflare/worker.mjs";
 
+test("Cloudflare worker routes public app pages from the Voice Lab portal", async () => {
+  const requestedPaths = [];
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("asset", { status: 200 });
+    },
+  };
+
+  await handleRequest(new Request("https://example.com/"), env);
+  await handleRequest(new Request("https://example.com/fun"), env);
+  await handleRequest(new Request("https://example.com/speakloop"), env);
+  await handleRequest(new Request("https://example.com/speakloop/admin"), env);
+  await handleRequest(new Request("https://example.com/skitvoice"), env);
+  await handleRequest(new Request("https://example.com/skitvoice/admin"), env);
+
+  assert.deepEqual(requestedPaths, [
+    "/portal.html",
+    "/user.html",
+    "/practice.html",
+    "/practice_admin.html",
+    "/vibevoice_simple.html",
+    "/vibevoice.html",
+  ]);
+});
+
 test("Cloudflare worker translates speech with OpenAI and stores a completed job", async () => {
   const calls = [];
   const env = fakeEnv(async (url, init) => {

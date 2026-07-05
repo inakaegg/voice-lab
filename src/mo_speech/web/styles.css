@@ -2916,3 +2916,112 @@ audio {
     transform: translateX(230%);
   }
 }
+/* Voice Lab portal */
+.portal-body {
+  background:
+    linear-gradient(135deg, rgba(21, 96, 130, 0.12), transparent 34%),
+    linear-gradient(225deg, rgba(184, 96, 53, 0.14), transparent 38%),
+    #f6f8fb;
+  color: #172033;
+  margin: 0;
+  min-height: 100svh;
+}
+
+.portal-shell {
+  display: grid;
+  gap: 30px;
+  margin: 0 auto;
+  max-width: 980px;
+  min-height: 100svh;
+  padding: clamp(28px, 8vw, 88px) clamp(16px, 5vw, 40px);
+  place-content: center;
+}
+
+.portal-header {
+  display: grid;
+  gap: 8px;
+}
+
+.portal-kicker {
+  color: #31616f;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.portal-header h1 {
+  font-size: clamp(34px, 6vw, 72px);
+  letter-spacing: 0;
+  line-height: 1.05;
+  margin: 0;
+  max-width: 760px;
+}
+
+.portal-apps {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portal-app {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(63, 82, 107, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(31, 45, 66, 0.12);
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  min-height: 210px;
+  padding: clamp(20px, 4vw, 34px);
+  text-decoration: none;
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.portal-app:hover {
+  border-color: rgba(25, 112, 146, 0.36);
+  box-shadow: 0 22px 60px rgba(31, 45, 66, 0.16);
+  transform: translateY(-2px);
+}
+
+.portal-app-label {
+  color: #2f6671;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.portal-app strong {
+  color: #162132;
+  font-size: clamp(24px, 3.5vw, 36px);
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+.portal-app span:last-child {
+  color: #536174;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.portal-app-skit {
+  border-top: 4px solid #197092;
+}
+
+.portal-app-speak {
+  border-top: 4px solid #ad6a3b;
+}
+
+@media (max-width: 720px) {
+  .portal-shell {
+    place-content: start center;
+  }
+
+  .portal-apps {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-app {
+    min-height: 0;
+  }
+}

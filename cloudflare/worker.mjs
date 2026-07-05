@@ -224,11 +224,27 @@ async function serveAsset(request, env, url) {
   }
   const assetUrl = new URL(request.url);
   if (url.pathname === "/") {
+    assetUrl.pathname = "/portal.html";
+  } else if (url.pathname === "/fun" || url.pathname === "/fun/" || url.pathname === "/user" || url.pathname === "/user/") {
     assetUrl.pathname = "/user.html";
-  } else if (url.pathname === "/practice") {
+  } else if (url.pathname === "/practice" || url.pathname === "/practice/" || url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
     assetUrl.pathname = "/practice.html";
-  } else if (url.pathname === "/practice/admin") {
+  } else if (
+    url.pathname === "/practice/admin" ||
+    url.pathname === "/practice/admin/" ||
+    url.pathname === "/speakloop/admin" ||
+    url.pathname === "/speakloop/admin/"
+  ) {
     assetUrl.pathname = "/practice_admin.html";
+  } else if (url.pathname === "/vibevoice" || url.pathname === "/vibevoice/" || url.pathname === "/skitvoice" || url.pathname === "/skitvoice/") {
+    assetUrl.pathname = "/vibevoice_simple.html";
+  } else if (
+    url.pathname === "/vibevoice/admin" ||
+    url.pathname === "/vibevoice/admin/" ||
+    url.pathname === "/skitvoice/admin" ||
+    url.pathname === "/skitvoice/admin/"
+  ) {
+    assetUrl.pathname = "/vibevoice.html";
   } else if (url.pathname === "/admin") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {

@@ -51,10 +51,24 @@ def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch
     assert Path("tmp/audio-history").resolve() != (tmp_path / "isolated-history").resolve()
 
 
-def test_root_serves_simple_user_ui() -> None:
+def test_root_serves_voice_lab_portal() -> None:
     client = TestClient(create_app())
 
     response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Voice Lab" in response.text
+    assert "SkitVoice" in response.text
+    assert "SpeakLoop" in response.text
+    assert 'href="/skitvoice"' in response.text
+    assert 'href="/speakloop"' in response.text
+    assert "へんな へんかん アプリ" not in response.text
+
+
+def test_fun_serves_simple_user_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/fun")
 
     assert response.status_code == 200
     assert "へんな へんかん アプリ" in response.text
@@ -94,7 +108,8 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     response = client.get("/practice")
 
     assert response.status_code == 200
-    assert "発音練習" in response.text
+    assert "SpeakLoop" in response.text
+    assert "言いたいことを話す練習" in response.text
     assert "Pronunciation Practice" in response.text
     assert "发音练习" in response.text
     assert "言いたいことを話す" in response.text
@@ -123,6 +138,16 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "/static/app_practice.js" in response.text
 
 
+def test_speakloop_alias_serves_practice_ui() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/speakloop")
+
+    assert response.status_code == 200
+    assert "SpeakLoop" in response.text
+    assert "practice-target-language" in response.text
+
+
 def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"en-US": "I want coffee"}),
@@ -144,10 +169,10 @@ def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
 def test_practice_admin_serves_practice_history_ui() -> None:
     client = TestClient(create_app())
 
-    response = client.get("/practice/admin")
+    response = client.get("/speakloop/admin")
 
     assert response.status_code == 200
-    assert "発音練習履歴" in response.text
+    assert "SpeakLoop 履歴" in response.text
     assert "/api/practice-history" not in response.text
     assert "/static/app_practice_history.js" in response.text
 
@@ -155,7 +180,7 @@ def test_practice_admin_serves_practice_history_ui() -> None:
 def test_vibevoice_serves_simple_user_ui() -> None:
     client = TestClient(create_app())
 
-    response = client.get("/vibevoice")
+    response = client.get("/skitvoice")
 
     assert response.status_code == 200
     assert "SkitVoice" in response.text
@@ -172,7 +197,7 @@ def test_vibevoice_serves_simple_user_ui() -> None:
 def test_vibevoice_serves_admin_skit_ui() -> None:
     client = TestClient(create_app())
 
-    response = client.get("/vibevoice/admin")
+    response = client.get("/skitvoice/admin")
 
     assert response.status_code == 200
     assert "SkitVoice 管理" in response.text

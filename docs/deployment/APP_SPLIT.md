@@ -4,7 +4,7 @@
 
 このリポジトリには、目的の異なる2つのWebアプリが同居し始めている。
 
-- 発音練習アプリ: 利用者が言いたい内容を学習対象言語へ変換し、模範音声を聞いて復唱し、ASR結果との比較で練習する。
+- SpeakLoop: 利用者が言いたい内容を学習対象言語へ変換し、模範音声を聞いて復唱し、ASR結果との比較で練習する。
 - SkitVoice: 指定台本と参照音声から、特定の声に近い音声や会話音声を生成する実験的な制作ツール。内部実装としてVibeVoiceを使う。
 
 両者は音声処理という基盤は近いが、プロダクト価値、品質要求、コスト構造、公開時の説明が異なる。今後のCloudflare対応やポートフォリオ公開へ進む前に、アプリ境界を明確にする。
@@ -58,10 +58,10 @@
 
 ```text
 same repository
-  -> pronunciation app build
-     -> Cloudflare project: mo-practice
+  -> SpeakLoop app build
+     -> Cloudflare project: speakloop
      -> Worker secrets: OPENAI_API_KEY など
-     -> storage: practice用KV/D1/R2
+     -> storage: SpeakLoop用KV/D1/R2
 
   -> SkitVoice app build
      -> Cloudflare project: skitvoice
@@ -70,7 +70,7 @@ same repository
      -> RunPod endpoint: VibeVoice/Seed-VC用
 ```
 
-1つのWorkerで `/practice` と `/vibevoice` を振り分けることも可能だが、公開アプリとして分けるなら別Workerの方が扱いやすい。SkitVoiceを単体公開する場合は、ローカル開発の `/vibevoice` を公開側の `/`、`/vibevoice/admin` を公開側の `/admin` として扱う。
+1つのWorkerで `/speakloop` と `/skitvoice` を振り分けることも可能だが、公開アプリとして分けるなら別Workerの方が扱いやすい。統合公開の初期段階では `/` を `Voice Lab` ポータルとして、`SpeakLoop` と `SkitVoice` への2つのリンクを置く。SkitVoiceを単体公開する場合は、ローカル開発の `/vibevoice` または `/skitvoice` を公開側の `/`、`/vibevoice/admin` または `/skitvoice/admin` を公開側の `/admin` として扱う。
 
 - secretの混在を避けられる。
 - RunPod依存のない発音練習アプリを軽く保てる。
@@ -110,9 +110,9 @@ docs/
 
 ## アプリごとの位置づけ
 
-### 発音練習アプリ
+### SpeakLoop
 
-目的は、学習者が短いループで何度も発音練習できること。
+公開名は `SpeakLoop`、サブタイトルは `言いたいことを話す練習` とする。目的は、学習者が短いループで何度も発音練習できること。
 
 - 既定経路は低遅延、低コストを優先する。
 - VibeVoiceやSeed-VCは標準経路に入れない。
@@ -132,9 +132,9 @@ docs/
 
 管理画面はCloudflare公開時に `/admin` へ置く。`/admin` はCloudflare AccessでGoogleログインを要求し、管理者本人のメールアドレスだけをAllow policyで許可する。公開ページの `/` は認証なしで見せ、管理画面、診断、詳細パラメータ、RunPod warmup、履歴確認は認証済み管理者だけに出す。
 
-### 従来の変換デモ
+### Voice Lab と従来の変換デモ
 
-既存の `/` にある `へんな へんかん アプリ` は、SkitVoiceとも発音練習アプリとも別経路の音声変換デモとして扱う。半分ジョークの体験であり、ポートフォリオ公開時に前面へ出すか、実験ページへ下げるかは後で判断する。
+統合公開の初期段階では、トップページ `/` を `Voice Lab` として、`SkitVoice` と `SpeakLoop` の2リンクだけを主導線にする。既存の `へんな へんかん アプリ` は `/fun` へ退避し、SkitVoiceともSpeakLoopとも別経路の音声変換デモとして扱う。半分ジョークの体験であり、ポートフォリオ公開時に前面へ出すか、実験ページへ下げるかは後で判断する。
 
 ## 別リポジトリへ分ける条件
 
@@ -150,7 +150,7 @@ repo分割する場合でも、先に `src/mo_speech/shared` 相当の共通modu
 
 ## 今後の作業順
 
-1. 現行の `/practice`、`/vibevoice`、従来 `/` の責務をdocs上で確定する。
+1. 現行の `/speakloop`、`/skitvoice`、`/fun`、ポータル `/` の責務をdocs上で確定する。
 2. 同一repo内で、発音練習アプリとSkitVoiceのUI入口、API、管理画面、履歴を分ける。
 3. 共通化できる音声処理、provider、storage、診断JSON処理を薄いshared moduleへ寄せる。
 4. 発音練習アプリをRunPodなしでCloudflareへ載せられる形にする。
