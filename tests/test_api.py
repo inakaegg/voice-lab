@@ -714,6 +714,51 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     assert captured == {"source_language": "zh-CN"}
 
 
+def test_practice_recording_api_detects_repeat_attempt_while_target_exists() -> None:
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "La pelan susinja se treak", "zh-CN": "我想要咖啡"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/recordings",
+        data={"target_language": "zh-CN", "current_target_text": "我想要咖啡。"},
+        files={"audio": ("recording.webm", b"repeat audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recording_kind"] == "attempt"
+    assert payload["recognized_text"] == "我想要咖啡"
+    assert payload["classification"]["attempt_source"] == "target"
+    assert payload["grade"] == "ok"
+
+
+def test_practice_recording_api_detects_new_prompt_while_target_exists() -> None:
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "明日は天気がいいですか", "zh-CN": "请问明天天气怎么样"}),
+        translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "明天天气好吗？"}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/recordings",
+        data={"target_language": "zh-CN", "current_target_text": "我想要咖啡。", "include_pinyin": "true"},
+        files={"audio": ("recording.webm", b"new prompt audio", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recording_kind"] == "prompt"
+    assert payload["transcript"] == "明日は天気がいいですか"
+    assert payload["target_text"] == "明天天气好吗？"
+    assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:明天天气好吗？".encode()).decode()
+    assert payload["classification"]["kind"] == "prompt"
+
+
 def test_audio_history_excludes_practice_entries_and_practice_history_lists_them(tmp_path) -> None:
     from mo_speech.audio_history import AudioHistoryStore
 

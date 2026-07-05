@@ -1,4 +1,4 @@
-from mo_speech.practice import evaluate_practice_attempt, normalize_practice_text
+from mo_speech.practice import classify_practice_recording, evaluate_practice_attempt, normalize_practice_text
 
 
 def test_practice_normalization_handles_supported_learning_languages() -> None:
@@ -39,3 +39,43 @@ def test_practice_attempt_keeps_missing_target_ranges_in_diff() -> None:
     assert deleted
     assert deleted[-1]["target"] == "价格还挺贵的"
     assert deleted[-1]["recognized"] == ""
+
+
+def test_practice_attempt_aligns_target_phrases_to_recognized_positions() -> None:
+    result = evaluate_practice_attempt(
+        "昨天买了一辆自行车，是 Trek 的 Domane。这是我的第一辆公路车。",
+        "嗯 昨天买了一辆自行车 是 Trek 的 Domane 啊 这是我的第一辆公路车",
+        "zh-CN",
+    )
+
+    assert result["phrase_similarity"] >= 0.9
+    assert result["similarity"] >= result["global_similarity"]
+    assert len(result["phrase_matches"]) == 3
+    assert result["phrase_matches"][0]["matched"] is True
+    assert result["phrase_matches"][0]["recognized_start"] > 0
+    assert result["phrase_matches"][1]["recognized_start"] >= result["phrase_matches"][0]["recognized_end"]
+    assert result["phrase_matches"][2]["recognized_start"] >= result["phrase_matches"][1]["recognized_end"]
+
+
+def test_practice_recording_classifier_prefers_attempt_for_target_language_repeat() -> None:
+    result = classify_practice_recording(
+        target_text="我想要咖啡。",
+        target_language="zh-CN",
+        target_recognized_text="我想要咖啡",
+        auto_recognized_text="La pelan susinja se treak",
+    )
+
+    assert result["kind"] == "attempt"
+    assert result["attempt_source"] == "target"
+    assert result["target_similarity"] >= 0.8
+
+
+def test_practice_recording_classifier_detects_new_prompt_while_target_exists() -> None:
+    result = classify_practice_recording(
+        target_text="我想要咖啡。",
+        target_language="zh-CN",
+        target_recognized_text="请问明天天气怎么样",
+        auto_recognized_text="明日は天気がいいですか",
+    )
+
+    assert result["kind"] == "prompt"

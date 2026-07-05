@@ -53,6 +53,7 @@ from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
 from .practice import (
     PRACTICE_TARGET_LANGUAGES,
+    classify_practice_recording,
     evaluate_practice_attempt,
     supported_practice_target_language,
 )
@@ -862,6 +863,244 @@ def create_app(
             return vibevoice_job_store.cancel(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
+
+    def _create_practice_prompt_result(
+        *,
+        audio_bytes: bytes,
+        filename: str,
+        practice_target_language: str,
+        include_pinyin: bool,
+        practice_asr_model: str,
+        precomputed_asr_result: AsrTranscription | None = None,
+        precomputed_asr_ms: float | None = None,
+    ) -> dict[str, object]:
+        timings_ms: dict[str, float] = {}
+        total_started = perf_counter()
+        used_precomputed_asr = precomputed_asr_result is not None
+        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            try:
+                if precomputed_asr_result is None:
+                    started = perf_counter()
+                    asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), "auto")
+                    timings_ms["asr"] = _elapsed_ms(started)
+                else:
+                    asr_result = precomputed_asr_result
+                    timings_ms["asr"] = float(precomputed_asr_ms or 0.0)
+                transcript = asr_result.text
+
+                started = perf_counter()
+                target_text = active_openai_pipeline.translator.translate(
+                    transcript,
+                    "auto",
+                    practice_target_language,
+                )
+                timings_ms["translation"] = _elapsed_ms(started)
+
+                started = perf_counter()
+                tts_output = _normalize_tts_provider_output(
+                    active_openai_pipeline.tts.synthesize(target_text, practice_target_language),
+                    active_openai_pipeline.tts.audio_mime_type,
+                )
+                timings_ms.update(tts_output.timings_ms)
+                timings_ms.setdefault("tts", _elapsed_ms(started))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        timings_ms["total"] = _elapsed_ms(total_started) + (
+            timings_ms["asr"] if used_precomputed_asr else 0.0
+        )
+        result = {
+            "transcript": transcript,
+            "target_text": target_text,
+            "translated_text": target_text,
+            "transformed_text": target_text,
+            "target_language": practice_target_language,
+            "target_language_label": PRACTICE_TARGET_LANGUAGES[practice_target_language]["label"],
+            "display_text": _practice_display_text(
+                target_text,
+                practice_target_language,
+                include_pinyin=include_pinyin,
+            ),
+            "audio_mime_type": tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
+            "audio_base64": base64.b64encode(tts_output.audio_bytes).decode(),
+            "timings_ms": timings_ms,
+            "asr_model": practice_asr_model,
+            "asr_timestamps": _serialize_asr_timestamps(asr_result),
+            "providers": {
+                "asr": asr_provider.name,
+                "translation": active_openai_pipeline.translator.name,
+                "tts": active_openai_pipeline.tts.name,
+            },
+        }
+        active_audio_history_store.save_output(
+            tts_output.audio_bytes,
+            suffix=_mime_suffix(result["audio_mime_type"]),
+            metadata={
+                "endpoint": "practice-prompts",
+                "translation_backend": "openai",
+                "target_language": practice_target_language,
+                "asr_model": practice_asr_model,
+                "audio_mime_type": result["audio_mime_type"],
+                "transcript_preview": transcript[:80],
+                "translated_text_preview": target_text[:80],
+                "tts_text": target_text,
+                "text_preview": target_text[:80],
+            },
+        )
+        return result
+
+    def _create_practice_attempt_result(
+        *,
+        audio_bytes: bytes,
+        filename: str,
+        practice_target_language: str,
+        target_text: str,
+        practice_asr_model: str,
+        precomputed_asr_result: AsrTranscription | None = None,
+        precomputed_asr_ms: float | None = None,
+        classification: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        total_started = perf_counter()
+        used_precomputed_asr = precomputed_asr_result is not None
+        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            try:
+                if precomputed_asr_result is None:
+                    asr_started = perf_counter()
+                    asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
+                    asr_ms = _elapsed_ms(asr_started)
+                else:
+                    asr_result = precomputed_asr_result
+                    asr_ms = float(precomputed_asr_ms or 0.0)
+                recognized_text = asr_result.text
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
+        result = {
+            "target_language": practice_target_language,
+            "target_text": target_text,
+            "recognized_text": recognized_text,
+            "asr_model": practice_asr_model,
+            "asr_timestamps": _serialize_asr_timestamps(asr_result),
+            **evaluation,
+            "timings_ms": {
+                "asr": asr_ms,
+                "compare": max(0.0, _elapsed_ms(total_started) - asr_ms),
+                "total": _elapsed_ms(total_started) + (asr_ms if used_precomputed_asr else 0.0),
+            },
+            "providers": {
+                "asr": asr_provider.name,
+            },
+        }
+        if classification is not None:
+            result["classification"] = classification
+        return result
+
+    @app.post("/api/practice/recordings")
+    async def create_practice_recording(
+        audio: Annotated[UploadFile, File()],
+        target_language: Annotated[str, Form()] = "ja-JP",
+        current_target_text: Annotated[str, Form()] = "",
+        include_pinyin: Annotated[bool, Form()] = False,
+        asr_model: Annotated[str, Form()] = "gpt-4o-transcribe",
+    ) -> dict[str, object]:
+        try:
+            practice_target_language = supported_practice_target_language(target_language)
+            practice_asr_model = supported_openai_practice_asr_model(asr_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        audio_bytes = await audio.read()
+        _save_audio_history_recording(
+            active_audio_history_store,
+            audio_bytes,
+            suffix=_upload_suffix(audio.filename),
+            metadata={
+                "endpoint": "practice-recordings",
+                "target_language": practice_target_language,
+                "asr_model": practice_asr_model,
+                "current_target_text_preview": current_target_text[:80],
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
+
+        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            try:
+                auto_started = perf_counter()
+                auto_asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), "auto")
+                auto_asr_ms = _elapsed_ms(auto_started)
+                target_asr_result: AsrTranscription | None = None
+                target_asr_ms = 0.0
+                classification = classify_practice_recording(
+                    target_text=current_target_text,
+                    target_language=practice_target_language,
+                    target_recognized_text="",
+                    auto_recognized_text=auto_asr_result.text,
+                )
+                if current_target_text.strip():
+                    target_started = perf_counter()
+                    target_asr_result = _transcribe_practice_audio(
+                        asr_provider,
+                        Path(temp_audio.name),
+                        practice_target_language,
+                    )
+                    target_asr_ms = _elapsed_ms(target_started)
+                    classification = classify_practice_recording(
+                        target_text=current_target_text,
+                        target_language=practice_target_language,
+                        target_recognized_text=target_asr_result.text,
+                        auto_recognized_text=auto_asr_result.text,
+                    )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        if classification["kind"] == "attempt" and target_asr_result is not None:
+            selected_asr_result = target_asr_result
+            selected_asr_ms = target_asr_ms
+            if classification.get("attempt_source") == "auto":
+                selected_asr_result = auto_asr_result
+                selected_asr_ms = auto_asr_ms
+            result = _create_practice_attempt_result(
+                audio_bytes=audio_bytes,
+                filename=audio.filename or "",
+                practice_target_language=practice_target_language,
+                target_text=current_target_text,
+                practice_asr_model=practice_asr_model,
+                precomputed_asr_result=selected_asr_result,
+                precomputed_asr_ms=selected_asr_ms,
+                classification=classification,
+            )
+            result["recording_kind"] = "attempt"
+            return result
+
+        result = _create_practice_prompt_result(
+            audio_bytes=audio_bytes,
+            filename=audio.filename or "",
+            practice_target_language=practice_target_language,
+            include_pinyin=include_pinyin,
+            practice_asr_model=practice_asr_model,
+            precomputed_asr_result=auto_asr_result,
+            precomputed_asr_ms=auto_asr_ms,
+        )
+        result["recording_kind"] = "prompt"
+        result["classification"] = classification
+        return result
 
     @app.post("/api/practice/prompts")
     async def create_practice_prompt(

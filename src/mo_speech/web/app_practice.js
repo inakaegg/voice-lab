@@ -211,15 +211,11 @@ async function toggleRecording(kind) {
     }
     return;
   }
-  if (kind === "repeat" && !currentTargetText) {
-    showError("先に おてほんを つくってください。");
-    return;
-  }
   await startRecording(kind);
 }
 
 function toggleActiveRecording() {
-  return toggleRecording(currentTargetText ? "repeat" : "native");
+  return toggleRecording("practice");
 }
 
 async function startRecording(kind) {
@@ -249,9 +245,9 @@ async function startRecording(kind) {
   startLevelMeter(stream, nativeLevel);
   setRecordingVisual(kind, true);
   setStatus(
-    kind === "native"
-      ? "言いたいことを話してください / Speak / 说"
-      : "お手本をまねして話してください / Repeat / 跟读",
+    currentTargetText
+      ? "まねして話すか、新しい内容を話してください。"
+      : "言いたいことを話してください / Speak / 说",
   );
 }
 
@@ -266,26 +262,37 @@ async function handleRecordingStopped() {
     showError("録音できませんでした。");
     return;
   }
-  if (kind === "native") {
-    await submitPrompt(blob);
-  } else {
-    await submitAttempt(blob);
-  }
+  await submitPracticeRecording(blob);
 }
 
-async function submitPrompt(blob) {
-  setBusy(true, "お手本を作っています。", 72, "native");
-  promptPanel.hidden = true;
+async function submitPracticeRecording(blob) {
+  const hasTarget = Boolean(currentTargetText);
+  setBusy(true, hasTarget ? "聞き取っています。" : "お手本を作っています。", hasTarget ? 88 : 72, "practice");
+  if (!hasTarget) {
+    promptPanel.hidden = true;
+  }
   resultPanel.hidden = true;
   const form = new FormData();
   if (selectedTargetLanguage === "zh-CN") {
     pinyinToggle.checked = true;
   }
   form.append("target_language", selectedTargetLanguage);
+  form.append("current_target_text", currentTargetText);
   form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
   form.append("asr_model", practiceAsrModel());
-  form.append("audio", blob, `native.${extensionForMimeType(blob.type)}`);
-  const payload = await postPracticeForm("/api/practice/prompts", form);
+  form.append("audio", blob, `practice.${extensionForMimeType(blob.type)}`);
+  const payload = await postPracticeForm("/api/practice/recordings", form);
+  if (payload.recording_kind === "attempt") {
+    setRepeatAudio(blob);
+    renderAttemptResult(payload);
+    setBusy(false, "何度でも練習できます。");
+    return;
+  }
+  renderPromptResult(payload);
+  setBusy(false, "お手本を聞いて、まねして話してください。");
+}
+
+function renderPromptResult(payload) {
   detectedNativeLanguage = normalizePracticeLanguage(payload.detected_source_language || "");
   renderNativeLabels();
   currentTargetText = payload.target_text || "";
@@ -300,26 +307,19 @@ async function submitPrompt(blob) {
   setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
   nativePanel.hidden = false;
   promptPanel.hidden = false;
+  stopRepeatAudio();
+  currentRecognizedText = "";
+  currentAttemptAsrTimestamps = null;
+  recognizedText.textContent = "";
   syncPracticeRecordMode();
-  setBusy(false, "お手本を聞いて、まねして話してください。");
-  await ensureAudioMetadata(modelAudio);
   syncModelAudioSpeed();
-  await modelAudio.play().catch(() => {});
   syncPlayButton();
-}
-
-async function submitAttempt(blob) {
-  setBusy(true, "聞き取っています。", 88, "repeat");
-  resultPanel.hidden = true;
-  setRepeatAudio(blob);
-  const form = new FormData();
-  form.append("target_language", selectedTargetLanguage);
-  form.append("target_text", currentTargetText);
-  form.append("asr_model", practiceAsrModel());
-  form.append("audio", blob, `repeat.${extensionForMimeType(blob.type)}`);
-  const payload = await postPracticeForm("/api/practice/attempts", form);
-  renderAttemptResult(payload);
-  setBusy(false, "何度でも練習できます。");
+  ensureAudioMetadata(modelAudio)
+    .then(() => {
+      syncModelAudioSpeed();
+      return modelAudio.play();
+    })
+    .catch(() => {});
 }
 
 async function postPracticeForm(url, form) {
@@ -938,14 +938,14 @@ function updateProgress() {
   progressFill.style.width = `${Math.max(0, Math.min(100, progressDisplayed))}%`;
 }
 
-function setRecordingVisual(kind, recording) {
+function setRecordingVisual(_kind, recording) {
   const button = nativeRecordButton;
   const label = nativeActionLabel;
   button.classList.toggle("is-recording", recording);
   button.classList.remove("is-processing");
   if (recording) {
     recordingStartedAt = performance.now();
-    button.setAttribute("aria-label", kind === "native" ? "録音中" : "まねして録音中");
+    button.setAttribute("aria-label", "録音中");
     label.textContent = "停止 / Stop / 停止";
     startRecordTimer(button);
   } else {

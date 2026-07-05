@@ -148,6 +148,83 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(practiceHistory.outputs[0].metadata.endpoint, "practice-prompts");
 });
 
+test("Cloudflare worker auto-classifies a single practice recording as a repeat attempt", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url, init) => {
+    calls.push({ url, init });
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return json({
+        text: calls.length === 1 ? "La pelan susinja se treak" : "我想要咖啡",
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "recording.webm");
+  form.append("target_language", "zh-CN");
+  form.append("current_target_text", "我想要咖啡。");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/recordings", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.recording_kind, "attempt");
+  assert.equal(payload.recognized_text, "我想要咖啡");
+  assert.equal(payload.classification.attempt_source, "target");
+  assert.equal(calls[0].init.body.get("language"), null);
+  assert.equal(calls[1].init.body.get("language"), "zh");
+});
+
+test("Cloudflare worker auto-classifies a single practice recording as a new prompt", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url, init) => {
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return json({
+        text: calls.length === 1 ? "明日は天気がいいですか" : "请问明天天气怎么样",
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          source_language: "ja-JP",
+          target_language: "zh-CN",
+          translated_text: "明天天气好吗？",
+        }),
+      });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([13, 14, 15]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["prompt"], { type: "audio/webm" }), "recording.webm");
+  form.append("target_language", "zh-CN");
+  form.append("current_target_text", "我想要咖啡。");
+  form.append("include_pinyin", "true");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/recordings", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+  const practiceHistory = await (await handleRequest(new Request("https://example.com/api/practice-history"), env)).json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.recording_kind, "prompt");
+  assert.equal(payload.transcript, "明日は天気がいいですか");
+  assert.equal(payload.target_text, "明天天气好吗？");
+  assert.equal(payload.audio_base64, Buffer.from([13, 14, 15]).toString("base64"));
+  assert.equal(payload.classification.kind, "prompt");
+  assert.equal(calls[0].init.body.get("language"), null);
+  assert.equal(calls[1].init.body.get("language"), "zh");
+  assert.equal(practiceHistory.outputs[0].metadata.endpoint, "practice-recordings");
+});
+
 test("Cloudflare worker requests whisper timestamps for pronunciation practice", async () => {
   const calls = [];
   const env = fakeEnv(async (url, init) => {

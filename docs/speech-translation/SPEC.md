@@ -53,7 +53,7 @@
 - ユーザー用画面ではブラウザ標準のaudio controlsを主UIにせず、出力音声の再生/停止を専用トグルボタンで表示する。出力後にトグルが変更された場合、再生ボタンは作り直し操作として扱い、必要な段階だけ再処理して最新出力を置き換える。出力言語が変わった場合は録音から再翻訳し、大阪弁/バリエーションだけが変わった場合は翻訳済みテキストからテキスト加工とTTS以降だけを再実行する。ジョークだけが変わった場合は本文の翻訳/TTSを再生成せず、出力言語に応じてジョーク音声の生成または効果音挿入だけを行う。同じ録音内で既に作った組み合わせへ戻した場合は、翻訳結果、ベースTTS音声、Seed-VC音声、効果音挿入後音声を組み合わせごとにキャッシュして再利用し、不要な再生成を避ける。
 - ユーザー用画面の音声翻訳は、翻訳方式を `OpenAI API` 固定、入力言語を `auto` とする。出力言語はユーザー画面専用の自動判定とし、ASR結果が日本語の場合は `id-ID`、日本語以外の場合は `ja-JP` へ翻訳する。
 - SpeakLoopではSeed-VC、ジョーク、大阪弁、バリエーションを使わない。速度を優先し、OpenAI ASR、OpenAI翻訳、OpenAI TTSだけで模範音声を作る。母国語入力は `auto` ASR、復唱入力は選択された学習対象言語をASRへ渡す。中国語を学習対象にした復唱では、ASRへ `zh-CN` 相当を明示し、中国語として聞き取らせる。初期判定は発音音響スコアではなく、ASRで聞き取れた文と目標文の正規化文字列類似度で行う。
-- SpeakLoopの録音UIは1つのマイクボタンにする。目標文がまだ無い状態では「言いたいことを話す」として母国語入力を作り、目標文がある状態では同じボタンを「まねして話す」として復唱入力に使う。新しい目標文へ移る場合は、別の小さい操作で現在の目標文をクリアしてから同じマイクを使う。母国語入力用と復唱用の2つのマイクを同時に出して、どちらを押すべきか迷わせない。
+- SpeakLoopの録音UIは1つのマイクボタンにする。目標文がまだ無い状態では「言いたいことを話す」として母国語入力を作る。目標文がある状態でも、フロントは録音を1つの `practice recordings` APIへ送り、サーバー側が録音内容から「目標文の復唱」か「新しい母国語入力」かを判定する。復唱と判定した場合は、必ず学習対象言語を指定してASRした結果を評価に使う。新しい目標文へ移る場合は、別の小さい操作で現在の目標文をクリアしてから同じマイクを使うこともできる。母国語入力用と復唱用の2つのマイクを同時に出して、どちらを押すべきか迷わせない。
 - 発音練習用画面の録音UIは、トップページと同じ録音ボタン、録音中の波形/レベルメーター、処理中アニメーションを再利用する。独自の録音ボタンで視覚フィードバックを弱くしない。
 - 発音練習用画面の固定文言は、ひらがなのみの日本語にはしない。ユーザーの母国語がまだ分からない初回ロード時は、日本語、中国語、英語を併記して「言いたいことを話す / 说出想说的话 / Say what you want」のように表示する。
 - 発音練習用画面では、ASRモデルを `gpt-4o-transcribe`、`gpt-4o-mini-transcribe`、`whisper-1` から選択できる。選択したASRモデルは母国語入力と復唱入力の両方に使い、ブラウザ側へ保存する。比較検証用の設定であり、通常の音声翻訳デモの既定ASRモデルは変えない。既定は `gpt-4o-transcribe` とし、精度と速度のバランスが必要な通常練習ではこれを推奨する。`gpt-4o-mini-transcribe` は軽量・低コスト寄りの比較用、`whisper-1` はword/segmentタイムスタンプが必要な比較再生用として扱う。
@@ -343,6 +343,29 @@ OpenAI Realtime翻訳の扱い:
 - ローカルVibeVoice実行ではCLI subprocessへ停止要求を出す。
 - 既に終了済みの場合は現在状態を返す。
 - RunPod Serverless側の細かいキャンセルはRunPod jobの扱いに依存するため、まずはUI上でキャンセル要求済みとして扱う。
+
+`POST /api/practice/recordings`
+
+リクエスト:
+
+- `audio`: 単一マイクで録音した音声ファイル。
+- `target_language`: `ja-JP`、`zh-CN`、`en-US`。
+- `current_target_text`: 現在表示中の目標文。空の場合は新しい母国語入力として扱う。
+- `include_pinyin`: `target_language=zh-CN` かつ新しいお手本を作る場合、ピンイン表示を生成するかどうか。
+- `asr_model`: `gpt-4o-transcribe`、`gpt-4o-mini-transcribe`、`whisper-1`。
+
+挙動:
+
+- `current_target_text` が空なら、`audio` を `auto` ASRで文字起こしし、学習対象言語へ翻訳して模範音声を返す。
+- `current_target_text` がある場合は、同じ音声を `auto` と `target_language` の両方でASRし、録音内容が「目標文の復唱」か「新しい母国語入力」かを判定する。
+- 復唱と判定した場合は、`target_language` 指定ASRを優先して評価する。これにより、中国語練習中の復唱音声がローマ字や別言語として評価されることを避ける。
+- 新しい母国語入力と判定した場合は、`auto` ASR結果を翻訳して新しい目標文と模範音声を返す。
+
+レスポンス:
+
+- 共通: `recording_kind`、`classification`、`asr_model`。
+- `recording_kind=prompt`: `transcript`、`target_text`、`display_text`、`audio_mime_type` / `audio_base64`、`providers` / `timings_ms`。
+- `recording_kind=attempt`: `recognized_text`、`similarity`、`global_similarity`、`phrase_similarity`、`phrase_matches`、`grade`、`grade_label`、`diff`、`providers` / `timings_ms`。
 
 `POST /api/practice/prompts`
 

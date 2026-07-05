@@ -96,8 +96,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.doesNotMatch(practiceHtml, /id="practice-retry-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-next-button"/);
   assert.match(practiceHtml, /\/static\/app_practice\.js/);
-  assert.match(practiceSource, /\/api\/practice\/prompts/);
-  assert.match(practiceSource, /\/api\/practice\/attempts/);
+  assert.match(practiceSource, /\/api\/practice\/recordings/);
+  assert.match(practiceSource, /current_target_text/);
   assert.match(practiceSource, /localStorage\.getItem/);
   assert.match(practiceSource, /localStorage\.setItem/);
   assert.match(practiceSource, /speed:/);
@@ -122,7 +122,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /stopComparisonPlayback/);
   assert.match(practiceSource, /比較再生/);
   assert.match(practiceSource, /toggleActiveRecording/);
-  assert.match(practiceSource, /currentTargetText \? "repeat" : "native"/);
+  assert.doesNotMatch(practiceSource, /currentTargetText \? "repeat" : "native"/);
   assert.match(practiceSource, /recognizedTextMatchesLearningLanguage/);
   assert.match(practiceSource, /canUseSegmentComparison/);
   assert.match(practiceSource, /renderRecognizedDiff/);
