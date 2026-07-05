@@ -14,9 +14,6 @@
           <h1>かんたんスキット生成</h1>
           <p>台本と参照音声から、指定した声でセリフ音声を生成します。</p>
         </div>
-        <nav class="vibevoice-nav" aria-label="関連画面">
-          <a href="/skitvoice/admin">管理</a>
-        </nav>
       </header>
 
       <form id="vibevoice-form" class="vibevoice-form">
@@ -114,25 +111,15 @@
           </section>
         </section>
 
-        <section class="vibevoice-panel vibevoice-simple-settings-panel" aria-label="生成設定">
+        <section class="vibevoice-panel vibevoice-simple-settings-panel" aria-label="生成">
           <div class="vibevoice-panel-header">
             <div>
-              <p class="vibevoice-section-label">Mode</p>
-              <h2>生成モード</h2>
+              <p class="vibevoice-section-label">Generate</p>
+              <h2>生成</h2>
             </div>
-            <button id="vibevoice-reset-settings-button" class="vibevoice-reset-settings-button" type="button">初期設定に戻す</button>
           </div>
-          <dl class="vibevoice-simple-mode-summary">
-            <div>
-              <dt>指定台詞モード</dt>
-              <dd>ON。話者ごとに1行生成し、ASRで台本順へ再配置します。</dd>
-            </div>
-            <div>
-              <dt>低スコア行の再生成</dt>
-              <dd>ON。ASRスコアが0.65未満の行を、台本行数から自動算出した上限まで再生成します。</dd>
-            </div>
-          </dl>
           <div class="vibevoice-simple-hidden-settings" hidden>
+            <button id="vibevoice-reset-settings-button" type="button">初期設定に戻す</button>
             <select name="backend" id="vibevoice-backend">
               <option value="local">ローカル</option>
               <option value="runpod_serverless" selected>RunPod Serverless</option>
@@ -183,7 +170,7 @@
           <h3>行ごとの音声</h3>
           <div id="vibevoice-artifacts" class="vibevoice-artifacts"></div>
         </section>
-        <details class="vibevoice-simple-debug">
+        <details class="vibevoice-simple-debug" hidden>
           <summary>診断とVV入力</summary>
           <section class="vibevoice-speaker-scripts-section" aria-label="VV入力テキスト">
             <h3>VV入力テキスト</h3>
@@ -205,7 +192,7 @@
         </details>
       </section>
 
-      <details class="vibevoice-debug-runtime">
+      <details class="vibevoice-debug-runtime" hidden>
         <summary>
           <span>実行環境</span>
           <span id="vibevoice-runtime-status" class="vibevoice-runtime-status" role="status" aria-live="polite">確認中...</span>

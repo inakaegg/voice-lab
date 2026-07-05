@@ -1651,10 +1651,6 @@ audio {
   opacity: 0.64;
 }
 
-.practice-repeat-card {
-  order: -1;
-}
-
 .practice-orb-caption {
   color: #174ea6;
   font-size: 12px;
@@ -1748,6 +1744,24 @@ audio {
 
 .practice-play-button.is-playing {
   background: #6f42c1;
+}
+
+.practice-next-prompt-button {
+  background: #ffffff;
+  border: 1px solid #c9d8e8;
+  border-radius: 999px;
+  color: #24435f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 42px;
+  padding: 0 14px;
+}
+
+.practice-next-prompt-button:hover {
+  border-color: #2f80ed;
+  color: #174ea6;
 }
 
 .practice-prompt-card {
@@ -2021,7 +2035,6 @@ audio {
     width: clamp(76px, 24vw, 104px);
   }
 
-  .practice-repeat-card,
   .practice-card-primary,
   .practice-prompt-card {
     grid-column: 1 / -1;

@@ -17,7 +17,7 @@
       </header>
 
       <section class="practice-target-panel" aria-label="れんしゅうすることば">
-        <p class="practice-section-label">練習する言語 / Practice language / 练习语言</p>
+        <p class="practice-section-label">学習する言語 / Learning language / 学习语言</p>
         <div id="practice-target-language" class="practice-language-grid" role="radiogroup" aria-label="学習対象言語">
           <button type="button" class="practice-language-button is-selected" data-language="ja-JP" value="ja-JP" role="radio" aria-checked="true">
             <span aria-hidden="true">🇯🇵</span>
@@ -50,8 +50,8 @@
         <article class="practice-card practice-card-primary">
           <div class="practice-step-number">1</div>
           <div class="practice-card-copy">
-            <h2>言いたいことを話す</h2>
-            <p>说出想说的话 / Say what you want</p>
+            <h2 id="practice-record-title">言いたいことを話す</h2>
+            <p id="practice-record-description">说出想说的话 / Say what you want</p>
           </div>
           <button id="practice-native-record-button" class="record-orb practice-record-orb" type="button" aria-label="言いたいことを録音">
             <span class="record-progress" aria-hidden="true"></span>
@@ -114,32 +114,9 @@
                 <option value="sentence">句点</option>
               </select>
             </label>
+            <button id="practice-next-prompt-button" class="practice-next-prompt-button" type="button" hidden>次の文</button>
           </div>
           <audio id="practice-model-audio" hidden></audio>
-        </article>
-
-        <article id="practice-repeat-panel" class="practice-card practice-repeat-card" hidden>
-          <div class="practice-step-number">1</div>
-          <div class="practice-card-copy">
-            <h2>まねして話す</h2>
-            <p>Repeat / 跟着说</p>
-          </div>
-          <button id="practice-repeat-record-button" class="record-orb practice-record-orb" type="button" aria-label="まねして録音">
-            <span class="record-progress" aria-hidden="true"></span>
-            <span class="record-waves" aria-hidden="true"></span>
-            <span class="record-icon" aria-hidden="true"></span>
-            <span id="practice-repeat-level" class="record-level-meter" aria-hidden="true">
-              <span class="record-level-bar"></span>
-              <span class="record-level-bar"></span>
-              <span class="record-level-bar"></span>
-              <span class="record-level-bar"></span>
-              <span class="record-level-bar"></span>
-              <span class="record-level-bar"></span>
-              <span class="record-level-bar"></span>
-            </span>
-            <span class="record-timer" aria-hidden="true">REC</span>
-          </button>
-          <p id="practice-repeat-action-label" class="practice-orb-caption">まねする / Repeat / 模仿</p>
         </article>
       </section>
 

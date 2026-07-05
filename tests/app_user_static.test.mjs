@@ -61,6 +61,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /言いたいことを話す練習/);
   assert.match(practiceHtml, /Pronunciation Practice/);
   assert.match(practiceHtml, /发音练习/);
+  assert.match(practiceHtml, /学習する言語/);
   assert.match(practiceHtml, /言いたいことを話す/);
   assert.match(practiceHtml, /Say what you want/);
   assert.match(practiceHtml, /id="practice-target-language"/);
@@ -68,7 +69,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /value="zh-CN"/);
   assert.match(practiceHtml, /value="en-US"/);
   assert.match(practiceHtml, /id="practice-native-record-button"/);
-  assert.match(practiceHtml, /id="practice-repeat-record-button"/);
+  assert.equal((practiceHtml.match(/class="record-orb practice-record-orb"/g) || []).length, 1);
+  assert.doesNotMatch(practiceHtml, /id="practice-repeat-record-button"/);
   assert.match(practiceHtml, /id="practice-native-transcript"/);
   assert.match(practiceHtml, /id="practice-pinyin-toggle"/);
   assert.match(practiceHtml, /class="record-orb practice-record-orb"/);
@@ -85,6 +87,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /id="practice-segment-mode"/);
   assert.match(practiceHtml, /value="sentence"/);
   assert.match(practiceHtml, /value="punctuation"/);
+  assert.match(practiceHtml, /id="practice-next-prompt-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-repeat-audio-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-compare-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-retry-button"/);
@@ -115,6 +118,10 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /isComparisonPlaying/);
   assert.match(practiceSource, /stopComparisonPlayback/);
   assert.match(practiceSource, /比較再生/);
+  assert.match(practiceSource, /toggleActiveRecording/);
+  assert.match(practiceSource, /currentTargetText \? "repeat" : "native"/);
+  assert.match(practiceSource, /recognizedTextMatchesLearningLanguage/);
+  assert.match(practiceSource, /canUseSegmentComparison/);
   assert.match(practiceSource, /renderRecognizedDiff/);
   assert.match(practiceSource, /renderMissingTargetDiff/);
   assert.match(practiceSource, /practice-diff-mismatch/);
@@ -129,7 +136,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(styles, /\.practice-target-text rt/s);
   assert.match(styles, /\.practice-diff-mismatch/);
   assert.match(styles, /\.practice-diff-missing/);
-  assert.match(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);
+  assert.match(styles, /\.practice-next-prompt-button/);
+  assert.doesNotMatch(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);
   assert.doesNotMatch(styles, /\.practice-actions/);
   assert.doesNotMatch(styles, /\.practice-target-text-box\s*\{[^}]*overflow:\s*auto/s);
   assert.doesNotMatch(practiceHtml, /joke_mode|similar_voice|osaka_dialect|variation_mode/);
@@ -284,7 +292,8 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
   assert.match(vibevoiceSimpleHtml, /SkitVoice/);
   assert.match(vibevoiceSimpleHtml, /かんたんスキット生成/);
-  assert.match(vibevoiceSimpleHtml, /href="\/skitvoice\/admin">管理/);
+  assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/skitvoice\/admin">管理/);
+  assert.doesNotMatch(vibevoiceSimpleHtml, /生成モード/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/practice"/);
   assert.match(vibevoiceSimpleHtml, /name="backend"/);
   assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);
@@ -298,12 +307,13 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /name="directed_retry_max_multiplier" type="hidden" value="1"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-line-mode"[^>]*checked/s);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-retry-low-score"[^>]*checked/s);
-  assert.match(vibevoiceSimpleHtml, /台本行数から自動算出した上限まで再生成/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-button"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-job-progress"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-audio"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-artifacts"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-copy-diagnostics"/);
+  assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-debug" hidden/);
+  assert.match(vibevoiceSimpleHtml, /class="vibevoice-debug-runtime" hidden/);
   assert.match(vibevoiceSimpleHtml, /\/static\/app_vibevoice\.js/);
   assert.match(styles, /\.vibevoice-simple-shell/);
   assert.match(styles, /\.vibevoice-simple-mode-summary/);

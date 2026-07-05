@@ -1,13 +1,11 @@
 const targetLanguageButtons = Array.from(document.querySelectorAll(".practice-language-button"));
 const nativePanel = document.querySelector(".practice-card-primary");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
-const repeatRecordButton = document.querySelector("#practice-repeat-record-button");
+const recordTitle = document.querySelector("#practice-record-title");
+const recordDescription = document.querySelector("#practice-record-description");
 const nativeLevel = document.querySelector("#practice-native-level");
-const repeatLevel = document.querySelector("#practice-repeat-level");
 const nativeActionLabel = document.querySelector("#practice-native-action-label");
-const repeatActionLabel = document.querySelector("#practice-repeat-action-label");
 const promptPanel = document.querySelector("#practice-prompt-panel");
-const repeatPanel = document.querySelector("#practice-repeat-panel");
 const resultPanel = document.querySelector("#practice-result-panel");
 const targetLabel = document.querySelector("#practice-target-label");
 const targetText = document.querySelector("#practice-target-text");
@@ -33,6 +31,7 @@ const nativeTranscriptLabel = document.querySelector("#practice-native-transcrip
 const nativeTranscript = document.querySelector("#practice-native-transcript");
 const recognizedLabel = document.querySelector("#practice-recognized-label");
 const repeatAudio = document.querySelector("#practice-repeat-audio");
+const nextPromptButton = document.querySelector("#practice-next-prompt-button");
 
 const languageLabels = {
   "ja-JP": "日本語",
@@ -171,13 +170,13 @@ let comparisonPlaybackToken = 0;
 targetLanguageButtons.forEach((button) => {
   button.addEventListener("click", () => selectTargetLanguage(button.dataset.language || "ja-JP"));
 });
-nativeRecordButton.addEventListener("click", () => toggleRecording("native"));
-repeatRecordButton.addEventListener("click", () => toggleRecording("repeat"));
+nativeRecordButton.addEventListener("click", toggleActiveRecording);
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 segmentModeSelect.addEventListener("change", savePracticeSettings);
 asrModelSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
+nextPromptButton.addEventListener("click", resetPractice);
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
@@ -219,6 +218,10 @@ async function toggleRecording(kind) {
   await startRecording(kind);
 }
 
+function toggleActiveRecording() {
+  return toggleRecording(currentTargetText ? "repeat" : "native");
+}
+
 async function startRecording(kind) {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
     showError("このブラウザでは録音を使えません。");
@@ -243,7 +246,7 @@ async function startRecording(kind) {
   });
   mediaRecorder.addEventListener("stop", handleRecordingStopped, { once: true });
   mediaRecorder.start();
-  startLevelMeter(stream, kind === "native" ? nativeLevel : repeatLevel);
+  startLevelMeter(stream, nativeLevel);
   setRecordingVisual(kind, true);
   setStatus(
     kind === "native"
@@ -273,7 +276,6 @@ async function handleRecordingStopped() {
 async function submitPrompt(blob) {
   setBusy(true, "お手本を作っています。", 72, "native");
   promptPanel.hidden = true;
-  repeatPanel.hidden = true;
   resultPanel.hidden = true;
   const form = new FormData();
   if (selectedTargetLanguage === "zh-CN") {
@@ -296,9 +298,9 @@ async function submitPrompt(blob) {
   nativeTranscript.textContent = payload.transcript || "";
   nativeTranscriptPanel.hidden = !payload.transcript;
   setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
-  nativePanel.hidden = true;
+  nativePanel.hidden = false;
   promptPanel.hidden = false;
-  repeatPanel.hidden = false;
+  syncPracticeRecordMode();
   setBusy(false, "お手本を聞いて、まねして話してください。");
   await ensureAudioMetadata(modelAudio);
   syncModelAudioSpeed();
@@ -348,6 +350,7 @@ function renderAttemptResult(payload) {
   renderRecognizedDiff(payload);
   nativePanel.hidden = false;
   resultPanel.hidden = false;
+  syncPracticeRecordMode();
   syncPlayButton();
 }
 
@@ -364,7 +367,6 @@ function resetPractice() {
   detectedNativeLanguage = "";
   nativePanel.hidden = false;
   promptPanel.hidden = true;
-  repeatPanel.hidden = true;
   resultPanel.hidden = true;
   nativeTranscriptPanel.hidden = true;
   nativeTranscript.textContent = "";
@@ -372,6 +374,7 @@ function resetPractice() {
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
+  syncPracticeRecordMode();
   setStatus("言いたいことを話す / 说出想说的话 / Say what you want");
   clearError();
 }
@@ -578,7 +581,12 @@ async function playComparisonAudios() {
       return;
     }
     const sentences = splitPracticeSentences(currentTargetText, practiceSegmentMode());
-    if (sentences.length <= 1 || !Number.isFinite(modelAudio.duration) || !Number.isFinite(repeatAudio.duration)) {
+    if (
+      sentences.length <= 1 ||
+      !Number.isFinite(modelAudio.duration) ||
+      !Number.isFinite(repeatAudio.duration) ||
+      !canUseSegmentComparison(sentences)
+    ) {
       await playAudioElementToEnd(modelAudio, token);
       if (!isActiveComparisonPlayback(token)) {
         return;
@@ -593,7 +601,15 @@ async function playComparisonAudios() {
       currentAttemptAsrTimestamps,
       repeatAudio.duration,
       practiceSegmentMode(),
-    ) || sentenceAudioRanges(sentences, repeatAudio.duration);
+    );
+    if (!repeatRanges) {
+      await playAudioElementToEnd(modelAudio, token);
+      if (!isActiveComparisonPlayback(token)) {
+        return;
+      }
+      await playAudioElementToEnd(repeatAudio, token);
+      return;
+    }
     for (let index = 0; index < sentences.length; index += 1) {
       if (!isActiveComparisonPlayback(token)) {
         return;
@@ -747,6 +763,33 @@ function sentenceAudioRanges(sentences, duration) {
   });
 }
 
+function canUseSegmentComparison(sentences) {
+  return (
+    sentences.length > 1 &&
+    currentAttemptAsrTimestamps?.available === true &&
+    recognizedTextMatchesLearningLanguage(currentRecognizedText, selectedTargetLanguage)
+  );
+}
+
+function recognizedTextMatchesLearningLanguage(text, language) {
+  const contentChars = Array.from(String(text || "")).filter((char) => !/[\s\p{P}\p{S}]/u.test(char));
+  if (!contentChars.length) {
+    return false;
+  }
+  if (language === "zh-CN") {
+    const hanCount = contentChars.filter((char) => isHanCharacter(char)).length;
+    return hanCount >= 2 && hanCount / contentChars.length >= 0.3;
+  }
+  if (language === "ja-JP") {
+    const japaneseCount = contentChars.filter((char) => isHanCharacter(char) || /[\u3040-\u30ff]/u.test(char)).length;
+    return japaneseCount >= 2 && japaneseCount / contentChars.length >= 0.3;
+  }
+  if (language === "en-US") {
+    return contentChars.some((char) => /[A-Za-z]/u.test(char));
+  }
+  return true;
+}
+
 function timestampAudioRangesForSentences(sentences, recognized, timestamps, duration, mode) {
   if (!timestamps?.available) {
     return null;
@@ -762,19 +805,20 @@ function timestampAudioRangesForSentences(sentences, recognized, timestamps, dur
   if (!preferredRanges.length) {
     return null;
   }
-  let used = false;
-  const ranges = fallbackRanges.map((fallback, index) => {
+  if (preferredRanges.length < sentences.length) {
+    return null;
+  }
+  const ranges = fallbackRanges.map((_fallback, index) => {
     const range = preferredRanges[index];
     if (range && Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start) {
-      used = true;
       return {
         start: Math.max(0, range.start),
         end: Math.min(Number(duration) || range.end, range.end),
       };
     }
-    return fallback;
+    return null;
   });
-  return used ? ranges : null;
+  return ranges.every(Boolean) ? ranges : null;
 }
 
 function timestampRangesFromWords(recognizedSentences, words) {
@@ -846,8 +890,7 @@ function sleep(milliseconds) {
 function setBusy(busy, message, target = 100, kind = processingKind) {
   isBusy = busy;
   nativeRecordButton.disabled = busy;
-  repeatRecordButton.disabled = busy || !currentTargetText;
-  const processingButton = kind === "repeat" ? repeatRecordButton : nativeRecordButton;
+  const processingButton = nativeRecordButton;
   progress.hidden = !busy;
   if (busy) {
     processingButton.classList.add("is-processing");
@@ -856,7 +899,6 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
     startProgressTimer();
   } else {
     nativeRecordButton.classList.remove("is-processing");
-    repeatRecordButton.classList.remove("is-processing");
     processingKind = "";
     progressTarget = 100;
     progressDisplayed = 100;
@@ -897,8 +939,8 @@ function updateProgress() {
 }
 
 function setRecordingVisual(kind, recording) {
-  const button = kind === "native" ? nativeRecordButton : repeatRecordButton;
-  const label = kind === "native" ? nativeActionLabel : repeatActionLabel;
+  const button = nativeRecordButton;
+  const label = nativeActionLabel;
   button.classList.toggle("is-recording", recording);
   button.classList.remove("is-processing");
   if (recording) {
@@ -908,8 +950,7 @@ function setRecordingVisual(kind, recording) {
     startRecordTimer(button);
   } else {
     stopRecordTimer(button);
-    button.setAttribute("aria-label", kind === "native" ? "言いたいことを録音" : "まねして録音");
-    label.textContent = kind === "native" ? "話す / Speak / 说" : "まねする / Repeat / 模仿";
+    syncPracticeRecordMode();
   }
 }
 
@@ -953,7 +994,7 @@ function stopLevelMeter() {
     currentAudioContext = null;
   }
   currentAnalyser = null;
-  [nativeLevel, repeatLevel].forEach((container) => {
+  [nativeLevel].filter(Boolean).forEach((container) => {
     container.classList.remove("is-active");
     container.querySelectorAll(".record-level-bar").forEach((bar) => {
       bar.style.transform = "scaleY(0.18)";
@@ -1116,6 +1157,15 @@ function renderNativeLabels() {
   const labels = nativeUiLabels[detectedNativeLanguage] || nativeUiLabels["ja-JP"];
   nativeTranscriptLabel.textContent = labels.transcript;
   recognizedLabel.textContent = labels.recognized;
+}
+
+function syncPracticeRecordMode() {
+  const repeatMode = Boolean(currentTargetText);
+  recordTitle.textContent = repeatMode ? "まねして話す" : "言いたいことを話す";
+  recordDescription.textContent = repeatMode ? "Repeat / 跟着说" : "说出想说的话 / Say what you want";
+  nativeRecordButton.setAttribute("aria-label", repeatMode ? "まねして録音" : "言いたいことを録音");
+  nativeActionLabel.textContent = repeatMode ? "まねする / Repeat / 模仿" : "話す / Speak / 说";
+  nextPromptButton.hidden = !repeatMode;
 }
 
 function renderRecognizedDiff(payload) {

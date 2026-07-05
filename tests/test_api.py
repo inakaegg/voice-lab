@@ -112,6 +112,7 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "言いたいことを話す練習" in response.text
     assert "Pronunciation Practice" in response.text
     assert "发音练习" in response.text
+    assert "学習する言語" in response.text
     assert "言いたいことを話す" in response.text
     assert "Say what you want" in response.text
     assert "practice-target-language" in response.text
@@ -119,7 +120,7 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert 'value="zh-CN"' in response.text
     assert 'value="en-US"' in response.text
     assert "practice-native-record-button" in response.text
-    assert "practice-repeat-record-button" in response.text
+    assert "practice-repeat-record-button" not in response.text
     assert "practice-native-transcript" in response.text
     assert "practice-pinyin-toggle" in response.text
     assert "record-level-meter" in response.text
@@ -131,6 +132,7 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert 'min="0.25"' in response.text
     assert 'max="2"' in response.text
     assert 'step="0.25"' in response.text
+    assert "practice-next-prompt-button" in response.text
     assert "practice-repeat-audio-button" not in response.text
     assert "practice-compare-button" not in response.text
     assert "practice-retry-button" not in response.text
@@ -186,6 +188,8 @@ def test_vibevoice_serves_simple_user_ui() -> None:
     assert "SkitVoice" in response.text
     assert "かんたんスキット生成" in response.text
     assert 'data-vibevoice-mode="simple"' in response.text
+    assert 'href="/skitvoice/admin"' not in response.text
+    assert "生成モード" not in response.text
     assert "vibevoice-script" in response.text
     assert "voice_file_1" in response.text
     assert 'href="/practice"' not in response.text
