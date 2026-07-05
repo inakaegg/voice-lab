@@ -18,25 +18,118 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
   await handleRequest(new Request("https://example.com/"), env);
   await handleRequest(new Request("https://example.com/fun"), env);
   await handleRequest(new Request("https://example.com/speakloop"), env);
-  await handleRequest(new Request("https://example.com/speakloop/admin"), env);
   await handleRequest(new Request("https://example.com/skitvoice"), env);
-  await handleRequest(new Request("https://example.com/skitvoice/admin"), env);
   await handleRequest(new Request("https://example.com/seed-vc"), env);
 
   assert.deepEqual(requestedPaths, [
     "/portal.html",
     "/user.html",
     "/practice.html",
-    "/practice_admin.html",
     "/vibevoice_simple.html",
-    "/vibevoice.html",
     "/seed_vc.html",
   ]);
 });
 
+test("Cloudflare worker protects admin pages with a signed password session", async () => {
+  const requestedPaths = [];
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("asset", { status: 200 });
+    },
+  };
+
+  const blocked = await handleRequest(new Request("https://example.com/skitvoice/admin"), env);
+  const loginForm = await handleRequest(new Request("https://example.com/admin/login?next=%2Fskitvoice%2Fadmin"), env);
+  const badLogin = await handleRequest(
+    new Request("https://example.com/admin/login", {
+      method: "POST",
+      body: new URLSearchParams({ password: "wrong", next: "/skitvoice/admin" }),
+    }),
+    env,
+  );
+  const login = await handleRequest(
+    new Request("https://example.com/admin/login", {
+      method: "POST",
+      body: new URLSearchParams({ password: "secret-pass", next: "/skitvoice/admin" }),
+    }),
+    env,
+  );
+  const cookie = login.headers.get("set-cookie");
+  const allowed = await handleRequest(new Request("https://example.com/skitvoice/admin", { headers: { cookie } }), env);
+
+  assert.equal(blocked.status, 302);
+  assert.equal(blocked.headers.get("location"), "/admin/login?next=%2Fskitvoice%2Fadmin");
+  assert.equal(loginForm.status, 200);
+  assert.match(await loginForm.text(), /管理ログイン/);
+  assert.equal(badLogin.status, 401);
+  assert.equal(login.status, 302);
+  assert.equal(login.headers.get("location"), "/skitvoice/admin");
+  assert.match(cookie, /mo_admin_session=/);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Secure/);
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(requestedPaths, ["/vibevoice.html"]);
+});
+
+test("Cloudflare worker protects admin APIs with the same password session", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv() });
+  const login = await handleRequest(
+    new Request("https://example.com/admin/login", {
+      method: "POST",
+      body: new URLSearchParams({ password: "secret-pass" }),
+    }),
+    env,
+  );
+  const cookie = login.headers.get("set-cookie");
+
+  const blockedSettings = await handleRequest(
+    new Request("https://example.com/api/user-settings", {
+      method: "PUT",
+      body: JSON.stringify({ theme: "blue" }),
+    }),
+    env,
+  );
+  const allowedSettings = await handleRequest(
+    new Request("https://example.com/api/user-settings", {
+      method: "PUT",
+      headers: { cookie },
+      body: JSON.stringify({ theme: "blue" }),
+    }),
+    env,
+  );
+  const blockedHistory = await handleRequest(new Request("https://example.com/api/audio-history"), env);
+  const allowedHistory = await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie } }), env);
+
+  assert.equal(blockedSettings.status, 401);
+  assert.deepEqual(await blockedSettings.json(), { detail: "admin authentication required" });
+  assert.equal(allowedSettings.status, 200);
+  assert.equal(blockedHistory.status, 401);
+  assert.equal(allowedHistory.status, 200);
+});
+
+test("Cloudflare worker reports admin auth setup errors on protected routes", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+
+  const page = await handleRequest(new Request("https://example.com/admin"), env);
+  const api = await handleRequest(new Request("https://example.com/api/warmup", { method: "POST" }), env);
+
+  assert.equal(page.status, 503);
+  assert.match(await page.text(), /ADMIN_PASSWORD_SHA256/);
+  assert.equal(api.status, 503);
+  assert.deepEqual(await api.json(), { detail: "admin authentication is not configured" });
+});
+
 test("Cloudflare worker translates speech with OpenAI and stores a completed job", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       return json({ text: "Halo Jepang" });
@@ -74,7 +167,10 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   const polled = await (
     await handleRequest(new Request(`https://example.com/api/translate-speech-jobs/${payload.job_id}`), env)
   ).json();
-  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+  const adminCookieValue = await adminCookie(env);
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(response.status, 200);
   assert.match(payload.job_id, /^cf-/);
@@ -98,7 +194,7 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
 
 test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       return json({ text: "コーヒーがほしいです" });
@@ -127,8 +223,13 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
     env,
   );
   const payload = await response.json();
-  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
-  const practiceHistory = await (await handleRequest(new Request("https://example.com/api/practice-history"), env)).json();
+  const adminCookieValue = await adminCookie(env);
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
+  const practiceHistory = await (
+    await handleRequest(new Request("https://example.com/api/practice-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(response.status, 200);
   assert.equal(payload.transcript, "コーヒーがほしいです");
@@ -152,7 +253,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
 
 test("Cloudflare worker auto-classifies a single practice recording as a repeat attempt", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       return json({
@@ -182,7 +283,7 @@ test("Cloudflare worker auto-classifies a single practice recording as a repeat 
 
 test("Cloudflare worker auto-classifies a single practice recording as a new prompt", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       return json({
@@ -214,7 +315,10 @@ test("Cloudflare worker auto-classifies a single practice recording as a new pro
     env,
   );
   const payload = await response.json();
-  const practiceHistory = await (await handleRequest(new Request("https://example.com/api/practice-history"), env)).json();
+  const adminCookieValue = await adminCookie(env);
+  const practiceHistory = await (
+    await handleRequest(new Request("https://example.com/api/practice-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(response.status, 200);
   assert.equal(payload.recording_kind, "prompt");
@@ -393,7 +497,7 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
 });
 
 test("Cloudflare worker saves voice conversion source audio to KV history", async () => {
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async () => json({ id: "job-vc", status: "IN_QUEUE" }),
     { kv: fakeKv() },
   );
@@ -406,7 +510,10 @@ test("Cloudflare worker saves voice conversion source audio to KV history", asyn
     new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
     env,
   );
-  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+  const adminCookieValue = await adminCookie(env);
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(response.status, 200);
   assert.equal(history.recordings.length, 1);
@@ -416,7 +523,7 @@ test("Cloudflare worker saves voice conversion source audio to KV history", asyn
 });
 
 test("Cloudflare worker maps completed RunPod voice conversion status to local job snapshot", async () => {
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async () =>
       json({
         id: "job-vc",
@@ -434,7 +541,10 @@ test("Cloudflare worker maps completed RunPod voice conversion status to local j
     env,
   );
   const payload = await response.json();
-  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+  const adminCookieValue = await adminCookie(env);
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(payload.status, "succeeded");
   assert.equal(payload.current_stage.stage, "complete");
@@ -482,7 +592,7 @@ test("Cloudflare worker creates user text output with OpenAI text transform and 
 
 test("Cloudflare worker persists user settings in KV and generates joke variations", async () => {
   const calls = [];
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async (url, init) => {
       calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
       if (url === "https://api.openai.com/v1/responses") {
@@ -493,10 +603,11 @@ test("Cloudflare worker persists user settings in KV and generates joke variatio
     { kv: fakeKv() },
   );
 
+  const adminCookieValue = await adminCookie(env);
   const saveResponse = await handleRequest(
     new Request("https://example.com/api/user-settings", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", cookie: adminCookieValue },
       body: JSON.stringify({
         target_language: "ja-JP",
         joke_texts: ["A", "B"],
@@ -539,7 +650,7 @@ test("Cloudflare worker persists user settings in KV and generates joke variatio
 });
 
 test("Cloudflare worker saves joke TTS output to KV audio history", async () => {
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async (url) => {
       if (url === "https://api.openai.com/v1/responses") {
         return json({ output_text: "Lucu sekali." });
@@ -560,16 +671,22 @@ test("Cloudflare worker saves joke TTS output to KV audio history", async () => 
     }),
     env,
   );
-  const historyResponse = await handleRequest(new Request("https://example.com/api/audio-history"), env);
-  const history = await historyResponse.json();
-  const entry = history.outputs[0];
-  const audioResponse = await handleRequest(new Request(`https://example.com${entry.url}`), env);
-  const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
-  const deleteResponse = await handleRequest(
-    new Request(`https://example.com${entry.url}`, { method: "DELETE" }),
+  const adminCookieValue = await adminCookie(env);
+  const historyResponse = await handleRequest(
+    new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }),
     env,
   );
-  const afterDelete = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+  const history = await historyResponse.json();
+  const entry = history.outputs[0];
+  const audioResponse = await handleRequest(new Request(`https://example.com${entry.url}`, { headers: { cookie: adminCookieValue } }), env);
+  const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
+  const deleteResponse = await handleRequest(
+    new Request(`https://example.com${entry.url}`, { method: "DELETE", headers: { cookie: adminCookieValue } }),
+    env,
+  );
+  const afterDelete = await (
+    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(jokeResponse.status, 200);
   assert.equal(history.settings.enabled, true);
@@ -584,10 +701,13 @@ test("Cloudflare worker saves joke TTS output to KV audio history", async () => 
 });
 
 test("Cloudflare worker can expose one hundred audio history entries per kind", async () => {
-  const env = fakeEnv(async () => json({ ok: true }), { kv: fakeKv() });
+  const env = adminAuthEnv(async () => json({ ok: true }), { kv: fakeKv() });
   env.CLOUDFLARE_AUDIO_HISTORY_LIMIT = "100";
+  const adminCookieValue = await adminCookie(env);
 
-  const history = await (await handleRequest(new Request("https://example.com/api/audio-history"), env)).json();
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
+  ).json();
 
   assert.equal(history.settings.limit, 100);
 });
@@ -627,7 +747,7 @@ test("Cloudflare worker only enables user-page warmup when explicitly opted in",
 test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", async () => {
   const kv = fakeKv();
   const calls = [];
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async (url, init) => {
       calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
       if (url.endsWith("/run")) {
@@ -652,9 +772,13 @@ test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", asy
     { kv },
   );
 
-  const warmupResponse = await handleRequest(new Request("https://example.com/api/warmup", { method: "POST" }), env);
+  const adminCookieValue = await adminCookie(env);
+  const warmupResponse = await handleRequest(
+    new Request("https://example.com/api/warmup", { method: "POST", headers: { cookie: adminCookieValue } }),
+    env,
+  );
   const warmupJob = await warmupResponse.json();
-  const statusResponse = await handleRequest(new Request("https://example.com/api/warmup/warm-job"), env);
+  const statusResponse = await handleRequest(new Request("https://example.com/api/warmup/warm-job", { headers: { cookie: adminCookieValue } }), env);
   const statusJob = await statusResponse.json();
   const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
   const runtime = await runtimeResponse.json();
@@ -670,7 +794,7 @@ test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", asy
 
 test("Cloudflare worker stores Seed-VC ready state when warmup run completes immediately", async () => {
   const kv = fakeKv();
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async (url) => {
       if (url.endsWith("/run")) {
         return json({
@@ -690,7 +814,11 @@ test("Cloudflare worker stores Seed-VC ready state when warmup run completes imm
     { kv },
   );
 
-  const warmupResponse = await handleRequest(new Request("https://example.com/api/warmup", { method: "POST" }), env);
+  const adminCookieValue = await adminCookie(env);
+  const warmupResponse = await handleRequest(
+    new Request("https://example.com/api/warmup", { method: "POST", headers: { cookie: adminCookieValue } }),
+    env,
+  );
   const warmupJob = await warmupResponse.json();
   const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
   const runtime = await runtimeResponse.json();
@@ -761,12 +889,13 @@ test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async ()
     }
     throw new Error(`unexpected url: ${url}`);
   };
-  const firstEnv = fakeEnv(fetchImpl, { kv });
+  const firstEnv = adminAuthEnv(fetchImpl, { kv });
   firstEnv.RUNPOD_ENDPOINT_ID = "endpoint-a";
-  const secondEnv = fakeEnv(fetchImpl, { kv });
+  const secondEnv = adminAuthEnv(fetchImpl, { kv });
   secondEnv.RUNPOD_ENDPOINT_ID = "endpoint-b";
+  const adminCookieValue = await adminCookie(firstEnv);
 
-  await handleRequest(new Request("https://example.com/api/warmup/warm-job"), firstEnv);
+  await handleRequest(new Request("https://example.com/api/warmup/warm-job", { headers: { cookie: adminCookieValue } }), firstEnv);
   const firstRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), firstEnv)).json();
   const secondRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), secondEnv)).json();
 
@@ -791,6 +920,25 @@ function fakeEnv(fetchImpl, options = {}) {
     MO_SPEECH_KV: options.kv || null,
     __fetch: fetchImpl,
   };
+}
+
+function adminAuthEnv(fetchImpl, options = {}) {
+  return {
+    ...fakeEnv(fetchImpl, options),
+    ADMIN_PASSWORD_SHA256: "f38eb016088980f10dcbffce49bc7d0d476d198c43a6fa8a343416709049c9db",
+    ADMIN_SESSION_SECRET: "test-admin-session-secret",
+  };
+}
+
+async function adminCookie(env) {
+  const response = await handleRequest(
+    new Request("https://example.com/admin/login", {
+      method: "POST",
+      body: new URLSearchParams({ password: "secret-pass" }),
+    }),
+    env,
+  );
+  return response.headers.get("set-cookie");
 }
 
 function json(payload, init = {}) {

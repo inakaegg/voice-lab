@@ -21,8 +21,12 @@ Browser
 - `RUNPOD_API_KEY`
 - `RUNPOD_ENDPOINT_ID`
 - `OPENAI_API_KEY`
+- `ADMIN_PASSWORD_SHA256`
+- `ADMIN_SESSION_SECRET`
 
 `RUNPOD_API_KEY` は可能なら対象endpointだけに権限を絞ったRestricted API keyにする。OpenAI API keyは、ASR、翻訳、TTS、表示用ひらがな、短いテキスト加工、ジョークTTSなどWorker側で完結する処理に使う。
+
+`ADMIN_PASSWORD_SHA256` は管理画面ログイン用パスワードのSHA-256 hex digestである。平文パスワードはsecretにもリポジトリにも保存しない。`ADMIN_SESSION_SECRET` は管理セッションcookieへ署名するためのランダム文字列で、パスワードとは別の値にする。
 
 ## API gateway範囲
 
@@ -80,7 +84,9 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 ## デプロイ
 
-`wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleで `/api/*` を処理する。`/` はユーザー画面の `user.html`、`/admin` は管理画面の `index.html` へ振り分ける必要があるため、Static Assetsの `run_worker_first` を有効にする。Cloudflare AssetsのHTML clean URL redirectで `/user.html` が `/user` へ変換されると既存URL互換が崩れるため、`html_handling="none"` にする。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
+`wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleで `/api/*` を処理する。`/` はポータル、`/fun` は従来の簡易変換画面、`/speakloop` は発音練習画面、`/skitvoice` はSkitVoiceユーザー画面、`/admin` は従来の管理画面へ振り分ける必要があるため、Static Assetsの `run_worker_first` を有効にする。Cloudflare AssetsのHTML clean URL redirectで `/user.html` が `/user` へ変換されると既存URL互換が崩れるため、`html_handling="none"` にする。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
+
+`workers.dev` のまま公開ページを認証なしにして管理画面だけを守る場合は、Cloudflare AccessではなくWorker内の簡易管理ログインを使う。対象は `/admin`、`/skitvoice/admin`、`/vibevoice/admin`、`/speakloop/admin`、`/practice/admin` と、管理画面が使う設定保存、履歴閲覧/削除、practice履歴、warmup APIである。ログイン成功時は `HttpOnly; Secure; SameSite=Lax` cookieを発行し、以後の管理画面/APIだけで検証する。`ADMIN_PASSWORD_SHA256` または `ADMIN_SESSION_SECRET` が未設定の場合、管理ルートはsetup errorを返し、公開ページと生成APIは動かし続ける。
 
 2アプリ化後は、発音練習アプリとSkitVoiceで `wrangler.toml`、Worker名、secret、KV/D1/R2 bindingを分ける。発音練習側はRunPod secretを持たず、SkitVoice側だけRunPod endpointとGPU推論用secretを持つ。
 
@@ -90,6 +96,10 @@ SkitVoice単体公開では、公開ページを `/`、管理画面を `/admin` 
 wrangler secret put RUNPOD_API_KEY
 wrangler secret put RUNPOD_ENDPOINT_ID
 wrangler secret put OPENAI_API_KEY
+printf '管理パスワード' | shasum -a 256
+wrangler secret put ADMIN_PASSWORD_SHA256
+openssl rand -base64 32
+wrangler secret put ADMIN_SESSION_SECRET
 wrangler deploy
 ```
 

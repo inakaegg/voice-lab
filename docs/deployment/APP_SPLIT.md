@@ -130,7 +130,7 @@ docs/
 - 発音練習アプリと同じ公開説明に混ぜない。
 - Realtime-0.5B系の別性質モデルは、標準計画には含めず、必要になった場合だけ別実験として扱う。
 
-管理画面はCloudflare公開時に `/admin` へ置く。`/admin` はCloudflare AccessでGoogleログインを要求し、管理者本人のメールアドレスだけをAllow policyで許可する。公開ページの `/` は認証なしで見せ、管理画面、診断、詳細パラメータ、RunPod warmup、履歴確認は認証済み管理者だけに出す。
+管理画面はCloudflare公開時に `/admin` へ置く。独自ドメインを割り当てる前の `workers.dev` 運用では、Worker内の簡易パスワードログインで `/admin`、`/skitvoice/admin`、`/speakloop/admin`、`/practice/admin` と管理用APIを保護する。公開ページの `/` は認証なしで見せ、管理画面、診断、詳細パラメータ、RunPod warmup、履歴確認は認証済み管理者だけに出す。独自ドメインへ移行する場合は、Cloudflare AccessのAccess applicationで `/admin*` などをpath単位で保護し、Google identity providerと管理者本人のAllow policyへ移す。
 
 ### Voice Lab と従来の変換デモ
 

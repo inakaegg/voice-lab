@@ -9,6 +9,8 @@ const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
 const AUDIO_HISTORY_DEFAULT_LIMIT = 100;
 const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
+const ADMIN_SESSION_COOKIE = "mo_admin_session";
+const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
 const OPENAI_LANGUAGE_CODES = {
   auto: "",
   "id-ID": "id",
@@ -139,10 +141,320 @@ export default {
 
 export async function handleRequest(request, env = {}, ctx = {}) {
   const url = new URL(request.url);
+  if (isAdminAuthPath(url.pathname)) {
+    return handleAdminAuthRequest(request, env, url);
+  }
   if (url.pathname.startsWith("/api/")) {
+    if (isProtectedAdminApiRequest(request.method, url.pathname)) {
+      const authResponse = await adminApiAuthResponse(request, env);
+      if (authResponse) {
+        return authResponse;
+      }
+    }
     return handleApiRequest(request, env, ctx, url);
   }
+  if (isProtectedAdminPagePath(url.pathname)) {
+    const authResponse = await adminPageAuthResponse(request, env, url);
+    if (authResponse) {
+      return authResponse;
+    }
+  }
   return serveAsset(request, env, url);
+}
+
+function isAdminAuthPath(pathname) {
+  return pathname === "/admin/login" || pathname === "/admin/login/" || pathname === "/admin/logout" || pathname === "/admin/logout/";
+}
+
+function isProtectedAdminPagePath(pathname) {
+  const path = normalizePathname(pathname);
+  return new Set([
+    "/admin",
+    "/index.html",
+    "/skitvoice/admin",
+    "/vibevoice/admin",
+    "/vibevoice.html",
+    "/speakloop/admin",
+    "/practice/admin",
+    "/practice_admin.html",
+  ]).has(path);
+}
+
+function isProtectedAdminApiRequest(method, pathname) {
+  if (method === "OPTIONS") {
+    return false;
+  }
+  if (method === "PUT" && pathname === "/api/user-settings") {
+    return true;
+  }
+  if (method === "GET" && pathname === "/api/audio-history") {
+    return true;
+  }
+  if ((method === "GET" || method === "DELETE") && pathname.startsWith("/api/audio-history/")) {
+    return true;
+  }
+  if (method === "GET" && pathname === "/api/practice-history") {
+    return true;
+  }
+  if (method === "POST" && pathname === "/api/warmup") {
+    return true;
+  }
+  if (method === "GET" && pathname.startsWith("/api/warmup/")) {
+    return true;
+  }
+  return false;
+}
+
+function normalizePathname(pathname) {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
+  return pathname;
+}
+
+async function adminPageAuthResponse(request, env, url) {
+  if (!adminAuthConfigured(env)) {
+    return adminSetupErrorResponse();
+  }
+  if (await hasValidAdminSession(request, env)) {
+    return null;
+  }
+  return redirectResponse(`/admin/login?next=${encodeURIComponent(url.pathname)}`);
+}
+
+async function adminApiAuthResponse(request, env) {
+  if (!adminAuthConfigured(env)) {
+    return jsonResponse({ detail: "admin authentication is not configured" }, { status: 503 });
+  }
+  if (await hasValidAdminSession(request, env)) {
+    return null;
+  }
+  return jsonResponse({ detail: "admin authentication required" }, { status: 401 });
+}
+
+async function handleAdminAuthRequest(request, env, url) {
+  if (url.pathname === "/admin/logout" || url.pathname === "/admin/logout/") {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: "/admin/login",
+        "Set-Cookie": expiredAdminCookie(),
+      },
+    });
+  }
+  if (!adminAuthConfigured(env)) {
+    return adminSetupErrorResponse();
+  }
+  if (request.method === "GET") {
+    return adminLoginPage(url.searchParams.get("next") || "/admin");
+  }
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, POST" } });
+  }
+  const form = await request.formData();
+  const password = String(form.get("password") || "");
+  const next = safeAdminNextPath(String(form.get("next") || url.searchParams.get("next") || "/admin"));
+  if (!(await adminPasswordMatches(password, env))) {
+    return adminLoginPage(next, "パスワードが違います。", 401);
+  }
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: next,
+      "Set-Cookie": await createAdminSessionCookie(env),
+    },
+  });
+}
+
+function adminAuthConfigured(env) {
+  return Boolean(adminPasswordHash(env) && env.ADMIN_SESSION_SECRET);
+}
+
+function adminPasswordHash(env) {
+  return String(env.ADMIN_PASSWORD_SHA256 || env.ADMIN_PASSWORD_HASH || "").trim().toLowerCase();
+}
+
+async function adminPasswordMatches(password, env) {
+  const expected = adminPasswordHash(env);
+  if (!expected) {
+    return false;
+  }
+  const actual = await sha256Hex(password);
+  return constantTimeEqual(actual, expected);
+}
+
+async function hasValidAdminSession(request, env) {
+  const cookies = parseCookies(request.headers.get("cookie") || "");
+  const value = cookies.get(ADMIN_SESSION_COOKIE);
+  if (!value || !env.ADMIN_SESSION_SECRET) {
+    return false;
+  }
+  const [payload, signature] = value.split(".");
+  if (!payload || !signature) {
+    return false;
+  }
+  const expectedSignature = await hmacSha256Hex(payload, env.ADMIN_SESSION_SECRET);
+  if (!constantTimeEqual(signature, expectedSignature)) {
+    return false;
+  }
+  try {
+    const session = JSON.parse(base64UrlDecodeToString(payload));
+    return Number(session.exp || 0) > Math.floor(Date.now() / 1000);
+  } catch {
+    return false;
+  }
+}
+
+async function createAdminSessionCookie(env) {
+  const now = Math.floor(Date.now() / 1000);
+  const ttl = Number(env.ADMIN_SESSION_TTL_SECONDS || ADMIN_SESSION_TTL_SECONDS) || ADMIN_SESSION_TTL_SECONDS;
+  const payload = base64UrlEncodeString(JSON.stringify({ iat: now, exp: now + ttl }));
+  const signature = await hmacSha256Hex(payload, env.ADMIN_SESSION_SECRET);
+  return `${ADMIN_SESSION_COOKIE}=${payload}.${signature}; Path=/; Max-Age=${ttl}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function expiredAdminCookie() {
+  return `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function safeAdminNextPath(next) {
+  if (!next.startsWith("/") || next.startsWith("//")) {
+    return "/admin";
+  }
+  try {
+    const path = new URL(next, "https://example.com").pathname;
+    return isProtectedAdminPagePath(path) ? path : "/admin";
+  } catch {
+    return "/admin";
+  }
+}
+
+function adminSetupErrorResponse() {
+  return new Response(
+    "<!doctype html><meta charset=\"utf-8\"><title>Admin auth setup required</title><h1>管理認証が未設定です</h1><p>Cloudflare Worker secret の ADMIN_PASSWORD_SHA256 と ADMIN_SESSION_SECRET を設定してください。</p>",
+    { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
+function adminLoginPage(next, errorMessageText = "", status = 200) {
+  const safeNext = safeAdminNextPath(next || "/admin");
+  const errorHtml = errorMessageText ? `<p class="error">${escapeHtml(errorMessageText)}</p>` : "";
+  return new Response(
+    `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>管理ログイン</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #172026; }
+    main { width: min(92vw, 380px); padding: 28px; background: white; border: 1px solid #d7dce2; border-radius: 8px; box-shadow: 0 12px 30px rgba(16, 24, 40, 0.08); }
+    h1 { margin: 0 0 18px; font-size: 22px; }
+    label { display: grid; gap: 8px; font-weight: 600; }
+    input { box-sizing: border-box; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid #b8c0cc; border-radius: 6px; font-size: 16px; }
+    button { width: 100%; min-height: 44px; margin-top: 16px; border: 0; border-radius: 6px; background: #1d4ed8; color: white; font-weight: 700; font-size: 16px; cursor: pointer; }
+    .error { color: #b42318; font-weight: 700; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111827; color: #e5e7eb; }
+      main { background: #1f2937; border-color: #374151; }
+      input { background: #111827; color: #f9fafb; border-color: #4b5563; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>管理ログイン</h1>
+    ${errorHtml}
+    <form method="post" action="/admin/login">
+      <input type="hidden" name="next" value="${escapeHtml(safeNext)}" />
+      <label>
+        パスワード
+        <input type="password" name="password" autocomplete="current-password" required autofocus />
+      </label>
+      <button type="submit">ログイン</button>
+    </form>
+  </main>
+</body>
+</html>`,
+    { status, headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
+function redirectResponse(location) {
+  return new Response(null, { status: 302, headers: { Location: location } });
+}
+
+function parseCookies(cookieHeader) {
+  const cookies = new Map();
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...valueParts] = part.trim().split("=");
+    if (!name) {
+      continue;
+    }
+    cookies.set(name, valueParts.join("="));
+  }
+  return cookies;
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
+  return bufferToHex(digest);
+}
+
+async function hmacSha256Hex(message, secret) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(secret)),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(message)));
+  return bufferToHex(signature);
+}
+
+function bufferToHex(buffer) {
+  return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+function base64UrlEncodeString(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function base64UrlDecodeToString(value) {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 async function handleApiRequest(request, env, ctx, url) {
@@ -250,7 +562,7 @@ async function serveAsset(request, env, url) {
     assetUrl.pathname = "/vibevoice.html";
   } else if (url.pathname === "/seed-vc" || url.pathname === "/seed-vc/") {
     assetUrl.pathname = "/seed_vc.html";
-  } else if (url.pathname === "/admin") {
+  } else if (url.pathname === "/admin" || url.pathname === "/admin/") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {
     assetUrl.pathname = `/${url.pathname.slice("/static/".length)}`;
