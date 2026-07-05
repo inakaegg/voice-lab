@@ -1768,24 +1768,6 @@ audio {
   background: #6f42c1;
 }
 
-.practice-next-prompt-button {
-  background: #ffffff;
-  border: 1px solid #c9d8e8;
-  border-radius: 999px;
-  color: #24435f;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 900;
-  min-height: 42px;
-  padding: 0 14px;
-}
-
-.practice-next-prompt-button:hover {
-  border-color: #2f80ed;
-  color: #174ea6;
-}
-
 .practice-prompt-card {
   grid-column: span 2;
 }

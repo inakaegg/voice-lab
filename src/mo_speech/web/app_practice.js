@@ -14,7 +14,6 @@ const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
-const segmentModeSelect = document.querySelector("#practice-segment-mode");
 const asrModelSelect = document.querySelector("#practice-asr-model");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
@@ -31,7 +30,6 @@ const nativeTranscriptLabel = document.querySelector("#practice-native-transcrip
 const nativeTranscript = document.querySelector("#practice-native-transcript");
 const recognizedLabel = document.querySelector("#practice-recognized-label");
 const repeatAudio = document.querySelector("#practice-repeat-audio");
-const nextPromptButton = document.querySelector("#practice-next-prompt-button");
 
 const languageLabels = {
   "ja-JP": "日本語",
@@ -173,14 +171,13 @@ targetLanguageButtons.forEach((button) => {
 nativeRecordButton.addEventListener("click", toggleActiveRecording);
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
-segmentModeSelect.addEventListener("change", savePracticeSettings);
 asrModelSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
-nextPromptButton.addEventListener("click", resetPractice);
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
 modelAudio.addEventListener("play", handleModelAudioPlay);
+repeatAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 
 function selectTargetLanguage(language) {
   if (isBusy || mediaRecorder) {
@@ -393,6 +390,8 @@ function setRepeatAudio(blob) {
   stopRepeatAudio();
   repeatAudioUrl = URL.createObjectURL(blob);
   repeatAudio.src = repeatAudioUrl;
+  repeatAudio.load();
+  syncModelAudioSpeed();
 }
 
 function toggleModelAudio() {
@@ -466,8 +465,10 @@ function syncModelAudioSpeed() {
   const speed = normalizedPlaybackSpeed(speedSlider.value);
   speedSlider.value = String(speed);
   speedValue.textContent = formatPlaybackSpeed(speed);
-  modelAudio.defaultPlaybackRate = speed;
-  modelAudio.playbackRate = speed;
+  [modelAudio, repeatAudio].forEach((audio) => {
+    audio.defaultPlaybackRate = speed;
+    audio.playbackRate = speed;
+  });
 }
 
 function handleModelAudioPlay() {
@@ -676,9 +677,7 @@ function playAudioElementToEnd(audio, token) {
     };
     audio.pause();
     audio.currentTime = 0;
-    if (audio === modelAudio) {
-      syncModelAudioSpeed();
-    }
+    syncModelAudioSpeed();
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
     audio.play().then(watch).catch(done);
@@ -729,9 +728,7 @@ function playAudioSegmentToEnd(audio, start, end, token) {
     };
     audio.pause();
     audio.currentTime = segmentStart;
-    if (audio === modelAudio) {
-      syncModelAudioSpeed();
-    }
+    syncModelAudioSpeed();
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
     audio.play().then(watch).catch(done);
@@ -764,7 +761,7 @@ function splitPracticeSentencesWithRanges(text, mode = "punctuation") {
 }
 
 function practiceSegmentMode() {
-  return segmentModeSelect.value === "sentence" ? "sentence" : "punctuation";
+  return "punctuation";
 }
 
 function sentenceAudioRanges(sentences, duration) {
@@ -1115,7 +1112,6 @@ function loadPracticeSettings() {
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   asrModelSelect.value = practiceAsrModels.has(settings.asr_model) ? settings.asr_model : "gpt-4o-transcribe";
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
-  segmentModeSelect.value = settings.segment_mode === "sentence" ? "sentence" : "punctuation";
   targetLanguageButtons.forEach((button) => {
     const selected = button.dataset.language === selectedTargetLanguage;
     button.classList.toggle("is-selected", selected);
@@ -1142,7 +1138,6 @@ function savePracticeSettings() {
         show_pinyin: Boolean(pinyinToggle.checked),
         asr_model: practiceAsrModel(),
         speed: normalizedPlaybackSpeed(speedSlider.value),
-        segment_mode: practiceSegmentMode(),
       }),
     );
   } catch (_error) {
@@ -1181,7 +1176,6 @@ function syncPracticeRecordMode() {
   recordDescription.textContent = repeatMode ? "Repeat / 跟着说" : "说出想说的话 / Say what you want";
   nativeRecordButton.setAttribute("aria-label", repeatMode ? "まねして録音" : "言いたいことを録音");
   nativeActionLabel.textContent = repeatMode ? "まねする / Repeat / 模仿" : "話す / Speak / 说";
-  nextPromptButton.hidden = !repeatMode;
 }
 
 function renderRecognizedDiff(payload) {

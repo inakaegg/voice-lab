@@ -88,10 +88,10 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /max="2"/);
   assert.match(practiceHtml, /step="0\.25"/);
   assert.equal((practiceHtml.match(/id="practice-result-panel"/g) || []).length, 1);
-  assert.match(practiceHtml, /id="practice-segment-mode"/);
-  assert.match(practiceHtml, /value="sentence"/);
-  assert.match(practiceHtml, /value="punctuation"/);
-  assert.match(practiceHtml, /id="practice-next-prompt-button"/);
+  assert.doesNotMatch(practiceHtml, /id="practice-segment-mode"/);
+  assert.doesNotMatch(practiceHtml, /value="sentence"/);
+  assert.doesNotMatch(practiceHtml, /value="punctuation"/);
+  assert.doesNotMatch(practiceHtml, /id="practice-next-prompt-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-repeat-audio-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-compare-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-retry-button"/);
@@ -104,7 +104,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /speed:/);
   assert.match(practiceSource, /Math\.round\(parsed \/ 0\.25\) \* 0\.25/);
   assert.match(practiceSource, /Math\.max\(0\.25/);
-  assert.match(practiceSource, /segment_mode:/);
+  assert.doesNotMatch(practiceSource, /segment_mode:/);
+  assert.doesNotMatch(practiceSource, /segmentModeSelect|nextPromptButton/);
   assert.match(practiceSource, /asr_model:/);
   assert.match(practiceSource, /asr_timestamps/);
   assert.match(practiceSource, /include_pinyin/);
@@ -116,8 +117,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceSource, /ピンインを生成できませんでした/);
   assert.match(practiceSource, /selectedTargetLanguage === "zh-CN" \? true : settings\.show_pinyin !== false/);
   assert.match(practiceSource, /pinyinToggle\.checked = true/);
-  assert.match(practiceSource, /modelAudio\.playbackRate/);
-  assert.match(practiceSource, /modelAudio\.defaultPlaybackRate/);
+  assert.match(practiceSource, /\[modelAudio, repeatAudio\]\.forEach/);
+  assert.match(practiceSource, /audio\.playbackRate/);
+  assert.match(practiceSource, /audio\.defaultPlaybackRate/);
   assert.match(practiceSource, /loadedmetadata/);
   assert.match(practiceSource, /isComparisonPlaying/);
   assert.match(practiceSource, /stopComparisonPlayback/);
@@ -145,7 +147,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(styles, /\.practice-target-text rt/s);
   assert.match(styles, /\.practice-diff-mismatch/);
   assert.match(styles, /\.practice-diff-missing/);
-  assert.match(styles, /\.practice-next-prompt-button/);
+  assert.doesNotMatch(styles, /\.practice-next-prompt-button/);
   assert.doesNotMatch(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);
   assert.doesNotMatch(styles, /\.practice-actions/);
   assert.doesNotMatch(styles, /\.practice-target-text-box\s*\{[^}]*overflow:\s*auto/s);
