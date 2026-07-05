@@ -4,7 +4,7 @@
 
 スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置き、GPU推論だけをRunPod Serverlessへ送る。GPU PodでWebサーバーを常時起動しない。
 
-この文書は現在のCloudflareデモ構成を説明する。発音練習アプリとVibeVoiceスキット作成アプリを分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。
+この文書は現在のCloudflareデモ構成を説明する。発音練習アプリとSkitVoiceを分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。
 
 ```text
 Browser
@@ -82,7 +82,9 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 `wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleで `/api/*` を処理する。`/` はユーザー画面の `user.html`、`/admin` は管理画面の `index.html` へ振り分ける必要があるため、Static Assetsの `run_worker_first` を有効にする。Cloudflare AssetsのHTML clean URL redirectで `/user.html` が `/user` へ変換されると既存URL互換が崩れるため、`html_handling="none"` にする。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
 
-2アプリ化後は、発音練習アプリとVibeVoiceアプリで `wrangler.toml`、Worker名、secret、KV/D1/R2 bindingを分ける。発音練習側はRunPod secretを持たず、VibeVoice側だけRunPod endpointとGPU推論用secretを持つ。
+2アプリ化後は、発音練習アプリとSkitVoiceで `wrangler.toml`、Worker名、secret、KV/D1/R2 bindingを分ける。発音練習側はRunPod secretを持たず、SkitVoice側だけRunPod endpointとGPU推論用secretを持つ。
+
+SkitVoice単体公開では、公開ページを `/`、管理画面を `/admin` とする。`/admin` はCloudflare AccessのAccess applicationとしてpath単位で保護し、Googleをidentity providerに設定したうえで、管理者本人のGoogleアカウントだけをAllow policyに含める。`/` と生成APIのうち公開画面に必要な範囲は認証なしで使えるようにし、詳細設定、診断、履歴、warmupなど管理操作は `/admin` 側へ寄せる。
 
 ```sh
 wrangler secret put RUNPOD_API_KEY

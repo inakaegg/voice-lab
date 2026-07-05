@@ -158,10 +158,13 @@ def test_vibevoice_serves_simple_user_ui() -> None:
     response = client.get("/vibevoice")
 
     assert response.status_code == 200
-    assert "かんたん生成" in response.text
+    assert "SkitVoice" in response.text
+    assert "かんたんスキット生成" in response.text
     assert 'data-vibevoice-mode="simple"' in response.text
     assert "vibevoice-script" in response.text
     assert "voice_file_1" in response.text
+    assert 'href="/practice"' not in response.text
+    assert 'href="/"' not in response.text
     assert 'name="directed_retry_max_multiplier" type="hidden" value="1"' in response.text
     assert "/static/app_vibevoice.js" in response.text
 
@@ -172,7 +175,7 @@ def test_vibevoice_serves_admin_skit_ui() -> None:
     response = client.get("/vibevoice/admin")
 
     assert response.status_code == 200
-    assert "VibeVoice" in response.text
+    assert "SkitVoice 管理" in response.text
     assert "vibevoice-script" in response.text
     assert 'name="directed_retry_max_multiplier"' in response.text
     assert "/static/app_vibevoice.js" in response.text
@@ -184,7 +187,7 @@ def test_vibevoice_simple_alias_still_serves_user_ui() -> None:
     response = client.get("/vibevoice/simple")
 
     assert response.status_code == 200
-    assert "かんたん生成" in response.text
+    assert "かんたんスキット生成" in response.text
     assert 'data-vibevoice-mode="simple"' in response.text
 
 

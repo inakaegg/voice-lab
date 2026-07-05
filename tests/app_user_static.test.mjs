@@ -266,8 +266,10 @@ test("vibevoice page provides local skit generation controls", () => {
 
 test("vibevoice simple page hides advanced controls behind fixed practical defaults", () => {
   assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
-  assert.match(vibevoiceSimpleHtml, /かんたん生成/);
-  assert.match(vibevoiceSimpleHtml, /href="\/vibevoice\/admin">詳細設定/);
+  assert.match(vibevoiceSimpleHtml, /SkitVoice/);
+  assert.match(vibevoiceSimpleHtml, /かんたんスキット生成/);
+  assert.match(vibevoiceSimpleHtml, /href="\/vibevoice\/admin">管理/);
+  assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/practice"/);
   assert.match(vibevoiceSimpleHtml, /name="backend"/);
   assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);
   assert.match(vibevoiceSimpleHtml, /name="model_id"/);
