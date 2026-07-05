@@ -36,14 +36,20 @@
           <input id="practice-pinyin-toggle" type="checkbox" checked />
           <span>ピンインを表示 / Show pinyin / 显示拼音</span>
         </label>
-        <label class="practice-inline-setting">
-          <span>ASR</span>
-          <select id="practice-asr-model">
-            <option value="gpt-4o-transcribe" selected>gpt-4o</option>
-            <option value="gpt-4o-mini-transcribe">gpt-4o mini</option>
-            <option value="whisper-1">whisper-1</option>
-          </select>
-        </label>
+        <div class="practice-asr-row">
+          <label class="practice-inline-setting">
+            <span>ASR</span>
+            <select id="practice-asr-model">
+              <option value="gpt-4o-transcribe" selected>gpt-4o（推奨）</option>
+              <option value="gpt-4o-mini-transcribe">gpt-4o mini（軽量）</option>
+              <option value="whisper-1">whisper-1（タイムスタンプ）</option>
+            </select>
+          </label>
+          <p class="practice-asr-help">
+            <strong>通常は gpt-4o。</strong>
+            mini は軽量・低コスト寄り、whisper-1 は文ごとの比較再生に使うタイムスタンプ確認用です。
+          </p>
+        </div>
       </section>
 
       <section class="practice-flow" aria-label="れんしゅう">

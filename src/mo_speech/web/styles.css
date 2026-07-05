@@ -1572,6 +1572,28 @@ audio {
   padding: 0 8px;
 }
 
+.practice-asr-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.practice-asr-help {
+  align-self: center;
+  color: #4d6379;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  margin: 0;
+  max-inline-size: 42rem;
+}
+
+.practice-asr-help strong {
+  color: #174ea6;
+  font-weight: 900;
+}
+
 .practice-flow {
   display: grid;
   gap: 10px;
