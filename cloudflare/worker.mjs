@@ -248,6 +248,8 @@ async function serveAsset(request, env, url) {
     url.pathname === "/skitvoice/admin/"
   ) {
     assetUrl.pathname = "/vibevoice.html";
+  } else if (url.pathname === "/seed-vc" || url.pathname === "/seed-vc/") {
+    assetUrl.pathname = "/seed_vc.html";
   } else if (url.pathname === "/admin") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {

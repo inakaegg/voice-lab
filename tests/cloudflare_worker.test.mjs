@@ -21,6 +21,7 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
   await handleRequest(new Request("https://example.com/speakloop/admin"), env);
   await handleRequest(new Request("https://example.com/skitvoice"), env);
   await handleRequest(new Request("https://example.com/skitvoice/admin"), env);
+  await handleRequest(new Request("https://example.com/seed-vc"), env);
 
   assert.deepEqual(requestedPaths, [
     "/portal.html",
@@ -29,6 +30,7 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
     "/practice_admin.html",
     "/vibevoice_simple.html",
     "/vibevoice.html",
+    "/seed_vc.html",
   ]);
 });
 
