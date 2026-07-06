@@ -131,7 +131,7 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "gpt-4o（推奨）" in response.text
     assert "採点は gpt-4o 推奨" in response.text
     assert "gpt-4o/mini は全体比較再生" in response.text
-    assert "whisper-1 はタイムスタンプ取得時だけ文ごと比較再生" in response.text
+    assert "whisper-1 はタイムスタンプ取得時だけフレーズごと比較再生" in response.text
     assert "practice-speed-slider" in response.text
     assert 'min="0.25"' in response.text
     assert 'max="2"' in response.text

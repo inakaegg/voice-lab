@@ -991,10 +991,6 @@ def create_app(
                 "text_preview": target_text[:80],
             },
         )
-        active_audio_history_store.update_metadata(
-            recording_entry,
-            _practice_history_diagnostics_metadata(result),
-        )
         return result
 
     def _create_practice_attempt_result(
@@ -1259,6 +1255,10 @@ def create_app(
                 "text_preview": target_text[:80],
             },
         )
+        active_audio_history_store.update_metadata(
+            recording_entry,
+            _practice_history_diagnostics_metadata(result),
+        )
         return result
 
     @app.post("/api/practice/attempts")
@@ -1277,7 +1277,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="target_text is required")
 
         audio_bytes = await audio.read()
-        _save_audio_history_recording(
+        recording_entry = _save_audio_history_recording(
             active_audio_history_store,
             audio_bytes,
             suffix=_upload_suffix(audio.filename),
