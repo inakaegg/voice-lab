@@ -1059,7 +1059,7 @@ def create_app(
         target_language: Annotated[str, Form()] = "ja-JP",
         current_target_text: Annotated[str, Form()] = "",
         include_pinyin: Annotated[bool, Form()] = False,
-        asr_model: Annotated[str, Form()] = "gpt-4o-transcribe",
+        asr_model: Annotated[str, Form()] = "whisper-1",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
@@ -1162,7 +1162,7 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         target_language: Annotated[str, Form()] = "ja-JP",
         include_pinyin: Annotated[bool, Form()] = False,
-        asr_model: Annotated[str, Form()] = "gpt-4o-transcribe",
+        asr_model: Annotated[str, Form()] = "whisper-1",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
@@ -1266,7 +1266,7 @@ def create_app(
         audio: Annotated[UploadFile, File()],
         target_language: Annotated[str, Form()],
         target_text: Annotated[str, Form()],
-        asr_model: Annotated[str, Form()] = "gpt-4o-transcribe",
+        asr_model: Annotated[str, Form()] = "whisper-1",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)

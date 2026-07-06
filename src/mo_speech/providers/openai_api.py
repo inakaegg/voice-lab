@@ -116,6 +116,7 @@ OPENAI_TTS_MIME_TYPES = {
 }
 
 OPENAI_PRACTICE_ASR_MODELS = ("gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1")
+OPENAI_DEFAULT_PRACTICE_ASR_MODEL = "whisper-1"
 OPENAI_TIMESTAMP_ASR_MODELS = {"whisper-1"}
 OPENAI_JSON_ONLY_ASR_MODELS = {"gpt-4o-transcribe", "gpt-4o-mini-transcribe"}
 
@@ -134,7 +135,7 @@ class AsrTranscription:
 
 
 def supported_openai_practice_asr_model(value: str | None) -> str:
-    model = str(value or "gpt-4o-transcribe").strip() or "gpt-4o-transcribe"
+    model = str(value or OPENAI_DEFAULT_PRACTICE_ASR_MODEL).strip() or OPENAI_DEFAULT_PRACTICE_ASR_MODEL
     if model not in OPENAI_PRACTICE_ASR_MODELS:
         raise ValueError(f"unsupported practice ASR model: {model}")
     return model

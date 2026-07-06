@@ -25,6 +25,7 @@ const OPENAI_LANGUAGE_NAMES = {
   "en-US": "English",
 };
 const OPENAI_PRACTICE_ASR_MODELS = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"]);
+const OPENAI_DEFAULT_PRACTICE_ASR_MODEL = "whisper-1";
 const OPENAI_TIMESTAMP_ASR_MODELS = new Set(["whisper-1"]);
 const OPENAI_JSON_ONLY_ASR_MODELS = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]);
 const PRACTICE_TARGET_LANGUAGES = {
@@ -1315,7 +1316,7 @@ async function createPracticePrompt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
-  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", "gpt-4o-transcribe"));
+  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
@@ -1397,7 +1398,7 @@ async function createPracticeRecording(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
-  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", "gpt-4o-transcribe"));
+  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const currentTargetText = stringFormValue(form, "current_target_text", "");
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const audioBytes = await audio.arrayBuffer();
@@ -1545,7 +1546,7 @@ async function createPracticeAttempt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
-  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", "gpt-4o-transcribe"));
+  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = stringFormValue(form, "target_text", "").trim();
   if (!targetText) {
     throw httpError(400, "target_text is required");
@@ -2598,7 +2599,7 @@ function supportedPracticeTargetLanguage(value) {
 }
 
 function supportedPracticeAsrModel(value) {
-  const model = String(value || "gpt-4o-transcribe").trim() || "gpt-4o-transcribe";
+  const model = String(value || OPENAI_DEFAULT_PRACTICE_ASR_MODEL).trim() || OPENAI_DEFAULT_PRACTICE_ASR_MODEL;
   if (!OPENAI_PRACTICE_ASR_MODELS.has(model)) {
     throw httpError(400, `unsupported practice ASR model: ${model}`);
   }

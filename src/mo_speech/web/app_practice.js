@@ -15,6 +15,10 @@ const playModelButton = document.querySelector("#practice-play-model-button");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
 const asrModelSelect = document.querySelector("#practice-asr-model");
+const currentLanguageLabel = document.querySelector("#practice-current-language-label");
+const settingsButton = document.querySelector("#practice-settings-button");
+const settingsOverlay = document.querySelector("#practice-settings-overlay");
+const settingsCloseButton = document.querySelector("#practice-settings-close-button");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
@@ -173,11 +177,26 @@ playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 asrModelSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
+settingsButton.addEventListener("click", openPracticeSettings);
+settingsCloseButton.addEventListener("click", closePracticeSettings);
+settingsOverlay.addEventListener("click", (event) => {
+  if (event.target === settingsOverlay) {
+    closePracticeSettings();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !settingsOverlay.hidden) {
+    closePracticeSettings();
+  }
+});
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
 modelAudio.addEventListener("play", handleModelAudioPlay);
+modelAudio.addEventListener("playing", handleModelAudioPlay);
 repeatAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
+repeatAudio.addEventListener("play", syncModelAudioSpeed);
+repeatAudio.addEventListener("playing", syncModelAudioSpeed);
 
 function selectTargetLanguage(language) {
   if (isBusy || mediaRecorder) {
@@ -193,6 +212,7 @@ function selectTargetLanguage(language) {
     pinyinToggle.checked = true;
   }
   syncPinyinSettingVisibility();
+  syncCurrentLanguageLabel();
   savePracticeSettings();
   resetPractice();
 }
@@ -243,8 +263,8 @@ async function startRecording(kind) {
   setRecordingVisual(kind, true);
   setStatus(
     currentTargetText
-      ? "まねして話すか、新しい内容を話してください。"
-      : "言いたいことを話してください / Speak / 说",
+      ? "録音中です。"
+      : "録音中です / Recording / 录音中",
   );
 }
 
@@ -282,11 +302,11 @@ async function submitPracticeRecording(blob) {
   if (payload.recording_kind === "attempt") {
     setRepeatAudio(blob);
     renderAttemptResult(payload);
-    setBusy(false, "何度でも練習できます。");
+    setBusy(false, "");
     return;
   }
   renderPromptResult(payload);
-  setBusy(false, "お手本を聞いて、まねして話してください。");
+  setBusy(false, "");
 }
 
 function renderPromptResult(payload) {
@@ -313,8 +333,7 @@ function renderPromptResult(payload) {
   syncPlayButton();
   ensureAudioMetadata(modelAudio)
     .then(() => {
-      syncModelAudioSpeed();
-      return modelAudio.play();
+      return playAudioWithCurrentSpeed(modelAudio);
     })
     .catch(() => {});
 }
@@ -372,7 +391,7 @@ function resetPractice() {
   renderNativeLabels();
   renderTargetDisplay();
   syncPracticeRecordMode();
-  setStatus("言いたいことを話す / 说出想说的话 / Say what you want");
+  setStatus("");
   clearError();
 }
 
@@ -407,8 +426,7 @@ function toggleModelAudio() {
     return;
   }
   if (modelAudio.paused) {
-    syncModelAudioSpeed();
-    modelAudio.play().catch((error) => showError(error.message));
+    playAudioWithCurrentSpeed(modelAudio).catch((error) => showError(error.message));
   } else {
     modelAudio.pause();
   }
@@ -465,9 +483,13 @@ function syncModelAudioSpeed() {
   speedSlider.value = String(speed);
   speedValue.textContent = formatPlaybackSpeed(speed);
   [modelAudio, repeatAudio].forEach((audio) => {
-    audio.defaultPlaybackRate = speed;
-    audio.playbackRate = speed;
+    applyPlaybackSpeed(audio, speed);
   });
+}
+
+function applyPlaybackSpeed(audio, speed = normalizedPlaybackSpeed(speedSlider.value)) {
+  audio.defaultPlaybackRate = speed;
+  audio.playbackRate = speed;
 }
 
 function handleModelAudioPlay() {
@@ -640,10 +662,17 @@ async function playComparisonAudios() {
 }
 
 async function playModelAudioOnce() {
-  syncModelAudioSpeed();
   await ensureAudioMetadata(modelAudio);
+  await playAudioWithCurrentSpeed(modelAudio);
+}
+
+async function playAudioWithCurrentSpeed(audio) {
   syncModelAudioSpeed();
-  await modelAudio.play();
+  applyPlaybackSpeed(audio);
+  const playPromise = audio.play();
+  applyPlaybackSpeed(audio);
+  await playPromise;
+  applyPlaybackSpeed(audio);
 }
 
 function playAudioElementToEnd(audio, token) {
@@ -667,10 +696,10 @@ function playAudioElementToEnd(audio, token) {
     };
     audio.pause();
     audio.currentTime = 0;
-    syncModelAudioSpeed();
+    applyPlaybackSpeed(audio);
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
-    audio.play().then(watch).catch(done);
+    playAudioWithCurrentSpeed(audio).then(watch).catch(done);
   });
 }
 
@@ -718,10 +747,10 @@ function playAudioSegmentToEnd(audio, start, end, token) {
     };
     audio.pause();
     audio.currentTime = segmentStart;
-    syncModelAudioSpeed();
+    applyPlaybackSpeed(audio);
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });
-    audio.play().then(watch).catch(done);
+    playAudioWithCurrentSpeed(audio).then(watch).catch(done);
   });
 }
 
@@ -976,8 +1005,8 @@ function normalizedPlaybackSpeed(value) {
   if (!Number.isFinite(parsed)) {
     return 1;
   }
-  const rounded = Math.round(parsed / 0.25) * 0.25;
-  return Math.max(0.25, Math.min(2, Number(rounded.toFixed(2))));
+  const rounded = Math.round(parsed / 0.1) * 0.1;
+  return Math.max(0.5, Math.min(2, Number(rounded.toFixed(1))));
 }
 
 function formatPlaybackSpeed(speed) {
@@ -997,6 +1026,7 @@ function base64ToBlob(base64, mimeType) {
 }
 
 function setStatus(message) {
+  statusText.hidden = !message;
   statusText.textContent = message;
 }
 
@@ -1014,7 +1044,7 @@ function loadPracticeSettings() {
   const settings = readPracticeSettings();
   selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
-  asrModelSelect.value = practiceAsrModels.has(settings.asr_model) ? settings.asr_model : "gpt-4o-transcribe";
+  asrModelSelect.value = practiceAsrModels.has(settings.asr_model) ? settings.asr_model : "whisper-1";
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageButtons.forEach((button) => {
     const selected = button.dataset.language === selectedTargetLanguage;
@@ -1022,6 +1052,7 @@ function loadPracticeSettings() {
     button.setAttribute("aria-checked", selected ? "true" : "false");
   });
   syncPinyinSettingVisibility();
+  syncCurrentLanguageLabel();
   syncModelAudioSpeed();
 }
 
@@ -1050,11 +1081,30 @@ function savePracticeSettings() {
 }
 
 function practiceAsrModel() {
-  return practiceAsrModels.has(asrModelSelect.value) ? asrModelSelect.value : "gpt-4o-transcribe";
+  return practiceAsrModels.has(asrModelSelect.value) ? asrModelSelect.value : "whisper-1";
 }
 
 function syncPinyinSettingVisibility() {
   pinyinSetting.hidden = selectedTargetLanguage !== "zh-CN";
+}
+
+function syncCurrentLanguageLabel() {
+  currentLanguageLabel.textContent = languageLabels[selectedTargetLanguage] || "日本語";
+}
+
+function openPracticeSettings() {
+  settingsOverlay.hidden = false;
+  settingsButton.setAttribute("aria-expanded", "true");
+  const selectedButton = targetLanguageButtons.find((button) => button.dataset.language === selectedTargetLanguage);
+  window.setTimeout(() => {
+    (selectedButton || settingsCloseButton).focus();
+  }, 0);
+}
+
+function closePracticeSettings() {
+  settingsOverlay.hidden = true;
+  settingsButton.setAttribute("aria-expanded", "false");
+  settingsButton.focus();
 }
 
 function normalizePracticeLanguage(language) {
@@ -1076,10 +1126,10 @@ function renderNativeLabels() {
 
 function syncPracticeRecordMode() {
   const repeatMode = Boolean(currentTargetText);
-  recordTitle.textContent = repeatMode ? "まねして話す" : "言いたいことを話す";
-  recordDescription.textContent = repeatMode ? "Repeat / 跟着说" : "说出想说的话 / Say what you want";
+  recordTitle.textContent = "録音";
+  recordDescription.textContent = repeatMode ? "お手本を復唱" : "言いたいことを話す";
   nativeRecordButton.setAttribute("aria-label", repeatMode ? "まねして録音" : "言いたいことを録音");
-  nativeActionLabel.textContent = repeatMode ? "まねする / Repeat / 模仿" : "話す / Speak / 说";
+  nativeActionLabel.textContent = repeatMode ? "復唱" : "話す";
 }
 
 function renderRecognizedDiff(payload) {

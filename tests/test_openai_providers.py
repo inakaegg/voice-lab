@@ -13,6 +13,7 @@ from mo_speech.providers.openai_api import (
     openai_pipeline_status,
     openai_realtime_pipeline_status,
     openai_realtime_streaming_status,
+    supported_openai_practice_asr_model,
 )
 
 
@@ -90,6 +91,11 @@ def test_openai_asr_detail_requests_whisper_timestamps(tmp_path: Path, monkeypat
     assert captured["response_format"] == "verbose_json"
     assert captured["timestamp_granularities"] == ["word", "segment"]
     assert captured["language"] == "en"
+
+
+def test_supported_practice_asr_model_defaults_to_whisper() -> None:
+    assert supported_openai_practice_asr_model(None) == "whisper-1"
+    assert supported_openai_practice_asr_model("") == "whisper-1"
 
 
 def test_openai_asr_detail_does_not_request_timestamps_for_gpt4o(tmp_path: Path, monkeypatch) -> None:

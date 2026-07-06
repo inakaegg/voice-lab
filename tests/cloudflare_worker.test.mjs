@@ -240,8 +240,9 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(payload.display_text.pinyin_text, "wǒ xiǎng yào kā fēi");
   assert.equal(payload.display_text.pinyin_status, "ready");
   assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
-  assert.equal(calls[0].init.body.get("model"), "gpt-4o-transcribe");
-  assert.equal(calls[0].init.body.get("response_format"), "json");
+  assert.equal(calls[0].init.body.get("model"), "whisper-1");
+  assert.equal(calls[0].init.body.get("response_format"), "verbose_json");
+  assert.deepEqual(calls[0].init.body.getAll("timestamp_granularities[]"), ["word", "segment"]);
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");
   assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/responses").length, 1);

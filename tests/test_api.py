@@ -113,6 +113,9 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "Pronunciation Practice" in response.text
     assert "发音练习" in response.text
     assert "学習する言語" in response.text
+    assert "practice-current-language-label" in response.text
+    assert "practice-settings-button" in response.text
+    assert "practice-settings-overlay" in response.text
     assert "言いたいことを話す" in response.text
     assert "Say what you want" in response.text
     assert "practice-target-language" in response.text
@@ -127,15 +130,15 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "practice-asr-model" in response.text
     assert 'value="gpt-4o-transcribe"' in response.text
     assert 'value="gpt-4o-mini-transcribe"' in response.text
-    assert 'value="whisper-1"' in response.text
-    assert "gpt-4o（推奨）" in response.text
-    assert "採点は gpt-4o 推奨" in response.text
+    assert 'value="whisper-1" selected' in response.text
+    assert "whisper-1（フレーズ比較）" in response.text
+    assert "通常は whisper-1" in response.text
     assert "gpt-4o/mini は全体比較再生" in response.text
     assert "whisper-1 はタイムスタンプ取得時だけフレーズごと比較再生" in response.text
     assert "practice-speed-slider" in response.text
-    assert 'min="0.25"' in response.text
+    assert 'min="0.5"' in response.text
     assert 'max="2"' in response.text
-    assert 'step="0.25"' in response.text
+    assert 'step="0.1"' in response.text
     assert "practice-segment-mode" not in response.text
     assert "practice-next-prompt-button" not in response.text
     assert "practice-repeat-audio-button" not in response.text

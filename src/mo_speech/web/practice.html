@@ -16,41 +16,56 @@
         </div>
       </header>
 
-      <section class="practice-target-panel" aria-label="れんしゅうすることば">
-        <p class="practice-section-label">学習する言語 / Learning language / 学习语言</p>
-        <div id="practice-target-language" class="practice-language-grid" role="radiogroup" aria-label="学習対象言語">
-          <button type="button" class="practice-language-button is-selected" data-language="ja-JP" value="ja-JP" role="radio" aria-checked="true">
-            <span aria-hidden="true">🇯🇵</span>
-            <strong>日本語</strong>
-          </button>
-          <button type="button" class="practice-language-button" data-language="zh-CN" value="zh-CN" role="radio" aria-checked="false">
-            <span aria-hidden="true">🇨🇳</span>
-            <strong>中文</strong>
-          </button>
-          <button type="button" class="practice-language-button" data-language="en-US" value="en-US" role="radio" aria-checked="false">
-            <span aria-hidden="true">🇺🇸</span>
-            <strong>English</strong>
-          </button>
+      <section class="practice-quick-settings" aria-label="練習設定">
+        <div class="practice-current-language">
+          <span>学習言語</span>
+          <strong id="practice-current-language-label">日本語</strong>
         </div>
-        <label id="practice-pinyin-setting" class="practice-inline-setting" hidden>
-          <input id="practice-pinyin-toggle" type="checkbox" checked />
-          <span>ピンインを表示 / Show pinyin / 显示拼音</span>
-        </label>
-        <div class="practice-asr-row">
-          <label class="practice-inline-setting">
+        <button id="practice-settings-button" class="practice-settings-button" type="button" aria-haspopup="dialog" aria-controls="practice-settings-overlay">
+          <span aria-hidden="true">⚙</span>
+          <span>設定</span>
+        </button>
+      </section>
+
+      <div id="practice-settings-overlay" class="practice-settings-overlay" hidden>
+        <div class="practice-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="practice-settings-title">
+          <div class="practice-settings-header">
+            <h2 id="practice-settings-title">設定</h2>
+            <button id="practice-settings-close-button" class="practice-settings-close-button" type="button" aria-label="設定を閉じる">×</button>
+          </div>
+          <p class="practice-section-label">学習する言語 / Learning language / 学习语言</p>
+          <div id="practice-target-language" class="practice-language-grid" role="radiogroup" aria-label="学習対象言語">
+            <button type="button" class="practice-language-button is-selected" data-language="ja-JP" value="ja-JP" role="radio" aria-checked="true">
+              <span aria-hidden="true">🇯🇵</span>
+              <strong>日本語</strong>
+            </button>
+            <button type="button" class="practice-language-button" data-language="zh-CN" value="zh-CN" role="radio" aria-checked="false">
+              <span aria-hidden="true">🇨🇳</span>
+              <strong>中文</strong>
+            </button>
+            <button type="button" class="practice-language-button" data-language="en-US" value="en-US" role="radio" aria-checked="false">
+              <span aria-hidden="true">🇺🇸</span>
+              <strong>English</strong>
+            </button>
+          </div>
+          <label id="practice-pinyin-setting" class="practice-inline-setting" hidden>
+            <input id="practice-pinyin-toggle" type="checkbox" checked />
+            <span>ピンインを表示 / Show pinyin / 显示拼音</span>
+          </label>
+          <label class="practice-settings-field">
             <span>ASR</span>
             <select id="practice-asr-model">
-              <option value="gpt-4o-transcribe" selected>gpt-4o（推奨）</option>
+              <option value="whisper-1" selected>whisper-1（フレーズ比較）</option>
+              <option value="gpt-4o-transcribe">gpt-4o（全体比較）</option>
               <option value="gpt-4o-mini-transcribe">gpt-4o mini（軽量）</option>
-              <option value="whisper-1">whisper-1（タイムスタンプ）</option>
             </select>
           </label>
           <p class="practice-asr-help">
-            <strong>採点は gpt-4o 推奨。</strong>
-            gpt-4o/mini は全体比較再生、whisper-1 はタイムスタンプ取得時だけフレーズごと比較再生に切り替わります。
+            <strong>通常は whisper-1。</strong>
+            whisper-1 はタイムスタンプ取得時だけフレーズごと比較再生、gpt-4o/mini は全体比較再生に切り替わります。
           </p>
         </div>
-      </section>
+      </div>
 
       <section class="practice-flow" aria-label="れんしゅう">
         <article class="practice-card practice-card-primary">
@@ -110,7 +125,7 @@
             </button>
             <label class="practice-speed-control">
               <span>速度</span>
-              <input id="practice-speed-slider" type="range" min="0.25" max="2" step="0.25" value="1" />
+              <input id="practice-speed-slider" type="range" min="0.5" max="2" step="0.1" value="1" />
               <output id="practice-speed-value" for="practice-speed-slider">1.0x</output>
             </label>
           </div>
@@ -121,7 +136,7 @@
       <div id="practice-progress" class="practice-progress" hidden>
         <span id="practice-progress-fill"></span>
       </div>
-      <p id="practice-status" class="practice-status" role="status" aria-live="polite">言いたいことを話す / 说出想说的话 / Say what you want</p>
+      <p id="practice-status" class="practice-status" role="status" aria-live="polite" hidden></p>
       <p id="practice-error" class="practice-error" hidden></p>
     </main>
     <script src="/static/app_practice.js" defer></script>
