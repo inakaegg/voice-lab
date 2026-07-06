@@ -333,17 +333,21 @@ test("Cloudflare worker auto-classifies a single practice recording as a new pro
 
 test("Cloudflare worker requests whisper timestamps for pronunciation practice", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       return json({
         text: "I want coffee.",
-        words: [{ word: "I", start: 0.1, end: 0.2 }, { word: "coffee", start: 0.6, end: 1.1 }],
+        words: [
+          { word: "I", start: 0.1, end: 0.2 },
+          { word: "want", start: 0.2, end: 0.5 },
+          { word: "coffee", start: 0.6, end: 1.1 },
+        ],
         segments: [{ text: "I want coffee.", start: 0.1, end: 1.1 }],
       });
     }
     throw new Error(`unexpected url: ${url}`);
-  });
+  }, { kv: fakeKv() });
   const form = new FormData();
   form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
   form.append("target_language", "en-US");
@@ -363,7 +367,19 @@ test("Cloudflare worker requests whisper timestamps for pronunciation practice",
   assert.equal(payload.recognized_text, "I want coffee.");
   assert.equal(payload.asr_timestamps.available, true);
   assert.equal(payload.asr_timestamps.words[0].text, "I");
+  assert.equal(payload.comparison_alignment.complete, true);
+  assert.equal(payload.comparison_alignment.ranges[0].audio_start, 0.1);
+  assert.equal(payload.comparison_alignment.ranges[0].audio_end, 1.1);
   assert.equal(payload.providers.asr, "openai-asr-whisper-1");
+
+  const cookie = await adminCookie(env);
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/practice-history", { headers: { cookie } }), env)
+  ).json();
+  const diagnostics = JSON.parse(history.recordings[0].metadata.practice_diagnostics_json);
+  assert.equal(diagnostics.recognized_text, "I want coffee.");
+  assert.equal(diagnostics.asr_timestamps.word_count, 3);
+  assert.equal(diagnostics.comparison_alignment.complete, true);
 });
 
 test("Cloudflare worker creates practice pinyin without Latin or numeric tokens", async () => {

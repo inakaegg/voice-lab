@@ -235,6 +235,111 @@ def practice_phrase_similarity(matches: list[dict[str, object]]) -> float:
     return max(0.0, min(1.0, weighted_total / weight_sum))
 
 
+def practice_comparison_alignment(
+    *,
+    target_text: str,
+    recognized_text: str,
+    target_language: str,
+    asr_timestamps: object | None,
+) -> dict[str, object]:
+    """Map target-side phrases to ASR timestamp ranges for comparison playback.
+
+    This is intentionally target-driven. ASR punctuation is often missing or
+    shifted, so splitting the recognized transcript first is too fragile for
+    phrase playback.
+    """
+
+    language = supported_practice_target_language(target_language)
+    phrases = _comparison_target_phrases(target_text, language)
+    timestamp_data = asr_timestamps if isinstance(asr_timestamps, dict) else {}
+    word_spans, recognized_normalized = _asr_word_spans(timestamp_data.get("words"), language)
+
+    if word_spans and recognized_normalized:
+        ranges = _align_phrases_to_word_spans(phrases, recognized_normalized, word_spans, language)
+        complete = bool(ranges) and all(bool(entry["available"]) for entry in ranges)
+        return {
+            "available": any(bool(entry["available"]) for entry in ranges),
+            "complete": complete,
+            "mode": "target_phrase_word_alignment",
+            "reason": "" if complete else "some target phrases could not be mapped to reliable word timestamps",
+            "target_language": language,
+            "recognized_normalized": recognized_normalized,
+            "target_phrase_count": len(phrases),
+            "ranges": ranges,
+        }
+
+    segments = _asr_segments(timestamp_data.get("segments"))
+    if phrases and len(segments) == len(phrases):
+        ranges = []
+        for index, (phrase, segment) in enumerate(zip(phrases, segments)):
+            segment_text = str(segment.get("text") or "")
+            similarity = practice_similarity(
+                str(phrase["normalized_target"]),
+                normalize_practice_text(segment_text, language),
+            )
+            available = similarity >= 0.45
+            ranges.append(
+                {
+                    "index": index,
+                    "source_index": phrase["source_index"],
+                    "target": phrase["target"],
+                    "normalized_target": phrase["normalized_target"],
+                    "available": available,
+                    "matched": available,
+                    "source": "segments",
+                    "similarity": round(similarity, 3),
+                    "coverage": 1.0 if available else 0.0,
+                    "recognized_start": None,
+                    "recognized_end": None,
+                    "normalized_recognized": normalize_practice_text(segment_text, language),
+                    "matched_text": segment_text,
+                    "audio_start": segment["start"] if available else None,
+                    "audio_end": segment["end"] if available else None,
+                }
+            )
+        complete = all(bool(entry["available"]) for entry in ranges)
+        return {
+            "available": any(bool(entry["available"]) for entry in ranges),
+            "complete": complete,
+            "mode": "target_phrase_segment_fallback",
+            "reason": "word timestamps were unavailable; segment count matched target phrase count",
+            "target_language": language,
+            "recognized_normalized": normalize_practice_text(recognized_text, language),
+            "target_phrase_count": len(phrases),
+            "ranges": ranges,
+        }
+
+    return {
+        "available": False,
+        "complete": False,
+        "mode": "unavailable",
+        "reason": "word timestamps were unavailable and segments could not be mapped safely",
+        "target_language": language,
+        "recognized_normalized": normalize_practice_text(recognized_text, language),
+        "target_phrase_count": len(phrases),
+        "ranges": [
+            {
+                "index": index,
+                "source_index": phrase["source_index"],
+                "target": phrase["target"],
+                "normalized_target": phrase["normalized_target"],
+                "available": False,
+                "matched": False,
+                "source": "none",
+                "similarity": 0.0,
+                "coverage": 0.0,
+                "recognized_start": None,
+                "recognized_end": None,
+                "normalized_recognized": "",
+                "matched_text": "",
+                "audio_start": None,
+                "audio_end": None,
+            }
+            for index, phrase in enumerate(phrases)
+        ],
+    }
+
+
 def classify_practice_recording(
     *,
     target_text: str,
@@ -310,6 +415,152 @@ def _best_practice_phrase_match(target_normalized: str, recognized_normalized: s
             if similarity >= 0.999:
                 return best
     return best
+
+
+def _comparison_target_phrases(target_text: str, target_language: str) -> list[dict[str, object]]:
+    phrases: list[dict[str, object]] = []
+    for source_index, phrase in enumerate(split_practice_phrases(target_text)):
+        normalized = normalize_practice_text(phrase, target_language)
+        if not normalized or _is_comparison_label_phrase(phrase, normalized):
+            continue
+        phrases.append(
+            {
+                "source_index": source_index,
+                "target": phrase,
+                "normalized_target": normalized,
+            }
+        )
+    return phrases
+
+
+def _is_comparison_label_phrase(phrase: str, normalized: str) -> bool:
+    label = str(phrase or "").strip().rstrip("：:")
+    if not label:
+        return True
+    if re.fullmatch(r"(?i:speaker\s*\d+|[a-z]\d*|\d+)", label):
+        return True
+    return len(normalized) <= 2 and phrase.strip().endswith((":", "："))
+
+
+def _asr_word_spans(words: object, target_language: str) -> tuple[list[dict[str, object]], str]:
+    if not isinstance(words, list):
+        return [], ""
+
+    spans: list[dict[str, object]] = []
+    normalized_pieces: list[str] = []
+    cursor = 0
+    for item in words:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("word") or "").strip()
+        start = _safe_float(item.get("start"))
+        end = _safe_float(item.get("end"))
+        normalized = normalize_practice_text(text, target_language)
+        if not normalized or start is None or end is None or end <= start:
+            continue
+        normalized_pieces.append(normalized)
+        span_end = cursor + len(normalized)
+        spans.append(
+            {
+                "text": text,
+                "normalized": normalized,
+                "normalized_start": cursor,
+                "normalized_end": span_end,
+                "audio_start": start,
+                "audio_end": end,
+            }
+        )
+        cursor = span_end
+    return spans, "".join(normalized_pieces)
+
+
+def _asr_segments(segments: object) -> list[dict[str, object]]:
+    if not isinstance(segments, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for item in segments:
+        if not isinstance(item, dict):
+            continue
+        start = _safe_float(item.get("start"))
+        end = _safe_float(item.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        normalized.append(
+            {
+                "text": str(item.get("text") or ""),
+                "start": start,
+                "end": end,
+            }
+        )
+    return normalized
+
+
+def _align_phrases_to_word_spans(
+    phrases: list[dict[str, object]],
+    recognized_normalized: str,
+    word_spans: list[dict[str, object]],
+    target_language: str,
+) -> list[dict[str, object]]:
+    cursor = 0
+    ranges: list[dict[str, object]] = []
+    for index, phrase in enumerate(phrases):
+        normalized_target = str(phrase["normalized_target"])
+        match = _best_practice_phrase_match(normalized_target, recognized_normalized, cursor)
+        start = int(match["recognized_start"])
+        end = int(match["recognized_end"])
+        similarity = float(match["similarity"])
+        coverage = (end - start) / len(normalized_target) if normalized_target else 0.0
+        matched = bool(normalized_target) and similarity >= 0.45 and coverage >= 0.50
+        overlapping = _overlapping_word_spans(word_spans, start, end) if matched else []
+        available = bool(overlapping)
+        if available:
+            cursor = max(cursor, int(overlapping[-1]["normalized_end"]))
+        ranges.append(
+            {
+                "index": index,
+                "source_index": phrase["source_index"],
+                "target": phrase["target"],
+                "normalized_target": normalized_target,
+                "available": available,
+                "matched": matched,
+                "source": "words" if available else "none",
+                "similarity": round(similarity, 3),
+                "coverage": round(coverage, 3),
+                "recognized_start": start if available else None,
+                "recognized_end": end if available else None,
+                "normalized_recognized": recognized_normalized[start:end] if available else "",
+                "matched_text": _join_matched_words(overlapping, target_language) if available else "",
+                "audio_start": overlapping[0]["audio_start"] if available else None,
+                "audio_end": overlapping[-1]["audio_end"] if available else None,
+            }
+        )
+    return ranges
+
+
+def _overlapping_word_spans(
+    word_spans: list[dict[str, object]],
+    normalized_start: int,
+    normalized_end: int,
+) -> list[dict[str, object]]:
+    return [
+        span
+        for span in word_spans
+        if int(span["normalized_end"]) > normalized_start and int(span["normalized_start"]) < normalized_end
+    ]
+
+
+def _join_matched_words(word_spans: list[dict[str, object]], target_language: str) -> str:
+    words = [str(span.get("text") or "") for span in word_spans if str(span.get("text") or "")]
+    if target_language in {"ja-JP", "zh-CN"}:
+        return "".join(words)
+    return " ".join(words)
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_han_character(char: str) -> bool:

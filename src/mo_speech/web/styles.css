@@ -2008,6 +2008,34 @@ audio {
   inline-size: 100%;
 }
 
+.practice-history-diagnostics {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.practice-history-diagnostics summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.practice-history-diagnostics button {
+  justify-self: start;
+}
+
+.practice-history-diagnostics pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #111827;
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 720px) {
   .practice-shell {
     padding: 10px 10px 14px;

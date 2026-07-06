@@ -1403,7 +1403,7 @@ async function createPracticeRecording(request, env) {
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
-  await saveAudioHistoryEntry(env, "recordings", {
+  const recordingEntry = await saveAudioHistoryEntry(env, "recordings", {
     audio_base64: arrayBufferToBase64(audioBytes),
     audio_mime_type: audioMimeType,
     filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-recording.${extensionForMimeType(audioMimeType)}`,
@@ -1461,14 +1461,21 @@ async function createPracticeRecording(request, env) {
     const selectedTranscription = classification.attempt_source === "auto" ? autoTranscription : targetTranscription;
     const selectedAsrMs = classification.attempt_source === "auto" ? autoAsrMs : targetAsrMs;
     const evaluation = evaluatePracticeAttempt(currentTargetText, selectedTranscription.text, targetLanguage);
-    return {
+    const asrTimestamps = serializeAsrTimestamps(selectedTranscription);
+    const result = {
       recording_kind: "attempt",
       target_language: targetLanguage,
       target_text: currentTargetText,
       recognized_text: selectedTranscription.text,
       asr_model: asrModel,
-      asr_timestamps: serializeAsrTimestamps(selectedTranscription),
+      asr_timestamps: asrTimestamps,
       ...evaluation,
+      comparison_alignment: practiceComparisonAlignment({
+        targetText: currentTargetText,
+        recognizedText: selectedTranscription.text,
+        targetLanguage,
+        asrTimestamps,
+      }),
       classification,
       timings_ms: {
         asr: selectedAsrMs,
@@ -1479,6 +1486,8 @@ async function createPracticeRecording(request, env) {
         asr: `openai-asr-${asrModel}`,
       },
     };
+    await updateAudioHistoryEntryMetadata(env, recordingEntry, practiceHistoryDiagnosticsMetadata(result));
+    return result;
   }
 
   const totalStarted = Date.now();
@@ -1528,6 +1537,7 @@ async function createPracticeRecording(request, env) {
     asr_model: asrModel,
     voice_mode: "default",
   });
+  await updateAudioHistoryEntryMetadata(env, recordingEntry, practiceHistoryDiagnosticsMetadata(result));
   return result;
 }
 
@@ -1543,7 +1553,7 @@ async function createPracticeAttempt(request, env) {
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
-  await saveAudioHistoryEntry(env, "recordings", {
+  const recordingEntry = await saveAudioHistoryEntry(env, "recordings", {
     audio_base64: arrayBufferToBase64(audioBytes),
     audio_mime_type: audioMimeType,
     filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-repeat.${extensionForMimeType(audioMimeType)}`,
@@ -1569,13 +1579,20 @@ async function createPracticeAttempt(request, env) {
   const recognizedText = transcription.text;
   const asrMs = Date.now() - asrStarted;
   const evaluation = evaluatePracticeAttempt(targetText, recognizedText, targetLanguage);
-  return {
+  const asrTimestamps = serializeAsrTimestamps(transcription);
+  const result = {
     target_language: targetLanguage,
     target_text: targetText,
     recognized_text: recognizedText,
     asr_model: asrModel,
-    asr_timestamps: serializeAsrTimestamps(transcription),
+    asr_timestamps: asrTimestamps,
     ...evaluation,
+    comparison_alignment: practiceComparisonAlignment({
+      targetText,
+      recognizedText,
+      targetLanguage,
+      asrTimestamps,
+    }),
     timings_ms: {
       asr: asrMs,
       compare: Math.max(0, Date.now() - totalStarted - asrMs),
@@ -1585,6 +1602,8 @@ async function createPracticeAttempt(request, env) {
       asr: `openai-asr-${asrModel}`,
     },
   };
+  await updateAudioHistoryEntryMetadata(env, recordingEntry, practiceHistoryDiagnosticsMetadata(result));
+  return result;
 }
 
 async function createPracticeDisplayText(text, targetLanguage, env, { includePinyin = false } = {}) {
@@ -1985,6 +2004,22 @@ async function saveAudioHistoryEntry(env, kind, { audio_base64, audio_mime_type,
   return entry;
 }
 
+async function updateAudioHistoryEntryMetadata(env, entry, metadata = {}) {
+  const kv = stateKv(env);
+  if (!kv || !entry || !AUDIO_HISTORY_KINDS.has(entry.kind)) {
+    return null;
+  }
+  const index = await readAudioHistoryIndex(env);
+  const items = index[entry.kind] || [];
+  const target = items.find((item) => item.filename === entry.filename);
+  if (!target) {
+    return null;
+  }
+  target.metadata = normalizeMetadata({ ...(target.metadata || {}), ...metadata });
+  await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
+  return target;
+}
+
 async function trimAudioHistoryIndex(kv, index, kind, limit) {
   const overflow = index[kind].slice(limit);
   index[kind] = index[kind].slice(0, limit);
@@ -2073,8 +2108,46 @@ function historyTextMetadataFromResult(result) {
   };
 }
 
+function practiceHistoryDiagnosticsMetadata(result) {
+  const diagnostics = {
+    recording_kind: String(result.recording_kind || ""),
+    target_language: String(result.target_language || ""),
+    target_text: String(result.target_text || ""),
+    recognized_text: String(result.recognized_text || ""),
+    transcript: String(result.transcript || ""),
+    asr_model: String(result.asr_model || ""),
+    classification: result.classification || {},
+    phrase_matches: result.phrase_matches || [],
+    comparison_alignment: result.comparison_alignment || {},
+    asr_timestamps: compactAsrTimestamps(result.asr_timestamps || {}),
+    timings_ms: result.timings_ms || {},
+  };
+  return {
+    text_preview: textPreview(result.target_text || result.recognized_text || result.transcript || ""),
+    recognized_text_preview: textPreview(result.recognized_text || result.transcript || ""),
+    practice_diagnostics_json: JSON.stringify(diagnostics),
+  };
+}
+
+function compactAsrTimestamps(timestamps) {
+  const words = Array.isArray(timestamps.words) ? timestamps.words : [];
+  const segments = Array.isArray(timestamps.segments) ? timestamps.segments : [];
+  return {
+    available: Boolean(timestamps.available),
+    model: String(timestamps.model || ""),
+    timestamp_granularities: Array.isArray(timestamps.timestamp_granularities)
+      ? timestamps.timestamp_granularities
+      : [],
+    word_count: words.length,
+    segment_count: segments.length,
+    words: words.slice(0, 120),
+    segments: segments.slice(0, 40),
+    truncated: words.length > 120 || segments.length > 40,
+  };
+}
+
 function metadataTextPreview(metadata) {
-  for (const key of ["text_preview", "transformed_text_preview", "translated_text_preview", "transcript_preview"]) {
+  for (const key of ["text_preview", "recognized_text_preview", "transformed_text_preview", "translated_text_preview", "transcript_preview"]) {
     const value = String(metadata[key] || "").trim();
     if (value) {
       return value;
@@ -2637,6 +2710,96 @@ function practicePhraseSimilarity(matches) {
   return Math.max(0, Math.min(1, weightedTotal / weightSum));
 }
 
+function practiceComparisonAlignment({ targetText, recognizedText, targetLanguage, asrTimestamps }) {
+  const language = supportedPracticeTargetLanguage(targetLanguage);
+  const phrases = comparisonTargetPhrases(targetText, language);
+  const timestampData = asrTimestamps && typeof asrTimestamps === "object" ? asrTimestamps : {};
+  const { spans: wordSpans, recognized } = asrWordSpans(timestampData.words, language);
+
+  if (wordSpans.length && recognized) {
+    const ranges = alignPhrasesToWordSpans(phrases, recognized, wordSpans, language);
+    const complete = ranges.length > 0 && ranges.every((entry) => entry.available);
+    return {
+      available: ranges.some((entry) => entry.available),
+      complete,
+      mode: "target_phrase_word_alignment",
+      reason: complete ? "" : "some target phrases could not be mapped to reliable word timestamps",
+      target_language: language,
+      recognized_normalized: recognized,
+      target_phrase_count: phrases.length,
+      ranges,
+    };
+  }
+
+  const segments = asrSegments(timestampData.segments);
+  if (phrases.length && segments.length === phrases.length) {
+    const ranges = phrases.map((phrase, index) => {
+      const segment = segments[index];
+      const segmentText = String(segment.text || "");
+      const similarity = practiceSimilarity(
+        String(phrase.normalized_target || ""),
+        normalizePracticeText(segmentText, language),
+      );
+      const available = similarity >= 0.45;
+      return {
+        index,
+        source_index: phrase.source_index,
+        target: phrase.target,
+        normalized_target: phrase.normalized_target,
+        available,
+        matched: available,
+        source: "segments",
+        similarity: roundScore(similarity),
+        coverage: available ? 1 : 0,
+        recognized_start: null,
+        recognized_end: null,
+        normalized_recognized: normalizePracticeText(segmentText, language),
+        matched_text: segmentText,
+        audio_start: available ? segment.start : null,
+        audio_end: available ? segment.end : null,
+      };
+    });
+    const complete = ranges.every((entry) => entry.available);
+    return {
+      available: ranges.some((entry) => entry.available),
+      complete,
+      mode: "target_phrase_segment_fallback",
+      reason: "word timestamps were unavailable; segment count matched target phrase count",
+      target_language: language,
+      recognized_normalized: normalizePracticeText(recognizedText, language),
+      target_phrase_count: phrases.length,
+      ranges,
+    };
+  }
+
+  return {
+    available: false,
+    complete: false,
+    mode: "unavailable",
+    reason: "word timestamps were unavailable and segments could not be mapped safely",
+    target_language: language,
+    recognized_normalized: normalizePracticeText(recognizedText, language),
+    target_phrase_count: phrases.length,
+    ranges: phrases.map((phrase, index) => ({
+      index,
+      source_index: phrase.source_index,
+      target: phrase.target,
+      normalized_target: phrase.normalized_target,
+      available: false,
+      matched: false,
+      source: "none",
+      similarity: 0,
+      coverage: 0,
+      recognized_start: null,
+      recognized_end: null,
+      normalized_recognized: "",
+      matched_text: "",
+      audio_start: null,
+      audio_end: null,
+    })),
+  };
+}
+
 function bestPracticePhraseMatch(normalizedTarget, recognized, cursor) {
   if (!normalizedTarget || !recognized) {
     return { recognized_start: 0, recognized_end: 0, similarity: 0 };
@@ -2657,6 +2820,129 @@ function bestPracticePhraseMatch(normalizedTarget, recognized, cursor) {
     }
   }
   return best;
+}
+
+function comparisonTargetPhrases(targetText, targetLanguage) {
+  return splitPracticePhrases(targetText)
+    .map((phrase, sourceIndex) => ({
+      source_index: sourceIndex,
+      target: phrase,
+      normalized_target: normalizePracticeText(phrase, targetLanguage),
+    }))
+    .filter((phrase) => phrase.normalized_target && !isComparisonLabelPhrase(phrase.target, phrase.normalized_target));
+}
+
+function isComparisonLabelPhrase(phrase, normalized) {
+  const label = String(phrase || "").trim().replace(/[：:]$/u, "");
+  if (!label) {
+    return true;
+  }
+  if (/^(speaker\s*\d+|[a-z]\d*|\d+)$/iu.test(label)) {
+    return true;
+  }
+  return String(normalized || "").length <= 2 && /[：:]$/u.test(String(phrase || "").trim());
+}
+
+function asrWordSpans(words, targetLanguage) {
+  if (!Array.isArray(words)) {
+    return { spans: [], recognized: "" };
+  }
+  const spans = [];
+  const pieces = [];
+  let cursor = 0;
+  for (const item of words) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const text = String(item.text || item.word || "").trim();
+    const start = safeNumber(item.start);
+    const end = safeNumber(item.end);
+    const normalized = normalizePracticeText(text, targetLanguage);
+    if (!normalized || start === null || end === null || end <= start) {
+      continue;
+    }
+    pieces.push(normalized);
+    const spanEnd = cursor + normalized.length;
+    spans.push({
+      text,
+      normalized,
+      normalized_start: cursor,
+      normalized_end: spanEnd,
+      audio_start: start,
+      audio_end: end,
+    });
+    cursor = spanEnd;
+  }
+  return { spans, recognized: pieces.join("") };
+}
+
+function asrSegments(segments) {
+  if (!Array.isArray(segments)) {
+    return [];
+  }
+  return segments
+    .map((item) => {
+      const start = safeNumber(item?.start);
+      const end = safeNumber(item?.end);
+      if (start === null || end === null || end <= start) {
+        return null;
+      }
+      return { text: String(item?.text || ""), start, end };
+    })
+    .filter(Boolean);
+}
+
+function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage) {
+  let cursor = 0;
+  return phrases.map((phrase, index) => {
+    const normalizedTarget = String(phrase.normalized_target || "");
+    const match = bestPracticePhraseMatch(normalizedTarget, recognized, cursor);
+    const coverage = normalizedTarget ? (match.recognized_end - match.recognized_start) / normalizedTarget.length : 0;
+    const matched = Boolean(normalizedTarget) && match.similarity >= 0.45 && coverage >= 0.5;
+    const overlapping = matched ? overlappingWordSpans(wordSpans, match.recognized_start, match.recognized_end) : [];
+    const available = overlapping.length > 0;
+    if (available) {
+      cursor = Math.max(cursor, overlapping[overlapping.length - 1].normalized_end);
+    }
+    return {
+      index,
+      source_index: phrase.source_index,
+      target: phrase.target,
+      normalized_target: normalizedTarget,
+      available,
+      matched,
+      source: available ? "words" : "none",
+      similarity: roundScore(match.similarity),
+      coverage: roundScore(coverage),
+      recognized_start: available ? match.recognized_start : null,
+      recognized_end: available ? match.recognized_end : null,
+      normalized_recognized: available ? recognized.slice(match.recognized_start, match.recognized_end) : "",
+      matched_text: available ? joinMatchedWords(overlapping, targetLanguage) : "",
+      audio_start: available ? overlapping[0].audio_start : null,
+      audio_end: available ? overlapping[overlapping.length - 1].audio_end : null,
+    };
+  });
+}
+
+function overlappingWordSpans(wordSpans, normalizedStart, normalizedEnd) {
+  return wordSpans.filter((span) => span.normalized_end > normalizedStart && span.normalized_start < normalizedEnd);
+}
+
+function joinMatchedWords(wordSpans, targetLanguage) {
+  const words = wordSpans.map((span) => String(span.text || "")).filter(Boolean);
+  if (targetLanguage === "ja-JP" || targetLanguage === "zh-CN") {
+    return words.join("");
+  }
+  return words.join(" ");
+}
+
+function safeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function roundScore(value) {
+  return Math.round((Number(value) || 0) * 1000) / 1000;
 }
 
 function practiceLanguageSignal(text, targetLanguage) {

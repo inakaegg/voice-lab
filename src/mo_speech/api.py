@@ -55,6 +55,7 @@ from .practice import (
     PRACTICE_TARGET_LANGUAGES,
     classify_practice_recording,
     evaluate_practice_attempt,
+    practice_comparison_alignment,
     supported_practice_target_language,
 )
 from .providers.openai_api import (
@@ -145,6 +146,43 @@ def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
         "timestamp_granularities": result.timestamp_granularities,
         "words": result.words,
         "segments": result.segments,
+    }
+
+
+def _compact_asr_timestamps_for_metadata(timestamps: dict[str, object]) -> dict[str, object]:
+    words = timestamps.get("words") if isinstance(timestamps.get("words"), list) else []
+    segments = timestamps.get("segments") if isinstance(timestamps.get("segments"), list) else []
+    return {
+        "available": bool(timestamps.get("available")),
+        "model": str(timestamps.get("model") or ""),
+        "timestamp_granularities": timestamps.get("timestamp_granularities") or [],
+        "word_count": len(words),
+        "segment_count": len(segments),
+        "words": words[:120],
+        "segments": segments[:40],
+        "truncated": len(words) > 120 or len(segments) > 40,
+    }
+
+
+def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[str, object]:
+    asr_timestamps = result.get("asr_timestamps") if isinstance(result.get("asr_timestamps"), dict) else {}
+    diagnostics = {
+        "recording_kind": result.get("recording_kind") or "",
+        "target_language": result.get("target_language") or "",
+        "target_text": result.get("target_text") or "",
+        "recognized_text": result.get("recognized_text") or "",
+        "transcript": result.get("transcript") or "",
+        "asr_model": result.get("asr_model") or "",
+        "classification": result.get("classification") or {},
+        "phrase_matches": result.get("phrase_matches") or [],
+        "comparison_alignment": result.get("comparison_alignment") or {},
+        "asr_timestamps": _compact_asr_timestamps_for_metadata(asr_timestamps),
+        "timings_ms": result.get("timings_ms") or {},
+    }
+    return {
+        "text_preview": str(result.get("target_text") or result.get("recognized_text") or result.get("transcript") or "")[:80],
+        "recognized_text_preview": str(result.get("recognized_text") or result.get("transcript") or "")[:80],
+        "practice_diagnostics": diagnostics,
     }
 
 
@@ -914,6 +952,7 @@ def create_app(
         timings_ms["total"] = _elapsed_ms(total_started) + (
             timings_ms["asr"] if used_precomputed_asr else 0.0
         )
+        asr_timestamps = _serialize_asr_timestamps(asr_result)
         result = {
             "transcript": transcript,
             "target_text": target_text,
@@ -930,7 +969,7 @@ def create_app(
             "audio_base64": base64.b64encode(tts_output.audio_bytes).decode(),
             "timings_ms": timings_ms,
             "asr_model": practice_asr_model,
-            "asr_timestamps": _serialize_asr_timestamps(asr_result),
+            "asr_timestamps": asr_timestamps,
             "providers": {
                 "asr": asr_provider.name,
                 "translation": active_openai_pipeline.translator.name,
@@ -951,6 +990,10 @@ def create_app(
                 "tts_text": target_text,
                 "text_preview": target_text[:80],
             },
+        )
+        active_audio_history_store.update_metadata(
+            recording_entry,
+            _practice_history_diagnostics_metadata(result),
         )
         return result
 
@@ -986,13 +1029,21 @@ def create_app(
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
+        asr_timestamps = _serialize_asr_timestamps(asr_result)
+        comparison_alignment = practice_comparison_alignment(
+            target_text=target_text,
+            recognized_text=recognized_text,
+            target_language=practice_target_language,
+            asr_timestamps=asr_timestamps,
+        )
         result = {
             "target_language": practice_target_language,
             "target_text": target_text,
             "recognized_text": recognized_text,
             "asr_model": practice_asr_model,
-            "asr_timestamps": _serialize_asr_timestamps(asr_result),
+            "asr_timestamps": asr_timestamps,
             **evaluation,
+            "comparison_alignment": comparison_alignment,
             "timings_ms": {
                 "asr": asr_ms,
                 "compare": max(0.0, _elapsed_ms(total_started) - asr_ms),
@@ -1021,7 +1072,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         audio_bytes = await audio.read()
-        _save_audio_history_recording(
+        recording_entry = _save_audio_history_recording(
             active_audio_history_store,
             audio_bytes,
             suffix=_upload_suffix(audio.filename),
@@ -1087,6 +1138,10 @@ def create_app(
                 classification=classification,
             )
             result["recording_kind"] = "attempt"
+            active_audio_history_store.update_metadata(
+                recording_entry,
+                _practice_history_diagnostics_metadata(result),
+            )
             return result
 
         result = _create_practice_prompt_result(
@@ -1100,6 +1155,10 @@ def create_app(
         )
         result["recording_kind"] = "prompt"
         result["classification"] = classification
+        active_audio_history_store.update_metadata(
+            recording_entry,
+            _practice_history_diagnostics_metadata(result),
+        )
         return result
 
     @app.post("/api/practice/prompts")
@@ -1116,7 +1175,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         audio_bytes = await audio.read()
-        _save_audio_history_recording(
+        recording_entry = _save_audio_history_recording(
             active_audio_history_store,
             audio_bytes,
             suffix=_upload_suffix(audio.filename),
@@ -1247,13 +1306,21 @@ def create_app(
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
-        return {
+        asr_timestamps = _serialize_asr_timestamps(asr_result)
+        comparison_alignment = practice_comparison_alignment(
+            target_text=target_text,
+            recognized_text=recognized_text,
+            target_language=practice_target_language,
+            asr_timestamps=asr_timestamps,
+        )
+        result = {
             "target_language": practice_target_language,
             "target_text": target_text,
             "recognized_text": recognized_text,
             "asr_model": practice_asr_model,
-            "asr_timestamps": _serialize_asr_timestamps(asr_result),
+            "asr_timestamps": asr_timestamps,
             **evaluation,
+            "comparison_alignment": comparison_alignment,
             "timings_ms": {
                 "asr": asr_ms,
                 "compare": max(0.0, _elapsed_ms(total_started) - asr_ms),
@@ -1263,6 +1330,11 @@ def create_app(
                 "asr": asr_provider.name,
             },
         }
+        active_audio_history_store.update_metadata(
+            recording_entry,
+            _practice_history_diagnostics_metadata(result),
+        )
+        return result
 
     @app.post("/api/translate-speech")
     async def translate_speech(

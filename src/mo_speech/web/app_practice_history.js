@@ -44,6 +44,51 @@ function renderHistoryList(container, entries) {
     audio.src = entry.url;
 
     item.append(title, details, audio);
+    const diagnostics = practiceDiagnosticsJson(entry);
+    if (diagnostics) {
+      item.append(createDiagnosticsDetails(diagnostics));
+    }
     container.append(item);
   });
+}
+
+function practiceDiagnosticsJson(entry) {
+  const raw = entry?.metadata?.practice_diagnostics_json || entry?.metadata?.practice_diagnostics;
+  if (!raw) {
+    return "";
+  }
+  if (typeof raw === "string") {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  }
+  return JSON.stringify(raw, null, 2);
+}
+
+function createDiagnosticsDetails(text) {
+  const details = document.createElement("details");
+  details.className = "practice-history-diagnostics";
+
+  const summary = document.createElement("summary");
+  summary.textContent = "診断JSON";
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.textContent = "コピー";
+  copyButton.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await navigator.clipboard.writeText(text);
+    copyButton.textContent = "コピー済み";
+    setTimeout(() => {
+      copyButton.textContent = "コピー";
+    }, 1200);
+  });
+
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+
+  details.append(summary, copyButton, pre);
+  return details;
 }
