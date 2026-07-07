@@ -14,6 +14,8 @@ const vibevoiceSimpleHtml = await readFile(new URL("../src/mo_speech/web/vibevoi
 const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
 const publicSessionSource = await readFile(new URL("../src/mo_speech/web/app_public_session.js", import.meta.url), "utf8");
 const publicAccessSettingsSource = await readFile(new URL("../src/mo_speech/web/app_public_access_settings.js", import.meta.url), "utf8");
+const publicSampleAudioSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio.js", import.meta.url), "utf8");
+const publicSampleAudioAdminSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio_admin.js", import.meta.url), "utf8");
 const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.html", import.meta.url), "utf8");
 const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
@@ -58,7 +60,12 @@ test("admin page can start RunPod warmup manually", () => {
   assert.match(adminHtml, /data-public-feature="voice_conversion"/);
   assert.match(adminHtml, /data-public-feature-setting="audio_max_bytes"/);
   assert.match(adminHtml, /data-public-setting="google_login_required"/);
+  assert.match(adminHtml, /data-public-samples-admin/);
+  assert.match(adminHtml, /data-public-samples-features="fun,voice_conversion"/);
+  assert.match(adminHtml, /data-public-sample-admin-feature="fun"/);
+  assert.match(adminHtml, /data-public-sample-admin-feature="voice_conversion"/);
   assert.match(adminHtml, /\/static\/app_public_access_settings\.js/);
+  assert.match(adminHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.ok(adminHtml.indexOf("runpod-warmup-panel") < adminHtml.indexOf("operation_mode"));
   assert.match(adminSource, /runpodWarmupButton\.addEventListener\("click", startRunpodWarmup\)/);
   assert.match(adminSource, /fetch\("\/api\/warmup", \{ method: "POST" \}\)/);
@@ -74,6 +81,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /id="practice-current-language-label"/);
   assert.match(practiceHtml, /data-public-auth-panel/);
   assert.match(practiceHtml, /\/auth\/google\/login\?next=\/speakloop/);
+  assert.match(practiceHtml, /data-public-sample-feature="speakloop"/);
+  assert.match(practiceHtml, /\/static\/app_public_sample_audio\.js/);
   assert.match(practiceHtml, /id="practice-settings-button"/);
   assert.match(practiceHtml, /id="practice-settings-overlay"/);
   assert.match(practiceHtml, /role="dialog"/);
@@ -183,6 +192,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(publicSessionSource, /\/api\/public-session/);
   assert.match(publicSessionSource, /\/auth\/google\/login/);
   assert.match(publicSessionSource, /session\.is_admin/);
+  assert.match(publicSampleAudioSource, /\/api\/public-sample-audios/);
+  assert.match(publicSampleAudioSource, /data-public-sample-feature/);
 });
 
 test("practice history admin uses separated practice history API", () => {
@@ -192,14 +203,20 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /data-public-feature="speakloop"/);
   assert.match(practiceAdminHtml, /data-public-feature-setting="audio_max_bytes"/);
   assert.match(practiceAdminHtml, /data-public-setting="admin_google_emails"/);
+  assert.match(practiceAdminHtml, /data-public-samples-admin/);
+  assert.match(practiceAdminHtml, /data-public-samples-features="speakloop"/);
+  assert.match(practiceAdminHtml, /data-public-sample-admin-feature="speakloop"/);
   assert.match(practiceAdminHtml, /id="practice-history-recordings"/);
   assert.match(practiceAdminHtml, /id="practice-history-outputs"/);
   assert.match(practiceAdminHtml, /\/static\/app_public_access_settings\.js/);
+  assert.match(practiceAdminHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
   assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
   assert.match(publicAccessSettingsSource, /data-public-feature-setting/);
+  assert.match(publicSampleAudioAdminSource, /\/api\/public-sample-audios/);
+  assert.match(publicSampleAudioAdminSource, /data-public-sample-admin-feature/);
 });
 
 test("vibevoice page provides local skit generation controls", () => {
@@ -211,6 +228,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /data-public-feature-setting="script_max_chars"/);
   assert.match(vibevoiceHtml, /data-public-feature-setting="reference_url_duration_max_seconds"/);
   assert.match(vibevoiceHtml, /\/static\/app_public_access_settings\.js/);
+  assert.match(vibevoiceHtml, /data-public-samples-admin/);
+  assert.match(vibevoiceHtml, /data-public-samples-features="skitvoice"/);
+  assert.match(vibevoiceHtml, /data-public-sample-admin-feature="skitvoice"/);
+  assert.match(vibevoiceHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
@@ -350,6 +371,8 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /かんたんスキット生成/);
   assert.match(vibevoiceSimpleHtml, /data-public-auth-panel/);
   assert.match(vibevoiceSimpleHtml, /\/auth\/google\/login\?next=\/skitvoice/);
+  assert.match(vibevoiceSimpleHtml, /data-public-sample-feature="skitvoice"/);
+  assert.match(vibevoiceSimpleHtml, /\/static\/app_public_sample_audio\.js/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/skitvoice\/admin">管理/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /生成モード/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/practice"/);
@@ -373,6 +396,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-debug" hidden/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-debug-runtime" hidden/);
   assert.match(vibevoiceSimpleHtml, /\/static\/app_public_session\.js/);
+  assert.match(vibevoiceSimpleHtml, /\/static\/app_public_sample_audio\.js/);
   assert.match(vibevoiceSimpleHtml, /\/static\/app_vibevoice\.js/);
   assert.match(styles, /\.vibevoice-simple-shell/);
   assert.match(styles, /\.vibevoice-simple-mode-summary/);
@@ -416,6 +440,7 @@ test("vibevoice progress animation only runs while a job is active", () => {
 
 test("seed-vc direct page only exposes direct voice conversion controls", () => {
   assert.match(seedVcDirectHtml, /Seed-VC/);
+  assert.match(seedVcDirectHtml, /data-public-sample-feature="voice_conversion"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-source-audio"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-audio-device"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-audio-device-refresh"/);
@@ -432,6 +457,7 @@ test("seed-vc direct page only exposes direct voice conversion controls", () => 
   assert.match(seedVcDirectHtml, /class="seed-vc-range-control"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-submit-button"/);
   assert.match(seedVcDirectHtml, /id="seed-vc-output-audio"/);
+  assert.match(seedVcDirectHtml, /\/static\/app_public_sample_audio\.js/);
   assert.match(seedVcDirectHtml, /\/static\/app_config\.js/);
   assert.match(seedVcDirectHtml, /\/static\/app_seed_vc_direct\.js/);
   assert.doesNotMatch(seedVcDirectHtml, /operation_mode|translation_backend|tts_backend|user-settings-panel|runpod-warmup-panel/);

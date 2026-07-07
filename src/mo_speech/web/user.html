@@ -12,6 +12,15 @@
       <input id="similar_voice" type="checkbox" checked hidden />
       <button id="display-mode-button" class="display-mode-button" type="button">🇯🇵 ひらがな</button>
 
+      <section class="public-sample-audio user-sample-audio" data-public-sample-feature="fun" hidden aria-label="へんなへんかん サンプル音声">
+        <div>
+          <p class="public-sample-kicker">Sample</p>
+          <h2 data-public-sample-title>サンプル音声</h2>
+          <p data-public-sample-description hidden></p>
+        </div>
+        <audio data-public-sample-audio controls preload="metadata"></audio>
+      </section>
+
       <section class="user-hero" aria-label="ろくおん">
         <p id="user-language-label" class="user-kicker">へんな へんかん アプリ</p>
         <span id="user-warmup-status" class="user-warmup-status" hidden aria-label="RunPod準備状態"></span>
@@ -79,6 +88,7 @@
         <p id="user-error" class="user-error" hidden></p>
       </section>
     </main>
+    <script src="/static/app_public_sample_audio.js" defer></script>
     <script src="/static/app_user.js" defer></script>
   </body>
 </html>

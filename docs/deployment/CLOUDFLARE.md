@@ -106,6 +106,8 @@ KVは簡易デモ向けの保存先であり、大きい音声や長期保存に
 
 公開Googleログインとquota判定は監査用にKVへ最近のイベントを保存する。保存先は `public-audit-log` で、管理APIからのみ読める。記録対象は、Googleログイン成功、ログアウト、quota消費、quota上限ブロック、管理者emailによるquota免除、公開アクセス設定の更新である。イベントには時刻、Google email、feature、API path、quota使用数、上限値を含める。音声、台本、入力本文、OAuth token、raw IP addressは保存しない。これは求人・ポートフォリオ公開時の過剰利用確認と簡易トラブルシュートを目的にしたもので、法的な監査証跡や課金台帳としては扱わない。厳密な監査が必要になった場合はD1または外部ログ基盤へ移す。
 
+公開ページに表示するサンプル出力音声は `public-sample-audios` としてKVへ保存する。管理画面 `/admin`、`/speakloop/admin`、`/skitvoice/admin` からfeature別に1件ずつ登録でき、公開ページは `GET /api/public-sample-audios` で読み取る。保存対象はタイトル、説明、音声MIME、base64音声、元ファイル名である。サンプル音声は公開表示前提なので、機密音声や第三者権利が不明な音声を置かない。
+
 ## warmup
 
 `GET /api/runtime` はRunPod `/health` を読むだけの確認APIとして扱う。これはRunPod jobを作らず、worker起動やSeed-VC preloadを要求しない。RunPod `/health` の `IDLE`、`READY` などはendpointまたはworkerの存在確認には使えるが、それだけでSeed-VCモデルがworker process内にresident load済みとは判定しない。

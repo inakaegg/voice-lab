@@ -1807,6 +1807,116 @@ fieldset.public-access-admin {
   font-weight: 900;
 }
 
+.public-sample-audio {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #dbe8f7;
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
+  padding: 12px;
+}
+
+.public-sample-audio[hidden] {
+  display: none;
+}
+
+.public-sample-audio h2,
+.public-sample-audio p {
+  margin: 0;
+}
+
+.public-sample-audio h2 {
+  color: #18263a;
+  font-size: 17px;
+}
+
+.public-sample-audio p[data-public-sample-description] {
+  color: #56677f;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.public-sample-kicker {
+  color: #6b7d95;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.public-sample-audio audio,
+.public-sample-admin-feature audio {
+  width: 100%;
+}
+
+.user-sample-audio {
+  margin: 0 auto 12px;
+  max-width: min(92vw, 760px);
+  position: relative;
+  z-index: 2;
+}
+
+.public-samples-admin {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #dbe8f7;
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+fieldset.public-samples-admin {
+  border-color: #dbe8f7;
+}
+
+.public-sample-admin-feature {
+  border-top: 1px solid #dbe8f7;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: 10px;
+}
+
+.public-sample-admin-feature[hidden] {
+  display: none;
+}
+
+.public-sample-admin-feature h3,
+.public-sample-admin-feature audio,
+.public-sample-details {
+  grid-column: 1 / -1;
+}
+
+.public-sample-admin-feature h3 {
+  margin: 0;
+}
+
+.public-sample-admin-feature label {
+  color: #40546e;
+  display: grid;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 5px;
+}
+
+.public-sample-admin-feature input,
+.public-sample-admin-feature textarea {
+  border: 1px solid #cbd9ea;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #162033;
+  font: inherit;
+  min-height: 36px;
+  min-width: 0;
+  padding: 7px 9px;
+  width: 100%;
+}
+
 .practice-flow {
   align-items: start;
   display: grid;
@@ -3206,6 +3316,11 @@ fieldset.public-access-admin {
   }
 
   .public-access-feature {
+    grid-template-columns: 1fr;
+  }
+
+  .public-sample-audio,
+  .public-sample-admin-feature {
     grid-template-columns: 1fr;
   }
 }

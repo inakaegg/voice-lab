@@ -14,6 +14,8 @@ const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
 const PUBLIC_AUDIT_LOG_DEFAULT_LIMIT = 500;
+const PUBLIC_SAMPLE_AUDIOS_KV_KEY = "public-sample-audios";
+const PUBLIC_SAMPLE_AUDIO_MAX_BASE64_CHARS = 2_500_000;
 const PUBLIC_USAGE_KV_PREFIX = "public-usage:";
 const PUBLIC_SESSION_COOKIE = "mo_public_session";
 const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
@@ -172,6 +174,15 @@ const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
   },
 };
 
+const DEFAULT_PUBLIC_SAMPLE_AUDIOS = {
+  features: {
+    speakloop: null,
+    skitvoice: null,
+    fun: null,
+    voice_conversion: null,
+  },
+};
+
 let ephemeralUserSettings = null;
 let ephemeralPublicAccessSettings = null;
 const ephemeralTranslationJobs = new Map();
@@ -240,6 +251,9 @@ function isProtectedAdminApiRequest(method, pathname) {
     return true;
   }
   if ((method === "GET" || method === "PUT") && pathname === "/api/public-access-settings") {
+    return true;
+  }
+  if (method === "PUT" && pathname === "/api/public-sample-audios") {
     return true;
   }
   if (method === "GET" && pathname === "/api/audio-history") {
@@ -752,6 +766,9 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "GET" && url.pathname === "/api/public-session") {
       return jsonResponse(await publicSessionPayload(request, env));
     }
+    if (request.method === "GET" && url.pathname === "/api/public-sample-audios") {
+      return jsonResponse(await readPublicSampleAudios(env));
+    }
     if (request.method === "GET" && url.pathname === "/api/public-access-settings") {
       return jsonResponse(await readPublicAccessSettings(env));
     }
@@ -766,6 +783,15 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "GET" && url.pathname === "/api/public-audit-log") {
       return jsonResponse(await readPublicAuditLog(env, url));
+    }
+    if (request.method === "PUT" && url.pathname === "/api/public-sample-audios") {
+      const payload = await request.json();
+      const samples = await writePublicSampleAudios(payload, env);
+      await appendPublicAuditEvent(env, {
+        action: "public_sample_audios_updated",
+        ...requestAuditContext(request),
+      });
+      return jsonResponse(samples);
     }
     if (request.method === "GET" && url.pathname === "/api/audio-history") {
       return jsonResponse(await listAudioHistory(env));
@@ -1106,6 +1132,65 @@ async function writePublicAccessSettings(payload, env) {
     ephemeralPublicAccessSettings = settings;
   }
   return readPublicAccessSettings(env);
+}
+
+async function readPublicSampleAudios(env) {
+  const kv = stateKv(env);
+  let stored = null;
+  if (kv) {
+    stored = await kvGetJson(kv, PUBLIC_SAMPLE_AUDIOS_KV_KEY, null);
+  } else if (env.PUBLIC_SAMPLE_AUDIOS_JSON) {
+    try {
+      stored = JSON.parse(env.PUBLIC_SAMPLE_AUDIOS_JSON);
+    } catch (_error) {
+      stored = null;
+    }
+  }
+  return coercePublicSampleAudios(stored || DEFAULT_PUBLIC_SAMPLE_AUDIOS);
+}
+
+async function writePublicSampleAudios(payload, env) {
+  const samples = coercePublicSampleAudios(payload);
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(PUBLIC_SAMPLE_AUDIOS_KV_KEY, JSON.stringify(samples));
+  }
+  return samples;
+}
+
+function coercePublicSampleAudios(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const features = source.features && typeof source.features === "object" ? source.features : source;
+  const normalized = { features: {} };
+  for (const feature of PUBLIC_ACCESS_FEATURES) {
+    normalized.features[feature] = coercePublicSampleAudio(features[feature]);
+  }
+  return normalized;
+}
+
+function coercePublicSampleAudio(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const audioBase64 = String(raw.audio_base64 || "").replace(/\s/g, "");
+  if (!audioBase64) {
+    return null;
+  }
+  if (audioBase64.length > PUBLIC_SAMPLE_AUDIO_MAX_BASE64_CHARS) {
+    throw httpError(413, "sample audio is too large");
+  }
+  const mimeType = normalizeMimeType(raw.audio_mime_type || "audio/wav") || "audio/wav";
+  if (!mimeType.startsWith("audio/")) {
+    throw httpError(400, "sample audio MIME type is not supported");
+  }
+  return {
+    title: String(raw.title || "").trim().slice(0, 80) || "サンプル音声",
+    description: String(raw.description || "").trim().slice(0, 300),
+    filename: safeHistoryToken(raw.filename || `sample.${extensionForMimeType(mimeType)}`),
+    audio_mime_type: mimeType,
+    audio_base64: audioBase64,
+    size_bytes: base64ByteLength(audioBase64),
+  };
 }
 
 function mergePublicAccessSettings(...items) {

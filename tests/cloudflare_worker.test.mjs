@@ -328,6 +328,57 @@ test("Cloudflare worker lets password admin edit public access limits", async ()
   assert.equal(fetched.features.speakloop.text_max_chars, 321);
 });
 
+test("Cloudflare worker lets admins publish sample audios for public pages", async () => {
+  const kv = fakeKv();
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv });
+  const samplePayload = {
+    features: {
+      speakloop: {
+        title: "SpeakLoop demo",
+        description: "発音練習の出力例",
+        filename: "speakloop.mp3",
+        audio_mime_type: "audio/mpeg",
+        audio_base64: Buffer.from([1, 2, 3, 4]).toString("base64"),
+      },
+      skitvoice: null,
+    },
+  };
+  const cookie = await adminCookie(env);
+
+  const initial = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
+  const blocked = await handleRequest(
+    new Request("https://example.com/api/public-sample-audios", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(samplePayload),
+    }),
+    env,
+  );
+  const saved = await handleRequest(
+    new Request("https://example.com/api/public-sample-audios", {
+      method: "PUT",
+      headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify(samplePayload),
+    }),
+    env,
+  );
+  const fetched = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
+
+  assert.equal(initial.status, 200);
+  assert.equal((await initial.json()).features.speakloop, null);
+  assert.equal(blocked.status, 401);
+  assert.equal(saved.status, 200);
+  const payload = await fetched.json();
+  assert.equal(payload.features.speakloop.title, "SpeakLoop demo");
+  assert.equal(payload.features.speakloop.audio_mime_type, "audio/mpeg");
+  assert.equal(payload.features.speakloop.size_bytes, 4);
+  assert.equal(payload.features.skitvoice, null);
+  const audit = JSON.parse(await kv.get("public-audit-log"));
+  assert.equal(audit.at(-1).action, "public_sample_audios_updated");
+});
+
 test("Cloudflare worker rejects oversized public input before consuming quota", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({

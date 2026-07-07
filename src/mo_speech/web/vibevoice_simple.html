@@ -22,6 +22,15 @@
         <a data-public-auth-logout href="/auth/logout" hidden>ログアウト</a>
       </section>
 
+      <section class="public-sample-audio" data-public-sample-feature="skitvoice" hidden aria-label="SkitVoice サンプル音声">
+        <div>
+          <p class="public-sample-kicker">Sample</p>
+          <h2 data-public-sample-title>サンプル音声</h2>
+          <p data-public-sample-description hidden></p>
+        </div>
+        <audio data-public-sample-audio controls preload="metadata"></audio>
+      </section>
+
       <form id="vibevoice-form" class="vibevoice-form">
         <section class="vibevoice-panel vibevoice-script-panel" aria-label="台本">
           <div class="vibevoice-panel-header">
@@ -207,6 +216,7 @@
       </details>
     </main>
     <script src="/static/app_public_session.js" defer></script>
+    <script src="/static/app_public_sample_audio.js" defer></script>
     <script src="/static/app_vibevoice.js" defer></script>
   </body>
 </html>

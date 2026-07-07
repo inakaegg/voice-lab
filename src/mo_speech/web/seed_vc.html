@@ -16,6 +16,15 @@
         <div class="status" id="seed-vc-status" role="status" aria-live="polite">確認中</div>
       </header>
 
+      <section class="public-sample-audio" data-public-sample-feature="voice_conversion" hidden aria-label="Seed-VC サンプル音声">
+        <div>
+          <p class="public-sample-kicker">Sample</p>
+          <h2 data-public-sample-title>サンプル音声</h2>
+          <p data-public-sample-description hidden></p>
+        </div>
+        <audio data-public-sample-audio controls preload="metadata"></audio>
+      </section>
+
       <section class="workspace" aria-label="Seed-VC変換フォーム">
         <form id="seed-vc-form" class="control-panel">
           <div class="field-row">
@@ -136,6 +145,7 @@
         </section>
       </section>
     </main>
+    <script src="/static/app_public_sample_audio.js" defer></script>
     <script src="/static/app_config.js" defer></script>
     <script src="/static/app_seed_vc_direct.js" defer></script>
   </body>
