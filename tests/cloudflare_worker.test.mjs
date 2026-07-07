@@ -114,6 +114,7 @@ test("Cloudflare worker protects admin APIs with the same password session", asy
 });
 
 test("Cloudflare worker signs in public users with Google OAuth", async () => {
+  const kv = fakeKv();
   const env = publicAuthEnv(async (url, init) => {
     if (url === "https://oauth2.googleapis.com/token") {
       const body = String(init.body);
@@ -126,7 +127,7 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
       return json({ email: "viewer@example.com", email_verified: true, name: "Viewer" });
     }
     throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
+  }, { kv });
 
   const login = await handleRequest(new Request("https://example.com/auth/google/login?next=%2Fspeakloop"), env);
   const loginLocation = new URL(login.headers.get("location"));
@@ -156,6 +157,12 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
   assert.equal(session.authenticated, true);
   assert.equal(session.email, "viewer@example.com");
   assert.equal(session.is_admin, false);
+  const audit = JSON.parse(await kv.get("public-audit-log"));
+  assert.equal(audit.length, 1);
+  assert.equal(audit[0].action, "google_login_success");
+  assert.equal(audit[0].email, "viewer@example.com");
+  assert.equal(audit[0].path, "/auth/google/callback");
+  assert.equal(audit[0].next, "/speakloop");
 });
 
 test("Cloudflare worker requires public Google login before costly generation APIs", async () => {
@@ -220,6 +227,15 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
   assert.equal(second.status, 429);
   assert.deepEqual(await second.json(), { detail: "public quota exceeded" });
   assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/audio/speech").length, 1);
+  const audit = JSON.parse(await kv.get("public-audit-log"));
+  assert.deepEqual(
+    audit.map((event) => event.action),
+    ["google_login_success", "public_quota_consumed", "public_quota_blocked"],
+  );
+  assert.equal(audit[1].feature, "fun");
+  assert.equal(audit[1].email, "viewer@example.com");
+  assert.equal(audit[1].daily_used, 1);
+  assert.equal(audit[2].limit_type, "daily");
 });
 
 test("Cloudflare worker exempts configured admin Google emails from public quota", async () => {
@@ -263,6 +279,11 @@ test("Cloudflare worker exempts configured admin Google emails from public quota
 
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
+  const audit = JSON.parse(await kv.get("public-audit-log"));
+  assert.deepEqual(
+    audit.map((event) => event.action),
+    ["google_login_success", "public_quota_exempt", "public_quota_exempt"],
+  );
 });
 
 test("Cloudflare worker lets password admin edit public access limits", async () => {
@@ -289,9 +310,16 @@ test("Cloudflare worker lets password admin edit public access limits", async ()
   const fetched = await (
     await handleRequest(new Request("https://example.com/api/public-access-settings", { headers: { cookie } }), env)
   ).json();
+  const blockedAudit = await handleRequest(new Request("https://example.com/api/public-audit-log"), env);
+  const auditResponse = await handleRequest(new Request("https://example.com/api/public-audit-log?limit=5", { headers: { cookie } }), env);
+  const audit = await auditResponse.json();
 
   assert.equal(blocked.status, 401);
   assert.equal(updated.status, 200);
+  assert.equal(blockedAudit.status, 401);
+  assert.equal(auditResponse.status, 200);
+  assert.equal(audit.events[0].action, "public_access_settings_updated");
+  assert.equal(audit.events[0].path, "/api/public-access-settings");
   assert.equal(fetched.google_login_required, true);
   assert.deepEqual(fetched.admin_google_emails, ["owner@example.com"]);
   assert.equal(fetched.features.speakloop.daily_limit, 9);

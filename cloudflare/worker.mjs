@@ -12,6 +12,8 @@ const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 const ADMIN_SESSION_COOKIE = "mo_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
+const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
+const PUBLIC_AUDIT_LOG_DEFAULT_LIMIT = 500;
 const PUBLIC_USAGE_KV_PREFIX = "public-usage:";
 const PUBLIC_SESSION_COOKIE = "mo_public_session";
 const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
@@ -249,6 +251,9 @@ function isProtectedAdminApiRequest(method, pathname) {
   if (method === "GET" && pathname === "/api/practice-history") {
     return true;
   }
+  if (method === "GET" && pathname === "/api/public-audit-log") {
+    return true;
+  }
   if (method === "POST" && pathname === "/api/warmup") {
     return true;
   }
@@ -438,6 +443,14 @@ async function handlePublicAuthRequest(request, env, url) {
   try {
     const path = normalizePathname(url.pathname);
     if (path === "/auth/logout") {
+      const session = await readPublicSession(request, env);
+      if (session) {
+        await appendPublicAuditEvent(env, {
+          action: "google_logout",
+          email: session.email,
+          ...requestAuditContext(request),
+        });
+      }
       return new Response(null, {
         status: 302,
         headers: {
@@ -513,6 +526,14 @@ async function handleGoogleCallback(request, env, url) {
     email,
     name: String(userInfo.name || ""),
     picture: String(userInfo.picture || ""),
+  });
+  const settings = await readPublicAccessSettings(env);
+  await appendPublicAuditEvent(env, {
+    action: "google_login_success",
+    email,
+    is_admin: isPublicAdminEmail(email, settings),
+    next: safePublicNextPath(statePayload.next || "/"),
+    ...requestAuditContext(request),
   });
   const headers = new Headers({ Location: safePublicNextPath(statePayload.next || "/") });
   headers.append("Set-Cookie", sessionCookie);
@@ -736,7 +757,15 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "PUT" && url.pathname === "/api/public-access-settings") {
       const payload = await request.json();
-      return jsonResponse(await writePublicAccessSettings(payload, env));
+      const settings = await writePublicAccessSettings(payload, env);
+      await appendPublicAuditEvent(env, {
+        action: "public_access_settings_updated",
+        ...requestAuditContext(request),
+      });
+      return jsonResponse(settings);
+    }
+    if (request.method === "GET" && url.pathname === "/api/public-audit-log") {
+      return jsonResponse(await readPublicAuditLog(env, url));
     }
     if (request.method === "GET" && url.pathname === "/api/audio-history") {
       return jsonResponse(await listAudioHistory(env));
@@ -1191,9 +1220,16 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
   }
   const isAdmin = isPublicAdminEmail(session.email, settings);
   if (isAdmin) {
+    await appendPublicAuditEvent(env, {
+      action: "public_quota_exempt",
+      email: session.email,
+      feature,
+      is_admin: true,
+      ...requestAuditContext(request),
+    });
     return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email };
   }
-  await consumePublicQuota(env, feature, session.email, featureSettings);
+  await consumePublicQuota(env, feature, session.email, featureSettings, request);
   return { settings, consumed: true, authenticated: true, is_admin: false, email: session.email };
 }
 
@@ -1212,7 +1248,7 @@ function validatePublicInputLimits(featureSettings, limits) {
   }
 }
 
-async function consumePublicQuota(env, feature, email, featureSettings) {
+async function consumePublicQuota(env, feature, email, featureSettings, request = null) {
   const normalizedEmail = normalizeEmail(email);
   const dailyLimit = Number(featureSettings.daily_limit ?? -1);
   const totalLimit = Number(featureSettings.total_limit ?? -1);
@@ -1222,13 +1258,124 @@ async function consumePublicQuota(env, feature, email, featureSettings) {
   const dailyUsed = await publicUsageGet(env, dailyKey);
   const totalUsed = await publicUsageGet(env, totalKey);
   if (dailyLimit >= 0 && dailyUsed >= dailyLimit) {
+    await appendPublicAuditEvent(env, {
+      action: "public_quota_blocked",
+      email: normalizedEmail,
+      feature,
+      limit_type: "daily",
+      used: dailyUsed,
+      limit: dailyLimit,
+      ...requestAuditContext(request),
+    });
     throw httpError(429, "public quota exceeded");
   }
   if (totalLimit >= 0 && totalUsed >= totalLimit) {
+    await appendPublicAuditEvent(env, {
+      action: "public_quota_blocked",
+      email: normalizedEmail,
+      feature,
+      limit_type: "total",
+      used: totalUsed,
+      limit: totalLimit,
+      ...requestAuditContext(request),
+    });
     throw httpError(429, "public quota exceeded");
   }
   await publicUsagePut(env, dailyKey, dailyUsed + 1, 60 * 60 * 48);
   await publicUsagePut(env, totalKey, totalUsed + 1);
+  await appendPublicAuditEvent(env, {
+    action: "public_quota_consumed",
+    email: normalizedEmail,
+    feature,
+    daily_used: dailyUsed + 1,
+    daily_limit: dailyLimit,
+    total_used: totalUsed + 1,
+    total_limit: totalLimit,
+    ...requestAuditContext(request),
+  });
+}
+
+async function readPublicAuditLog(env, url = null) {
+  const kv = stateKv(env);
+  const requestedLimit = url ? Number(new URL(url).searchParams.get("limit") || "") : 0;
+  const limit = clampInt(requestedLimit, 1, publicAuditLogLimit(env), 100);
+  const events = kv ? await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []) : [];
+  const normalizedEvents = Array.isArray(events) ? events : [];
+  return {
+    events: normalizedEvents.slice(-limit).reverse(),
+    limit,
+    stored: normalizedEvents.length,
+  };
+}
+
+async function appendPublicAuditEvent(env, event) {
+  const kv = stateKv(env);
+  if (!kv) {
+    return;
+  }
+  const now = new Date();
+  const entry = sanitizePublicAuditEvent({
+    id: crypto.randomUUID(),
+    created_at: now.toISOString(),
+    created_at_unix: Math.floor(now.getTime() / 1000),
+    ...event,
+  });
+  try {
+    const current = await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []);
+    const events = Array.isArray(current) ? current : [];
+    events.push(entry);
+    const limit = publicAuditLogLimit(env);
+    await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(events.slice(-limit)));
+  } catch (_error) {
+    // 監査ログ保存の失敗で、ログインや生成APIの本処理を止めない。
+  }
+}
+
+function publicAuditLogLimit(env) {
+  return clampInt(env.PUBLIC_AUDIT_LOG_LIMIT, 10, 5000, PUBLIC_AUDIT_LOG_DEFAULT_LIMIT);
+}
+
+function sanitizePublicAuditEvent(event) {
+  const allowed = {};
+  for (const [key, value] of Object.entries(event || {})) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    if (["email", "action", "feature", "path", "method", "limit_type", "next", "cf_country", "cf_ray"].includes(key)) {
+      allowed[key] = String(value).slice(0, 256);
+    } else if (["id", "created_at"].includes(key)) {
+      allowed[key] = String(value).slice(0, 128);
+    } else if (["is_admin"].includes(key)) {
+      allowed[key] = Boolean(value);
+    } else if (
+      [
+        "created_at_unix",
+        "daily_used",
+        "daily_limit",
+        "total_used",
+        "total_limit",
+        "used",
+        "limit",
+      ].includes(key)
+    ) {
+      allowed[key] = Number(value);
+    }
+  }
+  return allowed;
+}
+
+function requestAuditContext(request) {
+  if (!request) {
+    return {};
+  }
+  const url = new URL(request.url);
+  const cf = request.cf || {};
+  return {
+    method: request.method,
+    path: url.pathname,
+    cf_country: cf.country || "",
+    cf_ray: request.headers.get("cf-ray") || "",
+  };
 }
 
 async function publicUsageGet(env, key) {
