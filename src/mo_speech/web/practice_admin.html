@@ -14,6 +14,32 @@
         <h1>SpeakLoop 履歴</h1>
         <p>通常の音声変換履歴とは分けて、練習用のお手本音声と復唱録音だけを表示します。</p>
       </header>
+      <section class="public-access-admin" data-public-access-settings data-public-access-features="speakloop" aria-label="公開制限">
+        <div class="public-access-header">
+          <div>
+            <h2>公開制限</h2>
+            <p>Googleログインと、SpeakLoopの使用回数・入力上限を設定します。</p>
+          </div>
+          <button type="button" class="secondary-button" data-public-access-save>保存</button>
+        </div>
+        <label class="public-access-toggle">
+          <input type="checkbox" data-public-setting="google_login_required" />
+          <span>公開生成APIはGoogleログインを必須にする</span>
+        </label>
+        <label class="public-access-field public-access-wide">
+          <span>quota対象外の管理者Googleメール</span>
+          <textarea data-public-setting="admin_google_emails" rows="2" placeholder="owner@example.com, admin@example.com"></textarea>
+        </label>
+        <div class="public-access-feature" data-public-feature="speakloop">
+          <h3>SpeakLoop</h3>
+          <label>日次回数 <input type="number" min="-1" step="1" data-public-feature-setting="daily_limit" /></label>
+          <label>累計回数 <input type="number" min="-1" step="1" data-public-feature-setting="total_limit" /></label>
+          <label>録音最大byte <input type="number" min="0" step="1000" data-public-feature-setting="audio_max_bytes" /></label>
+          <label>対象文最大文字数 <input type="number" min="0" step="10" data-public-feature-setting="text_max_chars" /></label>
+        </div>
+        <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
+        <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
+      </section>
       <section class="practice-history-section" aria-label="練習入力">
         <h2>録音</h2>
         <div id="practice-history-recordings" class="practice-history-list"></div>
@@ -24,6 +50,7 @@
       </section>
       <p id="practice-history-status" class="practice-status" role="status" aria-live="polite">読み込み中です。</p>
     </main>
+    <script src="/static/app_public_access_settings.js" defer></script>
     <script src="/static/app_practice_history.js" defer></script>
   </body>
 </html>

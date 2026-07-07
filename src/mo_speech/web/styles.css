@@ -1687,6 +1687,126 @@ audio {
   font-weight: 900;
 }
 
+.public-auth-panel {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dbe8f7;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(20, 33, 61, 0.08);
+  color: #24435f;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 9px 12px;
+}
+
+.public-auth-panel[hidden] {
+  display: none;
+}
+
+.public-auth-panel a {
+  background: #143d72;
+  border-radius: 999px;
+  color: #ffffff;
+  font-weight: 900;
+  padding: 7px 11px;
+  text-decoration: none;
+}
+
+.public-auth-panel a[hidden] {
+  display: none;
+}
+
+.public-access-admin {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #dbe8f7;
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+fieldset.public-access-admin {
+  border-color: #dbe8f7;
+}
+
+.public-access-header {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.public-access-header h2,
+.public-access-feature h3 {
+  margin: 0;
+}
+
+.public-access-header p,
+.public-access-note,
+.public-access-status {
+  color: #556984;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.public-access-toggle,
+.public-access-field,
+.public-access-feature label {
+  color: #40546e;
+  display: grid;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 5px;
+}
+
+.public-access-toggle {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.public-access-feature {
+  border-top: 1px solid #dbe8f7;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: 10px;
+}
+
+.public-access-feature[hidden] {
+  display: none;
+}
+
+.public-access-feature h3,
+.public-access-wide {
+  grid-column: 1 / -1;
+}
+
+.public-access-field textarea,
+.public-access-feature input {
+  border: 1px solid #cbd9ea;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #162033;
+  font: inherit;
+  min-height: 36px;
+  min-width: 0;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.public-access-status[data-state="error"] {
+  color: #a12414;
+  font-weight: 900;
+}
+
 .practice-flow {
   align-items: start;
   display: grid;
@@ -3077,6 +3197,19 @@ audio {
     transform: translateX(230%);
   }
 }
+
+@media (max-width: 720px) {
+  .public-access-header,
+  .public-auth-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .public-access-feature {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Voice Lab portal */
 .portal-body {
   background:

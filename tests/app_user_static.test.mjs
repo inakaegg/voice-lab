@@ -12,6 +12,8 @@ const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_p
 const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
 const vibevoiceSimpleHtml = await readFile(new URL("../src/mo_speech/web/vibevoice_simple.html", import.meta.url), "utf8");
 const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
+const publicSessionSource = await readFile(new URL("../src/mo_speech/web/app_public_session.js", import.meta.url), "utf8");
+const publicAccessSettingsSource = await readFile(new URL("../src/mo_speech/web/app_public_access_settings.js", import.meta.url), "utf8");
 const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.html", import.meta.url), "utf8");
 const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
@@ -50,6 +52,13 @@ test("user page only shows warmup as a passive status dot", () => {
 test("admin page can start RunPod warmup manually", () => {
   assert.match(adminHtml, /id="runpod-warmup-button"/);
   assert.match(adminHtml, /id="runpod-warmup-status"/);
+  assert.match(adminHtml, /id="public-access-panel"/);
+  assert.match(adminHtml, /data-public-access-features="fun,voice_conversion"/);
+  assert.match(adminHtml, /data-public-feature="fun"/);
+  assert.match(adminHtml, /data-public-feature="voice_conversion"/);
+  assert.match(adminHtml, /data-public-feature-setting="audio_max_bytes"/);
+  assert.match(adminHtml, /data-public-setting="google_login_required"/);
+  assert.match(adminHtml, /\/static\/app_public_access_settings\.js/);
   assert.ok(adminHtml.indexOf("runpod-warmup-panel") < adminHtml.indexOf("operation_mode"));
   assert.match(adminSource, /runpodWarmupButton\.addEventListener\("click", startRunpodWarmup\)/);
   assert.match(adminSource, /fetch\("\/api\/warmup", \{ method: "POST" \}\)/);
@@ -63,6 +72,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /发音练习/);
   assert.match(practiceHtml, /学習する言語/);
   assert.match(practiceHtml, /id="practice-current-language-label"/);
+  assert.match(practiceHtml, /data-public-auth-panel/);
+  assert.match(practiceHtml, /\/auth\/google\/login\?next=\/speakloop/);
   assert.match(practiceHtml, /id="practice-settings-button"/);
   assert.match(practiceHtml, /id="practice-settings-overlay"/);
   assert.match(practiceHtml, /role="dialog"/);
@@ -101,6 +112,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.doesNotMatch(practiceHtml, /id="practice-retry-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-next-button"/);
   assert.match(practiceHtml, /\/static\/app_practice\.js/);
+  assert.match(practiceHtml, /\/static\/app_public_session\.js/);
   assert.match(practiceSource, /\/api\/practice\/recordings/);
   assert.match(practiceSource, /current_target_text/);
   assert.match(practiceSource, /localStorage\.getItem/);
@@ -152,6 +164,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(styles, /\.practice-quick-settings/);
   assert.match(styles, /\.practice-settings-overlay/);
   assert.match(styles, /\.practice-settings-dialog/);
+  assert.match(styles, /\.public-auth-panel/);
+  assert.match(styles, /\.public-access-admin/);
+  assert.match(styles, /\.public-access-feature/);
   assert.match(styles, /\.practice-language-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3/s);
   assert.doesNotMatch(styles, /\.practice-asr-row/);
   assert.match(styles, /\.practice-asr-help/);
@@ -165,20 +180,37 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.doesNotMatch(styles, /\.practice-actions/);
   assert.doesNotMatch(styles, /\.practice-target-text-box\s*\{[^}]*overflow:\s*auto/s);
   assert.doesNotMatch(practiceHtml, /joke_mode|similar_voice|osaka_dialect|variation_mode/);
+  assert.match(publicSessionSource, /\/api\/public-session/);
+  assert.match(publicSessionSource, /\/auth\/google\/login/);
+  assert.match(publicSessionSource, /session\.is_admin/);
 });
 
 test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /SpeakLoop 履歴/);
+  assert.match(practiceAdminHtml, /data-public-access-settings/);
+  assert.match(practiceAdminHtml, /data-public-access-features="speakloop"/);
+  assert.match(practiceAdminHtml, /data-public-feature="speakloop"/);
+  assert.match(practiceAdminHtml, /data-public-feature-setting="audio_max_bytes"/);
+  assert.match(practiceAdminHtml, /data-public-setting="admin_google_emails"/);
   assert.match(practiceAdminHtml, /id="practice-history-recordings"/);
   assert.match(practiceAdminHtml, /id="practice-history-outputs"/);
+  assert.match(practiceAdminHtml, /\/static\/app_public_access_settings\.js/);
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
+  assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
+  assert.match(publicAccessSettingsSource, /data-public-feature-setting/);
 });
 
 test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /VibeVoice/);
   assert.match(vibevoiceHtml, /href="\/skitvoice"/);
+  assert.match(vibevoiceHtml, /data-public-access-settings/);
+  assert.match(vibevoiceHtml, /data-public-access-features="skitvoice"/);
+  assert.match(vibevoiceHtml, /data-public-feature="skitvoice"/);
+  assert.match(vibevoiceHtml, /data-public-feature-setting="script_max_chars"/);
+  assert.match(vibevoiceHtml, /data-public-feature-setting="reference_url_duration_max_seconds"/);
+  assert.match(vibevoiceHtml, /\/static\/app_public_access_settings\.js/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);
@@ -316,6 +348,8 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
   assert.match(vibevoiceSimpleHtml, /SkitVoice/);
   assert.match(vibevoiceSimpleHtml, /かんたんスキット生成/);
+  assert.match(vibevoiceSimpleHtml, /data-public-auth-panel/);
+  assert.match(vibevoiceSimpleHtml, /\/auth\/google\/login\?next=\/skitvoice/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/skitvoice\/admin">管理/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /生成モード/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/practice"/);
@@ -338,6 +372,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-copy-diagnostics"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-debug" hidden/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-debug-runtime" hidden/);
+  assert.match(vibevoiceSimpleHtml, /\/static\/app_public_session\.js/);
   assert.match(vibevoiceSimpleHtml, /\/static\/app_vibevoice\.js/);
   assert.match(styles, /\.vibevoice-simple-shell/);
   assert.match(styles, /\.vibevoice-simple-mode-summary/);

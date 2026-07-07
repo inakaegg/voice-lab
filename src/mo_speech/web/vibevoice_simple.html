@@ -16,6 +16,12 @@
         </div>
       </header>
 
+      <section class="public-auth-panel" data-public-auth-panel hidden aria-label="公開デモのログイン状態">
+        <span data-public-auth-status>ログイン状態を確認中です。</span>
+        <a data-public-auth-login href="/auth/google/login?next=/skitvoice">Googleでログイン</a>
+        <a data-public-auth-logout href="/auth/logout" hidden>ログアウト</a>
+      </section>
+
       <form id="vibevoice-form" class="vibevoice-form">
         <section class="vibevoice-panel vibevoice-script-panel" aria-label="台本">
           <div class="vibevoice-panel-header">
@@ -200,6 +206,7 @@
         <dl id="vibevoice-runtime-details" class="vibevoice-runtime-details"></dl>
       </details>
     </main>
+    <script src="/static/app_public_session.js" defer></script>
     <script src="/static/app_vibevoice.js" defer></script>
   </body>
 </html>

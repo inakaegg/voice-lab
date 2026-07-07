@@ -132,6 +132,8 @@ docs/
 
 管理画面はCloudflare公開時に `/admin` へ置く。独自ドメインを割り当てる前の `workers.dev` 運用では、Worker内の簡易パスワードログインで `/admin`、`/skitvoice/admin`、`/speakloop/admin`、`/practice/admin` と管理用APIを保護する。公開ページの `/` は認証なしで見せ、管理画面、診断、詳細パラメータ、RunPod warmup、履歴確認は認証済み管理者だけに出す。独自ドメインへ移行する場合は、Cloudflare AccessのAccess applicationで `/admin*` などをpath単位で保護し、Google identity providerと管理者本人のAllow policyへ移す。
 
+ポートフォリオ公開時は、求人企業が職務経歴書のURLからすぐ閲覧できるように、招待コードは使わない。ページ閲覧は開放し、課金が発生する生成APIだけGoogleログイン必須にする。Google emailごとの日次/累計quotaと入力サイズ上限はWorkers KVに保存し、各admin画面から変更する。管理者Google emailは別途設定でき、公開生成APIを使ってもquotaを消費しない。
+
 ### Voice Lab と従来の変換デモ
 
 統合公開の初期段階では、トップページ `/` を `Voice Lab` として、`SkitVoice` と `SpeakLoop` の2リンクだけを主導線にする。既存の `へんな へんかん アプリ` は `/fun` へ退避し、SkitVoiceともSpeakLoopとも別経路の音声変換デモとして扱う。半分ジョークの体験であり、ポートフォリオ公開時に前面へ出すか、実験ページへ下げるかは後で判断する。

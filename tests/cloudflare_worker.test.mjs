@@ -113,6 +113,325 @@ test("Cloudflare worker protects admin APIs with the same password session", asy
   assert.equal(allowedHistory.status, 200);
 });
 
+test("Cloudflare worker signs in public users with Google OAuth", async () => {
+  const env = publicAuthEnv(async (url, init) => {
+    if (url === "https://oauth2.googleapis.com/token") {
+      const body = String(init.body);
+      assert.match(body, /code=oauth-code/);
+      assert.match(body, /client_id=google-client-id/);
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      assert.equal(init.headers.Authorization, "Bearer google-access-token");
+      return json({ email: "viewer@example.com", email_verified: true, name: "Viewer" });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+
+  const login = await handleRequest(new Request("https://example.com/auth/google/login?next=%2Fspeakloop"), env);
+  const loginLocation = new URL(login.headers.get("location"));
+  const state = loginLocation.searchParams.get("state");
+  const stateCookie = login.headers.get("set-cookie");
+  const callback = await handleRequest(
+    new Request(`https://example.com/auth/google/callback?code=oauth-code&state=${encodeURIComponent(state)}`, {
+      headers: { cookie: stateCookie },
+    }),
+    env,
+  );
+  const sessionCookie = callback.headers.get("set-cookie");
+  const session = await (
+    await handleRequest(new Request("https://example.com/api/public-session", { headers: { cookie: sessionCookie } }), env)
+  ).json();
+
+  assert.equal(login.status, 302);
+  assert.equal(loginLocation.origin, "https://accounts.google.com");
+  assert.equal(loginLocation.pathname, "/o/oauth2/v2/auth");
+  assert.equal(loginLocation.searchParams.get("client_id"), "google-client-id");
+  assert.equal(loginLocation.searchParams.get("scope"), "openid email profile");
+  assert.match(stateCookie, /mo_google_oauth_state=/);
+  assert.equal(callback.status, 302);
+  assert.equal(callback.headers.get("location"), "/speakloop");
+  assert.match(sessionCookie, /mo_public_session=/);
+  assert.equal(session.google_login_required, true);
+  assert.equal(session.authenticated, true);
+  assert.equal(session.email, "viewer@example.com");
+  assert.equal(session.is_admin, false);
+});
+
+test("Cloudflare worker requires public Google login before costly generation APIs", async () => {
+  const env = publicAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv() });
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { detail: "Google login is required" });
+});
+
+test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: {
+      fun: { daily_limit: 1, total_limit: 1, text_max_chars: 80, audio_max_bytes: 1000 },
+    },
+  }));
+  const calls = [];
+  const env = publicAuthEnv(async (url, init) => {
+    calls.push({ url, init });
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "viewer@example.com", email_verified: true });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv });
+  const cookie = await publicCookie(env);
+
+  const first = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+  const second = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 429);
+  assert.deepEqual(await second.json(), { detail: "public quota exceeded" });
+  assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/audio/speech").length, 1);
+});
+
+test("Cloudflare worker exempts configured admin Google emails from public quota", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: {
+      fun: { daily_limit: 0, total_limit: 0, text_max_chars: 80, audio_max_bytes: 1000 },
+    },
+  }));
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "owner@example.com", email_verified: true });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv, adminGoogleEmails: "owner@example.com" });
+  const cookie = await publicCookie(env);
+
+  const first = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+  const second = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+});
+
+test("Cloudflare worker lets password admin edit public access limits", async () => {
+  const env = publicAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv() });
+  const cookie = await adminCookie(env);
+
+  const blocked = await handleRequest(new Request("https://example.com/api/public-access-settings"), env);
+  const updated = await handleRequest(
+    new Request("https://example.com/api/public-access-settings", {
+      method: "PUT",
+      headers: { cookie },
+      body: JSON.stringify({
+        google_login_required: true,
+        admin_google_emails: ["owner@example.com"],
+        features: {
+          speakloop: { daily_limit: 9, total_limit: 90, audio_max_bytes: 1234, text_max_chars: 321 },
+        },
+      }),
+    }),
+    env,
+  );
+  const fetched = await (
+    await handleRequest(new Request("https://example.com/api/public-access-settings", { headers: { cookie } }), env)
+  ).json();
+
+  assert.equal(blocked.status, 401);
+  assert.equal(updated.status, 200);
+  assert.equal(fetched.google_login_required, true);
+  assert.deepEqual(fetched.admin_google_emails, ["owner@example.com"]);
+  assert.equal(fetched.features.speakloop.daily_limit, 9);
+  assert.equal(fetched.features.speakloop.total_limit, 90);
+  assert.equal(fetched.features.speakloop.audio_max_bytes, 1234);
+  assert.equal(fetched.features.speakloop.text_max_chars, 321);
+});
+
+test("Cloudflare worker rejects oversized public input before consuming quota", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: {
+      fun: { daily_limit: 1, total_limit: 1, text_max_chars: 5, audio_max_bytes: 1000 },
+    },
+  }));
+  const calls = [];
+  const env = publicAuthEnv(async (url) => {
+    calls.push(url);
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "viewer@example.com", email_verified: true });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv });
+  const cookie = await publicCookie(env);
+
+  const tooLong = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "これは長すぎる", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+  const valid = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "短い", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+
+  assert.equal(tooLong.status, 413);
+  assert.deepEqual(await tooLong.json(), { detail: "text is too large" });
+  assert.equal(valid.status, 200);
+  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
+});
+
+test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: {
+      skitvoice: { daily_limit: 2, total_limit: 2, script_max_chars: 100, audio_max_bytes: 1000 },
+    },
+  }));
+  const calls = [];
+  const env = publicAuthEnv(async (url, init) => {
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "viewer@example.com", email_verified: true });
+    }
+    if (url.endsWith("/run")) {
+      return json({ id: "vv-job", status: "IN_QUEUE" });
+    }
+    if (url.endsWith("/status/vv-job")) {
+      return json({
+        id: "vv-job",
+        status: "COMPLETED",
+        output: {
+          audio_mime_type: "audio/mpeg",
+          audio_base64: Buffer.from([4, 5, 6]).toString("base64"),
+          normalized_script: "Speaker 1: こんにちは",
+        },
+      });
+    }
+    if (url.endsWith("/cancel/vv-job")) {
+      return json({ id: "vv-job", status: "CANCELLED", error: "cancelled" });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv });
+  const cookie = await publicCookie(env, "/skitvoice");
+  const form = new FormData();
+  form.append("script", "1 こんにちは");
+  form.append("model_id", "vibevoice-large-aoi-pinned");
+  form.append("cfg_scale", "1.2");
+  form.append("directed_line_mode", "true");
+  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+
+  const created = await (
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }), env)
+  ).json();
+  const completed = await (
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job"), env)
+  ).json();
+  const cancelled = await (
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job/cancel", { method: "POST" }), env)
+  ).json();
+  const runCall = calls.find((call) => call.url.endsWith("/run"));
+
+  assert.equal(created.job_id, "vv-job");
+  assert.equal(created.status, "queued");
+  assert.equal(completed.status, "succeeded");
+  assert.equal(completed.result.normalized_script, "Speaker 1: こんにちは");
+  assert.equal(cancelled.status, "failed");
+  assert.equal(runCall.body.input.operation_mode, "vibevoice");
+  assert.equal(runCall.body.input.script, "1 こんにちは");
+  assert.equal(runCall.body.input.generation.model_id, "vibevoice-large-aoi-pinned");
+  assert.equal(runCall.body.input.generation.cfg_scale, 1.2);
+  assert.equal(runCall.body.input.voices[0].speaker, 1);
+  assert.equal(runCall.body.input.voices[0].audio_mime_type, "audio/wav");
+  assert.equal(runCall.body.input.voices[0].audio_base64, Buffer.from("voice").toString("base64"));
+});
+
+test("Cloudflare worker reports URL reference audio extraction as unavailable on Worker", async () => {
+  const env = publicAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv() });
+  const response = await handleRequest(
+    new Request("https://example.com/api/vibevoice/reference-audio-from-url", {
+      method: "POST",
+      body: new FormData(),
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 501);
+  assert.deepEqual(await response.json(), { detail: "URL reference audio extraction is not available on Cloudflare Worker" });
+});
+
 test("Cloudflare worker reports admin auth setup errors on protected routes", async () => {
   const env = fakeEnv(async () => {
     throw new Error("unexpected fetch");
@@ -947,6 +1266,17 @@ function adminAuthEnv(fetchImpl, options = {}) {
   };
 }
 
+function publicAuthEnv(fetchImpl, options = {}) {
+  return {
+    ...adminAuthEnv(fetchImpl, options),
+    GOOGLE_CLIENT_ID: "google-client-id",
+    GOOGLE_CLIENT_SECRET: "google-client-secret",
+    PUBLIC_SESSION_SECRET: "test-public-session-secret",
+    PUBLIC_GOOGLE_AUTH_REQUIRED: "1",
+    ADMIN_GOOGLE_EMAILS: options.adminGoogleEmails || "",
+  };
+}
+
 async function adminCookie(env) {
   const response = await handleRequest(
     new Request("https://example.com/admin/login", {
@@ -956,6 +1286,19 @@ async function adminCookie(env) {
     env,
   );
   return response.headers.get("set-cookie");
+}
+
+async function publicCookie(env, next = "/speakloop") {
+  const login = await handleRequest(new Request(`https://example.com/auth/google/login?next=${encodeURIComponent(next)}`), env);
+  const location = new URL(login.headers.get("location"));
+  const state = location.searchParams.get("state");
+  const callback = await handleRequest(
+    new Request(`https://example.com/auth/google/callback?code=oauth-code&state=${encodeURIComponent(state)}`, {
+      headers: { cookie: login.headers.get("set-cookie") },
+    }),
+    env,
+  );
+  return callback.headers.get("set-cookie");
 }
 
 function json(payload, init = {}) {

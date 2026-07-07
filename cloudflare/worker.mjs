@@ -11,6 +11,13 @@ const AUDIO_HISTORY_DEFAULT_LIMIT = 100;
 const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 const ADMIN_SESSION_COOKIE = "mo_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
+const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
+const PUBLIC_USAGE_KV_PREFIX = "public-usage:";
+const PUBLIC_SESSION_COOKIE = "mo_public_session";
+const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
+const PUBLIC_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const PUBLIC_OAUTH_STATE_TTL_SECONDS = 60 * 10;
+const PUBLIC_ACCESS_FEATURES = ["speakloop", "skitvoice", "fun", "voice_conversion"];
 const OPENAI_LANGUAGE_CODES = {
   auto: "",
   "id-ID": "id",
@@ -131,8 +138,42 @@ const DEFAULT_USER_SETTINGS = {
   theme: "blue",
 };
 
+const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
+  google_login_required: false,
+  admin_google_emails: [],
+  features: {
+    speakloop: {
+      daily_limit: 20,
+      total_limit: 200,
+      audio_max_bytes: 8_000_000,
+      text_max_chars: 800,
+    },
+    skitvoice: {
+      daily_limit: 2,
+      total_limit: 20,
+      audio_max_bytes: 10_000_000,
+      script_max_chars: 1600,
+      reference_url_duration_max_seconds: 10,
+    },
+    fun: {
+      daily_limit: 10,
+      total_limit: 100,
+      audio_max_bytes: 8_000_000,
+      text_max_chars: 1000,
+    },
+    voice_conversion: {
+      daily_limit: 3,
+      total_limit: 30,
+      audio_max_bytes: 10_000_000,
+      text_max_chars: 0,
+    },
+  },
+};
+
 let ephemeralUserSettings = null;
+let ephemeralPublicAccessSettings = null;
 const ephemeralTranslationJobs = new Map();
+const ephemeralPublicUsage = new Map();
 
 export default {
   async fetch(request, env, ctx) {
@@ -142,6 +183,9 @@ export default {
 
 export async function handleRequest(request, env = {}, ctx = {}) {
   const url = new URL(request.url);
+  if (isPublicAuthPath(url.pathname)) {
+    return handlePublicAuthRequest(request, env, url);
+  }
   if (isAdminAuthPath(url.pathname)) {
     return handleAdminAuthRequest(request, env, url);
   }
@@ -167,6 +211,11 @@ function isAdminAuthPath(pathname) {
   return pathname === "/admin/login" || pathname === "/admin/login/" || pathname === "/admin/logout" || pathname === "/admin/logout/";
 }
 
+function isPublicAuthPath(pathname) {
+  const path = normalizePathname(pathname);
+  return path === "/auth/google/login" || path === "/auth/google/callback" || path === "/auth/logout";
+}
+
 function isProtectedAdminPagePath(pathname) {
   const path = normalizePathname(pathname);
   return new Set([
@@ -186,6 +235,9 @@ function isProtectedAdminApiRequest(method, pathname) {
     return false;
   }
   if (method === "PUT" && pathname === "/api/user-settings") {
+    return true;
+  }
+  if ((method === "GET" || method === "PUT") && pathname === "/api/public-access-settings") {
     return true;
   }
   if (method === "GET" && pathname === "/api/audio-history") {
@@ -382,6 +434,209 @@ function adminLoginPage(next, errorMessageText = "", status = 200) {
   );
 }
 
+async function handlePublicAuthRequest(request, env, url) {
+  try {
+    const path = normalizePathname(url.pathname);
+    if (path === "/auth/logout") {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: safePublicNextPath(url.searchParams.get("next") || "/"),
+          "Set-Cookie": expiredCookie(PUBLIC_SESSION_COOKIE),
+        },
+      });
+    }
+    if (!publicGoogleAuthConfigured(env)) {
+      return jsonResponse({ detail: "Google login is not configured" }, { status: 503 });
+    }
+    if (path === "/auth/google/login") {
+      return createGoogleLoginRedirect(env, url);
+    }
+    if (path === "/auth/google/callback") {
+      return handleGoogleCallback(request, env, url);
+    }
+    return new Response("Not Found", { status: 404 });
+  } catch (error) {
+    return jsonResponse({ detail: errorMessage(error) }, { status: error.status || 500 });
+  }
+}
+
+function publicGoogleAuthConfigured(env) {
+  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && publicSessionSecret(env));
+}
+
+function publicSessionSecret(env) {
+  return String(env.PUBLIC_SESSION_SECRET || env.ADMIN_SESSION_SECRET || "").trim();
+}
+
+async function createGoogleLoginRedirect(env, url) {
+  const next = safePublicNextPath(url.searchParams.get("next") || "/");
+  const now = Math.floor(Date.now() / 1000);
+  const state = await createSignedPayload({
+    next,
+    nonce: crypto.randomUUID(),
+    iat: now,
+    exp: now + PUBLIC_OAUTH_STATE_TTL_SECONDS,
+  }, publicSessionSecret(env));
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+  authUrl.searchParams.set("redirect_uri", googleRedirectUri(url));
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", "openid email profile");
+  authUrl.searchParams.set("state", state);
+  authUrl.searchParams.set("prompt", "select_account");
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authUrl.toString(),
+      "Set-Cookie": `${PUBLIC_OAUTH_STATE_COOKIE}=${state}; Path=/; Max-Age=${PUBLIC_OAUTH_STATE_TTL_SECONDS}; HttpOnly; Secure; SameSite=Lax`,
+    },
+  });
+}
+
+async function handleGoogleCallback(request, env, url) {
+  const code = String(url.searchParams.get("code") || "");
+  const state = String(url.searchParams.get("state") || "");
+  const cookies = parseCookies(request.headers.get("cookie") || "");
+  const stateCookie = cookies.get(PUBLIC_OAUTH_STATE_COOKIE) || "";
+  if (!code || !state || !stateCookie || !constantTimeEqual(state, stateCookie)) {
+    throw httpError(400, "invalid Google OAuth state");
+  }
+  const statePayload = await verifySignedPayload(state, publicSessionSecret(env));
+  const token = await exchangeGoogleOAuthCode(env, code, googleRedirectUri(url));
+  const userInfo = await fetchGoogleUserInfo(env, token.access_token);
+  const email = normalizeEmail(userInfo.email);
+  if (!email || userInfo.email_verified === false) {
+    throw httpError(403, "Google account email is not verified");
+  }
+  const sessionCookie = await createPublicSessionCookie(env, {
+    email,
+    name: String(userInfo.name || ""),
+    picture: String(userInfo.picture || ""),
+  });
+  const headers = new Headers({ Location: safePublicNextPath(statePayload.next || "/") });
+  headers.append("Set-Cookie", sessionCookie);
+  headers.append("Set-Cookie", expiredCookie(PUBLIC_OAUTH_STATE_COOKIE));
+  return new Response(null, { status: 302, headers });
+}
+
+async function exchangeGoogleOAuthCode(env, code, redirectUri) {
+  const response = await runtimeFetch(env)("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.access_token) {
+    throw httpError(response.status || 502, body.error_description || body.error || "Google OAuth token exchange failed");
+  }
+  return body;
+}
+
+async function fetchGoogleUserInfo(env, accessToken) {
+  const response = await runtimeFetch(env)("https://openidconnect.googleapis.com/v1/userinfo", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(response.status, body.error_description || body.error || "Google userinfo request failed");
+  }
+  return body;
+}
+
+function googleRedirectUri(url) {
+  return new URL("/auth/google/callback", url.origin).toString();
+}
+
+function safePublicNextPath(next) {
+  if (!next || !String(next).startsWith("/") || String(next).startsWith("//")) {
+    return "/";
+  }
+  try {
+    const parsed = new URL(String(next), "https://example.com");
+    const path = normalizePathname(parsed.pathname);
+    if (path.includes("/admin") || path === "/index.html" || path.startsWith("/api/") || path.startsWith("/auth/")) {
+      return "/";
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
+async function createPublicSessionCookie(env, user) {
+  const now = Math.floor(Date.now() / 1000);
+  const ttl = Number(env.PUBLIC_SESSION_TTL_SECONDS || PUBLIC_SESSION_TTL_SECONDS) || PUBLIC_SESSION_TTL_SECONDS;
+  const value = await createSignedPayload({
+    email: normalizeEmail(user.email),
+    name: String(user.name || ""),
+    picture: String(user.picture || ""),
+    iat: now,
+    exp: now + ttl,
+  }, publicSessionSecret(env));
+  return `${PUBLIC_SESSION_COOKIE}=${value}; Path=/; Max-Age=${ttl}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+async function readPublicSession(request, env) {
+  const secret = publicSessionSecret(env);
+  if (!secret) {
+    return null;
+  }
+  const cookies = parseCookies(request.headers.get("cookie") || "");
+  const value = cookies.get(PUBLIC_SESSION_COOKIE);
+  if (!value) {
+    return null;
+  }
+  try {
+    const payload = await verifySignedPayload(value, secret);
+    const email = normalizeEmail(payload.email);
+    if (!email) {
+      return null;
+    }
+    return {
+      email,
+      name: String(payload.name || ""),
+      picture: String(payload.picture || ""),
+      exp: Number(payload.exp || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function createSignedPayload(payload, secret) {
+  const encoded = base64UrlEncodeString(JSON.stringify(payload || {}));
+  const signature = await hmacSha256Hex(encoded, secret);
+  return `${encoded}.${signature}`;
+}
+
+async function verifySignedPayload(value, secret) {
+  const [payload, signature] = String(value || "").split(".");
+  if (!payload || !signature) {
+    throw httpError(400, "invalid signed payload");
+  }
+  const expectedSignature = await hmacSha256Hex(payload, secret);
+  if (!constantTimeEqual(signature, expectedSignature)) {
+    throw httpError(400, "invalid signed payload");
+  }
+  const parsed = JSON.parse(base64UrlDecodeToString(payload));
+  if (Number(parsed.exp || 0) <= Math.floor(Date.now() / 1000)) {
+    throw httpError(401, "signed payload expired");
+  }
+  return parsed;
+}
+
+function expiredCookie(name) {
+  return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
 function redirectResponse(location) {
   return new Response(null, { status: 302, headers: { Location: location } });
 }
@@ -473,6 +728,16 @@ async function handleApiRequest(request, env, ctx, url) {
       const payload = await request.json();
       return jsonResponse(await writeUserSettings(payload, env));
     }
+    if (request.method === "GET" && url.pathname === "/api/public-session") {
+      return jsonResponse(await publicSessionPayload(request, env));
+    }
+    if (request.method === "GET" && url.pathname === "/api/public-access-settings") {
+      return jsonResponse(await readPublicAccessSettings(env));
+    }
+    if (request.method === "PUT" && url.pathname === "/api/public-access-settings") {
+      const payload = await request.json();
+      return jsonResponse(await writePublicAccessSettings(payload, env));
+    }
     if (request.method === "GET" && url.pathname === "/api/audio-history") {
       return jsonResponse(await listAudioHistory(env));
     }
@@ -490,13 +755,27 @@ async function handleApiRequest(request, env, ctx, url) {
       return jsonResponse(await deleteAudioHistoryFile(kind, decodeURIComponent(filename || ""), env));
     }
     if (request.method === "POST" && url.pathname === "/api/user-display-text") {
-      return jsonResponse(await createUserDisplayText(await request.json(), env));
+      const payload = await request.json();
+      const text = String(payload.text || "").trim();
+      const targetLanguage = String(payload.target_language || "ja-JP");
+      if (text && targetLanguage === "ja-JP") {
+        await enforcePublicFeatureAccess(request, env, "fun", { textChars: text.length });
+      }
+      return jsonResponse(await createUserDisplayText(payload, env));
     }
     if (request.method === "POST" && url.pathname === "/api/user-text-output") {
-      return jsonResponse(await createUserTextOutput(await request.json(), env));
+      const payload = await request.json();
+      await enforcePublicFeatureAccess(request, env, "fun", {
+        textChars: String(payload.translated_text || "").trim().length,
+      });
+      return jsonResponse(await createUserTextOutput(payload, env));
     }
     if (request.method === "POST" && url.pathname === "/api/user-joke-output") {
-      return jsonResponse(await createUserJokeOutput(await request.json(), env));
+      const payload = await request.json();
+      await enforcePublicFeatureAccess(request, env, "fun", {
+        textChars: String(payload.text || "").trim().length,
+      });
+      return jsonResponse(await createUserJokeOutput(payload, env));
     }
     if (request.method === "POST" && url.pathname === "/api/practice/prompts") {
       return jsonResponse(await createPracticePrompt(request, env));
@@ -506,6 +785,24 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "POST" && url.pathname === "/api/practice/attempts") {
       return jsonResponse(await createPracticeAttempt(request, env));
+    }
+    if (request.method === "GET" && url.pathname === "/api/vibevoice/status") {
+      return jsonResponse(await vibeVoiceStatus(env));
+    }
+    if (request.method === "POST" && url.pathname === "/api/vibevoice/reference-audio-from-url") {
+      return jsonResponse(await createVibeVoiceReferenceAudioFromUrl(request, env));
+    }
+    if (request.method === "POST" && url.pathname === "/api/vibevoice/jobs") {
+      return jsonResponse(await createVibeVoiceJob(request, env));
+    }
+    if (request.method === "GET" && /^\/api\/vibevoice\/jobs\/[^/]+$/.test(url.pathname)) {
+      const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
+      return jsonResponse(await getRunpodJobSnapshot(jobId, env, "vibevoice"));
+    }
+    if (request.method === "POST" && /^\/api\/vibevoice\/jobs\/[^/]+\/cancel$/.test(url.pathname)) {
+      const parts = url.pathname.split("/");
+      const jobId = decodeURIComponent(parts[parts.length - 2] || "");
+      return jsonResponse(await cancelRunpodJob(jobId, env, "vibevoice"));
     }
     if (request.method === "POST" && url.pathname === "/api/translate-speech-jobs") {
       return jsonResponse(await createTranslationJob(request, env));
@@ -745,6 +1042,213 @@ async function writeUserSettings(payload, env) {
   return settings;
 }
 
+async function readPublicAccessSettings(env) {
+  const kv = stateKv(env);
+  let stored = null;
+  if (kv) {
+    stored = await kvGetJson(kv, PUBLIC_ACCESS_SETTINGS_KV_KEY, null);
+  } else if (ephemeralPublicAccessSettings) {
+    stored = ephemeralPublicAccessSettings;
+  } else if (env.PUBLIC_ACCESS_SETTINGS_JSON) {
+    try {
+      stored = JSON.parse(env.PUBLIC_ACCESS_SETTINGS_JSON);
+    } catch (_error) {
+      stored = null;
+    }
+  }
+  const envDefaults = {
+    google_login_required: env.PUBLIC_GOOGLE_AUTH_REQUIRED === "1",
+    admin_google_emails: coerceEmailList(env.ADMIN_GOOGLE_EMAILS),
+  };
+  const settings = coercePublicAccessSettings(mergePublicAccessSettings(DEFAULT_PUBLIC_ACCESS_SETTINGS, envDefaults, stored || {}));
+  settings.admin_google_emails = uniqueEmails([
+    ...settings.admin_google_emails,
+    ...coerceEmailList(env.ADMIN_GOOGLE_EMAILS),
+  ]);
+  return settings;
+}
+
+async function writePublicAccessSettings(payload, env) {
+  const settings = coercePublicAccessSettings(payload);
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(PUBLIC_ACCESS_SETTINGS_KV_KEY, JSON.stringify(settings));
+  } else {
+    ephemeralPublicAccessSettings = settings;
+  }
+  return readPublicAccessSettings(env);
+}
+
+function mergePublicAccessSettings(...items) {
+  const merged = structuredClone(DEFAULT_PUBLIC_ACCESS_SETTINGS);
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(item, "google_login_required")) {
+      merged.google_login_required = Boolean(item.google_login_required);
+    }
+    if (Object.prototype.hasOwnProperty.call(item, "admin_google_emails")) {
+      merged.admin_google_emails = coerceEmailList(item.admin_google_emails);
+    }
+    const features = item.features && typeof item.features === "object" ? item.features : item;
+    for (const feature of PUBLIC_ACCESS_FEATURES) {
+      if (features[feature] && typeof features[feature] === "object") {
+        merged.features[feature] = {
+          ...merged.features[feature],
+          ...features[feature],
+        };
+      }
+    }
+  }
+  return merged;
+}
+
+function coercePublicAccessSettings(payload = {}) {
+  const merged = mergePublicAccessSettings(DEFAULT_PUBLIC_ACCESS_SETTINGS, payload);
+  const settings = {
+    google_login_required: Boolean(merged.google_login_required),
+    admin_google_emails: coerceEmailList(merged.admin_google_emails),
+    features: {},
+  };
+  for (const feature of PUBLIC_ACCESS_FEATURES) {
+    const defaults = DEFAULT_PUBLIC_ACCESS_SETTINGS.features[feature];
+    const raw = merged.features[feature] || {};
+    settings.features[feature] = {
+      daily_limit: clampInt(raw.daily_limit, -1, 100000, defaults.daily_limit),
+      total_limit: clampInt(raw.total_limit, -1, 1000000, defaults.total_limit),
+      audio_max_bytes: clampInt(raw.audio_max_bytes, 0, 100_000_000, defaults.audio_max_bytes),
+      text_max_chars: clampInt(raw.text_max_chars, 0, 100_000, defaults.text_max_chars || 0),
+    };
+    if (Object.prototype.hasOwnProperty.call(defaults, "script_max_chars")) {
+      settings.features[feature].script_max_chars = clampInt(
+        raw.script_max_chars,
+        0,
+        100_000,
+        defaults.script_max_chars,
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(defaults, "reference_url_duration_max_seconds")) {
+      settings.features[feature].reference_url_duration_max_seconds = clampInt(
+        raw.reference_url_duration_max_seconds,
+        1,
+        600,
+        defaults.reference_url_duration_max_seconds,
+      );
+    }
+  }
+  return settings;
+}
+
+async function publicSessionPayload(request, env) {
+  const settings = await readPublicAccessSettings(env);
+  const session = await readPublicSession(request, env);
+  const isAdmin = Boolean(session && isPublicAdminEmail(session.email, settings));
+  return {
+    google_login_required: Boolean(settings.google_login_required),
+    google_login_configured: publicGoogleAuthConfigured(env),
+    authenticated: Boolean(session),
+    email: session?.email || "",
+    name: session?.name || "",
+    picture: session?.picture || "",
+    is_admin: isAdmin,
+    login_url: `/auth/google/login?next=${encodeURIComponent(new URL(request.url).pathname)}`,
+    logout_url: "/auth/logout",
+    features: settings.features,
+  };
+}
+
+function coerceEmailList(value) {
+  const source = Array.isArray(value) ? value : String(value || "").split(/[,\s]+/);
+  return uniqueEmails(source.map(normalizeEmail).filter(Boolean));
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function uniqueEmails(values) {
+  return [...new Set(values.map(normalizeEmail).filter(Boolean))].slice(0, 100);
+}
+
+function isPublicAdminEmail(email, settings) {
+  return settings.admin_google_emails.includes(normalizeEmail(email));
+}
+
+async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
+  const settings = await readPublicAccessSettings(env);
+  const featureSettings = settings.features[feature] || {};
+  validatePublicInputLimits(featureSettings, limits);
+  if (!settings.google_login_required) {
+    return { settings, consumed: false, authenticated: false, is_admin: false };
+  }
+  if (!publicGoogleAuthConfigured(env)) {
+    throw httpError(503, "Google login is not configured");
+  }
+  const session = await readPublicSession(request, env);
+  if (!session) {
+    throw httpError(401, "Google login is required");
+  }
+  const isAdmin = isPublicAdminEmail(session.email, settings);
+  if (isAdmin) {
+    return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email };
+  }
+  await consumePublicQuota(env, feature, session.email, featureSettings);
+  return { settings, consumed: true, authenticated: true, is_admin: false, email: session.email };
+}
+
+function validatePublicInputLimits(featureSettings, limits) {
+  const audioBytes = Number(limits.audioBytes || 0);
+  const textChars = Number(limits.textChars || 0);
+  const scriptChars = Number(limits.scriptChars || 0);
+  if (featureSettings.audio_max_bytes > 0 && audioBytes > featureSettings.audio_max_bytes) {
+    throw httpError(413, "audio is too large");
+  }
+  if (featureSettings.text_max_chars > 0 && textChars > featureSettings.text_max_chars) {
+    throw httpError(413, "text is too large");
+  }
+  if (featureSettings.script_max_chars > 0 && scriptChars > featureSettings.script_max_chars) {
+    throw httpError(413, "script is too large");
+  }
+}
+
+async function consumePublicQuota(env, feature, email, featureSettings) {
+  const normalizedEmail = normalizeEmail(email);
+  const dailyLimit = Number(featureSettings.daily_limit ?? -1);
+  const totalLimit = Number(featureSettings.total_limit ?? -1);
+  const today = new Date().toISOString().slice(0, 10);
+  const dailyKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:${today}`;
+  const totalKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:total`;
+  const dailyUsed = await publicUsageGet(env, dailyKey);
+  const totalUsed = await publicUsageGet(env, totalKey);
+  if (dailyLimit >= 0 && dailyUsed >= dailyLimit) {
+    throw httpError(429, "public quota exceeded");
+  }
+  if (totalLimit >= 0 && totalUsed >= totalLimit) {
+    throw httpError(429, "public quota exceeded");
+  }
+  await publicUsagePut(env, dailyKey, dailyUsed + 1, 60 * 60 * 48);
+  await publicUsagePut(env, totalKey, totalUsed + 1);
+}
+
+async function publicUsageGet(env, key) {
+  const kv = stateKv(env);
+  if (kv) {
+    return clampInt(await kv.get(key), 0, 1_000_000_000, 0);
+  }
+  return clampInt(ephemeralPublicUsage.get(key), 0, 1_000_000_000, 0);
+}
+
+async function publicUsagePut(env, key, value, expirationTtl = null) {
+  const kv = stateKv(env);
+  if (kv) {
+    const options = expirationTtl ? { expirationTtl } : undefined;
+    await kv.put(key, String(value), options);
+  } else {
+    ephemeralPublicUsage.set(key, String(value));
+  }
+}
+
 async function prepareUserSettingsForWrite(payload, env) {
   const settings = coerceUserSettings(payload);
   if (settings.joke_variation_count <= 0 || settings.joke_texts.length === 0) {
@@ -875,6 +1379,8 @@ async function createTranslationJob(request, env) {
   const textTransformUnit = stringFormValue(form, "text_transform_unit", "text");
   const jobId = `cf-${crypto.randomUUID()}`;
 
+  await enforcePublicFeatureAccess(request, env, "fun", { audioBytes: audioBytes.byteLength });
+
   await saveAudioHistoryEntry(env, "recordings", {
     audio_base64: audioBase64,
     audio_mime_type: audioMimeType,
@@ -960,6 +1466,9 @@ async function createVoiceConversionJob(request, env) {
   const form = await request.formData();
   const sourceAudio = requiredBlob(form, "source_audio");
   const referenceAudio = requiredBlob(form, "reference_audio");
+  await enforcePublicFeatureAccess(request, env, "voice_conversion", {
+    audioBytes: Math.max(Number(sourceAudio.size || 0), Number(referenceAudio.size || 0)),
+  });
   const sourceAudioBase64 = await blobToBase64(sourceAudio);
   const sourceAudioMimeType = normalizeMimeType(sourceAudio.type || guessAudioMimeType(sourceAudio.name));
   const referenceAudioBase64 = await blobToBase64(referenceAudio);
@@ -1047,6 +1556,14 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
     await saveRunpodOutputHistory(env, jobId, kind, snapshot.result);
   }
   return snapshot;
+}
+
+async function cancelRunpodJob(jobId, env, kind) {
+  if (!jobId) {
+    throw httpError(400, "job_id is required");
+  }
+  const body = await runpodRequest(env, `/cancel/${encodeURIComponent(jobId)}`, { method: "POST" });
+  return jobSnapshotFromRunpod(body, kind);
 }
 
 async function readRunpodVcReadyState(env) {
@@ -1193,6 +1710,13 @@ function plannedStages(kind) {
   if (kind === "voice_conversion") {
     return [{ stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" }];
   }
+  if (kind === "vibevoice") {
+    return [
+      { stage: "queued", label: "待機中", provider: "RunPod Serverless" },
+      { stage: "vibevoice", label: "VibeVoice生成", provider: "RunPod Serverless" },
+      { stage: "postprocess", label: "後処理", provider: "RunPod Serverless" },
+    ];
+  }
   if (kind === "warmup") {
     return [{ stage: "warmup", label: "準備", provider: "RunPod Serverless" }];
   }
@@ -1213,6 +1737,9 @@ function currentStageForKind(kind, queued) {
   }
   if (kind === "voice_conversion") {
     return { stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" };
+  }
+  if (kind === "vibevoice") {
+    return { stage: "vibevoice", label: "VibeVoice生成", provider: "RunPod Serverless" };
   }
   if (kind === "warmup") {
     return { stage: "warmup", label: "準備", provider: "RunPod Serverless" };
@@ -1318,6 +1845,7 @@ async function createPracticePrompt(request, env) {
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
+  await enforcePublicFeatureAccess(request, env, "speakloop", { audioBytes: Number(audio.size || 0) });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -1401,6 +1929,10 @@ async function createPracticeRecording(request, env) {
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const currentTargetText = stringFormValue(form, "current_target_text", "");
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
+  await enforcePublicFeatureAccess(request, env, "speakloop", {
+    audioBytes: Number(audio.size || 0),
+    textChars: currentTargetText.trim().length,
+  });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -1551,6 +2083,10 @@ async function createPracticeAttempt(request, env) {
   if (!targetText) {
     throw httpError(400, "target_text is required");
   }
+  await enforcePublicFeatureAccess(request, env, "speakloop", {
+    audioBytes: Number(audio.size || 0),
+    textChars: targetText.length,
+  });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -1643,6 +2179,124 @@ async function createPracticeDisplayText(text, targetLanguage, env, { includePin
     pinyin_text: "",
     pinyin_status: "disabled",
   };
+}
+
+async function vibeVoiceStatus(env) {
+  const runpodAvailable = Boolean(env.RUNPOD_ENDPOINT_ID && env.RUNPOD_API_KEY);
+  return {
+    backends: {
+      local: {
+        available: false,
+        provider: "cloudflare-worker",
+        default_model_id: "vibevoice-large-aoi-pinned",
+        model_presets: vibeVoiceModelPresets(),
+        cli_exists: false,
+        cli_path: "Cloudflare Worker",
+        comfyui_vibevoice_exists: false,
+        comfyui_vibevoice_path: "RunPod Serverless",
+        model_cache_found: false,
+        model_cache_path: "",
+        tokenizer_found: false,
+        tokenizer_path: "",
+        timeout_seconds: 0,
+      },
+      runpod_serverless: {
+        available: runpodAvailable,
+        provider: "runpod-serverless-vibevoice",
+        configured: runpodAvailable,
+        endpoint_id: env.RUNPOD_ENDPOINT_ID || "",
+        request_mode: "async",
+        default_model_id: "vibevoice-large-aoi-pinned",
+        model_presets: vibeVoiceModelPresets(),
+        reason: runpodAvailable ? "" : "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。",
+      },
+    },
+  };
+}
+
+async function createVibeVoiceReferenceAudioFromUrl(_request, _env) {
+  throw httpError(501, "URL reference audio extraction is not available on Cloudflare Worker");
+}
+
+async function createVibeVoiceJob(request, env) {
+  const form = await request.formData();
+  const script = await readVibeVoiceScriptFromForm(form);
+  if (!script.trim()) {
+    throw httpError(400, "script is required");
+  }
+  const voiceBlobs = [];
+  for (let slot = 1; slot <= 4; slot += 1) {
+    const blob = optionalBlob(form, `voice_file_${slot}`);
+    if (blob && Number(blob.size || 0) > 0) {
+      voiceBlobs.push({ slot, blob });
+    }
+  }
+  if (voiceBlobs.length < 1) {
+    throw httpError(400, "voice sample is required");
+  }
+  await enforcePublicFeatureAccess(request, env, "skitvoice", {
+    scriptChars: script.trim().length,
+    audioBytes: Math.max(...voiceBlobs.map((item) => Number(item.blob.size || 0))),
+  });
+  const voices = [];
+  for (const item of voiceBlobs) {
+    const audioBytes = await item.blob.arrayBuffer();
+    const audioMimeType = normalizeMimeType(item.blob.type || guessAudioMimeType(item.blob.name));
+    voices.push({
+      speaker: item.slot,
+      filename: item.blob.name || `voice-${item.slot}.${extensionForMimeType(audioMimeType)}`,
+      audio_mime_type: audioMimeType,
+      audio_base64: arrayBufferToBase64(audioBytes),
+    });
+  }
+  const body = await submitRunpodJob(env, {
+    operation_mode: "vibevoice",
+    script,
+    voices,
+    generation: vibeVoiceGenerationPayloadFromForm(form),
+    response_audio_format: stringFormValue(form, "response_audio_format", "mp3"),
+  });
+  return jobSnapshotFromRunpod(body, "vibevoice");
+}
+
+async function readVibeVoiceScriptFromForm(form) {
+  const inline = stringFormValue(form, "script", "").trim();
+  if (inline) {
+    return inline;
+  }
+  const file = optionalBlob(form, "script_file");
+  if (file && Number(file.size || 0) > 0 && typeof file.text === "function") {
+    return (await file.text()).trim();
+  }
+  return "";
+}
+
+function vibeVoiceGenerationPayloadFromForm(form) {
+  return {
+    model_id: stringFormValue(form, "model_id", "vibevoice-large-aoi-pinned"),
+    cfg_scale: numberFormValue(form, "cfg_scale", 1.3),
+    inference_steps: clampInt(stringFormValue(form, "inference_steps", "10"), 1, 50, 10),
+    seed: clampInt(stringFormValue(form, "seed", "42"), 0, 999999999, 42),
+    do_sample: optionEnabled(stringFormValue(form, "do_sample", "true")),
+    temperature: numberFormValue(form, "temperature", 0.95),
+    top_p: numberFormValue(form, "top_p", 0.95),
+    top_k: clampInt(stringFormValue(form, "top_k", "0"), 0, 1000, 0),
+    max_voice_seconds: numberFormValue(form, "max_voice_seconds", 5),
+    line_by_line: optionEnabled(stringFormValue(form, "line_by_line", "false")),
+    line_gap: numberFormValue(form, "line_gap", 1),
+    directed_line_mode: optionEnabled(stringFormValue(form, "directed_line_mode", "true")),
+    directed_retry_low_score: optionEnabled(stringFormValue(form, "directed_retry_low_score", "true")),
+    directed_retry_score_threshold: numberFormValue(form, "directed_retry_score_threshold", 0.65),
+    directed_retry_max_multiplier: numberFormValue(form, "directed_retry_max_multiplier", 1),
+  };
+}
+
+function vibeVoiceModelPresets() {
+  return [
+    { model_id: "vibevoice-1.5b-pinned", label: "VibeVoice 1.5B 固定版", supported_backends: ["local", "runpod_serverless"] },
+    { model_id: "vibevoice-1.5b-latest", label: "VibeVoice 1.5B 最新", supported_backends: ["local", "runpod_serverless"] },
+    { model_id: "vibevoice-large-aoi-pinned", label: "VibeVoice Large (RunPod)", supported_backends: ["runpod_serverless"] },
+  ];
 }
 
 function createChinesePinyinText(text) {
@@ -2479,6 +3133,11 @@ function optionalBlob(form, key) {
 
 function stringFormValue(form, key, fallback = "") {
   return String(form.get(key) || fallback);
+}
+
+function numberFormValue(form, key, fallback) {
+  const number = Number.parseFloat(stringFormValue(form, key, String(fallback)));
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function optionalStringFormValue(form, key) {

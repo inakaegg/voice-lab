@@ -16,6 +16,12 @@
         </div>
       </header>
 
+      <section class="public-auth-panel" data-public-auth-panel hidden aria-label="公開デモのログイン状態">
+        <span data-public-auth-status>ログイン状態を確認中です。</span>
+        <a data-public-auth-login href="/auth/google/login?next=/speakloop">Googleでログイン</a>
+        <a data-public-auth-logout href="/auth/logout" hidden>ログアウト</a>
+      </section>
+
       <section class="practice-quick-settings" aria-label="練習設定">
         <div class="practice-current-language">
           <span>学習言語</span>
@@ -139,6 +145,7 @@
       <p id="practice-status" class="practice-status" role="status" aria-live="polite" hidden></p>
       <p id="practice-error" class="practice-error" hidden></p>
     </main>
+    <script src="/static/app_public_session.js" defer></script>
     <script src="/static/app_practice.js" defer></script>
   </body>
 </html>

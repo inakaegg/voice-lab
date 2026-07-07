@@ -19,6 +19,34 @@
         </nav>
       </header>
 
+      <section class="public-access-admin" data-public-access-settings data-public-access-features="skitvoice" aria-label="公開制限">
+        <div class="public-access-header">
+          <div>
+            <h2>公開制限</h2>
+            <p>Googleログインと、SkitVoiceの使用回数・入力上限を設定します。</p>
+          </div>
+          <button type="button" class="secondary-button" data-public-access-save>保存</button>
+        </div>
+        <label class="public-access-toggle">
+          <input type="checkbox" data-public-setting="google_login_required" />
+          <span>公開生成APIはGoogleログインを必須にする</span>
+        </label>
+        <label class="public-access-field public-access-wide">
+          <span>quota対象外の管理者Googleメール</span>
+          <textarea data-public-setting="admin_google_emails" rows="2" placeholder="owner@example.com, admin@example.com"></textarea>
+        </label>
+        <div class="public-access-feature" data-public-feature="skitvoice">
+          <h3>SkitVoice</h3>
+          <label>日次回数 <input type="number" min="-1" step="1" data-public-feature-setting="daily_limit" /></label>
+          <label>累計回数 <input type="number" min="-1" step="1" data-public-feature-setting="total_limit" /></label>
+          <label>参照音声最大byte <input type="number" min="0" step="1000" data-public-feature-setting="audio_max_bytes" /></label>
+          <label>台本最大文字数 <input type="number" min="0" step="10" data-public-feature-setting="script_max_chars" /></label>
+          <label>URL取得最大秒数 <input type="number" min="1" step="1" data-public-feature-setting="reference_url_duration_max_seconds" /></label>
+        </div>
+        <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
+        <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
+      </section>
+
       <form id="vibevoice-form" class="vibevoice-form">
         <div class="vibevoice-workspace">
           <section class="vibevoice-panel vibevoice-script-panel" aria-label="台本">
@@ -338,6 +366,7 @@
         <dl id="vibevoice-runtime-details" class="vibevoice-runtime-details"></dl>
       </details>
     </main>
+    <script src="/static/app_public_access_settings.js" defer></script>
     <script src="/static/app_vibevoice.js" defer></script>
   </body>
 </html>
