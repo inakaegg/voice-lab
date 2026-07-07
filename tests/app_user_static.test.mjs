@@ -216,7 +216,9 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
   assert.match(publicAccessSettingsSource, /data-public-feature-setting/);
   assert.match(publicSampleAudioAdminSource, /\/api\/public-sample-audios/);
+  assert.match(publicSampleAudioAdminSource, /method:\s*"DELETE"/);
   assert.match(publicSampleAudioAdminSource, /data-public-sample-admin-feature/);
+  assert.match(publicSampleAudioAdminSource, /data-public-sample-delete/);
 });
 
 test("vibevoice page provides local skit generation controls", () => {

@@ -104,9 +104,9 @@ KVは簡易デモ向けの保存先であり、大きい音声や長期保存に
 
 入力上限は生成前に検証する。上限超過はquotaを消費しない。quota消費は入力検証後、外部APIやRunPodへ送る直前に行う。Workers KVは厳密なatomic incrementを持たないため、同時アクセスが集中すると数回分の誤差は起こり得る。この構成はポートフォリオ公開時の過剰利用防止を目的とし、厳密な課金制御を目的にしない。課金機能へ進む場合はD1またはDurable Objectsで使用量台帳を分ける。
 
-公開Googleログインとquota判定は監査用にKVへ最近のイベントを保存する。保存先は `public-audit-log` で、管理APIからのみ読める。記録対象は、Googleログイン成功、ログアウト、quota消費、quota上限ブロック、管理者emailによるquota免除、公開アクセス設定の更新である。イベントには時刻、Google email、feature、API path、quota使用数、上限値を含める。音声、台本、入力本文、OAuth token、raw IP addressは保存しない。これは求人・ポートフォリオ公開時の過剰利用確認と簡易トラブルシュートを目的にしたもので、法的な監査証跡や課金台帳としては扱わない。厳密な監査が必要になった場合はD1または外部ログ基盤へ移す。
+公開Googleログインとquota判定は監査用にKVへ最近のイベントを保存する。保存先は `public-audit-log` で、管理APIからのみ読める。記録対象は、Googleログイン成功、ログアウト、quota消費、quota上限ブロック、管理者emailによるquota免除、公開アクセス設定の更新、公開サンプル音声設定の登録・削除である。イベントには時刻、Google email、feature、API path、quota使用数、上限値を含める。音声、台本、入力本文、OAuth token、raw IP addressは保存しない。これは求人・ポートフォリオ公開時の過剰利用確認と簡易トラブルシュートを目的にしたもので、法的な監査証跡や課金台帳としては扱わない。厳密な監査が必要になった場合はD1または外部ログ基盤へ移す。
 
-公開ページに表示するサンプル出力音声は `public-sample-audios` としてKVへ保存する。管理画面 `/admin`、`/speakloop/admin`、`/skitvoice/admin` からfeature別に1件ずつ登録でき、公開ページは `GET /api/public-sample-audios` で読み取る。保存対象はタイトル、説明、音声MIME、base64音声、元ファイル名である。サンプル音声は公開表示前提なので、機密音声や第三者権利が不明な音声を置かない。
+公開ページに表示するサンプル出力音声は `public-sample-audios` としてKVへ保存する。管理画面 `/admin`、`/speakloop/admin`、`/skitvoice/admin` からfeature別に1件ずつ登録でき、公開ページは `GET /api/public-sample-audios` で読み取る。保存対象はタイトル、説明、音声MIME、base64音声、元ファイル名である。保存済みサンプルは管理画面からfeature単位で削除でき、Workerは `DELETE /api/public-sample-audios/:feature` で該当featureを `null` に戻す。サンプル音声は公開表示前提なので、機密音声や第三者権利が不明な音声を置かない。
 
 ## warmup
 

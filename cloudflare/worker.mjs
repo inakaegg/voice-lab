@@ -256,6 +256,9 @@ function isProtectedAdminApiRequest(method, pathname) {
   if (method === "PUT" && pathname === "/api/public-sample-audios") {
     return true;
   }
+  if (method === "DELETE" && pathname.startsWith("/api/public-sample-audios/")) {
+    return true;
+  }
   if (method === "GET" && pathname === "/api/audio-history") {
     return true;
   }
@@ -793,6 +796,16 @@ async function handleApiRequest(request, env, ctx, url) {
       });
       return jsonResponse(samples);
     }
+    if (request.method === "DELETE" && url.pathname.startsWith("/api/public-sample-audios/")) {
+      const feature = decodeURIComponent(url.pathname.slice("/api/public-sample-audios/".length));
+      const samples = await deletePublicSampleAudioFeature(feature, env);
+      await appendPublicAuditEvent(env, {
+        action: "public_sample_audio_deleted",
+        feature,
+        ...requestAuditContext(request),
+      });
+      return jsonResponse(samples);
+    }
     if (request.method === "GET" && url.pathname === "/api/audio-history") {
       return jsonResponse(await listAudioHistory(env));
     }
@@ -1156,6 +1169,15 @@ async function writePublicSampleAudios(payload, env) {
     await kv.put(PUBLIC_SAMPLE_AUDIOS_KV_KEY, JSON.stringify(samples));
   }
   return samples;
+}
+
+async function deletePublicSampleAudioFeature(feature, env) {
+  if (!PUBLIC_ACCESS_FEATURES.includes(feature)) {
+    throw httpError(404, "sample audio feature is not found");
+  }
+  const samples = await readPublicSampleAudios(env);
+  samples.features[feature] = null;
+  return writePublicSampleAudios(samples, env);
 }
 
 function coercePublicSampleAudios(payload = {}) {

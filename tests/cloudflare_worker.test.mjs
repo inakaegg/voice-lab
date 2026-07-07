@@ -365,6 +365,20 @@ test("Cloudflare worker lets admins publish sample audios for public pages", asy
     env,
   );
   const fetched = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
+  const blockedDelete = await handleRequest(
+    new Request("https://example.com/api/public-sample-audios/speakloop", {
+      method: "DELETE",
+    }),
+    env,
+  );
+  const deleted = await handleRequest(
+    new Request("https://example.com/api/public-sample-audios/speakloop", {
+      method: "DELETE",
+      headers: { cookie },
+    }),
+    env,
+  );
+  const fetchedAfterDelete = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
 
   assert.equal(initial.status, 200);
   assert.equal((await initial.json()).features.speakloop, null);
@@ -375,8 +389,14 @@ test("Cloudflare worker lets admins publish sample audios for public pages", asy
   assert.equal(payload.features.speakloop.audio_mime_type, "audio/mpeg");
   assert.equal(payload.features.speakloop.size_bytes, 4);
   assert.equal(payload.features.skitvoice, null);
+  assert.equal(blockedDelete.status, 401);
+  assert.equal(deleted.status, 200);
+  assert.equal((await deleted.json()).features.speakloop, null);
+  assert.equal((await fetchedAfterDelete.json()).features.speakloop, null);
   const audit = JSON.parse(await kv.get("public-audit-log"));
-  assert.equal(audit.at(-1).action, "public_sample_audios_updated");
+  assert.equal(audit.at(-2).action, "public_sample_audios_updated");
+  assert.equal(audit.at(-1).action, "public_sample_audio_deleted");
+  assert.equal(audit.at(-1).feature, "speakloop");
 });
 
 test("Cloudflare worker rejects oversized public input before consuming quota", async () => {

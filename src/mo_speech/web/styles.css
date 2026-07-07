@@ -1917,6 +1917,11 @@ fieldset.public-samples-admin {
   width: 100%;
 }
 
+.public-sample-delete-button {
+  justify-self: start;
+  width: fit-content;
+}
+
 .practice-flow {
   align-items: start;
   display: grid;

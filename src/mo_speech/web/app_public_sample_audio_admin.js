@@ -5,7 +5,7 @@ if (publicSampleAdminRoots.length > 0) {
   for (const root of publicSampleAdminRoots) {
     root.querySelector("[data-public-samples-save]")?.addEventListener("click", () => savePublicSampleAudios(root));
     for (const featureSection of root.querySelectorAll("[data-public-sample-admin-feature]")) {
-      featureSection.querySelector("[data-public-sample-clear]")?.addEventListener("click", () => clearPublicSample(featureSection));
+      featureSection.querySelector("[data-public-sample-delete]")?.addEventListener("click", () => deletePublicSample(featureSection));
       featureSection.querySelector("[data-public-sample-file]")?.addEventListener("change", () => previewPublicSampleFile(featureSection));
     }
   }
@@ -121,7 +121,37 @@ async function previewPublicSampleFile(section) {
   }
 }
 
-function clearPublicSample(section) {
+async function deletePublicSample(section) {
+  const feature = section.dataset.publicSampleAdminFeature;
+  const savedSample = currentPublicSampleAudios?.features?.[feature] || null;
+  if (!savedSample) {
+    clearPublicSampleSection(section);
+    setPublicSampleAdminStatus("未保存の選択を取り消しました。");
+    return;
+  }
+  if (!window.confirm("保存済みのサンプル音声を削除しますか？")) {
+    return;
+  }
+  try {
+    setPublicSampleAdminStatus("削除中です。");
+    const response = await fetch(`/api/public-sample-audios/${encodeURIComponent(feature)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || `サンプル音声を削除できませんでした: ${response.status}`);
+    }
+    currentPublicSampleAudios = await response.json();
+    for (const targetRoot of publicSampleAdminRoots) {
+      renderPublicSampleAdmin(targetRoot, currentPublicSampleAudios);
+    }
+    setPublicSampleAdminStatus("削除しました。");
+  } catch (error) {
+    setPublicSampleAdminStatus(errorMessage(error), "error");
+  }
+}
+
+function clearPublicSampleSection(section) {
   section.dataset.publicSampleAudioBase64 = "";
   section.dataset.publicSampleAudioMimeType = "";
   section.dataset.publicSampleFilename = "";
