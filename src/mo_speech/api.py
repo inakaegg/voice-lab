@@ -534,7 +534,7 @@ def create_app(
     @app.get("/vibevoice")
     @app.get("/vibevoice/")
     def vibevoice() -> FileResponse:
-        return FileResponse(WEB_DIR / "vibevoice_simple.html")
+        return FileResponse(WEB_DIR / "vibevoice.html")
 
     @app.get("/skitvoice/admin")
     @app.get("/skitvoice/admin/")
