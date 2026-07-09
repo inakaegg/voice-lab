@@ -132,6 +132,24 @@ def test_runpod_image_workflow_embeds_source_revision() -> None:
     assert "ENV MO_IMAGE_REVISION=${SOURCE_REVISION}" in dockerfile
 
 
+def test_runpod_image_installs_deno_for_youtube_ytdlp() -> None:
+    dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
+
+    assert "ARG DENO_VERSION=" in dockerfile
+    assert "deno-x86_64-unknown-linux-gnu.zip" in dockerfile
+    assert "deno --version" in dockerfile
+
+
+def test_runpod_image_upgrades_ytdlp_after_comfyui_requirements() -> None:
+    dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
+
+    comfyui_install_index = dockerfile.index("python -m pip install -r requirements.txt")
+    ytdlp_upgrade_index = dockerfile.index('python -m pip install --upgrade "yt-dlp[curl-cffi]"')
+
+    assert comfyui_install_index < ytdlp_upgrade_index
+    assert "yt-dlp --version" in dockerfile
+
+
 def test_runpod_smoke_script_supports_diagnostics_operation() -> None:
     script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
 

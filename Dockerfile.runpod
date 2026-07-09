@@ -1,11 +1,13 @@
 ARG BASE_IMAGE=runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
 ARG COMFYUI_VIBEVOICE_REPO=https://github.com/wildminder/ComfyUI-VibeVoice
 ARG COMFYUI_VIBEVOICE_REF=99a98031d79e07f279a7aa6d01ce89042e8bba26
+ARG DENO_VERSION=2.3.7
 ARG SOURCE_REVISION=unknown
 ARG IMAGE_TAG=unknown
 FROM ${BASE_IMAGE}
 ARG COMFYUI_VIBEVOICE_REPO
 ARG COMFYUI_VIBEVOICE_REF
+ARG DENO_VERSION
 ARG SOURCE_REVISION
 ARG IMAGE_TAG
 
@@ -21,8 +23,14 @@ LABEL org.opencontainers.image.ref.name=${IMAGE_TAG}
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg git curl ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg git curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" -o /tmp/deno.zip \
+    && unzip -q /tmp/deno.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/deno \
+    && deno --version \
+    && rm -f /tmp/deno.zip
 
 COPY pyproject.toml /app/
 COPY src /app/src
@@ -35,6 +43,9 @@ RUN git clone "${COMFYUI_VIBEVOICE_REPO}" /app/ComfyUI-VibeVoice \
     && cd /app/ComfyUI-VibeVoice \
     && git checkout "${COMFYUI_VIBEVOICE_REF}" \
     && python -m pip install -r requirements.txt
+
+RUN python -m pip install --upgrade "yt-dlp[curl-cffi]" \
+    && yt-dlp --version
 
 ENV MO_PROVIDER_MODE=local
 ENV MO_ASR_PROVIDER=faster-whisper

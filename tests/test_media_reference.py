@@ -50,6 +50,11 @@ def test_media_reference_extractor_uses_url_start_and_duration(tmp_path: Path) -
     assert result.duration_seconds == 5.0
     assert result.filename.endswith("_s75_d5.wav")
     assert calls[0][:2] == ["yt-dlp", "--no-playlist"]
+    assert "--force-ipv4" in calls[0]
+    assert "--remote-components" in calls[0]
+    assert "ejs:github" in calls[0]
+    assert "--extractor-args" in calls[0]
+    assert "youtube:player_client=web_safari,android_vr" in calls[0]
     assert "--download-sections" in calls[0]
     assert "*75.000-80.000" in calls[0]
     assert calls[1][:2] == ["ffmpeg", "-y"]
@@ -94,6 +99,24 @@ def test_media_reference_extractor_does_not_full_download_when_section_download_
     assert len(calls) == 1
     assert "--download-sections" in calls[0]
     assert "*75.000-80.000" in calls[0]
+
+
+def test_media_reference_extractor_adds_actionable_youtube_unavailable_hint() -> None:
+    def fake_run(command, *, capture_output, text, timeout, check):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="ERROR: [youtube] uQ9BlVeip_U: Video unavailable. This video is not available",
+        )
+
+    extractor = MediaReferenceAudioExtractor(runner=fake_run)
+    with pytest.raises(RuntimeError) as exc_info:
+        extractor.extract_from_url("https://youtu.be/uQ9BlVeip_U?t=10", duration_seconds=5)
+
+    message = str(exc_info.value)
+    assert "Video unavailable" in message
+    assert "RunPodから対象動画を視聴できません" in message
 
 
 def test_media_reference_extractor_accepts_section_downloaded_combined_media() -> None:

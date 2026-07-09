@@ -14,6 +14,7 @@ from typing import Any
 
 from .audio_effects import AudioEffectInsertResult, AudioEffectInsertSettings, insert_audio_effect
 from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
+from .media_reference import MediaReferenceAudioExtractor, ReferenceAudioClip
 from .pipeline import PipelineRequest, SpeechTranslationPipeline, TtsOutput
 from .providers.text_tts import create_text_tts_providers
 from .providers.voice import (
@@ -66,6 +67,8 @@ def handler(event: dict[str, Any]) -> dict[str, object]:
         return _handle_voice_conversion(payload, handler_started)
     if operation_mode in {"vibevoice", "vibe_voice"}:
         return _handle_vibevoice(payload, handler_started)
+    if operation_mode in {"reference_audio_from_url", "vibevoice_reference_audio_from_url"}:
+        return _handle_reference_audio_from_url(payload, handler_started)
     if operation_mode in {"diagnostics", "diag"}:
         return _handle_diagnostics(payload, handler_started)
     if operation_mode in {"warmup", "preload"}:
@@ -281,23 +284,41 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
 
     decode_started = perf_counter()
     decoded_voices: list[tuple[int, str, str, bytes]] = []
+    url_reference_audio: list[dict[str, object]] = []
     for index, item in enumerate(voices, start=1):
         if not isinstance(item, dict):
             raise ValueError("each voice must be an object")
-        audio_base64 = item.get("audio_base64")
-        if not isinstance(audio_base64, str) or audio_base64 == "":
-            raise ValueError(f"voice {index} audio_base64 is required")
         speaker = _optional_int(item.get("speaker"))
         if speaker is None:
             speaker = index
-        decoded_voices.append(
-            (
-                speaker,
-                str(item.get("filename") or f"voice-{index}.wav"),
-                str(item.get("audio_mime_type") or "audio/wav"),
-                base64.b64decode(audio_base64),
+        audio_base64 = item.get("audio_base64")
+        if isinstance(audio_base64, str) and audio_base64:
+            decoded_voices.append(
+                (
+                    speaker,
+                    str(item.get("filename") or f"voice-{index}.wav"),
+                    str(item.get("audio_mime_type") or "audio/wav"),
+                    base64.b64decode(audio_base64),
+                )
             )
-        )
+            continue
+        url = str(item.get("url") or item.get("source_url") or "").strip()
+        if url:
+            clip = _extract_vibevoice_url_reference_audio(item, url)
+            decoded_voices.append((speaker, clip.filename, clip.audio_mime_type, clip.audio_bytes))
+            url_reference_audio.append(
+                {
+                    "speaker": speaker,
+                    "filename": clip.filename,
+                    "source_url": clip.source_url,
+                    "start_seconds": clip.start_seconds,
+                    "detected_start_seconds": clip.detected_start_seconds,
+                    "duration_seconds": clip.duration_seconds,
+                    "size_bytes": len(clip.audio_bytes),
+                }
+            )
+            continue
+        raise ValueError(f"voice {index} audio_base64 or url is required")
     audio_decode_ms = _elapsed_ms(decode_started)
 
     _release_voice_conversion_before_vibevoice()
@@ -323,6 +344,8 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         getattr(result, "artifacts", []),
     )
     diagnostics = dict(result.diagnostics)
+    if url_reference_audio:
+        diagnostics["url_reference_audio"] = url_reference_audio
     if artifact_summary["available"] or artifact_summary["include_requested"]:
         diagnostics["runpod_artifacts"] = artifact_summary
     response_audio_bytes, response_audio_mime_type, response_audio_diagnostics, response_audio_warnings = (
@@ -335,7 +358,10 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         "audio_base64": base64.b64encode(response_audio_bytes).decode("ascii"),
         "normalized_script": result.normalized_script,
         "timings_ms": result.timings_ms,
-        "providers": result.providers,
+        "providers": {
+            **result.providers,
+            **({"reference_audio_url": "yt-dlp+ffmpeg"} if url_reference_audio else {}),
+        },
         "diagnostics": diagnostics,
         "artifacts": response_artifacts,
         "warnings": response_audio_warnings,
@@ -349,6 +375,48 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         temp_write_ms=temp_write_ms,
         load_metric_name="vibevoice_service_load",
         load_ms=service_load_ms,
+    )
+    return response
+
+
+def _extract_vibevoice_url_reference_audio(item: dict[str, object], url: str) -> ReferenceAudioClip:
+    extractor = MediaReferenceAudioExtractor()
+    start_seconds = _optional_float(item.get("start_seconds"))
+    duration_seconds = _optional_float(item.get("duration_seconds"))
+    if duration_seconds is None:
+        duration_seconds = 5.0
+    return extractor.extract_from_url(
+        url,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+    )
+
+
+def _handle_reference_audio_from_url(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    url = str(payload.get("url") or payload.get("source_url") or "").strip()
+    if not url:
+        raise ValueError("url is required")
+    clip = _extract_vibevoice_url_reference_audio(payload, url)
+    response: dict[str, object] = {
+        "audio_mime_type": clip.audio_mime_type,
+        "audio_base64": base64.b64encode(clip.audio_bytes).decode("ascii"),
+        "filename": clip.filename,
+        "source_url": clip.source_url,
+        "start_seconds": clip.start_seconds,
+        "detected_start_seconds": clip.detected_start_seconds,
+        "duration_seconds": clip.duration_seconds,
+        "providers": {"reference_audio_url": "yt-dlp+ffmpeg"},
+        "warnings": [],
+    }
+    _attach_serverless_metrics(
+        response,
+        operation_mode="reference_audio_from_url",
+        handler_started=handler_started,
+        worker_cold=False,
+        audio_decode_ms=0.0,
+        temp_write_ms=0.0,
+        load_metric_name="reference_audio_url_load",
+        load_ms=0.0,
     )
     return response
 

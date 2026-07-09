@@ -125,6 +125,12 @@ class MediaReferenceAudioExtractor:
         if getattr(completed, "returncode", 1) != 0:
             stderr = str(getattr(completed, "stderr", "") or getattr(completed, "stdout", "") or "").strip()
             detail = stderr[-600:] if stderr else "no diagnostic"
+            if _looks_like_youtube_unavailable(detail):
+                detail = (
+                    f"{detail}\n"
+                    "RunPodから対象動画を視聴できません。動画の公開状態、地域制限、ログイン要求、"
+                    "YouTube側のdatacenter制限を確認し、別の公開動画URLまたはローカル音声ファイルを使ってください。"
+                )
             raise RuntimeError(f"{label} によるURL参照音声取得に失敗しました: {detail}")
 
 
@@ -138,6 +144,11 @@ def _yt_dlp_download_command(
     return [
         yt_dlp_command,
         "--no-playlist",
+        "--force-ipv4",
+        "--remote-components",
+        "ejs:github",
+        "--extractor-args",
+        "youtube:player_client=web_safari,android_vr",
         "--download-sections",
         section,
         "--force-keyframes-at-cuts",
@@ -147,6 +158,16 @@ def _yt_dlp_download_command(
         str(output_template),
         source_url,
     ]
+
+
+def _looks_like_youtube_unavailable(detail: str) -> bool:
+    text = str(detail or "").lower()
+    return "[youtube]" in text and (
+        "video unavailable" in text
+        or "this video is not available" in text
+        or "private video" in text
+        or "sign in" in text
+    )
 
 
 def parse_media_url_start_seconds(url: str) -> float | None:
