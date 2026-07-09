@@ -92,6 +92,18 @@
                 <label><input id="vibevoice-directed-line-mode" name="directed_line_mode" type="checkbox" checked /> directed_line_mode</label>
                 <label><input id="vibevoice-directed-retry-low-score" name="directed_retry_low_score" type="checkbox" checked /> directed_retry_low_score</label>
               </div>
+              <label class="vibevoice-setting-field vibevoice-setting-wide">
+                出力言語
+                <select name="output_language" id="vibevoice-output-language">
+                  <option value="en-US">英語</option>
+                  <option value="zh-CN" selected>中国語</option>
+                  <option value="ja-JP">日本語（低品質）</option>
+                </select>
+              </label>
+              <label class="vibevoice-switch">
+                <input name="translate_script" type="checkbox" checked />
+                <span>日本語台本を出力言語へ翻訳</span>
+              </label>
               <div class="vibevoice-actions">
                 <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
                 <button id="vibevoice-cancel-button" class="vibevoice-cancel-button" type="button" hidden>キャンセル</button>

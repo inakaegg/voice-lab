@@ -177,6 +177,14 @@
                     <option value="vibevoice-large-aoi-pinned" data-vibevoice-backends="runpod_serverless" data-vibevoice-auto-line-by-line="false">VibeVoice Large (RunPod)</option>
                   </select>
                 </label>
+                <label class="vibevoice-setting-field vibevoice-setting-wide">
+                  出力言語
+                  <select name="output_language" id="vibevoice-output-language">
+                    <option value="en-US">英語</option>
+                    <option value="zh-CN" selected>中国語</option>
+                    <option value="ja-JP">日本語（低品質）</option>
+                  </select>
+                </label>
                 <label class="vibevoice-range-control">
                   <span class="vibevoice-range-label">
                     <span>CFG</span>
@@ -264,6 +272,10 @@
                 <label class="vibevoice-switch" data-directed-retry-low-score="false">
                   <input id="vibevoice-directed-retry-low-score" name="directed_retry_low_score" type="checkbox" checked />
                   <span>低スコア行だけ再生成</span>
+                </label>
+                <label class="vibevoice-switch">
+                  <input name="translate_script" type="checkbox" checked />
+                  <span>日本語台本を出力言語へ翻訳</span>
                 </label>
               </div>
               <section class="vibevoice-parameter-guide" aria-label="生成パラメータの目安">

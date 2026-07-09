@@ -58,6 +58,8 @@ const directedLineMaxChars = 180;
 const persistedFieldNames = [
   "backend",
   "model_id",
+  "output_language",
+  "translate_script",
   "cfg_scale",
   "inference_steps",
   "seed",
@@ -620,6 +622,9 @@ async function handleGenerate(event) {
     body.set("line_by_line", effectiveLineByLineEnabled() ? "true" : "false");
     body.set("directed_line_mode", directedLineModeControl.checked ? "true" : "false");
     body.set("directed_retry_low_score", effectiveDirectedRetryLowScoreEnabled() ? "true" : "false");
+    if (form.elements.translate_script) {
+      body.set("translate_script", form.elements.translate_script.checked ? "true" : "false");
+    }
     const response = await fetch("/api/vibevoice/jobs", {
       method: "POST",
       body,

@@ -44,6 +44,11 @@ const PRACTICE_TARGET_LANGUAGES = {
   "zh-CN": { label: "中文", speech_name: "Mandarin Chinese" },
   "en-US": { label: "English", speech_name: "English" },
 };
+const VIBEVOICE_OUTPUT_LANGUAGES = {
+  "en-US": { label: "英語", speech_name: "English" },
+  "zh-CN": { label: "中国語", speech_name: "Chinese" },
+  "ja-JP": { label: "日本語（低品質）", speech_name: "Japanese" },
+};
 const PRACTICE_GRADE_LABELS = {
   perfect: "できました",
   ok: "いいかんじ",
@@ -2481,10 +2486,11 @@ async function createVibeVoiceReferenceAudioFromUrl(_request, _env) {
 
 async function createVibeVoiceJob(request, env) {
   const form = await request.formData();
-  const script = await readVibeVoiceScriptFromForm(form);
-  if (!script.trim()) {
+  const originalScript = await readVibeVoiceScriptFromForm(form);
+  if (!originalScript.trim()) {
     throw httpError(400, "script is required");
   }
+  const scriptPlan = await prepareVibeVoiceScriptForGeneration(form, env, originalScript);
   const voiceBlobs = [];
   for (let slot = 1; slot <= 4; slot += 1) {
     const blob = optionalBlob(form, `voice_file_${slot}`);
@@ -2503,7 +2509,7 @@ async function createVibeVoiceJob(request, env) {
     throw httpError(400, "voice sample is required");
   }
   await enforcePublicFeatureAccess(request, env, "skitvoice", {
-    scriptChars: script.trim().length,
+    scriptChars: originalScript.trim().length,
     audioBytes: Math.max(0, ...voiceBlobs.map((item) => Number(item.blob.size || 0))),
   });
   const voices = [];
@@ -2519,7 +2525,8 @@ async function createVibeVoiceJob(request, env) {
   }
   const body = await submitRunpodJob(env, {
     operation_mode: "vibevoice",
-    script,
+    script: scriptPlan.script,
+    script_translation: scriptPlan.diagnostics,
     voices,
     generation: vibeVoiceGenerationPayloadFromForm(form),
     response_audio_format: stringFormValue(form, "response_audio_format", "mp3"),
@@ -2595,13 +2602,88 @@ function vibeVoiceReferenceAudioRequestFromForm(form) {
 async function readVibeVoiceScriptFromForm(form) {
   const inline = stringFormValue(form, "script", "").trim();
   if (inline) {
-    return inline;
+    return normalizeVibeVoiceScriptLineEndings(inline);
   }
   const file = optionalBlob(form, "script_file");
   if (file && Number(file.size || 0) > 0 && typeof file.text === "function") {
-    return (await file.text()).trim();
+    return normalizeVibeVoiceScriptLineEndings((await file.text()).trim());
   }
   return "";
+}
+
+function normalizeVibeVoiceScriptLineEndings(text) {
+  return String(text || "").replace(/\r\n?/g, "\n");
+}
+
+async function prepareVibeVoiceScriptForGeneration(form, env, script) {
+  const outputLanguage = supportedVibeVoiceOutputLanguage(stringFormValue(form, "output_language", "zh-CN"));
+  const requested = optionEnabled(stringFormValue(form, "translate_script", "false"));
+  const diagnostics = {
+    requested,
+    enabled: false,
+    output_language: outputLanguage,
+    source_language: "ja-JP",
+    source_script: script,
+    translated_script: script,
+    model: "",
+    provider: "",
+  };
+  if (!requested || outputLanguage === "ja-JP") {
+    return { script, diagnostics };
+  }
+  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
+  const translated = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
+    model,
+    instructions: [
+      "Translate a Japanese skit script for speech generation.",
+      `Translate only dialogue text into natural spoken ${VIBEVOICE_OUTPUT_LANGUAGES[outputLanguage].speech_name}.`,
+      "Preserve speaker tags exactly.",
+      "Preserve the number of non-empty lines and preserve line order.",
+      "Return only the translated script with no notes.",
+    ].join(" "),
+    input: script,
+  }));
+  validateVibeVoiceTranslatedScript(script, translated);
+  return {
+    script: translated,
+    diagnostics: {
+      ...diagnostics,
+      enabled: true,
+      translated_script: translated,
+      model,
+      provider: "openai-responses",
+    },
+  };
+}
+
+function supportedVibeVoiceOutputLanguage(value) {
+  const language = String(value || "zh-CN").trim();
+  if (!Object.prototype.hasOwnProperty.call(VIBEVOICE_OUTPUT_LANGUAGES, language)) {
+    throw httpError(400, `unsupported VibeVoice output language: ${language}`);
+  }
+  return language;
+}
+
+function normalizeVibeVoiceTranslatedScript(text) {
+  let translated = String(text || "").trim();
+  if (translated.startsWith("```")) {
+    translated = translated.replace(/^```(?:text|txt)?/i, "").replace(/```$/i, "").trim();
+  }
+  return translated.split(/\r?\n/).map((line) => line.trimEnd()).join("\n").trim();
+}
+
+function validateVibeVoiceTranslatedScript(sourceScript, translatedScript) {
+  if (!translatedScript.trim()) {
+    throw httpError(502, "VibeVoice script translation returned empty text");
+  }
+  const sourceLines = String(sourceScript || "").split(/\r?\n/).filter((line) => line.trim());
+  const translatedLines = String(translatedScript || "").split(/\r?\n/).filter((line) => line.trim());
+  if (sourceLines.length > 0 && sourceLines.length !== translatedLines.length) {
+    throw httpError(
+      502,
+      `VibeVoice script translation must preserve non-empty line count: source=${sourceLines.length} translated=${translatedLines.length}`,
+    );
+  }
 }
 
 function vibeVoiceGenerationPayloadFromForm(form) {

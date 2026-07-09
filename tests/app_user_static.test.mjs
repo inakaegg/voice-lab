@@ -299,6 +299,12 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /value="vibevoice-1\.5b-pinned"/);
   assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-realtime-0\.5b-latest"/);
   assert.match(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"[^>]*data-vibevoice-backends="runpod_serverless"/);
+  assert.match(vibevoiceHtml, /name="output_language"/);
+  assert.match(vibevoiceHtml, /value="en-US"[^>]*>英語/);
+  assert.match(vibevoiceHtml, /value="zh-CN"[^>]*>中国語/);
+  assert.match(vibevoiceHtml, /value="ja-JP"[^>]*>日本語（低品質）/);
+  assert.match(vibevoiceHtml, /name="translate_script"/);
+  assert.match(vibevoiceHtml, /日本語台本を出力言語へ翻訳/);
   assert.match(vibevoiceHtml, /name="inference_steps"/);
   assert.match(vibevoiceHtml, /id="vibevoice-reset-settings-button"/);
   assert.match(vibevoiceHtml, /class="vibevoice-parameter-guide"/);
@@ -448,6 +454,10 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);
   assert.match(vibevoiceSimpleHtml, /name="model_id"/);
   assert.match(vibevoiceSimpleHtml, /value="vibevoice-large-aoi-pinned"[^>]*selected/s);
+  assert.match(vibevoiceSimpleHtml, /name="output_language"/);
+  assert.match(vibevoiceSimpleHtml, /value="zh-CN"[^>]*selected[^>]*>中国語/);
+  assert.match(vibevoiceSimpleHtml, /name="translate_script"[^>]*checked/);
+  assert.match(vibevoiceSimpleHtml, /日本語台本を出力言語へ翻訳/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-script"/);
   assert.match(
     vibevoiceSimpleHtml,
@@ -499,6 +509,8 @@ test("vibevoice auto line-by-line state is reflected in the UI without overwriti
   assert.match(vibevoiceSource, /lineByLineControl\.disabled = autoLineByLine \|\| directedLineModeEnabled/);
   assert.match(vibevoiceSource, /lineByLineControl\.checked = directedLineModeEnabled \? false : autoLineByLine \|\| lineByLineUserPreference/);
   assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
+  assert.match(vibevoiceSource, /"output_language"/);
+  assert.match(vibevoiceSource, /"translate_script"/);
   assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
   assert.match(vibevoiceSource, /function updateDirectedLineModeState\(\)/);
   assert.match(vibevoiceHtml, /data-auto-line-by-line/);

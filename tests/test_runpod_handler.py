@@ -234,6 +234,14 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
                 }
             ],
             "generation": {"model_id": "vibevoice-large-aoi-pinned", "inference_steps": 2},
+            "script_translation": {
+                "enabled": True,
+                "output_language": "zh-CN",
+                "source_script": "Speaker 1: こんにちは。",
+                "translated_script": "Speaker 1: 你好。",
+                "model": "test-model",
+                "provider": "openai-responses",
+            },
         }
     }
 
@@ -243,6 +251,8 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     assert base64.b64decode(payload["audio_base64"]) == b"vv audio"
     assert payload["normalized_script"] == "Speaker 1: 你好。"
     assert payload["providers"]["vibevoice"] == "fake-vibevoice"
+    assert payload["diagnostics"]["script_translation"]["translated_script"] == "Speaker 1: 你好。"
+    assert payload["diagnostics"]["script_translation"]["model"] == "test-model"
     assert payload["serverless"]["operation_mode"] == "vibevoice"
 
 

@@ -103,6 +103,11 @@ _HAN_CODEPOINT_RANGES = (
 )
 _PINYIN_OMITTED_PUNCTUATION = "，。！？；：、,.!?;:\"'“”‘’（）()[]【】《》<>"
 _PINYIN_WHITESPACE_RE = re.compile(r"\s+")
+_VIBEVOICE_OUTPUT_LANGUAGES = {
+    "en-US": {"label": "英語", "openai_name": "English"},
+    "zh-CN": {"label": "中国語", "openai_name": "Chinese"},
+    "ja-JP": {"label": "日本語（低品質）", "openai_name": "Japanese"},
+}
 
 
 def _configure_logging() -> None:
@@ -192,10 +197,14 @@ async def _read_vibevoice_script(script: str, script_file: UploadFile | None) ->
         if not content:
             raise ValueError("script file is empty")
         try:
-            return content.decode("utf-8")
+            return _normalize_vibevoice_script_line_endings(content.decode("utf-8"))
         except UnicodeDecodeError as exc:
             raise ValueError("script file must be UTF-8") from exc
-    return script
+    return _normalize_vibevoice_script_line_endings(script)
+
+
+def _normalize_vibevoice_script_line_endings(text: str) -> str:
+    return str(text or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
 async def _save_vibevoice_upload(upload: UploadFile, directory: Path, fallback_name: str) -> Path:
@@ -418,6 +427,129 @@ def _normalize_practice_pinyin_tokens(tokens: list[str]) -> str:
             continue
         normalized_tokens.extend(part for part in normalized.split(" ") if part)
     return " ".join(normalized_tokens).strip()
+
+
+def _supported_vibevoice_output_language(value: str | None) -> str:
+    language = str(value or "zh-CN").strip()
+    if language not in _VIBEVOICE_OUTPUT_LANGUAGES:
+        raise ValueError(f"unsupported VibeVoice output language: {language}")
+    return language
+
+
+def _vibevoice_script_translation_model() -> str:
+    return os.getenv(
+        "OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL",
+        os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.5"),
+    )
+
+
+def _prepare_vibevoice_script_for_generation(
+    *,
+    script_text: str,
+    output_language: str | None,
+    translate_script: str | None,
+) -> tuple[str, dict[str, object]]:
+    language = _supported_vibevoice_output_language(output_language)
+    requested = _bool_form_value(translate_script, default=False)
+    diagnostics: dict[str, object] = {
+        "script_translation": {
+            "requested": requested,
+            "enabled": False,
+            "source_language": "ja-JP",
+            "output_language": language,
+            "output_language_label": _VIBEVOICE_OUTPUT_LANGUAGES[language]["label"],
+            "source_script": script_text,
+            "translated_script": script_text,
+            "model": "",
+            "provider": "",
+        }
+    }
+    if not requested or language == "ja-JP":
+        return script_text, diagnostics
+
+    model = _vibevoice_script_translation_model()
+    translated_script = _normalize_vibevoice_translated_script(
+        _openai_vibevoice_translate_script(script_text, language, model)
+    )
+    _validate_vibevoice_translated_script(script_text, translated_script)
+    diagnostics["script_translation"].update(
+        {
+            "enabled": True,
+            "translated_script": translated_script,
+            "model": model,
+            "provider": "openai-responses",
+        }
+    )
+    return translated_script, diagnostics
+
+
+def _openai_vibevoice_translate_script(script_text: str, output_language: str, model: str) -> str:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise ValueError("OPENAI_API_KEY is required for VibeVoice script translation")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise ValueError("openai package is required for VibeVoice script translation") from exc
+
+    language_name = _VIBEVOICE_OUTPUT_LANGUAGES[output_language]["openai_name"]
+    response = OpenAI().responses.create(
+        model=model,
+        instructions=(
+            "Translate a Japanese skit script for speech generation. "
+            f"Translate only dialogue text into natural spoken {language_name}. "
+            "Preserve speaker tags exactly, preserve the number of non-empty lines, "
+            "preserve line order, and return only the translated script with no notes."
+        ),
+        input=script_text,
+    )
+    output_text = getattr(response, "output_text", None)
+    if output_text is not None:
+        return str(output_text)
+    if hasattr(response, "model_dump"):
+        try:
+            dumped = response.model_dump()
+            return _openai_response_text_from_dict(dumped)
+        except Exception:
+            pass
+    return str(response)
+
+
+def _openai_response_text_from_dict(body: dict[str, object]) -> str:
+    if isinstance(body.get("output_text"), str):
+        return str(body["output_text"])
+    chunks: list[str] = []
+    output = body.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    chunks.append(str(part["text"]))
+    return "".join(chunks)
+
+
+def _normalize_vibevoice_translated_script(text: str) -> str:
+    translated = str(text or "").strip()
+    if translated.startswith("```"):
+        translated = re.sub(r"^```(?:text|txt)?", "", translated, flags=re.IGNORECASE).strip()
+        translated = re.sub(r"```$", "", translated).strip()
+    return "\n".join(line.rstrip() for line in translated.splitlines()).strip()
+
+
+def _validate_vibevoice_translated_script(source_script: str, translated_script: str) -> None:
+    if not translated_script.strip():
+        raise ValueError("VibeVoice script translation returned empty text")
+    source_lines = [line for line in source_script.splitlines() if line.strip()]
+    translated_lines = [line for line in translated_script.splitlines() if line.strip()]
+    if source_lines and len(source_lines) != len(translated_lines):
+        raise ValueError(
+            "VibeVoice script translation must preserve the number of non-empty lines: "
+            f"source={len(source_lines)} translated={len(translated_lines)}"
+        )
 
 
 def _practice_pinyin_text_openai(text: str) -> str:
@@ -765,11 +897,18 @@ def create_app(
         directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
         directed_retry_max_lines: Annotated[str, Form()] = "auto",
         directed_retry_max_multiplier: Annotated[str, Form()] = "1",
+        output_language: Annotated[str, Form()] = "zh-CN",
+        translate_script: Annotated[str, Form()] = "false",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
         try:
             script_text = await _read_vibevoice_script(script, script_file)
+            script_text, script_diagnostics = _prepare_vibevoice_script_for_generation(
+                script_text=script_text,
+                output_language=output_language,
+                translate_script=translate_script,
+            )
             options = _vibevoice_generation_options(
                 script_text=script_text,
                 model_id=model_id,
@@ -809,13 +948,15 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except VibeVoiceError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        diagnostics = dict(vibevoice_result.diagnostics)
+        diagnostics.update(script_diagnostics)
         return {
             "audio_mime_type": vibevoice_result.audio_mime_type,
             "audio_base64": base64.b64encode(vibevoice_result.audio_bytes).decode("ascii"),
             "normalized_script": vibevoice_result.normalized_script,
             "providers": vibevoice_result.providers,
             "timings_ms": vibevoice_result.timings_ms,
-            "diagnostics": vibevoice_result.diagnostics,
+            "diagnostics": diagnostics,
             "artifacts": list(getattr(vibevoice_result, "artifacts", [])),
         }
 
@@ -842,12 +983,19 @@ def create_app(
         directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
         directed_retry_max_lines: Annotated[str, Form()] = "auto",
         directed_retry_max_multiplier: Annotated[str, Form()] = "1",
+        output_language: Annotated[str, Form()] = "zh-CN",
+        translate_script: Annotated[str, Form()] = "false",
         backend: Annotated[str, Form()] = "local",
         model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
     ) -> dict[str, object]:
         temp_dir = Path(mkdtemp(prefix="mo-vibevoice-job-"))
         try:
             script_text = await _read_vibevoice_script(script, script_file)
+            script_text, script_diagnostics = _prepare_vibevoice_script_for_generation(
+                script_text=script_text,
+                output_language=output_language,
+                translate_script=translate_script,
+            )
             options = _vibevoice_generation_options(
                 script_text=script_text,
                 model_id=model_id,
@@ -883,6 +1031,7 @@ def create_app(
                 voice_paths=voice_paths,
                 options=options,
                 temp_dir=temp_dir,
+                result_diagnostics=script_diagnostics,
             )
         except (ValueError, FileNotFoundError) as exc:
             shutil.rmtree(temp_dir, ignore_errors=True)

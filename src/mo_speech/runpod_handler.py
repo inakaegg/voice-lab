@@ -344,6 +344,9 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         getattr(result, "artifacts", []),
     )
     diagnostics = dict(result.diagnostics)
+    script_translation = payload.get("script_translation")
+    if isinstance(script_translation, dict):
+        diagnostics["script_translation"] = script_translation
     if url_reference_audio:
         diagnostics["url_reference_audio"] = url_reference_audio
     if artifact_summary["available"] or artifact_summary["include_requested"]:

@@ -320,6 +320,54 @@ def test_vibevoice_generate_api_returns_audio() -> None:
     assert service.calls[0][2].directed_retry_max_lines == 4
 
 
+def test_vibevoice_generate_api_translates_script_before_generation(monkeypatch) -> None:
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            return FakeVibeVoiceResult()
+
+    def fake_translate(script_text: str, output_language: str, model: str) -> str:
+        assert script_text == "1 こんにちは\n2 元気ですか"
+        assert output_language == "zh-CN"
+        assert model == "test-vv-translation-model"
+        return "1 你好。\n2 你好吗？"
+
+    monkeypatch.setenv("OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL", "test-vv-translation-model")
+    monkeypatch.setattr("mo_speech.api._openai_vibevoice_translate_script", fake_translate, raising=False)
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={
+            "script": "1 こんにちは\n2 元気ですか",
+            "output_language": "zh-CN",
+            "translate_script": "true",
+        },
+        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert service.calls[0][0] == "1 你好。\n2 你好吗？"
+    diagnostics = response.json()["diagnostics"]["script_translation"]
+    assert diagnostics["enabled"] is True
+    assert diagnostics["output_language"] == "zh-CN"
+    assert diagnostics["source_script"] == "1 こんにちは\n2 元気ですか"
+    assert diagnostics["translated_script"] == "1 你好。\n2 你好吗？"
+    assert diagnostics["model"] == "test-vv-translation-model"
+
+
 def test_vibevoice_generate_api_defaults_to_directed_retry_mode() -> None:
     class FakeVibeVoiceResult:
         audio_bytes = b"RIFFfakewav"
@@ -574,7 +622,9 @@ def test_vibevoice_job_api_reports_elapsed_and_result(tmp_path: Path) -> None:
     assert debug_payload["job_id"] == job_id
     assert debug_payload["result"]["audio_base64_chars"] == len(base64.b64encode(b"RIFFfakewav").decode("ascii"))
     assert "audio_base64" not in debug_payload["result"]
-    assert debug_payload["result"]["diagnostics"] == FakeVibeVoiceResult.diagnostics
+    assert debug_payload["result"]["diagnostics"]["used_voice_samples"] == FakeVibeVoiceResult.diagnostics["used_voice_samples"]
+    assert debug_payload["result"]["diagnostics"]["script_translation"]["enabled"] is False
+    assert debug_payload["result"]["diagnostics"]["script_translation"]["output_language"] == "zh-CN"
 
 
 def test_vibevoice_job_api_can_request_cancel() -> None:

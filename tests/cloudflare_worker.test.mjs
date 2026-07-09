@@ -572,6 +572,62 @@ test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", as
   assert.equal(runCall.body.input.voices[0].audio_base64, Buffer.from("voice").toString("base64"));
 });
 
+test("Cloudflare worker translates SkitVoice script before RunPod generation", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: {
+      skitvoice: { daily_limit: 2, total_limit: 2, script_max_chars: 100, audio_max_bytes: 1000 },
+    },
+  }));
+  const calls = [];
+  const env = publicAuthEnv(async (url, init) => {
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "viewer@example.com", email_verified: true });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({ output_text: "1 Hello.\n2 How are you?" });
+    }
+    if (url.endsWith("/run")) {
+      return json({ id: "vv-job", status: "IN_QUEUE" });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv });
+  env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL = "test-vv-translation-model";
+  const cookie = await publicCookie(env, "/skitvoice");
+  const form = new FormData();
+  form.append("script", "1 こんにちは\n2 元気ですか");
+  form.append("output_language", "en-US");
+  form.append("translate_script", "true");
+  form.append("model_id", "vibevoice-large-aoi-pinned");
+  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+
+  const created = await (
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }), env)
+  ).json();
+  const openAiCall = calls.find((call) => call.url === "https://api.openai.com/v1/responses");
+  const runCall = calls.find((call) => call.url.endsWith("/run"));
+
+  assert.equal(created.job_id, "vv-job");
+  assert.equal(openAiCall.body.model, "test-vv-translation-model");
+  assert.match(openAiCall.body.instructions, /Preserve speaker tags/);
+  assert.equal(runCall.body.input.script, "1 Hello.\n2 How are you?");
+  assert.deepEqual(runCall.body.input.script_translation, {
+    requested: true,
+    enabled: true,
+    output_language: "en-US",
+    source_language: "ja-JP",
+    source_script: "1 こんにちは\n2 元気ですか",
+    translated_script: "1 Hello.\n2 How are you?",
+    model: "test-vv-translation-model",
+    provider: "openai-responses",
+  });
+});
+
 test("Cloudflare worker rejects SkitVoice URL references before RunPod", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({

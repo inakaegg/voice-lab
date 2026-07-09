@@ -365,6 +365,7 @@ class VibeVoiceJobStore:
         voice_paths: list[VibeVoiceVoiceSample],
         options: VibeVoiceGenerationOptions,
         temp_dir: Path,
+        result_diagnostics: dict[str, object] | None = None,
     ) -> dict[str, object]:
         job = VibeVoiceJob(
             job_id=uuid4().hex,
@@ -377,7 +378,7 @@ class VibeVoiceJobStore:
             self.jobs[job.job_id] = job
         thread = Thread(
             target=self._run_job,
-            args=(job.job_id, generator, script_text, voice_paths, options),
+            args=(job.job_id, generator, script_text, voice_paths, options, result_diagnostics or {}),
             daemon=True,
         )
         thread.start()
@@ -416,6 +417,7 @@ class VibeVoiceJobStore:
         script_text: str,
         voice_paths: list[VibeVoiceVoiceSample],
         options: VibeVoiceGenerationOptions,
+        result_diagnostics: dict[str, object],
     ) -> None:
         try:
             with self.lock:
@@ -440,7 +442,7 @@ class VibeVoiceJobStore:
                 progress_callback=report_progress,
                 cancel_event=self.jobs[job_id].cancel_event,
             )
-            serialized_result = _serialize_vibevoice_result(result)
+            serialized_result = _serialize_vibevoice_result(result, result_diagnostics=result_diagnostics)
             _write_vibevoice_debug_result(job_id, serialized_result)
             with self.lock:
                 job = self.jobs[job_id]
@@ -596,14 +598,21 @@ def _generate_vibevoice_with_optional_hooks(
     return generator.generate(**kwargs)
 
 
-def _serialize_vibevoice_result(result: VibeVoiceResult) -> dict[str, object]:
+def _serialize_vibevoice_result(
+    result: VibeVoiceResult,
+    *,
+    result_diagnostics: dict[str, object] | None = None,
+) -> dict[str, object]:
+    diagnostics = dict(result.diagnostics)
+    if result_diagnostics:
+        diagnostics.update(result_diagnostics)
     return {
         "audio_mime_type": result.audio_mime_type,
         "audio_base64": base64.b64encode(result.audio_bytes).decode("ascii"),
         "normalized_script": result.normalized_script,
         "providers": result.providers,
         "timings_ms": result.timings_ms,
-        "diagnostics": result.diagnostics,
+        "diagnostics": diagnostics,
         "artifacts": list(getattr(result, "artifacts", [])),
     }
 
