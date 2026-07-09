@@ -510,6 +510,82 @@ def test_vibevoice_reference_audio_from_url_api_returns_wav() -> None:
     assert extractor.calls == [("https://youtu.be/example?t=75", None, 5.0)]
 
 
+def test_vibevoice_generate_api_resolves_url_reference_before_runpod_backend() -> None:
+    class FakeReferenceAudioExtractor:
+        def __init__(self):
+            self.calls = []
+
+        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
+            self.calls.append((url, start_seconds, duration_seconds))
+            return ReferenceAudioClip(
+                audio_bytes=b"RIFFurlwav",
+                audio_mime_type="audio/wav",
+                filename="reference_url_s12_d6.wav",
+                source_url=url,
+                start_seconds=12.0,
+                detected_start_seconds=75.0,
+                duration_seconds=duration_seconds,
+            )
+
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFrunpod"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "runpod_handler_total": 20.0, "total": 20.0}
+        diagnostics = {}
+        providers = {"vibevoice": "runpod-serverless-vibevoice"}
+
+    class FakeRunpodVibeVoiceService:
+        def __init__(self):
+            self.calls = []
+            self.voice_bytes = b""
+            self.voice_names = []
+
+        def status(self):
+            return {"available": True, "provider": "fake-runpod"}
+
+        def generate(self, *, script_text, voice_paths, options):
+            self.calls.append((script_text, voice_paths, options))
+            self.voice_bytes = voice_paths[0].path.read_bytes()
+            self.voice_names = [voice.path.name for voice in voice_paths]
+            return FakeVibeVoiceResult()
+
+    extractor = FakeReferenceAudioExtractor()
+    runpod_service = FakeRunpodVibeVoiceService()
+    client = TestClient(create_app(reference_audio_extractor=extractor, runpod_vibevoice_service=runpod_service))
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={
+            "script": "你好。",
+            "backend": "runpod_serverless",
+            "model_id": "vibevoice-large-aoi-pinned",
+            "voice_url_1": "https://youtu.be/example?t=75",
+            "voice_url_start_1": "12",
+            "voice_url_duration_1": "6",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["providers"]["vibevoice"] == "runpod-serverless-vibevoice"
+    assert payload["diagnostics"]["url_reference_audio"] == [
+        {
+            "slot": 1,
+            "filename": "reference_url_s12_d6.wav",
+            "source_url": "https://youtu.be/example?t=75",
+            "start_seconds": 12.0,
+            "detected_start_seconds": 75.0,
+            "duration_seconds": 6.0,
+            "size_bytes": len(b"RIFFurlwav"),
+        }
+    ]
+    assert extractor.calls == [("https://youtu.be/example?t=75", 12.0, 6.0)]
+    assert len(runpod_service.calls) == 1
+    assert runpod_service.voice_bytes == b"RIFFurlwav"
+    assert runpod_service.voice_names == ["voice-1.wav"]
+
+
 def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
     class FakeVibeVoiceResult:
         audio_bytes = b"RIFrunpod"
@@ -628,6 +704,70 @@ def test_vibevoice_job_api_reports_elapsed_and_result(tmp_path: Path) -> None:
     assert debug_payload["result"]["diagnostics"]["used_voice_samples"] == FakeVibeVoiceResult.diagnostics["used_voice_samples"]
     assert debug_payload["result"]["diagnostics"]["script_translation"]["enabled"] is False
     assert debug_payload["result"]["diagnostics"]["script_translation"]["output_language"] == "zh-CN"
+
+
+def test_vibevoice_job_api_resolves_url_reference_and_reports_diagnostics(tmp_path: Path) -> None:
+    class FakeReferenceAudioExtractor:
+        def __init__(self):
+            self.calls = []
+
+        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
+            self.calls.append((url, start_seconds, duration_seconds))
+            return ReferenceAudioClip(
+                audio_bytes=b"RIFFjoburlwav",
+                audio_mime_type="audio/wav",
+                filename="reference_url_s75_d5.wav",
+                source_url=url,
+                start_seconds=75.0,
+                detected_start_seconds=75.0,
+                duration_seconds=duration_seconds,
+            )
+
+    class FakeVibeVoiceResult:
+        audio_bytes = b"RIFFfakewav"
+        audio_mime_type = "audio/wav"
+        normalized_script = "Speaker 1: 你好。"
+        timings_ms = {"vibevoice": 12.0, "total": 12.0}
+        diagnostics = {}
+        providers = {"vibevoice": "fake-vibevoice"}
+
+    class FakeVibeVoiceService:
+        def __init__(self):
+            self.voice_bytes = b""
+
+        def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
+            self.voice_bytes = voice_paths[0].path.read_bytes()
+            return FakeVibeVoiceResult()
+
+    extractor = FakeReferenceAudioExtractor()
+    service = FakeVibeVoiceService()
+    client = TestClient(create_app(reference_audio_extractor=extractor, vibevoice_service=service))
+
+    response = client.post(
+        "/api/vibevoice/jobs",
+        data={
+            "script": "你好。",
+            "voice_url_1": "https://youtu.be/example?t=75",
+            "voice_url_duration_1": "5",
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    status_payload = None
+    for _ in range(20):
+        status_response = client.get(f"/api/vibevoice/jobs/{job_id}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "succeeded":
+            break
+    assert status_payload is not None
+    assert status_payload["status"] == "succeeded"
+    assert service.voice_bytes == b"RIFFjoburlwav"
+    assert extractor.calls == [("https://youtu.be/example?t=75", None, 5.0)]
+    assert status_payload["result"]["diagnostics"]["url_reference_audio"][0]["source_url"] == "https://youtu.be/example?t=75"
+    debug_payload = json.loads((tmp_path / "vibevoice-debug" / "last-result.json").read_text(encoding="utf-8"))
+    assert debug_payload["result"]["diagnostics"]["url_reference_audio"][0]["filename"] == "reference_url_s75_d5.wav"
 
 
 def test_vibevoice_job_api_can_request_cancel() -> None:

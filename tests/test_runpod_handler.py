@@ -4,7 +4,6 @@ import base64
 
 import pytest
 
-from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech import runpod_handler
 from mo_speech.pipeline import PipelineProgress, PipelineResult, TtsOutput
 from mo_speech.providers.voice import VoiceConversionBackendInfo, VoiceConversionService
@@ -256,126 +255,37 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     assert payload["serverless"]["operation_mode"] == "vibevoice"
 
 
-def test_runpod_handler_resolves_vibevoice_url_voice_in_same_job(monkeypatch: pytest.MonkeyPatch) -> None:
-    extracted: dict[str, object] = {}
-
-    class FakeReferenceAudioExtractor:
-        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
-            extracted["url"] = url
-            extracted["start_seconds"] = start_seconds
-            extracted["duration_seconds"] = duration_seconds
-            return ReferenceAudioClip(
-                audio_bytes=b"url wav",
-                audio_mime_type="audio/wav",
-                filename="reference-url.wav",
-                source_url=url,
-                start_seconds=2129.0,
-                detected_start_seconds=2129.0,
-                duration_seconds=6.0,
-            )
-
-    class FakeVibeVoiceService:
-        def generate(self, *, script_text, voice_paths, options):
-            assert script_text == "Speaker 1: こんにちは。"
-            assert len(voice_paths) == 1
-            assert voice_paths[0].slot == 1
-            assert voice_paths[0].path.read_bytes() == b"url wav"
-            return type(
-                "FakeVibeVoiceResult",
-                (),
-                {
-                    "audio_bytes": b"vv audio",
-                    "audio_mime_type": "audio/wav",
-                    "normalized_script": script_text,
-                    "timings_ms": {"vibevoice": 1.0},
-                    "providers": {"vibevoice": "fake-vibevoice"},
-                    "diagnostics": {},
-                    "artifacts": [],
-                },
-            )()
-
-    monkeypatch.setattr(runpod_handler, "MediaReferenceAudioExtractor", FakeReferenceAudioExtractor, raising=False)
-    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
-
-    payload = runpod_handler.handler(
-        {
-            "input": {
-                "operation_mode": "vibevoice",
-                "response_audio_format": "wav",
-                "script": "Speaker 1: こんにちは。",
-                "voices": [
-                    {
-                        "speaker": 1,
-                        "url": "https://youtu.be/zDZvAmCJJaY?t=2129",
-                        "duration_seconds": 6,
-                    }
-                ],
+def test_runpod_handler_rejects_vibevoice_url_voice() -> None:
+    with pytest.raises(ValueError, match="audio_base64 is required"):
+        runpod_handler.handler(
+            {
+                "input": {
+                    "operation_mode": "vibevoice",
+                    "response_audio_format": "wav",
+                    "script": "Speaker 1: こんにちは。",
+                    "voices": [
+                        {
+                            "speaker": 1,
+                            "url": "https://youtu.be/zDZvAmCJJaY?t=2129",
+                            "duration_seconds": 6,
+                        }
+                    ],
+                }
             }
-        }
-    )
-
-    assert extracted == {
-        "url": "https://youtu.be/zDZvAmCJJaY?t=2129",
-        "start_seconds": None,
-        "duration_seconds": 6.0,
-    }
-    assert payload["audio_mime_type"] == "audio/wav"
-    assert base64.b64decode(payload["audio_base64"]) == b"vv audio"
-    assert payload["providers"]["reference_audio_url"] == "yt-dlp+ffmpeg"
-    assert payload["diagnostics"]["url_reference_audio"] == [
-        {
-            "speaker": 1,
-            "filename": "reference-url.wav",
-            "source_url": "https://youtu.be/zDZvAmCJJaY?t=2129",
-            "start_seconds": 2129.0,
-            "detected_start_seconds": 2129.0,
-            "duration_seconds": 6.0,
-            "size_bytes": 7,
-        }
-    ]
+        )
 
 
-def test_runpod_handler_extracts_reference_audio_from_url_operation(monkeypatch: pytest.MonkeyPatch) -> None:
-    extracted: dict[str, object] = {}
-
-    class FakeReferenceAudioExtractor:
-        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
-            extracted["url"] = url
-            extracted["start_seconds"] = start_seconds
-            extracted["duration_seconds"] = duration_seconds
-            return ReferenceAudioClip(
-                audio_bytes=b"reference wav",
-                audio_mime_type="audio/wav",
-                filename="reference-url.wav",
-                source_url=url,
-                start_seconds=2129.0,
-                detected_start_seconds=2129.0,
-                duration_seconds=5.0,
-            )
-
-    monkeypatch.setattr(runpod_handler, "MediaReferenceAudioExtractor", FakeReferenceAudioExtractor, raising=False)
-
-    payload = runpod_handler.handler(
-        {
-            "input": {
-                "operation_mode": "reference_audio_from_url",
-                "url": "https://youtu.be/zDZvAmCJJaY?t=2129",
-                "duration_seconds": 5,
+def test_runpod_handler_rejects_reference_audio_from_url_operation() -> None:
+    with pytest.raises(ValueError, match="unsupported operation_mode: reference_audio_from_url"):
+        runpod_handler.handler(
+            {
+                "input": {
+                    "operation_mode": "reference_audio_from_url",
+                    "url": "https://youtu.be/zDZvAmCJJaY?t=2129",
+                    "duration_seconds": 5,
+                }
             }
-        }
-    )
-
-    assert extracted == {
-        "url": "https://youtu.be/zDZvAmCJJaY?t=2129",
-        "start_seconds": None,
-        "duration_seconds": 5.0,
-    }
-    assert payload["audio_mime_type"] == "audio/wav"
-    assert base64.b64decode(payload["audio_base64"]) == b"reference wav"
-    assert payload["filename"] == "reference-url.wav"
-    assert payload["source_url"] == "https://youtu.be/zDZvAmCJJaY?t=2129"
-    assert payload["providers"] == {"reference_audio_url": "yt-dlp+ffmpeg"}
-    assert payload["serverless"]["operation_mode"] == "reference_audio_from_url"
+        )
 
 
 def test_runpod_handler_compresses_vibevoice_audio_to_mp3_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

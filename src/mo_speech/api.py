@@ -220,20 +220,88 @@ async def _save_vibevoice_upload(upload: UploadFile, directory: Path, fallback_n
     return output
 
 
-async def _save_vibevoice_voice_uploads(uploads: list[UploadFile | None], directory: Path) -> list[VibeVoiceVoiceSample]:
-    voice_paths: list[VibeVoiceVoiceSample] = []
-    for index, upload in enumerate(uploads, start=1):
-        if upload is None or not upload.filename:
+def _vibevoice_url_reference_specs(
+    *,
+    voice_url_1: str,
+    voice_url_start_1: str | None,
+    voice_url_duration_1: str,
+    voice_url_2: str,
+    voice_url_start_2: str | None,
+    voice_url_duration_2: str,
+    voice_url_3: str,
+    voice_url_start_3: str | None,
+    voice_url_duration_3: str,
+    voice_url_4: str,
+    voice_url_start_4: str | None,
+    voice_url_duration_4: str,
+) -> dict[int, dict[str, object]]:
+    raw_values = {
+        1: (voice_url_1, voice_url_start_1, voice_url_duration_1),
+        2: (voice_url_2, voice_url_start_2, voice_url_duration_2),
+        3: (voice_url_3, voice_url_start_3, voice_url_duration_3),
+        4: (voice_url_4, voice_url_start_4, voice_url_duration_4),
+    }
+    specs: dict[int, dict[str, object]] = {}
+    for slot, (url_value, start_value, duration_value) in raw_values.items():
+        url = str(url_value or "").strip()
+        if not url:
             continue
-        voice_paths.append(
-            VibeVoiceVoiceSample(
-                slot=index,
-                path=await _save_vibevoice_upload(upload, directory, f"voice-{index}"),
+        specs[slot] = {
+            "url": url,
+            "start_seconds": _optional_float_form_value(start_value),
+            "duration_seconds": _required_float_form_value(duration_value, f"voice_url_duration_{slot}"),
+        }
+    return specs
+
+
+async def _save_vibevoice_voice_uploads(
+    uploads: list[UploadFile | None],
+    directory: Path,
+    *,
+    url_references: dict[int, dict[str, object]] | None = None,
+    reference_audio_extractor: MediaReferenceAudioExtractor | None = None,
+) -> tuple[list[VibeVoiceVoiceSample], dict[str, object]]:
+    voice_paths: list[VibeVoiceVoiceSample] = []
+    url_reference_audio: list[dict[str, object]] = []
+    for index, upload in enumerate(uploads, start=1):
+        if upload is not None and upload.filename:
+            voice_paths.append(
+                VibeVoiceVoiceSample(
+                    slot=index,
+                    path=await _save_vibevoice_upload(upload, directory, f"voice-{index}"),
+                )
             )
+            continue
+        url_reference = (url_references or {}).get(index)
+        if url_reference is None:
+            continue
+        extractor = reference_audio_extractor or MediaReferenceAudioExtractor()
+        clip = extractor.extract_from_url(
+            str(url_reference["url"]),
+            start_seconds=url_reference.get("start_seconds"),
+            duration_seconds=float(url_reference["duration_seconds"]),
+        )
+        suffix = Path(clip.filename).suffix or ".wav"
+        path = directory / f"voice-{index}{suffix}"
+        path.write_bytes(clip.audio_bytes)
+        voice_paths.append(VibeVoiceVoiceSample(slot=index, path=path))
+        url_reference_audio.append(
+            {
+                "slot": index,
+                "filename": clip.filename,
+                "source_url": clip.source_url,
+                "start_seconds": clip.start_seconds,
+                "detected_start_seconds": clip.detected_start_seconds,
+                "duration_seconds": clip.duration_seconds,
+                "size_bytes": len(clip.audio_bytes),
+            }
         )
     if not voice_paths:
         raise ValueError("voice sample is required")
-    return voice_paths
+    diagnostics: dict[str, object] = {}
+    if url_reference_audio:
+        diagnostics["url_reference_audio"] = url_reference_audio
+    return voice_paths, diagnostics
 
 
 def _vibevoice_generation_options(
@@ -882,6 +950,18 @@ def create_app(
         voice_file_2: Annotated[UploadFile | None, File()] = None,
         voice_file_3: Annotated[UploadFile | None, File()] = None,
         voice_file_4: Annotated[UploadFile | None, File()] = None,
+        voice_url_1: Annotated[str, Form()] = "",
+        voice_url_start_1: Annotated[str | None, Form()] = None,
+        voice_url_duration_1: Annotated[str, Form()] = "5",
+        voice_url_2: Annotated[str, Form()] = "",
+        voice_url_start_2: Annotated[str | None, Form()] = None,
+        voice_url_duration_2: Annotated[str, Form()] = "5",
+        voice_url_3: Annotated[str, Form()] = "",
+        voice_url_start_3: Annotated[str | None, Form()] = None,
+        voice_url_duration_3: Annotated[str, Form()] = "5",
+        voice_url_4: Annotated[str, Form()] = "",
+        voice_url_start_4: Annotated[str | None, Form()] = None,
+        voice_url_duration_4: Annotated[str, Form()] = "5",
         cfg_scale: Annotated[str, Form()] = "1.3",
         inference_steps: Annotated[str, Form()] = "10",
         seed: Annotated[str, Form()] = "42",
@@ -928,10 +1008,26 @@ def create_app(
                 directed_retry_max_lines=directed_retry_max_lines,
                 directed_retry_max_multiplier=directed_retry_max_multiplier,
             )
+            url_references = _vibevoice_url_reference_specs(
+                voice_url_1=voice_url_1,
+                voice_url_start_1=voice_url_start_1,
+                voice_url_duration_1=voice_url_duration_1,
+                voice_url_2=voice_url_2,
+                voice_url_start_2=voice_url_start_2,
+                voice_url_duration_2=voice_url_duration_2,
+                voice_url_3=voice_url_3,
+                voice_url_start_3=voice_url_start_3,
+                voice_url_duration_3=voice_url_duration_3,
+                voice_url_4=voice_url_4,
+                voice_url_start_4=voice_url_start_4,
+                voice_url_duration_4=voice_url_duration_4,
+            )
             with TemporaryDirectory(prefix="mo-vibevoice-api-") as temp_dir:
-                voice_paths = await _save_vibevoice_voice_uploads(
+                voice_paths, voice_diagnostics = await _save_vibevoice_voice_uploads(
                     [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
                     Path(temp_dir),
+                    url_references=url_references,
+                    reference_audio_extractor=active_reference_audio_extractor,
                 )
                 generator = _select_vibevoice_generator(
                     backend=backend,
@@ -946,10 +1042,13 @@ def create_app(
                 )
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except VibeVoiceError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         diagnostics = dict(vibevoice_result.diagnostics)
         diagnostics.update(script_diagnostics)
+        diagnostics.update(voice_diagnostics)
         return {
             "audio_mime_type": vibevoice_result.audio_mime_type,
             "audio_base64": base64.b64encode(vibevoice_result.audio_bytes).decode("ascii"),
@@ -968,6 +1067,18 @@ def create_app(
         voice_file_2: Annotated[UploadFile | None, File()] = None,
         voice_file_3: Annotated[UploadFile | None, File()] = None,
         voice_file_4: Annotated[UploadFile | None, File()] = None,
+        voice_url_1: Annotated[str, Form()] = "",
+        voice_url_start_1: Annotated[str | None, Form()] = None,
+        voice_url_duration_1: Annotated[str, Form()] = "5",
+        voice_url_2: Annotated[str, Form()] = "",
+        voice_url_start_2: Annotated[str | None, Form()] = None,
+        voice_url_duration_2: Annotated[str, Form()] = "5",
+        voice_url_3: Annotated[str, Form()] = "",
+        voice_url_start_3: Annotated[str | None, Form()] = None,
+        voice_url_duration_3: Annotated[str, Form()] = "5",
+        voice_url_4: Annotated[str, Form()] = "",
+        voice_url_start_4: Annotated[str | None, Form()] = None,
+        voice_url_duration_4: Annotated[str, Form()] = "5",
         cfg_scale: Annotated[str, Form()] = "1.3",
         inference_steps: Annotated[str, Form()] = "10",
         seed: Annotated[str, Form()] = "42",
@@ -1015,9 +1126,25 @@ def create_app(
                 directed_retry_max_lines=directed_retry_max_lines,
                 directed_retry_max_multiplier=directed_retry_max_multiplier,
             )
-            voice_paths = await _save_vibevoice_voice_uploads(
+            url_references = _vibevoice_url_reference_specs(
+                voice_url_1=voice_url_1,
+                voice_url_start_1=voice_url_start_1,
+                voice_url_duration_1=voice_url_duration_1,
+                voice_url_2=voice_url_2,
+                voice_url_start_2=voice_url_start_2,
+                voice_url_duration_2=voice_url_duration_2,
+                voice_url_3=voice_url_3,
+                voice_url_start_3=voice_url_start_3,
+                voice_url_duration_3=voice_url_duration_3,
+                voice_url_4=voice_url_4,
+                voice_url_start_4=voice_url_start_4,
+                voice_url_duration_4=voice_url_duration_4,
+            )
+            voice_paths, voice_diagnostics = await _save_vibevoice_voice_uploads(
                 [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
                 temp_dir,
+                url_references=url_references,
+                reference_audio_extractor=active_reference_audio_extractor,
             )
             generator = _select_vibevoice_generator(
                 backend=backend,
@@ -1031,11 +1158,14 @@ def create_app(
                 voice_paths=voice_paths,
                 options=options,
                 temp_dir=temp_dir,
-                result_diagnostics=script_diagnostics,
+                result_diagnostics={**script_diagnostics, **voice_diagnostics},
             )
         except (ValueError, FileNotFoundError) as exc:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/vibevoice/jobs/{job_id}")
     def get_vibevoice_job(job_id: str) -> dict[str, object]:

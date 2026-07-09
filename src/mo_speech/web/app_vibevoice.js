@@ -953,7 +953,7 @@ function handleReferenceUrlUse() {
     saveVibeVoiceDraft();
     setReferenceUrlStatus(referenceUrlUseMessage(slot, record), "ready");
     message.dataset.state = "ready";
-    message.textContent = `Speaker ${slot} のURL参照を設定しました。生成ボタンでRunPodへ送信します。`;
+    message.textContent = `Speaker ${slot} のURL参照を設定しました。生成ボタンで送信します。`;
     closeReferenceUrlDialog();
   } catch (error) {
     setReferenceUrlStatus(String(error.message || error), "error");
@@ -1094,7 +1094,7 @@ function referenceUrlUseMessage(slot, record) {
   if (Number.isFinite(duration)) {
     parts.push(`${formatSeconds(duration)}切り出し`);
   }
-  return `${parts.join(" / ")}。生成ボタンでRunPodへ送信します。`;
+  return `${parts.join(" / ")}。生成ボタンで送信します。`;
 }
 
 async function appendVoiceFiles(body, requiredSlots = null) {

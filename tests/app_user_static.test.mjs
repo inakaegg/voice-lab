@@ -278,9 +278,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-duration"/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-button"/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-dialog"/);
-  assert.match(vibevoiceHtml, /data-reference-url-open-slot="1"/);
-  assert.match(vibevoiceHtml, /data-reference-url-open-slot="4"/);
-  assert.match(vibevoiceHtml, /data-reference-url-display-slot="1"/);
+  assert.match(vibevoiceHtml, /data-reference-url-open-slot="1" data-local-reference-url hidden/);
+  assert.match(vibevoiceHtml, /data-reference-url-open-slot="4" data-local-reference-url hidden/);
+  assert.match(vibevoiceHtml, /data-reference-url-display-slot="1" data-local-reference-url hidden/);
   assert.match(vibevoiceHtml, />URL<\/button>/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-button"[^>]*>設定<\/button>/);
   assert.doesNotMatch(vibevoiceHtml, /class="vibevoice-reference-url-panel"/);
@@ -380,7 +380,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /renderReferenceUrlRecord/);
   assert.match(vibevoiceSource, /referenceUrlDialog\.showModal\(\)/);
   assert.match(vibevoiceSource, /referenceUrlButton\.textContent = "設定"/);
-  assert.match(vibevoiceSource, /生成ボタンでRunPodへ送信します/);
+  assert.match(vibevoiceSource, /生成ボタンで送信します/);
   assert.doesNotMatch(vibevoiceSource, /\/api\/vibevoice\/reference-audio-from-url/);
   assert.doesNotMatch(vibevoiceSource, /取得中\.\.\./);
   assert.match(vibevoiceSource, /data-vibevoice-range/);
