@@ -43,11 +43,13 @@ const referenceUrlCancelButton = document.querySelector("#vibevoice-reference-ur
 const referenceUrlTitleSlot = document.querySelector("#vibevoice-reference-url-title-slot");
 const referenceUrlOpenButtons = Array.from(document.querySelectorAll("[data-reference-url-open-slot]"));
 const referenceUrlDisplays = Array.from(document.querySelectorAll("[data-reference-url-display-slot]"));
+const localReferenceUrlElements = Array.from(document.querySelectorAll("[data-local-reference-url]"));
 const recordVoiceButtons = Array.from(document.querySelectorAll("[data-record-voice-slot]"));
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
 const vibevoicePageMode = document.body?.dataset.vibevoiceMode || "advanced";
+const referenceUrlSourcesEnabled = computeReferenceUrlSourcesEnabled();
 const vibevoiceSettingsStorageKey =
   vibevoicePageMode === "simple" ? "mo-speech-vibevoice-simple-draft" : "mo-speech-vibevoice-draft";
 const defaultSimpleScript = "1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか。どうしてました？";
@@ -167,6 +169,7 @@ savedVoicePreviews.forEach((preview) => {
   preview.addEventListener("click", stopPreviewEventPropagation);
   preview.addEventListener("pointerdown", stopPreviewEventPropagation);
 });
+configureReferenceUrlAvailability();
 loadVibeVoiceDraft();
 applyDefaultSimpleScript();
 updateModelAvailability();
@@ -208,6 +211,49 @@ function applyDefaultSimpleScript() {
   if (scriptInput.value.trim() === "") {
     scriptInput.value = defaultSimpleScript;
   }
+}
+
+function computeReferenceUrlSourcesEnabled() {
+  const explicitMode = document.body?.dataset.vibevoiceUrlSources || "";
+  if (explicitMode === "enabled") {
+    return true;
+  }
+  if (explicitMode === "disabled") {
+    return false;
+  }
+  const hasAlwaysVisibleUrlControl = referenceUrlOpenButtons.some(
+    (button) => !button.hasAttribute("data-local-reference-url"),
+  );
+  if (hasAlwaysVisibleUrlControl) {
+    return true;
+  }
+  return isLocalReferenceUrlOrigin();
+}
+
+function isLocalReferenceUrlOrigin() {
+  const locationValue = window.location;
+  const hostname = locationValue?.hostname || "";
+  return (
+    locationValue?.protocol === "file:" ||
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === ""
+  );
+}
+
+function configureReferenceUrlAvailability() {
+  for (const element of localReferenceUrlElements) {
+    if (element.hasAttribute("data-reference-url-display-slot")) {
+      element.hidden = true;
+    } else {
+      element.hidden = !referenceUrlSourcesEnabled;
+    }
+    if ("disabled" in element) {
+      element.disabled = !referenceUrlSourcesEnabled;
+    }
+  }
+  document.body?.toggleAttribute("data-reference-url-sources-enabled", referenceUrlSourcesEnabled);
 }
 
 function readVibeVoiceDraft() {
@@ -823,6 +869,9 @@ function stopStreamTracks(stream) {
 function openReferenceUrlDialog(event) {
   event.preventDefault();
   event.stopPropagation();
+  if (!referenceUrlSourcesEnabled) {
+    return;
+  }
   const slot = String(event.currentTarget?.dataset.referenceUrlOpenSlot || "1");
   const record = referenceUrlRecordsBySlot.get(slot);
   if (referenceUrlSlotSelect) {
@@ -858,6 +907,10 @@ function closeReferenceUrlDialog() {
 }
 
 function handleReferenceUrlUse() {
+  if (!referenceUrlSourcesEnabled) {
+    setReferenceUrlStatus("この環境ではURL参照音声を使えません。音声ファイルまたは録音を使ってください。", "error");
+    return;
+  }
   const slot = String(referenceUrlSlotSelect?.value || "1");
   const url = String(referenceUrlInput?.value || "").trim();
   const durationSeconds = String(referenceUrlDurationInput?.value || "5").trim();
@@ -910,6 +963,9 @@ function handleReferenceUrlUse() {
 }
 
 function serializeReferenceUrlRecords() {
+  if (!referenceUrlSourcesEnabled) {
+    return {};
+  }
   const records = {};
   for (const [slot, record] of referenceUrlRecordsBySlot.entries()) {
     const normalized = normalizeReferenceUrlRecord(record);
@@ -983,7 +1039,7 @@ function renderReferenceUrlRecord(slot, record) {
   if (!target) {
     return;
   }
-  if (!record?.url) {
+  if (!referenceUrlSourcesEnabled || !record?.url) {
     target.hidden = true;
     target.textContent = "";
     return;
@@ -1015,7 +1071,7 @@ function shortenUrlForDisplay(value) {
 
 function updateReferenceUrlButtonState() {
   if (referenceUrlButton) {
-    referenceUrlButton.disabled = generationBusy;
+    referenceUrlButton.disabled = generationBusy || !referenceUrlSourcesEnabled;
     referenceUrlButton.textContent = "設定";
   }
 }
@@ -1076,6 +1132,9 @@ async function appendVoiceFiles(body, requiredSlots = null) {
 }
 
 function appendVoiceUrlReference(body, slot) {
+  if (!referenceUrlSourcesEnabled) {
+    return false;
+  }
   const record = referenceUrlRecordsBySlot.get(String(slot));
   return appendStoredVoiceUrlReference(body, slot, record);
 }

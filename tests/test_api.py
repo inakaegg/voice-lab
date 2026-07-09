@@ -197,8 +197,9 @@ def test_skitvoice_serves_simple_user_ui_without_admin_controls() -> None:
     assert "vibevoice-script" in response.text
     assert "voice_file_1" in response.text
     assert 'data-record-voice-slot="1"' in response.text
-    assert 'data-reference-url-open-slot="1"' not in response.text
-    assert 'id="vibevoice-reference-url-dialog"' not in response.text
+    assert 'data-reference-url-open-slot="1"' in response.text
+    assert 'data-local-reference-url hidden' in response.text
+    assert 'id="vibevoice-reference-url-dialog"' in response.text
     assert "/static/app_vibevoice.js" in response.text
 
 

@@ -131,8 +131,10 @@
                   <span class="vibevoice-upload-actions">
                     <span class="vibevoice-upload-action">選択</span>
                     <button class="vibevoice-record-slot-button" type="button" data-record-voice-slot="1">録音</button>
+                    <button class="vibevoice-url-slot-button" type="button" data-reference-url-open-slot="1" data-local-reference-url hidden>URL</button>
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="1">未保存</small>
+                  <small class="vibevoice-url-voice" data-reference-url-display-slot="1" data-local-reference-url hidden></small>
                   <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="1" controls preload="metadata" hidden aria-label="Speaker 1 参照音声プレビュー"></audio>
                 </label>
                 <label class="vibevoice-upload-slot">
@@ -142,8 +144,10 @@
                   <span class="vibevoice-upload-actions">
                     <span class="vibevoice-upload-action">選択</span>
                     <button class="vibevoice-record-slot-button" type="button" data-record-voice-slot="2">録音</button>
+                    <button class="vibevoice-url-slot-button" type="button" data-reference-url-open-slot="2" data-local-reference-url hidden>URL</button>
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="2">未保存</small>
+                  <small class="vibevoice-url-voice" data-reference-url-display-slot="2" data-local-reference-url hidden></small>
                   <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="2" controls preload="metadata" hidden aria-label="Speaker 2 参照音声プレビュー"></audio>
                 </label>
                 <label class="vibevoice-upload-slot">
@@ -153,8 +157,10 @@
                   <span class="vibevoice-upload-actions">
                     <span class="vibevoice-upload-action">選択</span>
                     <button class="vibevoice-record-slot-button" type="button" data-record-voice-slot="3">録音</button>
+                    <button class="vibevoice-url-slot-button" type="button" data-reference-url-open-slot="3" data-local-reference-url hidden>URL</button>
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="3">未保存</small>
+                  <small class="vibevoice-url-voice" data-reference-url-display-slot="3" data-local-reference-url hidden></small>
                   <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="3" controls preload="metadata" hidden aria-label="Speaker 3 参照音声プレビュー"></audio>
                 </label>
                 <label class="vibevoice-upload-slot">
@@ -164,8 +170,10 @@
                   <span class="vibevoice-upload-actions">
                     <span class="vibevoice-upload-action">選択</span>
                     <button class="vibevoice-record-slot-button" type="button" data-record-voice-slot="4">録音</button>
+                    <button class="vibevoice-url-slot-button" type="button" data-reference-url-open-slot="4" data-local-reference-url hidden>URL</button>
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="4">未保存</small>
+                  <small class="vibevoice-url-voice" data-reference-url-display-slot="4" data-local-reference-url hidden></small>
                   <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="4" controls preload="metadata" hidden aria-label="Speaker 4 参照音声プレビュー"></audio>
                 </label>
               </div>
@@ -173,6 +181,37 @@
           </div>
         </div>
       </form>
+
+      <dialog id="vibevoice-reference-url-dialog" class="vibevoice-reference-url-dialog" aria-labelledby="vibevoice-reference-url-title" data-local-reference-url hidden>
+        <div class="vibevoice-reference-url-dialog-body">
+          <header class="vibevoice-dialog-header">
+            <div>
+              <p class="vibevoice-section-label">URL</p>
+              <h2 id="vibevoice-reference-url-title">Speaker <span id="vibevoice-reference-url-title-slot">1</span> のURL参照</h2>
+            </div>
+            <button id="vibevoice-reference-url-cancel" class="vibevoice-dialog-close" type="button" aria-label="閉じる">×</button>
+          </header>
+          <input id="vibevoice-reference-url-slot" type="hidden" value="1" />
+          <label class="vibevoice-setting-field vibevoice-setting-wide">
+            動画・音声URL
+            <input id="vibevoice-reference-url" type="url" placeholder="https://youtu.be/...?...&t=1m15s" />
+          </label>
+          <div class="vibevoice-reference-url-dialog-grid">
+            <label class="vibevoice-setting-field">
+              開始秒
+              <input id="vibevoice-reference-url-start" type="number" min="0" step="0.1" placeholder="URLの時刻" />
+            </label>
+            <label class="vibevoice-setting-field">
+              切り出し秒数
+              <input id="vibevoice-reference-url-duration" type="number" min="0.5" max="30" step="0.5" value="5" />
+            </label>
+          </div>
+          <div class="vibevoice-reference-url-actions">
+            <button id="vibevoice-reference-url-button" class="vibevoice-reference-url-button" type="button">設定</button>
+          </div>
+          <p id="vibevoice-reference-url-status" class="vibevoice-reference-url-status" role="status" aria-live="polite"></p>
+        </div>
+      </dialog>
 
       <section id="vibevoice-result" class="vibevoice-result" aria-label="生成結果" hidden>
         <div class="vibevoice-panel-header">
