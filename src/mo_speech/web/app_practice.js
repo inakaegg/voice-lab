@@ -1,24 +1,20 @@
-const targetLanguageButtons = Array.from(document.querySelectorAll(".practice-language-button"));
-const nativePanel = document.querySelector(".practice-card-primary");
+const targetLanguageSelect = document.querySelector("#practice-target-language-select");
+const nativePanel = document.querySelector("#practice-native-panel");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
 const recordTitle = document.querySelector("#practice-record-title");
-const recordDescription = document.querySelector("#practice-record-description");
 const nativeLevel = document.querySelector("#practice-native-level");
-const nativeActionLabel = document.querySelector("#practice-native-action-label");
 const promptPanel = document.querySelector("#practice-prompt-panel");
+const repeatRecordButton = document.querySelector("#practice-repeat-record-button");
+const repeatLevel = document.querySelector("#practice-repeat-level");
 const resultPanel = document.querySelector("#practice-result-panel");
 const targetLabel = document.querySelector("#practice-target-label");
 const targetText = document.querySelector("#practice-target-text");
 const targetSubtext = document.querySelector("#practice-target-subtext");
 const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
+const autoPlayComparisonControl = document.querySelector("#practice-auto-play-comparison");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
-const asrModelSelect = document.querySelector("#practice-asr-model");
-const currentLanguageLabel = document.querySelector("#practice-current-language-label");
-const settingsButton = document.querySelector("#practice-settings-button");
-const settingsOverlay = document.querySelector("#practice-settings-overlay");
-const settingsCloseButton = document.querySelector("#practice-settings-close-button");
 const gradeBadge = document.querySelector("#practice-grade-badge");
 const scoreText = document.querySelector("#practice-score");
 const scoreFill = document.querySelector("#practice-score-fill");
@@ -40,7 +36,6 @@ const languageLabels = {
   "zh-CN": "中文",
   "en-US": "English",
 };
-const practiceAsrModels = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"]);
 const hanCodePointRanges = [
   [0x3400, 0x4DBF],
   [0x4E00, 0x9FFF],
@@ -162,6 +157,7 @@ let currentAnalyser = null;
 let currentLevelFrame = null;
 let recordTimerId = null;
 let recordingStartedAt = 0;
+let activeRecordSlot = "native";
 let processingKind = "";
 let progressTimer = null;
 let progressDisplayed = 0;
@@ -169,26 +165,28 @@ let progressTarget = 0;
 let isComparisonPlaying = false;
 let comparisonPlaybackToken = 0;
 
-targetLanguageButtons.forEach((button) => {
-  button.addEventListener("click", () => selectTargetLanguage(button.dataset.language || "ja-JP"));
+targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || "ja-JP"));
+nativeRecordButton.addEventListener("click", () => {
+  setActiveRecordSlot("native");
+  toggleRecording("native");
 });
-nativeRecordButton.addEventListener("click", toggleActiveRecording);
+repeatRecordButton.addEventListener("click", () => {
+  setActiveRecordSlot("repeat");
+  toggleRecording("repeat");
+});
+nativePanel.addEventListener("pointerenter", () => setActiveRecordSlot("native"));
+nativePanel.addEventListener("pointerleave", () => {
+  if (currentTargetText && !mediaRecorder && !isBusy) {
+    setActiveRecordSlot("repeat");
+  }
+});
+nativePanel.addEventListener("focusin", () => setActiveRecordSlot("native"));
+promptPanel.addEventListener("pointerenter", () => setActiveRecordSlot("repeat"));
+promptPanel.addEventListener("focusin", () => setActiveRecordSlot("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
+autoPlayComparisonControl?.addEventListener("change", savePracticeSettings);
 speedSlider.addEventListener("input", handleSpeedChange);
-asrModelSelect.addEventListener("change", savePracticeSettings);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
-settingsButton.addEventListener("click", openPracticeSettings);
-settingsCloseButton.addEventListener("click", closePracticeSettings);
-settingsOverlay.addEventListener("click", (event) => {
-  if (event.target === settingsOverlay) {
-    closePracticeSettings();
-  }
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !settingsOverlay.hidden) {
-    closePracticeSettings();
-  }
-});
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
@@ -203,11 +201,7 @@ function selectTargetLanguage(language) {
     return;
   }
   selectedTargetLanguage = languageLabels[language] ? language : "ja-JP";
-  targetLanguageButtons.forEach((button) => {
-    const selected = button.dataset.language === selectedTargetLanguage;
-    button.classList.toggle("is-selected", selected);
-    button.setAttribute("aria-checked", selected ? "true" : "false");
-  });
+  targetLanguageSelect.value = selectedTargetLanguage;
   if (selectedTargetLanguage === "zh-CN") {
     pinyinToggle.checked = true;
   }
@@ -217,25 +211,21 @@ function selectTargetLanguage(language) {
   resetPractice();
 }
 
-async function toggleRecording(kind) {
+async function toggleRecording(slot) {
   clearError();
   if (isBusy) {
     return;
   }
   if (mediaRecorder && mediaRecorder.state === "recording") {
-    if (recordingKind === kind) {
+    if (recordingKind === slot) {
       mediaRecorder.stop();
     }
     return;
   }
-  await startRecording(kind);
+  await startRecording(slot);
 }
 
-function toggleActiveRecording() {
-  return toggleRecording("practice");
-}
-
-async function startRecording(kind) {
+async function startRecording(slot) {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
     showError("このブラウザでは録音を使えません。");
     return;
@@ -249,7 +239,7 @@ async function startRecording(kind) {
   }
   const mimeType = preferredRecordingMimeType();
   recordingStream = stream;
-  recordingKind = kind;
+  recordingKind = slot;
   recordingChunks = [];
   mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   mediaRecorder.addEventListener("dataavailable", (event) => {
@@ -259,8 +249,8 @@ async function startRecording(kind) {
   });
   mediaRecorder.addEventListener("stop", handleRecordingStopped, { once: true });
   mediaRecorder.start();
-  startLevelMeter(stream, nativeLevel);
-  setRecordingVisual(kind, true);
+  startLevelMeter(stream, levelForRecordSlot(slot));
+  setRecordingVisual(slot, true);
   setStatus(
     currentTargetText
       ? "録音中です。"
@@ -284,7 +274,7 @@ async function handleRecordingStopped() {
 
 async function submitPracticeRecording(blob) {
   const hasTarget = Boolean(currentTargetText);
-  setBusy(true, hasTarget ? "聞き取っています。" : "お手本を作っています。", hasTarget ? 88 : 72, "practice");
+  setBusy(true, hasTarget ? "聞き取っています。" : "お手本を作っています。", hasTarget ? 88 : 72, activeRecordSlot);
   if (!hasTarget) {
     promptPanel.hidden = true;
   }
@@ -303,6 +293,9 @@ async function submitPracticeRecording(blob) {
     setRepeatAudio(blob);
     renderAttemptResult(payload);
     setBusy(false, "");
+    if (autoPlayComparisonControl?.checked) {
+      playComparisonAudios().catch((error) => showError(error.message));
+    }
     return;
   }
   renderPromptResult(payload);
@@ -324,6 +317,7 @@ function renderPromptResult(payload) {
   setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
   nativePanel.hidden = false;
   promptPanel.hidden = false;
+  setActiveRecordSlot("repeat");
   stopRepeatAudio();
   currentRecognizedText = "";
   currentAttemptComparisonAlignment = null;
@@ -355,10 +349,10 @@ async function postPracticeForm(url, form) {
 
 function renderAttemptResult(payload) {
   stopComparisonPlayback();
-  const grade = payload.grade || "retry";
-  gradeBadge.textContent = payload.grade_label || grade;
-  gradeBadge.dataset.grade = grade;
   const percent = Math.round(Number(payload.similarity || 0) * 100);
+  const grade = renderPracticeGrade(percent);
+  gradeBadge.textContent = grade.label;
+  gradeBadge.dataset.grade = grade.key;
   scoreText.textContent = `${percent}%`;
   scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   currentRecognizedText = payload.recognized_text || "";
@@ -366,8 +360,22 @@ function renderAttemptResult(payload) {
   renderRecognizedDiff(payload);
   nativePanel.hidden = false;
   resultPanel.hidden = false;
+  setActiveRecordSlot("repeat");
   syncPracticeRecordMode();
   syncPlayButton();
+}
+
+function renderPracticeGrade(percent) {
+  if (percent >= 100) {
+    return { key: "perfect", label: "できました" };
+  }
+  if (percent >= 95) {
+    return { key: "ok", label: "いいかんじ" };
+  }
+  if (percent >= 90) {
+    return { key: "almost", label: "まあまあ" };
+  }
+  return { key: "retry", label: "もう一回" };
 }
 
 function resetPractice() {
@@ -381,6 +389,7 @@ function resetPractice() {
   currentRecognizedText = "";
   currentAttemptComparisonAlignment = null;
   detectedNativeLanguage = "";
+  activeRecordSlot = "native";
   nativePanel.hidden = false;
   promptPanel.hidden = true;
   resultPanel.hidden = true;
@@ -390,6 +399,7 @@ function resetPractice() {
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
+  syncRecordSlotVisuals();
   syncPracticeRecordMode();
   setStatus("");
   clearError();
@@ -836,7 +846,8 @@ function sleep(milliseconds) {
 function setBusy(busy, message, target = 100, kind = processingKind) {
   isBusy = busy;
   nativeRecordButton.disabled = busy;
-  const processingButton = nativeRecordButton;
+  repeatRecordButton.disabled = busy || !currentTargetText;
+  const processingButton = buttonForRecordSlot(kind || activeRecordSlot);
   progress.hidden = !busy;
   if (busy) {
     processingButton.classList.add("is-processing");
@@ -845,6 +856,7 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
     startProgressTimer();
   } else {
     nativeRecordButton.classList.remove("is-processing");
+    repeatRecordButton.classList.remove("is-processing");
     processingKind = "";
     progressTarget = 100;
     progressDisplayed = 100;
@@ -860,7 +872,10 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
   }
   if (message) {
     setStatus(message);
+  } else if (!busy) {
+    setStatus("");
   }
+  syncRecordSlotVisuals();
 }
 
 function startProgressTimer() {
@@ -884,20 +899,47 @@ function updateProgress() {
   progressFill.style.width = `${Math.max(0, Math.min(100, progressDisplayed))}%`;
 }
 
-function setRecordingVisual(_kind, recording) {
-  const button = nativeRecordButton;
-  const label = nativeActionLabel;
+function setActiveRecordSlot(slot) {
+  activeRecordSlot = slot === "repeat" && currentTargetText ? "repeat" : "native";
+  syncRecordSlotVisuals();
+}
+
+function buttonForRecordSlot(slot) {
+  return slot === "repeat" ? repeatRecordButton : nativeRecordButton;
+}
+
+function levelForRecordSlot(slot) {
+  return slot === "repeat" ? repeatLevel : nativeLevel;
+}
+
+function syncRecordSlotVisuals() {
+  const repeatAvailable = Boolean(currentTargetText) && !promptPanel.hidden;
+  repeatRecordButton.disabled = isBusy || !repeatAvailable;
+  nativeRecordButton.disabled = isBusy;
+  if (!repeatAvailable && activeRecordSlot === "repeat") {
+    activeRecordSlot = "native";
+  }
+  const activeButton = buttonForRecordSlot(activeRecordSlot);
+  [nativeRecordButton, repeatRecordButton].forEach((button) => {
+    const forcedActive = button === activeButton || button.classList.contains("is-recording") || button.classList.contains("is-processing");
+    button.classList.toggle("is-inactive", !forcedActive);
+  });
+}
+
+function setRecordingVisual(slot, recording) {
+  const button = buttonForRecordSlot(slot);
+  setActiveRecordSlot(slot);
   button.classList.toggle("is-recording", recording);
   button.classList.remove("is-processing");
   if (recording) {
     recordingStartedAt = performance.now();
     button.setAttribute("aria-label", "録音中");
-    label.textContent = "停止 / Stop / 停止";
     startRecordTimer(button);
   } else {
     stopRecordTimer(button);
     syncPracticeRecordMode();
   }
+  syncRecordSlotVisuals();
 }
 
 function startLevelMeter(stream, container) {
@@ -940,7 +982,7 @@ function stopLevelMeter() {
     currentAudioContext = null;
   }
   currentAnalyser = null;
-  [nativeLevel].filter(Boolean).forEach((container) => {
+  [nativeLevel, repeatLevel].filter(Boolean).forEach((container) => {
     container.classList.remove("is-active");
     container.querySelectorAll(".record-level-bar").forEach((bar) => {
       bar.style.transform = "scaleY(0.18)";
@@ -1044,13 +1086,11 @@ function loadPracticeSettings() {
   const settings = readPracticeSettings();
   selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
-  asrModelSelect.value = practiceAsrModels.has(settings.asr_model) ? settings.asr_model : "whisper-1";
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
-  targetLanguageButtons.forEach((button) => {
-    const selected = button.dataset.language === selectedTargetLanguage;
-    button.classList.toggle("is-selected", selected);
-    button.setAttribute("aria-checked", selected ? "true" : "false");
-  });
+  if (autoPlayComparisonControl) {
+    autoPlayComparisonControl.checked = settings.auto_play_comparison !== false;
+  }
+  targetLanguageSelect.value = selectedTargetLanguage;
   syncPinyinSettingVisibility();
   syncCurrentLanguageLabel();
   syncModelAudioSpeed();
@@ -1071,8 +1111,8 @@ function savePracticeSettings() {
       JSON.stringify({
         target_language: selectedTargetLanguage,
         show_pinyin: Boolean(pinyinToggle.checked),
-        asr_model: practiceAsrModel(),
         speed: normalizedPlaybackSpeed(speedSlider.value),
+        auto_play_comparison: autoPlayComparisonControl?.checked !== false,
       }),
     );
   } catch (_error) {
@@ -1081,7 +1121,7 @@ function savePracticeSettings() {
 }
 
 function practiceAsrModel() {
-  return practiceAsrModels.has(asrModelSelect.value) ? asrModelSelect.value : "whisper-1";
+  return "whisper-1";
 }
 
 function syncPinyinSettingVisibility() {
@@ -1089,22 +1129,7 @@ function syncPinyinSettingVisibility() {
 }
 
 function syncCurrentLanguageLabel() {
-  currentLanguageLabel.textContent = languageLabels[selectedTargetLanguage] || "日本語";
-}
-
-function openPracticeSettings() {
-  settingsOverlay.hidden = false;
-  settingsButton.setAttribute("aria-expanded", "true");
-  const selectedButton = targetLanguageButtons.find((button) => button.dataset.language === selectedTargetLanguage);
-  window.setTimeout(() => {
-    (selectedButton || settingsCloseButton).focus();
-  }, 0);
-}
-
-function closePracticeSettings() {
-  settingsOverlay.hidden = true;
-  settingsButton.setAttribute("aria-expanded", "false");
-  settingsButton.focus();
+  targetLanguageSelect.value = languageLabels[selectedTargetLanguage] ? selectedTargetLanguage : "ja-JP";
 }
 
 function normalizePracticeLanguage(language) {
@@ -1125,11 +1150,10 @@ function renderNativeLabels() {
 }
 
 function syncPracticeRecordMode() {
-  const repeatMode = Boolean(currentTargetText);
-  recordTitle.textContent = "録音";
-  recordDescription.textContent = repeatMode ? "お手本を復唱" : "言いたいことを話す";
-  nativeRecordButton.setAttribute("aria-label", repeatMode ? "まねして録音" : "言いたいことを録音");
-  nativeActionLabel.textContent = repeatMode ? "復唱" : "話す";
+  recordTitle.textContent = "言いたいことを話す";
+  nativeRecordButton.setAttribute("aria-label", "言いたいことを録音");
+  repeatRecordButton.setAttribute("aria-label", "練習を録音");
+  syncRecordSlotVisuals();
 }
 
 function renderRecognizedDiff(payload) {
@@ -1138,9 +1162,16 @@ function renderRecognizedDiff(payload) {
   const language = payload.target_language || selectedTargetLanguage;
   const map = normalizedOriginalMap(recognized, language);
   const targetMap = normalizedOriginalMap(currentTargetText, language);
-  let mismatchRanges = diff
-    .filter((entry) => entry.type !== "equal" && Number.isInteger(entry.recognized_start))
-    .map((entry) => originalRangeForNormalizedRange(map, entry.recognized_start, entry.recognized_end))
+  let mismatchDecorations = diff
+    .filter((entry) => entry.type !== "equal" && entry.type !== "delete" && Number.isInteger(entry.recognized_start))
+    .map((entry) => {
+      const range = originalRangeForNormalizedRange(map, entry.recognized_start, entry.recognized_end);
+      return {
+        start: range.start,
+        end: range.end,
+        correctText: originalTextForNormalizedRange(targetMap, entry.target_start, entry.target_end),
+      };
+    })
     .filter((range) => range.end > range.start);
   const missingMarkers = diff
     .filter((entry) => entry.type === "delete" && Number.isInteger(entry.target_start))
@@ -1158,12 +1189,12 @@ function renderRecognizedDiff(payload) {
     }
     return;
   }
-  if (!mismatchRanges.length && !missingMarkers.length && (payload.grade || "retry") !== "ok") {
-    mismatchRanges = [{ start: 0, end: recognized.length }];
+  if (!mismatchDecorations.length && !missingMarkers.length && (payload.grade || "retry") === "retry") {
+    mismatchDecorations = [{ start: 0, end: recognized.length, correctText: currentTargetText }];
   }
   let cursor = 0;
   const decorations = [
-    ...mergeRanges(mismatchRanges).map((range) => ({ kind: "mismatch", ...range })),
+    ...mergeDiffDecorations(mismatchDecorations).map((range) => ({ kind: "mismatch", ...range })),
     ...missingMarkers.map((marker) => ({ kind: "missing", start: marker.start, end: marker.start, text: marker.text })),
   ].sort((left, right) => left.start - right.start || (left.kind === "missing" ? -1 : 1));
   for (const decoration of decorations) {
@@ -1174,7 +1205,10 @@ function renderRecognizedDiff(payload) {
       recognizedText.append(renderMissingTargetDiff(decoration.text));
       continue;
     }
-    recognizedText.append(renderRecognizedMismatchDiff(recognized.slice(decoration.start, decoration.end)));
+    recognizedText.append(renderRecognizedMismatchDiff(
+      recognized.slice(decoration.start, decoration.end),
+      decoration.correctText,
+    ));
     cursor = decoration.end;
   }
   if (cursor < recognized.length) {
@@ -1182,11 +1216,20 @@ function renderRecognizedDiff(payload) {
   }
 }
 
-function renderRecognizedMismatchDiff(text) {
+function renderRecognizedMismatchDiff(text, correctText = "") {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "practice-diff-mismatch";
-  button.textContent = text;
+  if (correctText) {
+    const correction = document.createElement("span");
+    correction.className = "practice-diff-correction";
+    correction.textContent = correctText;
+    button.append(correction);
+  }
+  const heard = document.createElement("span");
+  heard.className = "practice-diff-heard";
+  heard.textContent = text;
+  button.append(heard);
   button.title = "比較再生";
   button.addEventListener("click", playComparisonAudios);
   return button;
@@ -1196,7 +1239,10 @@ function renderMissingTargetDiff(text) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "practice-diff-missing";
-  button.textContent = `抜け: ${text}`;
+  const heard = document.createElement("span");
+  heard.className = "practice-diff-heard";
+  heard.textContent = text;
+  button.append(heard);
   button.title = "抜けた部分を比較再生";
   button.addEventListener("click", playComparisonAudios);
   return button;
@@ -1264,13 +1310,14 @@ function insertionIndexForNormalizedIndex(map, index) {
   return map.originalIndexes[index];
 }
 
-function mergeRanges(ranges) {
+function mergeDiffDecorations(ranges) {
   const sorted = [...ranges].sort((left, right) => left.start - right.start);
   const merged = [];
   for (const range of sorted) {
     const previous = merged[merged.length - 1];
     if (previous && range.start <= previous.end) {
       previous.end = Math.max(previous.end, range.end);
+      previous.correctText = [previous.correctText, range.correctText].filter(Boolean).join("");
     } else {
       merged.push({ ...range });
     }

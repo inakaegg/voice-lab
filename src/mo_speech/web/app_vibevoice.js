@@ -38,12 +38,19 @@ const referenceUrlStartInput = document.querySelector("#vibevoice-reference-url-
 const referenceUrlDurationInput = document.querySelector("#vibevoice-reference-url-duration");
 const referenceUrlButton = document.querySelector("#vibevoice-reference-url-button");
 const referenceUrlStatus = document.querySelector("#vibevoice-reference-url-status");
+const referenceUrlDialog = document.querySelector("#vibevoice-reference-url-dialog");
+const referenceUrlCancelButton = document.querySelector("#vibevoice-reference-url-cancel");
+const referenceUrlTitleSlot = document.querySelector("#vibevoice-reference-url-title-slot");
+const referenceUrlOpenButtons = Array.from(document.querySelectorAll("[data-reference-url-open-slot]"));
+const referenceUrlDisplays = Array.from(document.querySelectorAll("[data-reference-url-display-slot]"));
+const recordVoiceButtons = Array.from(document.querySelectorAll("[data-record-voice-slot]"));
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
 const vibevoicePageMode = document.body?.dataset.vibevoiceMode || "advanced";
 const vibevoiceSettingsStorageKey =
   vibevoicePageMode === "simple" ? "mo-speech-vibevoice-simple-draft" : "mo-speech-vibevoice-draft";
+const defaultSimpleScript = "1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか。どうしてました？";
 const autoLineByLineMinLines = 4;
 const autoLineByLineMinChars = 180;
 const directedTargetMaxChars = 120;
@@ -73,6 +80,7 @@ const defaultGenerationSettings = Object.fromEntries(
   persistedControls.map((control) => [control.name, defaultControlValue(control)]),
 );
 const savedVoiceFilesBySlot = new Map();
+const referenceUrlRecordsBySlot = new Map();
 
 let currentAudioUrl = "";
 let artifactAudioUrls = [];
@@ -85,13 +93,21 @@ let jobStartedAt = 0;
 let copyDiagnosticsResetTimer = 0;
 let lineByLineUserPreference = lineByLineControl?.checked === true;
 let generationBusy = false;
-let referenceUrlFetching = false;
+let activeVoiceRecording = null;
 
 form.addEventListener("submit", handleGenerate);
 cancelButton.addEventListener("click", cancelVibeVoiceJob);
 resetSettingsButton.addEventListener("click", resetVibeVoiceGenerationSettings);
 copyDiagnosticsButton?.addEventListener("click", copyDiagnosticsToClipboard);
-referenceUrlButton?.addEventListener("click", handleReferenceUrlFetch);
+referenceUrlButton?.addEventListener("click", handleReferenceUrlUse);
+referenceUrlCancelButton?.addEventListener("click", closeReferenceUrlDialog);
+referenceUrlOpenButtons.forEach((button) => button.addEventListener("click", openReferenceUrlDialog));
+recordVoiceButtons.forEach((button) => button.addEventListener("click", toggleVoiceRecording));
+referenceUrlDialog?.addEventListener("click", (event) => {
+  if (event.target === referenceUrlDialog) {
+    closeReferenceUrlDialog();
+  }
+});
 scriptInput.addEventListener("input", () => {
   updateLineByLineAutoState();
   updateDirectedLineModeState();
@@ -150,6 +166,7 @@ savedVoicePreviews.forEach((preview) => {
   preview.addEventListener("pointerdown", stopPreviewEventPropagation);
 });
 loadVibeVoiceDraft();
+applyDefaultSimpleScript();
 updateModelAvailability();
 updateLineByLineAutoState();
 updateDirectedLineModeState();
@@ -179,6 +196,16 @@ function loadVibeVoiceDraft() {
     }
     restoreControlValue(control, settings[control.name]);
   }
+  restoreReferenceUrlRecords(draft.reference_urls);
+}
+
+function applyDefaultSimpleScript() {
+  if (vibevoicePageMode !== "simple") {
+    return;
+  }
+  if (scriptInput.value.trim() === "") {
+    scriptInput.value = defaultSimpleScript;
+  }
 }
 
 function readVibeVoiceDraft() {
@@ -205,6 +232,7 @@ function saveVibeVoiceDraft() {
       JSON.stringify({
         script: scriptInput.value,
         settings,
+        reference_urls: serializeReferenceUrlRecords(),
       }),
     );
   } catch {
@@ -560,6 +588,11 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
+  if (activeVoiceRecording) {
+    message.dataset.state = "error";
+    message.textContent = `Speaker ${activeVoiceRecording.slot} の録音を停止してから生成してください。`;
+    return;
+  }
   updateModelAvailability();
   updateLineByLineAutoState();
   saveVibeVoiceDraft();
@@ -634,10 +667,13 @@ async function handleVoiceFileChange(input) {
     return;
   }
   try {
+    referenceUrlRecordsBySlot.delete(String(slot));
+    renderReferenceUrlRecord(String(slot), null);
     await saveVoiceFile(slot, file);
     const record = voiceRecordFromFile(slot, file);
     savedVoiceFilesBySlot.set(slot, record);
     renderSavedVoiceFile(slot, record);
+    saveVibeVoiceDraft();
     message.dataset.state = "ready";
     message.textContent = `Speaker ${slot} の参照音声を保存しました。`;
   } catch (error) {
@@ -646,7 +682,177 @@ async function handleVoiceFileChange(input) {
   }
 }
 
-async function handleReferenceUrlFetch() {
+async function toggleVoiceRecording(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const button = event.currentTarget;
+  const slot = String(button?.dataset.recordVoiceSlot || "");
+  if (!/^[1-4]$/.test(slot)) {
+    return;
+  }
+  if (activeVoiceRecording) {
+    if (activeVoiceRecording.slot === slot) {
+      stopActiveVoiceRecording();
+      return;
+    }
+    message.dataset.state = "error";
+    message.textContent = `Speaker ${activeVoiceRecording.slot} の録音を停止してから、Speaker ${slot} を録音してください。`;
+    return;
+  }
+  await startVoiceRecording(slot, button);
+}
+
+async function startVoiceRecording(slot, button) {
+  if (generationBusy) {
+    message.dataset.state = "error";
+    message.textContent = "生成中は参照音声を録音できません。";
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    message.dataset.state = "error";
+    message.textContent = "このブラウザではマイク録音を使えません。音声ファイルを選択してください。";
+    return;
+  }
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = preferredRecordingMimeType();
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    const chunks = [];
+    activeVoiceRecording = { slot, button, recorder, stream, chunks };
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    });
+    recorder.addEventListener("stop", () => {
+      finishVoiceRecording(slot, recorder.mimeType || mimeType || "audio/webm").catch((error) => {
+        message.dataset.state = "error";
+        message.textContent = `録音を保存できませんでした: ${error.message || error}`;
+      });
+    });
+    recorder.start();
+    renderVoiceRecordingButtons();
+    message.dataset.state = "busy";
+    message.textContent = `Speaker ${slot} の参照音声を録音中です。もう一度押すと停止します。`;
+  } catch (error) {
+    stopStreamTracks(stream);
+    activeVoiceRecording = null;
+    renderVoiceRecordingButtons();
+    message.dataset.state = "error";
+    message.textContent = `マイク録音を開始できませんでした: ${error.message || error}`;
+  }
+}
+
+function stopActiveVoiceRecording() {
+  const recording = activeVoiceRecording;
+  if (!recording) {
+    return;
+  }
+  if (recording.recorder.state !== "inactive") {
+    recording.recorder.stop();
+  }
+  message.dataset.state = "busy";
+  message.textContent = `Speaker ${recording.slot} の録音を保存中です。`;
+}
+
+async function finishVoiceRecording(slot, mimeType) {
+  const recording = activeVoiceRecording;
+  if (!recording || recording.slot !== slot) {
+    return;
+  }
+  activeVoiceRecording = null;
+  stopStreamTracks(recording.stream);
+  renderVoiceRecordingButtons();
+  const blob = new Blob(recording.chunks, { type: mimeType || "audio/webm" });
+  if (!blob.size) {
+    throw new Error("録音データが空です。");
+  }
+  referenceUrlRecordsBySlot.delete(String(slot));
+  renderReferenceUrlRecord(String(slot), null);
+  const input = voiceFileInputs.find((candidate) => voiceSlotFromInput(candidate) === String(slot));
+  if (input) {
+    input.value = "";
+  }
+  const filename = recordedVoiceFilename(slot, blob.type);
+  await saveVoiceBlob(slot, blob, filename);
+  saveVibeVoiceDraft();
+  message.dataset.state = "ready";
+  message.textContent = `Speaker ${slot} の録音を参照音声として保存しました。`;
+}
+
+function renderVoiceRecordingButtons() {
+  for (const button of recordVoiceButtons) {
+    const slot = String(button.dataset.recordVoiceSlot || "");
+    const isActive = Boolean(activeVoiceRecording && activeVoiceRecording.slot === slot);
+    button.disabled = generationBusy || Boolean(activeVoiceRecording && !isActive);
+    button.dataset.recording = isActive ? "true" : "false";
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.textContent = isActive ? "停止" : "録音";
+  }
+}
+
+function preferredRecordingMimeType() {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+  return (
+    ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((type) =>
+      MediaRecorder.isTypeSupported(type),
+    ) || ""
+  );
+}
+
+function recordedVoiceFilename(slot, mimeType) {
+  const extension = extensionForMimeType(mimeType || "audio/webm");
+  return `speaker-${slot}-recorded-reference.${extension}`;
+}
+
+function stopStreamTracks(stream) {
+  if (!stream) {
+    return;
+  }
+  stream.getTracks().forEach((track) => track.stop());
+}
+
+function openReferenceUrlDialog(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const slot = String(event.currentTarget?.dataset.referenceUrlOpenSlot || "1");
+  const record = referenceUrlRecordsBySlot.get(slot);
+  if (referenceUrlSlotSelect) {
+    referenceUrlSlotSelect.value = slot;
+  }
+  if (referenceUrlTitleSlot) {
+    referenceUrlTitleSlot.textContent = slot;
+  }
+  if (referenceUrlInput) {
+    referenceUrlInput.value = record?.url || "";
+  }
+  if (referenceUrlStartInput) {
+    referenceUrlStartInput.value = record?.startSeconds || "";
+  }
+  if (referenceUrlDurationInput) {
+    referenceUrlDurationInput.value = record?.durationSeconds || "5";
+  }
+  setReferenceUrlStatus("", "ready");
+  if (typeof referenceUrlDialog?.showModal === "function") {
+    referenceUrlDialog.showModal();
+  } else {
+    referenceUrlDialog?.setAttribute("open", "");
+  }
+  referenceUrlInput?.focus();
+}
+
+function closeReferenceUrlDialog() {
+  if (typeof referenceUrlDialog?.close === "function") {
+    referenceUrlDialog.close();
+  } else {
+    referenceUrlDialog?.removeAttribute("open");
+  }
+}
+
+function handleReferenceUrlUse() {
   const slot = String(referenceUrlSlotSelect?.value || "1");
   const url = String(referenceUrlInput?.value || "").trim();
   const durationSeconds = String(referenceUrlDurationInput?.value || "5").trim();
@@ -656,58 +862,156 @@ async function handleReferenceUrlFetch() {
     return;
   }
   if (!durationSeconds) {
-    setReferenceUrlStatus("取得秒数を入力してください。", "error");
+    setReferenceUrlStatus("切り出し秒数を入力してください。", "error");
     return;
   }
-  setReferenceUrlBusy(true);
-  setReferenceUrlStatus("URLから参照音声を取得中です。", "busy");
   try {
-    const body = new FormData();
-    body.set("url", url);
-    body.set("duration_seconds", durationSeconds);
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("URLは http または https を指定してください。");
+    }
+    const duration = Number(durationSeconds);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("切り出し秒数は0より大きい数値を指定してください。");
+    }
+    const record = {
+      url,
+      durationSeconds,
+      startSeconds: "",
+    };
     if (startSeconds) {
-      body.set("start_seconds", startSeconds);
+      const start = Number(startSeconds);
+      if (!Number.isFinite(start) || start < 0) {
+        throw new Error("開始秒は0以上の数値を指定してください。");
+      }
+      record.startSeconds = startSeconds;
     }
-    const response = await fetch("/api/vibevoice/reference-audio-from-url", {
-      method: "POST",
-      body,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.detail || `URL参照音声取得に失敗しました: ${response.status}`);
-    }
-    const audioBytes = base64ToBytes(payload.audio_base64 || "");
-    if (audioBytes.length < 1) {
-      throw new Error("URL参照音声が空でした。");
-    }
-    const blob = new Blob([audioBytes], { type: payload.audio_mime_type || "audio/wav" });
-    const filename = payload.filename || `reference-url-speaker-${slot}.wav`;
-    await saveVoiceBlob(slot, blob, filename);
+    referenceUrlRecordsBySlot.set(slot, record);
     const input = voiceFileInputs.find((candidate) => voiceSlotFromInput(candidate) === slot);
     if (input) {
       input.value = "";
     }
-    setReferenceUrlStatus(referenceUrlSuccessMessage(slot, payload), "ready");
+    renderReferenceUrlRecord(slot, record);
+    saveVibeVoiceDraft();
+    setReferenceUrlStatus(referenceUrlUseMessage(slot, record), "ready");
     message.dataset.state = "ready";
-    message.textContent = `Speaker ${slot} の参照音声をURLから保存しました。Speaker枠で再生確認できます。`;
+    message.textContent = `Speaker ${slot} のURL参照を設定しました。生成ボタンでRunPodへ送信します。`;
+    closeReferenceUrlDialog();
   } catch (error) {
     setReferenceUrlStatus(String(error.message || error), "error");
     message.dataset.state = "error";
-    message.textContent = `URL参照音声を取得できませんでした: ${error.message || error}`;
-  } finally {
-    setReferenceUrlBusy(false);
+    message.textContent = `URL参照音声を設定できませんでした: ${error.message || error}`;
   }
 }
 
-function setReferenceUrlBusy(busy) {
-  referenceUrlFetching = busy;
-  updateReferenceUrlButtonState();
+function serializeReferenceUrlRecords() {
+  const records = {};
+  for (const [slot, record] of referenceUrlRecordsBySlot.entries()) {
+    const normalized = normalizeReferenceUrlRecord(record);
+    if (!normalized) {
+      continue;
+    }
+    records[String(slot)] = normalized;
+  }
+  return records;
+}
+
+function restoreReferenceUrlRecords(value) {
+  referenceUrlRecordsBySlot.clear();
+  if (value && typeof value === "object") {
+    for (const [slot, record] of Object.entries(value)) {
+      const normalizedSlot = String(slot || "").trim();
+      if (!/^[1-4]$/.test(normalizedSlot)) {
+        continue;
+      }
+      const normalized = normalizeReferenceUrlRecord(record);
+      if (normalized) {
+        referenceUrlRecordsBySlot.set(normalizedSlot, normalized);
+      }
+    }
+  }
+  renderAllReferenceUrlRecords();
+}
+
+function normalizeReferenceUrlRecord(record) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+  const url = String(record.url || "").trim();
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  const durationSeconds = String(record.durationSeconds || "5").trim() || "5";
+  const duration = Number(durationSeconds);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return null;
+  }
+  const startSeconds = String(record.startSeconds || "").trim();
+  if (startSeconds) {
+    const start = Number(startSeconds);
+    if (!Number.isFinite(start) || start < 0) {
+      return null;
+    }
+  }
+  return { url, durationSeconds, startSeconds };
+}
+
+function renderAllReferenceUrlRecords() {
+  for (const display of referenceUrlDisplays) {
+    const slot = String(display.dataset.referenceUrlDisplaySlot || "");
+    renderReferenceUrlRecord(slot, referenceUrlRecordsBySlot.get(slot));
+  }
+}
+
+function renderReferenceUrlRecord(slot, record) {
+  const target = referenceUrlDisplays.find(
+    (candidate) => String(candidate.dataset.referenceUrlDisplaySlot || "") === String(slot),
+  );
+  if (!target) {
+    return;
+  }
+  if (!record?.url) {
+    target.hidden = true;
+    target.textContent = "";
+    return;
+  }
+  target.hidden = false;
+  target.textContent = referenceUrlDisplayText(record);
+}
+
+function referenceUrlDisplayText(record) {
+  const parts = ["URL参照", shortenUrlForDisplay(record.url)];
+  const start = Number(record.startSeconds);
+  const duration = Number(record.durationSeconds);
+  if (record.startSeconds && Number.isFinite(start)) {
+    parts.push(`開始 ${formatSeconds(start)}`);
+  }
+  if (Number.isFinite(duration)) {
+    parts.push(`${formatSeconds(duration)}切り出し`);
+  }
+  return parts.join(" / ");
+}
+
+function shortenUrlForDisplay(value) {
+  const text = String(value || "");
+  if (text.length <= 72) {
+    return text;
+  }
+  return `${text.slice(0, 48)}...${text.slice(-18)}`;
 }
 
 function updateReferenceUrlButtonState() {
   if (referenceUrlButton) {
-    referenceUrlButton.disabled = generationBusy || referenceUrlFetching;
-    referenceUrlButton.textContent = referenceUrlFetching ? "取得中..." : "取得";
+    referenceUrlButton.disabled = generationBusy;
+    referenceUrlButton.textContent = "設定";
   }
 }
 
@@ -719,17 +1023,17 @@ function setReferenceUrlStatus(text, state = "ready") {
   referenceUrlStatus.textContent = text || "";
 }
 
-function referenceUrlSuccessMessage(slot, payload) {
-  const start = Number(payload.start_seconds);
-  const duration = Number(payload.duration_seconds);
-  const parts = [`Speaker ${slot} に保存しました`];
-  if (Number.isFinite(start)) {
+function referenceUrlUseMessage(slot, record) {
+  const start = Number(record.startSeconds);
+  const duration = Number(record.durationSeconds);
+  const parts = [`Speaker ${slot} のURL参照を設定しました`];
+  if (record.startSeconds && Number.isFinite(start)) {
     parts.push(`開始 ${formatSeconds(start)}`);
   }
   if (Number.isFinite(duration)) {
-    parts.push(`${formatSeconds(duration)}取得`);
+    parts.push(`${formatSeconds(duration)}切り出し`);
   }
-  return `${parts.join(" / ")}。Speaker枠で再生確認できます。`;
+  return `${parts.join(" / ")}。生成ボタンでRunPodへ送信します。`;
 }
 
 async function appendVoiceFiles(body, requiredSlots = null) {
@@ -751,6 +1055,10 @@ async function appendVoiceFiles(body, requiredSlots = null) {
       count += 1;
       continue;
     }
+    if (appendVoiceUrlReference(body, slot)) {
+      count += 1;
+      continue;
+    }
     const saved = savedVoiceFilesBySlot.get(slot);
     if (saved?.blob) {
       body.set(input.name, saved.blob, saved.name || `voice-${slot}`);
@@ -760,6 +1068,25 @@ async function appendVoiceFiles(body, requiredSlots = null) {
     missingSlots.push(slot);
   }
   return { count, missingSlots };
+}
+
+function appendVoiceUrlReference(body, slot) {
+  const record = referenceUrlRecordsBySlot.get(String(slot));
+  return appendStoredVoiceUrlReference(body, slot, record);
+}
+
+function appendStoredVoiceUrlReference(body, slot, record) {
+  if (!record?.url) {
+    return false;
+  }
+  body.set(`voice_url_${slot}`, record.url);
+  body.set(`voice_url_duration_${slot}`, record.durationSeconds || "5");
+  if (record.startSeconds) {
+    body.set(`voice_url_start_${slot}`, record.startSeconds);
+  } else {
+    body.delete(`voice_url_start_${slot}`);
+  }
+  return true;
 }
 
 function requiredVoiceSlotsFromScript(scriptText) {
@@ -1368,6 +1695,7 @@ function setBusy(busy, text) {
   generateButton.textContent = busy ? "生成中..." : "生成";
   resetSettingsButton.disabled = busy;
   updateReferenceUrlButtonState();
+  renderVoiceRecordingButtons();
   cancelButton.hidden = !busy;
   if (busy) {
     jobProgress.dataset.state = "running";

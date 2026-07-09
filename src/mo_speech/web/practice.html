@@ -3,91 +3,57 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SpeakLoop - 言いたいことを話す練習</title>
+    <title>SpeakLoop - 言いたいことで発音練習</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body class="practice-body">
     <main class="practice-shell" aria-label="SpeakLoop">
       <header class="practice-header">
-        <a class="practice-back-link" href="/" aria-label="Voice Labへ">←</a>
-        <div>
-          <p class="practice-kicker">SpeakLoop</p>
-          <h1>言いたいことを話す練習 <span>Pronunciation Practice</span> <span>发音练习</span></h1>
+        <div class="practice-header-main">
+          <a class="practice-back-link" href="/" aria-label="Voice Labへ">←</a>
+          <div>
+            <p class="practice-kicker">SpeakLoop</p>
+            <h1>言いたいことで発音練習</h1>
+          </div>
         </div>
+        <section class="public-auth-panel practice-header-auth" data-public-auth-panel hidden aria-label="公開デモのログイン状態">
+          <span data-public-auth-status>ログイン状態を確認中です。</span>
+          <a data-public-auth-login href="/auth/google/login?next=/speakloop">Googleでログイン</a>
+          <a data-public-auth-logout href="/auth/logout" hidden>ログアウト</a>
+        </section>
       </header>
 
-      <section class="public-auth-panel" data-public-auth-panel hidden aria-label="公開デモのログイン状態">
-        <span data-public-auth-status>ログイン状態を確認中です。</span>
-        <a data-public-auth-login href="/auth/google/login?next=/speakloop">Googleでログイン</a>
-        <a data-public-auth-logout href="/auth/logout" hidden>ログアウト</a>
-      </section>
-
-      <section class="public-sample-audio" data-public-sample-feature="speakloop" hidden aria-label="SpeakLoop サンプル音声">
-        <div>
-          <p class="public-sample-kicker">Sample</p>
-          <h2 data-public-sample-title>サンプル音声</h2>
-          <p data-public-sample-description hidden></p>
-        </div>
-        <audio data-public-sample-audio controls preload="metadata"></audio>
-      </section>
-
-      <section class="practice-quick-settings" aria-label="練習設定">
-        <div class="practice-current-language">
-          <span>学習言語</span>
-          <strong id="practice-current-language-label">日本語</strong>
-        </div>
-        <button id="practice-settings-button" class="practice-settings-button" type="button" aria-haspopup="dialog" aria-controls="practice-settings-overlay">
-          <span aria-hidden="true">⚙</span>
-          <span>設定</span>
-        </button>
-      </section>
-
-      <div id="practice-settings-overlay" class="practice-settings-overlay" hidden>
-        <div class="practice-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="practice-settings-title">
-          <div class="practice-settings-header">
-            <h2 id="practice-settings-title">設定</h2>
-            <button id="practice-settings-close-button" class="practice-settings-close-button" type="button" aria-label="設定を閉じる">×</button>
+      <div class="public-status-bar">
+        <section class="public-sample-audio" data-public-sample-feature="speakloop" hidden aria-label="SpeakLoop サンプル音声">
+          <div>
+            <p class="public-sample-kicker">Sample</p>
+            <h2 data-public-sample-title>サンプル音声</h2>
+            <p data-public-sample-description hidden></p>
           </div>
-          <p class="practice-section-label">学習する言語 / Learning language / 学习语言</p>
-          <div id="practice-target-language" class="practice-language-grid" role="radiogroup" aria-label="学習対象言語">
-            <button type="button" class="practice-language-button is-selected" data-language="ja-JP" value="ja-JP" role="radio" aria-checked="true">
-              <span aria-hidden="true">🇯🇵</span>
-              <strong>日本語</strong>
-            </button>
-            <button type="button" class="practice-language-button" data-language="zh-CN" value="zh-CN" role="radio" aria-checked="false">
-              <span aria-hidden="true">🇨🇳</span>
-              <strong>中文</strong>
-            </button>
-            <button type="button" class="practice-language-button" data-language="en-US" value="en-US" role="radio" aria-checked="false">
-              <span aria-hidden="true">🇺🇸</span>
-              <strong>English</strong>
-            </button>
-          </div>
-          <label id="practice-pinyin-setting" class="practice-inline-setting" hidden>
-            <input id="practice-pinyin-toggle" type="checkbox" checked />
-            <span>ピンインを表示 / Show pinyin / 显示拼音</span>
-          </label>
-          <label class="practice-settings-field">
-            <span>ASR</span>
-            <select id="practice-asr-model">
-              <option value="whisper-1" selected>whisper-1（フレーズ比較）</option>
-              <option value="gpt-4o-transcribe">gpt-4o（全体比較）</option>
-              <option value="gpt-4o-mini-transcribe">gpt-4o mini（軽量）</option>
-            </select>
-          </label>
-          <p class="practice-asr-help">
-            <strong>通常は whisper-1。</strong>
-            whisper-1 はタイムスタンプ取得時だけフレーズごと比較再生、gpt-4o/mini は全体比較再生に切り替わります。
-          </p>
-        </div>
+          <audio data-public-sample-audio controls preload="metadata"></audio>
+        </section>
       </div>
 
+      <section class="practice-quick-settings" aria-label="練習設定">
+        <label class="practice-current-language practice-language-select">
+          <span>学習言語</span>
+          <select id="practice-target-language-select" aria-label="学習する言語">
+            <option value="ja-JP">🇯🇵 日本語</option>
+            <option value="zh-CN">🇨🇳 中文</option>
+            <option value="en-US">🇺🇸 English</option>
+          </select>
+        </label>
+        <label id="practice-pinyin-setting" class="practice-inline-setting" hidden>
+          <input id="practice-pinyin-toggle" type="checkbox" checked />
+          <span>ピンイン</span>
+        </label>
+      </section>
+
       <section class="practice-flow" aria-label="れんしゅう">
-        <article class="practice-card practice-card-primary">
+        <article id="practice-native-panel" class="practice-card practice-card-primary" data-practice-record-slot="native">
           <div class="practice-step-number">1</div>
           <div class="practice-card-copy">
             <h2 id="practice-record-title">言いたいことを話す</h2>
-            <p id="practice-record-description">说出想说的话 / Say what you want</p>
           </div>
           <button id="practice-native-record-button" class="record-orb practice-record-orb" type="button" aria-label="言いたいことを録音">
             <span class="record-progress" aria-hidden="true"></span>
@@ -104,22 +70,38 @@
             </span>
             <span class="record-timer" aria-hidden="true">REC</span>
           </button>
-          <p id="practice-native-action-label" class="practice-orb-caption">話す / Speak / 说</p>
-        </article>
-
-        <article id="practice-prompt-panel" class="practice-card practice-prompt-card" hidden>
-          <div class="practice-step-number">2</div>
-          <div class="practice-card-copy">
-            <h2>お手本</h2>
-            <p id="practice-target-label">Listen and repeat / 听一听，然后模仿</p>
-          </div>
           <div id="practice-native-transcript-panel" class="practice-native-transcript-panel" hidden>
             <p id="practice-native-transcript-label" class="practice-mini-label">言ったこと</p>
             <p id="practice-native-transcript" class="practice-native-transcript"></p>
           </div>
-          <div class="practice-target-text-box">
-            <p id="practice-target-text" class="practice-target-text"></p>
-            <p id="practice-target-subtext" class="practice-target-subtext" hidden></p>
+        </article>
+
+        <article id="practice-prompt-panel" class="practice-card practice-prompt-card" data-practice-record-slot="repeat" hidden>
+          <div class="practice-step-number">2</div>
+          <div class="practice-card-copy">
+            <h2>練習</h2>
+            <p id="practice-target-label">お手本</p>
+          </div>
+          <div class="practice-target-practice-row">
+            <div class="practice-target-text-box">
+              <p id="practice-target-text" class="practice-target-text"></p>
+              <p id="practice-target-subtext" class="practice-target-subtext" hidden></p>
+            </div>
+            <button id="practice-repeat-record-button" class="record-orb practice-record-orb practice-repeat-record-button" type="button" aria-label="練習を録音">
+              <span class="record-progress" aria-hidden="true"></span>
+              <span class="record-waves" aria-hidden="true"></span>
+              <span class="record-icon" aria-hidden="true"></span>
+              <span id="practice-repeat-level" class="record-level-meter" aria-hidden="true">
+                <span class="record-level-bar"></span>
+                <span class="record-level-bar"></span>
+                <span class="record-level-bar"></span>
+                <span class="record-level-bar"></span>
+                <span class="record-level-bar"></span>
+                <span class="record-level-bar"></span>
+                <span class="record-level-bar"></span>
+              </span>
+              <span class="record-timer" aria-hidden="true">REC</span>
+            </button>
           </div>
           <div id="practice-result-panel" class="practice-result-inline" hidden>
             <p id="practice-recognized-label" class="practice-section-label">聞こえた言葉</p>
@@ -138,12 +120,17 @@
               <span aria-hidden="true">▶</span>
               <span>再生</span>
             </button>
+            <label class="practice-auto-play-control">
+              <input id="practice-auto-play-comparison" type="checkbox" checked />
+              <span>練習終了後すぐ再生</span>
+            </label>
             <label class="practice-speed-control">
               <span>速度</span>
               <input id="practice-speed-slider" type="range" min="0.5" max="2" step="0.1" value="1" />
               <output id="practice-speed-value" for="practice-speed-slider">1.0x</output>
             </label>
           </div>
+          <p class="practice-grade-guide">判定: 99.5%以上: できました / 95%以上: いいかんじ / 90%以上: まあまあ / 90%未満: もう一回</p>
           <audio id="practice-model-audio" hidden></audio>
         </article>
       </section>

@@ -16,14 +16,16 @@ def test_practice_normalization_treats_common_chinese_variants_as_equivalent() -
 
 
 def test_practice_attempt_grades_similarity() -> None:
+    perfect = evaluate_practice_attempt("I want a coffee.", "I want a coffee.", "en-US")
     ok = evaluate_practice_attempt("I want a coffee.", "i want coffee", "en-US")
-    almost = evaluate_practice_attempt("I want a coffee.", "want tea", "en-US")
+    almost = evaluate_practice_attempt("I want a coffee.", "I want a toffee", "en-US")
     retry = evaluate_practice_attempt("I want a coffee.", "good morning", "en-US")
 
+    assert perfect["grade"] == "perfect"
     assert ok["grade"] == "ok"
     assert almost["grade"] == "almost"
     assert retry["grade"] == "retry"
-    assert 0 <= retry["similarity"] < almost["similarity"] < ok["similarity"] <= 1
+    assert 0 <= retry["similarity"] < almost["similarity"] < ok["similarity"] < perfect["similarity"] <= 1
     assert ok["diff"]
     assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(ok["diff"][0])
 

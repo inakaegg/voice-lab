@@ -12,9 +12,10 @@ PRACTICE_TARGET_LANGUAGES = {
 }
 
 PRACTICE_GRADE_LABELS = {
+    "perfect": "できました",
     "ok": "いいかんじ",
-    "almost": "もうすこし",
-    "retry": "ちがうかも",
+    "almost": "まあまあ",
+    "retry": "もう一回",
 }
 _ZH_TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
     {
@@ -159,9 +160,11 @@ def practice_similarity(normalized_target: str, normalized_recognized: str) -> f
 
 
 def practice_grade(similarity: float) -> str:
-    if similarity >= 0.82:
+    if similarity >= 0.995:
+        return "perfect"
+    if similarity >= 0.95:
         return "ok"
-    if similarity >= 0.45:
+    if similarity >= 0.90:
         return "almost"
     return "retry"
 
