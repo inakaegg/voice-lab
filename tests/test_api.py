@@ -109,32 +109,30 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
 
     assert response.status_code == 200
     assert "SpeakLoop" in response.text
-    assert "言いたいことを話す練習" in response.text
-    assert "Pronunciation Practice" in response.text
-    assert "发音练习" in response.text
+    assert "言いたいことで発音練習" in response.text
+    assert "Pronunciation Practice" not in response.text
+    assert "发音练习" not in response.text
     assert "学習する言語" in response.text
-    assert "practice-current-language-label" in response.text
-    assert "practice-settings-button" in response.text
-    assert "practice-settings-overlay" in response.text
+    assert "practice-target-language-select" in response.text
+    assert "practice-settings-button" not in response.text
+    assert "practice-settings-overlay" not in response.text
     assert "言いたいことを話す" in response.text
-    assert "Say what you want" in response.text
+    assert "practice-repeat-record-button" in response.text
     assert "practice-target-language" in response.text
     assert 'value="ja-JP"' in response.text
     assert 'value="zh-CN"' in response.text
     assert 'value="en-US"' in response.text
     assert "practice-native-record-button" in response.text
-    assert "practice-repeat-record-button" not in response.text
+    assert "practice-repeat-record-button" in response.text
     assert "practice-native-transcript" in response.text
     assert "practice-pinyin-toggle" in response.text
     assert "record-level-meter" in response.text
-    assert "practice-asr-model" in response.text
-    assert 'value="gpt-4o-transcribe"' in response.text
-    assert 'value="gpt-4o-mini-transcribe"' in response.text
-    assert 'value="whisper-1" selected' in response.text
-    assert "whisper-1（フレーズ比較）" in response.text
-    assert "通常は whisper-1" in response.text
-    assert "gpt-4o/mini は全体比較再生" in response.text
-    assert "whisper-1 はタイムスタンプ取得時だけフレーズごと比較再生" in response.text
+    assert "practice-asr-model" not in response.text
+    assert 'value="gpt-4o-transcribe"' not in response.text
+    assert 'value="gpt-4o-mini-transcribe"' not in response.text
+    assert "whisper-1（フレーズ比較）" not in response.text
+    assert "通常は whisper-1" not in response.text
+    assert "gpt-4o/mini は全体比較再生" not in response.text
     assert "practice-speed-slider" in response.text
     assert 'min="0.5"' in response.text
     assert 'max="2"' in response.text
@@ -689,7 +687,7 @@ def test_practice_attempt_api_scores_repeat_audio() -> None:
     payload = response.json()
     assert payload["recognized_text"] == "I want coffee"
     assert payload["grade"] == "ok"
-    assert payload["similarity"] >= 0.85
+    assert payload["similarity"] >= 0.95
     assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(payload["diff"][0])
     assert payload["providers"]["asr"] == "fake-asr"
 
@@ -738,7 +736,7 @@ def test_practice_recording_api_detects_repeat_attempt_while_target_exists() -> 
     assert payload["recording_kind"] == "attempt"
     assert payload["recognized_text"] == "我想要咖啡"
     assert payload["classification"]["attempt_source"] == "target"
-    assert payload["grade"] == "ok"
+    assert payload["grade"] == "perfect"
 
 
 def test_practice_recording_api_detects_new_prompt_while_target_exists() -> None:

@@ -32,6 +32,7 @@ async function savePublicAccessSettings(root) {
     }
     const next = clonePublicAccessSettings(currentPublicAccessSettings);
     collectPublicAccessSettings(root, next);
+    setPublicAccessSaveButton(root, "保存中...", true);
     setPublicAccessStatus("保存中です。");
     const response = await fetch("/api/public-access-settings", {
       method: "PUT",
@@ -46,8 +47,16 @@ async function savePublicAccessSettings(root) {
     for (const targetRoot of publicAccessRoots) {
       renderPublicAccessSettings(targetRoot, currentPublicAccessSettings);
     }
-    setPublicAccessStatus("保存しました。");
+    const adminCount = Array.isArray(currentPublicAccessSettings.admin_google_emails)
+      ? currentPublicAccessSettings.admin_google_emails.length
+      : 0;
+    setPublicAccessSaveButton(root, "保存済み", false);
+    setPublicAccessStatus(`保存しました。quota対象外の管理者Googleメール: ${adminCount}件。`, "success");
+    window.setTimeout(() => {
+      setPublicAccessSaveButton(root, "保存", false, "保存済み");
+    }, 2400);
   } catch (error) {
+    setPublicAccessSaveButton(root, "保存", false);
     setPublicAccessStatus(errorMessage(error), "error");
   }
 }
@@ -115,6 +124,18 @@ function setPublicAccessStatus(text, state = "") {
     status.textContent = text;
     status.dataset.state = state;
   }
+}
+
+function setPublicAccessSaveButton(root, text, disabled, onlyIfText = "") {
+  const button = root.querySelector("[data-public-access-save]");
+  if (!button) {
+    return;
+  }
+  if (onlyIfText && button.textContent !== onlyIfText) {
+    return;
+  }
+  button.textContent = text;
+  button.disabled = Boolean(disabled);
 }
 
 function clonePublicAccessSettings(settings) {

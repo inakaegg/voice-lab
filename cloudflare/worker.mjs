@@ -45,9 +45,10 @@ const PRACTICE_TARGET_LANGUAGES = {
   "en-US": { label: "English", speech_name: "English" },
 };
 const PRACTICE_GRADE_LABELS = {
+  perfect: "できました",
   ok: "いいかんじ",
-  almost: "もうすこし",
-  retry: "ちがうかも",
+  almost: "まあまあ",
+  retry: "もう一回",
 };
 const ZH_TRADITIONAL_TO_SIMPLIFIED = {
   後: "后",
@@ -157,7 +158,6 @@ const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
       total_limit: 20,
       audio_max_bytes: 10_000_000,
       script_max_chars: 1600,
-      reference_url_duration_max_seconds: 10,
     },
     fun: {
       daily_limit: 10,
@@ -1344,6 +1344,7 @@ function validatePublicInputLimits(featureSettings, limits) {
   const audioBytes = Number(limits.audioBytes || 0);
   const textChars = Number(limits.textChars || 0);
   const scriptChars = Number(limits.scriptChars || 0);
+  const referenceUrlDurationSeconds = Number(limits.referenceUrlDurationSeconds || 0);
   if (featureSettings.audio_max_bytes > 0 && audioBytes > featureSettings.audio_max_bytes) {
     throw httpError(413, "audio is too large");
   }
@@ -1352,6 +1353,12 @@ function validatePublicInputLimits(featureSettings, limits) {
   }
   if (featureSettings.script_max_chars > 0 && scriptChars > featureSettings.script_max_chars) {
     throw httpError(413, "script is too large");
+  }
+  if (
+    featureSettings.reference_url_duration_max_seconds > 0 &&
+    referenceUrlDurationSeconds > featureSettings.reference_url_duration_max_seconds
+  ) {
+    throw httpError(413, "reference URL audio duration is too long");
   }
 }
 
@@ -2469,7 +2476,7 @@ async function vibeVoiceStatus(env) {
 }
 
 async function createVibeVoiceReferenceAudioFromUrl(_request, _env) {
-  throw httpError(501, "URL reference audio extraction is not available on Cloudflare Worker");
+  throw httpError(501, "URL reference audio extraction is only available in the local FastAPI app");
 }
 
 async function createVibeVoiceJob(request, env) {
@@ -2483,6 +2490,13 @@ async function createVibeVoiceJob(request, env) {
     const blob = optionalBlob(form, `voice_file_${slot}`);
     if (blob && Number(blob.size || 0) > 0) {
       voiceBlobs.push({ slot, blob });
+      continue;
+    }
+    if (stringFormValue(form, `voice_url_${slot}`, "").trim()) {
+      throw httpError(
+        400,
+        "URL reference audio is not available on the Cloudflare public demo. Upload or record reference audio instead.",
+      );
     }
   }
   if (voiceBlobs.length < 1) {
@@ -2490,7 +2504,7 @@ async function createVibeVoiceJob(request, env) {
   }
   await enforcePublicFeatureAccess(request, env, "skitvoice", {
     scriptChars: script.trim().length,
-    audioBytes: Math.max(...voiceBlobs.map((item) => Number(item.blob.size || 0))),
+    audioBytes: Math.max(0, ...voiceBlobs.map((item) => Number(item.blob.size || 0))),
   });
   const voices = [];
   for (const item of voiceBlobs) {
@@ -2511,6 +2525,71 @@ async function createVibeVoiceJob(request, env) {
     response_audio_format: stringFormValue(form, "response_audio_format", "mp3"),
   });
   return jobSnapshotFromRunpod(body, "vibevoice");
+}
+
+function vibeVoiceUrlReferenceFromForm(form, slot) {
+  const url = stringFormValue(form, `voice_url_${slot}`, "").trim();
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) {
+      throw new Error("invalid protocol");
+    }
+  } catch (_error) {
+    throw httpError(400, `voice_url_${slot} must be an http or https URL`);
+  }
+  const durationSeconds = numberFormValue(form, `voice_url_duration_${slot}`, 5);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw httpError(400, `voice_url_duration_${slot} must be a positive number`);
+  }
+  const startRaw = optionalStringFormValue(form, `voice_url_start_${slot}`);
+  let startSeconds = null;
+  if (startRaw !== null) {
+    startSeconds = Number.parseFloat(startRaw);
+    if (!Number.isFinite(startSeconds) || startSeconds < 0) {
+      throw httpError(400, `voice_url_start_${slot} must be a non-negative number`);
+    }
+  }
+  return {
+    slot,
+    url,
+    start_seconds: startSeconds,
+    duration_seconds: durationSeconds,
+  };
+}
+
+function vibeVoiceReferenceAudioRequestFromForm(form) {
+  const url = stringFormValue(form, "url", "").trim();
+  if (!url) {
+    throw httpError(400, "url is required");
+  }
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) {
+      throw new Error("invalid protocol");
+    }
+  } catch (_error) {
+    throw httpError(400, "url must be an http or https URL");
+  }
+  const durationSeconds = numberFormValue(form, "duration_seconds", 5);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw httpError(400, "duration_seconds must be a positive number");
+  }
+  const startRaw = optionalStringFormValue(form, "start_seconds");
+  let startSeconds = null;
+  if (startRaw !== null) {
+    startSeconds = Number.parseFloat(startRaw);
+    if (!Number.isFinite(startSeconds) || startSeconds < 0) {
+      throw httpError(400, "start_seconds must be a non-negative number");
+    }
+  }
+  return {
+    url,
+    start_seconds: startSeconds,
+    duration_seconds: durationSeconds,
+  };
 }
 
 async function readVibeVoiceScriptFromForm(form) {
@@ -3244,6 +3323,27 @@ async function submitRunpodJob(env, inputPayload) {
   });
 }
 
+async function submitRunpodSyncJob(env, inputPayload) {
+  return runpodRequest(env, "/runsync", {
+    method: "POST",
+    payload: { input: inputPayload },
+  });
+}
+
+function runpodSyncOutput(body, label) {
+  if (body && typeof body.output === "object" && body.output !== null) {
+    return body.output;
+  }
+  if (body && typeof body === "object" && body.audio_base64) {
+    return body;
+  }
+  const status = String(body?.status || "").toUpperCase();
+  if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
+    throw httpError(502, runpodErrorMessage(body));
+  }
+  throw httpError(502, `${label} did not return output`);
+}
+
 async function runpodRequest(env, path, { method = "GET", payload = null, timeoutMs = null } = {}) {
   requireEnv(env, "RUNPOD_ENDPOINT_ID");
   requireEnv(env, "RUNPOD_API_KEY");
@@ -3918,8 +4018,8 @@ function practiceSimilarity(normalizedTarget, normalizedRecognized) {
   if (normalizedTarget === normalizedRecognized) {
     return 1;
   }
-  const distance = levenshteinDistance(normalizedTarget, normalizedRecognized);
-  const sequenceScore = 1 - distance / Math.max(normalizedTarget.length, normalizedRecognized.length);
+  const commonLength = longestCommonSubsequenceLength(normalizedTarget, normalizedRecognized);
+  const sequenceScore = (2 * commonLength) / (normalizedTarget.length + normalizedRecognized.length);
   const containmentScore =
     normalizedTarget.includes(normalizedRecognized) || normalizedRecognized.includes(normalizedTarget)
       ? Math.min(normalizedTarget.length, normalizedRecognized.length) /
@@ -3929,13 +4029,37 @@ function practiceSimilarity(normalizedTarget, normalizedRecognized) {
 }
 
 function practiceGrade(similarity) {
-  if (similarity >= 0.82) {
+  if (similarity >= 0.995) {
+    return "perfect";
+  }
+  if (similarity >= 0.95) {
     return "ok";
   }
-  if (similarity >= 0.45) {
+  if (similarity >= 0.9) {
     return "almost";
   }
   return "retry";
+}
+
+function longestCommonSubsequenceLength(left, right) {
+  const leftChars = Array.from(left);
+  const rightChars = Array.from(right);
+  if (!leftChars.length || !rightChars.length) {
+    return 0;
+  }
+  let previous = new Array(rightChars.length + 1).fill(0);
+  let current = new Array(rightChars.length + 1).fill(0);
+  for (let leftIndex = 1; leftIndex <= leftChars.length; leftIndex += 1) {
+    for (let rightIndex = 1; rightIndex <= rightChars.length; rightIndex += 1) {
+      current[rightIndex] =
+        leftChars[leftIndex - 1] === rightChars[rightIndex - 1]
+          ? previous[rightIndex - 1] + 1
+          : Math.max(previous[rightIndex], current[rightIndex - 1]);
+    }
+    [previous, current] = [current, previous];
+    current.fill(0);
+  }
+  return previous[rightChars.length];
 }
 
 function practiceDiff(normalizedTarget, normalizedRecognized) {
