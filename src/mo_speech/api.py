@@ -663,10 +663,8 @@ def create_app(
 
     @app.get("/skitvoice")
     @app.get("/skitvoice/")
-    @app.get("/vibevoice")
-    @app.get("/vibevoice/")
-    def vibevoice() -> FileResponse:
-        return FileResponse(WEB_DIR / "vibevoice.html")
+    def skitvoice() -> FileResponse:
+        return FileResponse(WEB_DIR / "vibevoice_simple.html")
 
     @app.get("/skitvoice/admin")
     @app.get("/skitvoice/admin/")
@@ -675,6 +673,8 @@ def create_app(
     def vibevoice_admin() -> FileResponse:
         return FileResponse(WEB_DIR / "vibevoice.html")
 
+    @app.get("/vibevoice")
+    @app.get("/vibevoice/")
     @app.get("/vibevoice/simple")
     @app.get("/vibevoice/simple/")
     def vibevoice_simple() -> FileResponse:

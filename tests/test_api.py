@@ -185,21 +185,20 @@ def test_practice_admin_serves_practice_history_ui() -> None:
     assert "/static/app_practice_history.js" in response.text
 
 
-def test_vibevoice_serves_local_skit_ui_with_file_recording_and_url_sources() -> None:
+def test_skitvoice_serves_simple_user_ui_without_admin_controls() -> None:
     client = TestClient(create_app())
 
     response = client.get("/skitvoice")
 
     assert response.status_code == 200
     assert "SkitVoice" in response.text
-    assert "SkitVoice 管理" in response.text
-    assert 'data-vibevoice-mode="simple"' not in response.text
+    assert "SkitVoice 管理" not in response.text
+    assert 'data-vibevoice-mode="simple"' in response.text
     assert "vibevoice-script" in response.text
     assert "voice_file_1" in response.text
     assert 'data-record-voice-slot="1"' in response.text
-    assert 'data-reference-url-open-slot="1"' in response.text
-    assert 'id="vibevoice-reference-url-dialog"' in response.text
-    assert 'name="directed_retry_max_multiplier"' in response.text
+    assert 'data-reference-url-open-slot="1"' not in response.text
+    assert 'id="vibevoice-reference-url-dialog"' not in response.text
     assert "/static/app_vibevoice.js" in response.text
 
 
@@ -211,6 +210,9 @@ def test_vibevoice_serves_admin_skit_ui() -> None:
     assert response.status_code == 200
     assert "SkitVoice 管理" in response.text
     assert "vibevoice-script" in response.text
+    assert 'data-vibevoice-mode="simple"' not in response.text
+    assert 'data-reference-url-open-slot="1"' in response.text
+    assert 'id="vibevoice-reference-url-dialog"' in response.text
     assert 'name="directed_retry_max_multiplier"' in response.text
     assert "/static/app_vibevoice.js" in response.text
 

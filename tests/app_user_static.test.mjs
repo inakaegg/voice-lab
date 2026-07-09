@@ -284,6 +284,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, />URL<\/button>/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-button"[^>]*>設定<\/button>/);
   assert.doesNotMatch(vibevoiceHtml, /class="vibevoice-reference-url-panel"/);
+  assert.match(styles, /\.vibevoice-upload-slot\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/s);
+  assert.match(styles, /\.vibevoice-upload-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
+  assert.match(styles, /\.vibevoice-upload-actions\s*\{[^}]*grid-column:\s*2/s);
+  assert.match(styles, /\.vibevoice-upload-action,\s*\.vibevoice-url-slot-button,\s*\.vibevoice-record-slot-button\s*\{[^}]*min-width:\s*52px/s);
   assert.match(vibevoiceHtml, /name="cfg_scale"/);
   assert.match(vibevoiceHtml, /class="vibevoice-workspace"/);
   assert.match(vibevoiceHtml, /class="vibevoice-control-stack"/);

@@ -2675,14 +2675,14 @@ fieldset.public-samples-admin {
 }
 
 .vibevoice-upload-slot {
-  align-items: center;
+  align-items: start;
   background: #f7faff;
   border: 1px dashed #adc5e1;
   border-radius: 10px;
   display: grid;
   gap: 4px 8px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 72px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 92px;
   padding: 10px;
   position: relative;
   transition:
@@ -2707,7 +2707,7 @@ fieldset.public-samples-admin {
   color: #ffffff;
   display: inline-flex;
   font-weight: 900;
-  grid-row: 1 / 3;
+  grid-row: 1 / 4;
   height: 28px;
   justify-content: center;
   width: 28px;
@@ -2723,23 +2723,35 @@ fieldset.public-samples-admin {
 .vibevoice-upload-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  grid-column: 3;
-  grid-row: 1 / 3;
-  justify-content: flex-end;
+  grid-column: 2;
+  grid-row: 2;
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 .vibevoice-upload-action,
 .vibevoice-url-slot-button,
 .vibevoice-record-slot-button {
+  align-items: center;
+  appearance: none;
   background: #e5f0ff;
   border: 1px solid #bed5f5;
   border-radius: 999px;
+  box-sizing: border-box;
   color: #164c9e;
   cursor: pointer;
+  display: inline-flex;
   font-size: 12px;
   font-weight: 900;
+  justify-content: center;
+  line-height: 1;
+  margin: 0;
+  min-height: 30px;
+  min-width: 52px;
   padding: 5px 8px;
+  white-space: nowrap;
 }
 
 .vibevoice-url-slot-button,
@@ -2767,7 +2779,8 @@ fieldset.public-samples-admin {
   color: #40546e;
   display: block;
   font-size: 0.78rem;
-  grid-column: 2 / 4;
+  grid-column: 2 / -1;
+  grid-row: 3;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
