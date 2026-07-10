@@ -1,32 +1,54 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-export type LayoutVariant = "compact" | "guided" | "studio";
+type ThemePreference = "light" | "dark" | "system";
+const themeStorageKey = "mo-speech-theme";
 
-const layoutOptions: Array<{ id: LayoutVariant; label: string; note: string }> = [
-  { id: "compact", label: "コンパクト", note: "操作優先" },
-  { id: "guided", label: "ガイド", note: "手順優先" },
-  { id: "studio", label: "スタジオ", note: "制作画面" },
-];
-
-export function activateLayoutVariant(): LayoutVariant {
-  const requested = new URLSearchParams(window.location.search).get("layout");
-  const variant = layoutOptions.some((option) => option.id === requested) ? requested as LayoutVariant : "compact";
-  document.body.dataset.layout = variant;
-  return variant;
+export function activateCompactLayout(): void {
+  document.body.dataset.layout = "compact";
+  const preference = storedThemePreference();
+  document.documentElement.dataset.themePreference = preference;
+  document.documentElement.dataset.theme = preference === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : preference;
 }
 
 export function ProductHeader({ product, title, back = true }: { product: string; title: string; back?: boolean }) {
   return <header className="react-product-header">
     <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label="Voice Labへ">←</a>}<div><p className="react-eyebrow">{product}</p><h1>{title}</h1></div></div>
-    <div className="react-header-tools"><LayoutSwitcher/><AuthPanel productPath={`/${product.toLowerCase()}`} /></div>
+    <div className="react-header-tools"><ThemeSettings/><AuthPanel productPath={`/${product.toLowerCase()}`} /></div>
   </header>;
 }
 
-export function LayoutSwitcher() {
-  const current = document.body.dataset.layout || "compact";
-  return <nav className="react-layout-switcher" aria-label="レイアウト候補">
-    {layoutOptions.map((option) => <a key={option.id} href={`${window.location.pathname}?layout=${option.id}`} aria-current={current === option.id ? "page" : undefined}><strong>{option.label}</strong><span>{option.note}</span></a>)}
-  </nav>;
+export function ThemeSettings() {
+  const [preference, setPreference] = useState<ThemePreference>(() => storedThemePreference());
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const resolved = preference === "system" ? (media.matches ? "dark" : "light") : preference;
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.dataset.themePreference = preference;
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [preference]);
+
+  const selectTheme = (next: ThemePreference) => {
+    setPreference(next);
+    try { window.localStorage.setItem(themeStorageKey, next); } catch { /* 配色変更自体は継続する。 */ }
+  };
+  return <details className="react-theme-settings">
+    <summary aria-label="配色設定" title="配色設定"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm9 4.8v-2l-2.2-.7a7 7 0 0 0-.6-1.4l1.1-2-1.4-1.4-2 1.1a7 7 0 0 0-1.4-.6L13.8 3h-2L11 5.2a7 7 0 0 0-1.4.6l-2-1.1-1.4 1.4 1.1 2a7 7 0 0 0-.6 1.4L4.5 10v2l2.2.7a7 7 0 0 0 .6 1.4l-1.1 2 1.4 1.4 2-1.1a7 7 0 0 0 1.4.6l.7 2.2h2l.7-2.2a7 7 0 0 0 1.4-.6l2 1.1 1.4-1.4-1.1-2a7 7 0 0 0 .6-1.4L21 13Z"/></svg></summary>
+    <div className="react-theme-menu" role="radiogroup" aria-label="配色">
+      {([['light','明色'],['dark','暗色'],['system','システム']] as const).map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={preference === value} onClick={() => selectTheme(value)}>{label}</button>)}
+    </div>
+  </details>;
+}
+
+function storedThemePreference(): ThemePreference {
+  let value: string | null = null;
+  try { value = window.localStorage.getItem(themeStorageKey); } catch { /* systemへfallbackする。 */ }
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
 export function AuthPanel({ productPath }: { productPath: string }) {

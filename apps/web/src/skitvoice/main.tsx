@@ -1,7 +1,7 @@
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateLayoutVariant, PageShell, ProductHeader, SampleAudio } from "../shared/components";
+import { activateCompactLayout, PageShell, ProductHeader, SampleAudio } from "../shared/components";
 
-activateLayoutVariant();
+activateCompactLayout();
 
 const defaultScript = `1 あっ、こんにちは〜
 2 こんにちは。ご無沙汰してます。
