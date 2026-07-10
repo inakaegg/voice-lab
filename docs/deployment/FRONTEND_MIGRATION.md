@@ -14,6 +14,16 @@
 - WorkerとFastAPIは公開3routeだけReact buildを返す。管理画面と旧互換画面は従来HTML/JavaScriptのまま維持する。
 - 次段階では、既存controller内の状態遷移をreducer/hooksへ小単位で移し、移行済み部分から旧controllerを縮小する。
 
+### レイアウト比較
+
+SpeakLoopとSkitVoiceは同じ機能・文言のまま、クエリで3案を比較できる。
+
+- `?layout=compact`: 推奨。説明を圧縮し、PCでは主要操作を横並び、スマホでは生成操作を台本直後へ置く。
+- `?layout=guided`: 手順と説明を残した段階型。初回利用者向け。
+- `?layout=studio`: 暗色の制作画面。PCで台本・参照音声・生成設定を横並びにする。
+
+各画面上部の切替から移動できる。既定は `compact` とし、PC/スマホとも初回操作までのスクロール量を抑える。
+
 ## 現在の境界
 
 ```text

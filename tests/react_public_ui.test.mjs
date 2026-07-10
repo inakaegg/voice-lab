@@ -14,6 +14,10 @@ test("public portal SpeakLoop and SkitVoice are React TypeScript entries", () =>
   assert.match(speakloop, /mountPublicPage\(<SpeakLoop/);
   assert.match(skitvoice, /mountPublicPage\(<SkitVoice/);
   assert.match(shared, /function ProductHeader/);
+  assert.match(shared, /activateLayoutVariant/);
+  assert.match(shared, /"compact"/);
+  assert.match(shared, /"guided"/);
+  assert.match(shared, /"studio"/);
   assert.match(pkg, /"check:web"/);
 });
 
@@ -44,4 +48,11 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(skitvoice, /日本語サンプル/);
   assert.match(skitvoice, /中国語サンプル/);
   assert.match(skitvoice, /英語サンプル/);
+});
+
+test("SpeakLoop and SkitVoice expose three comparable layout candidates", () => {
+  assert.match(shared, /コンパクト/);
+  assert.match(shared, /ガイド/);
+  assert.match(shared, /スタジオ/);
+  assert.match(shared, /URLSearchParams/);
 });

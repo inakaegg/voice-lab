@@ -1,5 +1,7 @@
 import { mountPublicPage } from "../shared/bootstrap";
-import { PageShell, ProductHeader, SampleAudio } from "../shared/components";
+import { activateLayoutVariant, PageShell, ProductHeader, SampleAudio } from "../shared/components";
+
+activateLayoutVariant();
 
 const Meter = ({ id }: { id: string }) => <span id={id} className="record-level-meter" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <span className="record-level-bar" key={index} />)}</span>;
 
