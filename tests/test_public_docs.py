@@ -50,6 +50,11 @@ def test_public_demo_roadmap_tracks_tab_audio_and_rights_notice() -> None:
     assert "権利" in roadmap
     assert "プライバシー" in roadmap
 
+    vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
+    assert "ブラウザの共有許可" in vibevoice
+    assert "コンテンツの利用許諾" in vibevoice
+
+
 def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     workflow = read_text(".github/workflows/ci.yml")
 

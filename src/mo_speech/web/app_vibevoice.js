@@ -844,7 +844,18 @@ async function toggleTabAudioRecording(event) {
     message.textContent = `Speaker ${activeVoiceRecording.slot} の${activeRecordingLabel()}を停止してから、Speaker ${slot} のタブ音声を録音してください。`;
     return;
   }
+  if (!confirmTabAudioRights()) {
+    message.dataset.state = "error";
+    message.textContent = "タブ音声録音を中止しました。利用権限を確認できる音声だけ使用してください。";
+    return;
+  }
   await startTabAudioRecording(slot, button);
+}
+
+function confirmTabAudioRights() {
+  return window.confirm(
+    "ブラウザの共有許可は、音声の利用許諾ではありません。自分の音声、許諾済み音声、またはライセンス上この用途で利用できる音声だけを録音してください。条件を満たす音声ですか？",
+  );
 }
 
 async function startTabAudioRecording(slot, button) {

@@ -373,6 +373,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /URL\.createObjectURL\(record\.blob\)/);
   assert.match(vibevoiceSource, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(vibevoiceSource, /navigator\.mediaDevices\.getDisplayMedia/);
+  assert.match(vibevoiceSource, /function confirmTabAudioRights\(\)/);
+  assert.match(vibevoiceSource, /ブラウザの共有許可は、音声の利用許諾ではありません/);
+  assert.match(vibevoiceSource, /if \(!confirmTabAudioRights\(\)\)[\s\S]*タブ音声録音を中止しました/s);
   assert.match(vibevoiceSource, /getAudioTracks\(\)/);
   assert.match(vibevoiceSource, /YouTube JS Runtime/);
   assert.match(vibevoiceSource, /タブの音声を共有/);
@@ -462,7 +465,8 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /data-public-sample-feature="skitvoice"/);
   assert.match(vibevoiceSimpleHtml, /data-public-privacy-notice/);
   assert.match(vibevoiceSimpleHtml, /name="rights_confirmed"[^>]*required/s);
-  assert.match(vibevoiceSimpleHtml, /本人の同意または利用許諾/);
+  assert.match(vibevoiceSimpleHtml, /本人の同意、利用許諾、またはライセンス上/);
+  assert.match(vibevoiceSimpleHtml, /タブ音声を含む/);
   assert.match(vibevoiceSimpleHtml, /なりすましや誤認を招く用途ではありません/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-grid"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-main"/);
