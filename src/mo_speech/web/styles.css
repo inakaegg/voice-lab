@@ -1613,6 +1613,14 @@ audio {
   margin-top: 0;
 }
 
+.public-privacy-notice {
+  color: #52677f;
+  flex: 1 1 360px;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
 .public-auth-panel {
   align-items: center;
   background: #ffffff;
@@ -3076,6 +3084,26 @@ fieldset.public-samples-admin {
   flex-wrap: wrap;
   gap: 12px;
   padding: 12px 14px;
+}
+
+.vibevoice-rights-confirmation {
+  align-items: flex-start;
+  background: #fff8e8;
+  border: 1px solid #ead39d;
+  border-radius: 8px;
+  color: #5d4819;
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 8px;
+  line-height: 1.5;
+  padding: 10px 11px;
+}
+
+.vibevoice-rights-confirmation input {
+  accent-color: #1d75dc;
+  flex: 0 0 auto;
+  margin-top: 2px;
 }
 
 .vibevoice-generate-button,

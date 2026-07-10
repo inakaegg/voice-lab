@@ -27,6 +27,7 @@ const lineByLineSwitch = lineByLineControl?.closest(".vibevoice-switch");
 const directedLineModeControl = form.elements.directed_line_mode;
 const directedLineModeSwitch = directedLineModeControl?.closest(".vibevoice-switch");
 const directedRetryLowScoreControl = form.elements.directed_retry_low_score;
+const rightsConfirmedControl = form.elements.rights_confirmed;
 const directedRetryLowScoreSwitch = directedRetryLowScoreControl?.closest(".vibevoice-switch");
 const directedRetrySettingControls = Array.from(form.querySelectorAll("[data-directed-retry-setting] input"));
 const voiceFileInputs = Array.from(form.querySelectorAll('input[type="file"][name^="voice_file_"]'));
@@ -661,6 +662,12 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
+  if (!rightsConfirmedControl?.checked) {
+    message.dataset.state = "error";
+    message.textContent = "参照音声の利用許諾を確認してください。";
+    rightsConfirmedControl?.focus();
+    return;
+  }
   if (activeVoiceRecording) {
     message.dataset.state = "error";
     message.textContent = `Speaker ${activeVoiceRecording.slot} の録音を停止してから生成してください。`;

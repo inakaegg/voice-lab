@@ -86,6 +86,9 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.match(practiceHtml, /data-public-auth-panel/);
   assert.match(practiceHtml, /\/auth\/google\/login\?next=\/speakloop/);
   assert.match(practiceHtml, /data-public-sample-feature="speakloop"/);
+  assert.match(practiceHtml, /data-public-privacy-notice/);
+  assert.match(practiceHtml, /機密情報を含む音声は入力しないでください/);
+  assert.match(practiceHtml, /短い音声履歴を保存する場合があります/);
   assert.match(practiceHtml, /\/static\/app_public_sample_audio\.js/);
   assert.doesNotMatch(practiceHtml, /id="practice-settings-button"/);
   assert.doesNotMatch(practiceHtml, /id="practice-settings-overlay"/);
@@ -457,6 +460,10 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /class="public-auth-panel vibevoice-header-auth"/);
   assert.match(vibevoiceSimpleHtml, /\/auth\/google\/login\?next=\/skitvoice/);
   assert.match(vibevoiceSimpleHtml, /data-public-sample-feature="skitvoice"/);
+  assert.match(vibevoiceSimpleHtml, /data-public-privacy-notice/);
+  assert.match(vibevoiceSimpleHtml, /name="rights_confirmed"[^>]*required/s);
+  assert.match(vibevoiceSimpleHtml, /本人の同意または利用許諾/);
+  assert.match(vibevoiceSimpleHtml, /なりすましや誤認を招く用途ではありません/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-grid"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-main"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-side"/);
@@ -510,6 +517,9 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSource, /hostname === "localhost"/);
   assert.match(vibevoiceSource, /hostname === "127\.0\.0\.1"/);
   assert.match(vibevoiceSource, /function configureReferenceUrlAvailability\(\)/);
+  assert.match(vibevoiceSource, /const rightsConfirmedControl = form\.elements\.rights_confirmed/);
+  assert.match(vibevoiceSource, /if \(!rightsConfirmedControl\?\.checked\)/);
+  assert.match(vibevoiceSource, /参照音声の利用許諾を確認してください/);
   assert.match(vibevoiceSource, /data-local-reference-url/);
   assert.match(vibevoiceSource, /if \(!referenceUrlSourcesEnabled\)\s*\{\s*return false;\s*\}/);
   assert.match(styles, /\.vibevoice-simple-shell/);
@@ -521,6 +531,8 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(styles, /@media \(max-width:\s*640px\)[\s\S]*\.vibevoice-script-panel textarea\s*\{[^}]*height:\s*220px[^}]*min-height:\s*220px/s);
   assert.doesNotMatch(styles, /\.vibevoice-actions\s*\{[^}]*order:\s*-1/s);
   assert.match(styles, /\.vibevoice-simple-mode-summary/);
+  assert.match(styles, /\.public-privacy-notice/);
+  assert.match(styles, /\.vibevoice-rights-confirmation/);
   assert.match(styles, /\.vibevoice-simple-debug/);
 });
 

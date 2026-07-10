@@ -30,6 +30,9 @@
           </div>
           <audio data-public-sample-audio controls preload="metadata"></audio>
         </section>
+        <p class="public-privacy-notice" data-public-privacy-notice>
+          参照音声と生成内容は外部の音声処理APIへ送信され、公開デモでは設定に応じて短い履歴を保存する場合があります。機密情報は入力しないでください。
+        </p>
       </div>
 
       <form id="vibevoice-form" class="vibevoice-form">
@@ -103,6 +106,10 @@
               <label class="vibevoice-switch">
                 <input name="translate_script" type="checkbox" checked />
                 <span>日本語台本を出力言語へ翻訳</span>
+              </label>
+              <label class="vibevoice-rights-confirmation">
+                <input name="rights_confirmed" type="checkbox" required />
+                <span>参照音声は本人の同意または利用許諾を得ており、なりすましや誤認を招く用途ではありません。</span>
               </label>
               <div class="vibevoice-actions">
                 <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
