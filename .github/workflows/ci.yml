@@ -39,6 +39,9 @@ jobs:
       - name: Worker and browser tests
         run: npm test
 
+      - name: React typecheck and production build
+        run: npm run check:web
+
       - name: JavaScript syntax checks
         run: npm run check:js
 

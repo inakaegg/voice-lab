@@ -778,10 +778,11 @@ def create_app(
     if os.getenv("MO_PRELOAD_VOICE_CONVERSION") == "1" or os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
         active_voice_conversion_service.preload()
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/react", StaticFiles(directory=WEB_DIR / "react"), name="react")
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "portal.html")
+        return FileResponse(WEB_DIR / "react" / "portal.html")
 
     @app.get("/fun")
     @app.get("/fun/")
@@ -795,7 +796,7 @@ def create_app(
     @app.get("/speakloop")
     @app.get("/speakloop/")
     def practice() -> FileResponse:
-        return FileResponse(WEB_DIR / "practice.html")
+        return FileResponse(WEB_DIR / "react" / "speakloop.html")
 
     @app.get("/practice/admin")
     @app.get("/practice/admin/")
@@ -807,7 +808,7 @@ def create_app(
     @app.get("/skitvoice")
     @app.get("/skitvoice/")
     def skitvoice() -> FileResponse:
-        return FileResponse(WEB_DIR / "vibevoice_simple.html")
+        return FileResponse(WEB_DIR / "react" / "skitvoice.html")
 
     @app.get("/skitvoice/admin")
     @app.get("/skitvoice/admin/")
@@ -821,7 +822,7 @@ def create_app(
     @app.get("/vibevoice/simple")
     @app.get("/vibevoice/simple/")
     def vibevoice_simple() -> FileResponse:
-        return FileResponse(WEB_DIR / "vibevoice_simple.html")
+        return FileResponse(WEB_DIR / "react" / "skitvoice.html")
 
     @app.get("/seed-vc")
     def seed_vc_direct() -> FileResponse:

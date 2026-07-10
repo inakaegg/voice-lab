@@ -59,10 +59,8 @@ def test_root_serves_voice_lab_portal() -> None:
 
     assert response.status_code == 200
     assert "Voice Lab" in response.text
-    assert "SkitVoice" in response.text
-    assert "SpeakLoop" in response.text
-    assert 'href="/skitvoice"' in response.text
-    assert 'href="/speakloop"' in response.text
+    assert "/react/assets/portal.js" in response.text
+    assert '<div id="root"></div>' in response.text
     assert "へんな へんかん アプリ" not in response.text
 
 
@@ -113,38 +111,21 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "言いたいことで発音練習" in response.text
     assert "Pronunciation Practice" not in response.text
     assert "发音练习" not in response.text
-    assert "学習する言語" in response.text
-    assert "practice-target-language-select" in response.text
+    assert "/react/assets/speakloop.js" in response.text
     assert "practice-settings-button" not in response.text
     assert "practice-settings-overlay" not in response.text
-    assert "言いたいことを話す" in response.text
-    assert "practice-repeat-record-button" in response.text
-    assert "practice-target-language" in response.text
-    assert 'value="ja-JP"' in response.text
-    assert 'value="zh-CN"' in response.text
-    assert 'value="en-US"' in response.text
-    assert "practice-native-record-button" in response.text
-    assert "practice-repeat-record-button" in response.text
-    assert "practice-native-transcript" in response.text
-    assert "practice-pinyin-toggle" in response.text
-    assert "record-level-meter" in response.text
     assert "practice-asr-model" not in response.text
     assert 'value="gpt-4o-transcribe"' not in response.text
     assert 'value="gpt-4o-mini-transcribe"' not in response.text
     assert "whisper-1（フレーズ比較）" not in response.text
     assert "通常は whisper-1" not in response.text
     assert "gpt-4o/mini は全体比較再生" not in response.text
-    assert "practice-speed-slider" in response.text
-    assert 'min="0.5"' in response.text
-    assert 'max="2"' in response.text
-    assert 'step="0.1"' in response.text
     assert "practice-segment-mode" not in response.text
     assert "practice-next-prompt-button" not in response.text
     assert "practice-repeat-audio-button" not in response.text
     assert "practice-compare-button" not in response.text
     assert "practice-retry-button" not in response.text
     assert "practice-next-button" not in response.text
-    assert "/static/app_practice.js" in response.text
 
 
 def test_speakloop_alias_serves_practice_ui() -> None:
@@ -154,7 +135,7 @@ def test_speakloop_alias_serves_practice_ui() -> None:
 
     assert response.status_code == 200
     assert "SpeakLoop" in response.text
-    assert "practice-target-language" in response.text
+    assert "/react/assets/speakloop.js" in response.text
 
 
 def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
@@ -195,13 +176,8 @@ def test_skitvoice_serves_simple_user_ui_without_admin_controls() -> None:
     assert "SkitVoice" in response.text
     assert "SkitVoice 管理" not in response.text
     assert 'data-vibevoice-mode="simple"' in response.text
-    assert "vibevoice-script" in response.text
-    assert "voice_file_1" in response.text
-    assert 'data-record-voice-slot="1"' in response.text
-    assert 'data-reference-url-open-slot="1"' in response.text
-    assert 'data-local-reference-url hidden' in response.text
-    assert 'id="vibevoice-reference-url-dialog"' in response.text
-    assert "/static/app_vibevoice.js" in response.text
+    assert "/react/assets/skitvoice.js" in response.text
+    assert '<div id="root"></div>' in response.text
 
 
 def test_vibevoice_serves_admin_skit_ui() -> None:

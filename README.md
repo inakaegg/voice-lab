@@ -82,6 +82,7 @@ python3 -m pip install -e ".[dev,vibevoice]"
 python3 -m pytest
 npm test
 npm run check:js
+npm run check:web
 ```
 
 RunPod image buildとGPU smokeは費用・実行時間が大きいため、通常CIには含めず手動workflowで実行します。ローカルでhandler、payload、env、シリアライズ、進捗、エラー処理を先に検証します。

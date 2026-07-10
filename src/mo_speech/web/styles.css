@@ -5,6 +5,139 @@
   color: #1d2430;
 }
 
+/* React public UI --------------------------------------------------------- */
+.react-public-body {
+  --react-ink: #172033;
+  --react-muted: #647086;
+  --react-line: rgba(23, 32, 51, 0.12);
+  --react-paper: rgba(255, 255, 255, 0.88);
+  background:
+    radial-gradient(circle at 8% 4%, rgba(255, 190, 120, 0.28), transparent 28rem),
+    radial-gradient(circle at 94% 14%, rgba(83, 129, 255, 0.2), transparent 30rem),
+    #f5f3ee;
+  color: var(--react-ink);
+  min-height: 100vh;
+}
+
+.react-page-shell,
+.react-portal-shell {
+  box-sizing: border-box;
+  margin: 0 auto;
+  max-width: 1240px;
+  padding: 34px clamp(18px, 4vw, 54px) 70px;
+}
+
+.react-eyebrow,
+.react-step-label {
+  color: #49637d;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.react-portal-hero {
+  max-width: 800px;
+  padding: clamp(44px, 9vw, 110px) 0 48px;
+}
+
+.react-portal-hero h1 {
+  font-size: clamp(2.8rem, 7vw, 6.6rem);
+  letter-spacing: -0.065em;
+  line-height: 0.96;
+  margin: 0;
+}
+
+.react-portal-hero > p:last-child {
+  color: var(--react-muted);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  line-height: 1.8;
+  margin-top: 28px;
+  max-width: 560px;
+}
+
+.react-product-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.react-product-card {
+  background: var(--react-paper);
+  border: 1px solid var(--react-line);
+  border-radius: 28px;
+  box-shadow: 0 24px 70px rgba(35, 43, 63, 0.08);
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+  overflow: hidden;
+  padding: clamp(26px, 4vw, 46px);
+  position: relative;
+  text-decoration: none;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.react-product-card:hover { box-shadow: 0 32px 90px rgba(35, 43, 63, 0.15); transform: translateY(-6px); }
+.react-product-card::after { border-radius: 999px; content: ""; height: 210px; opacity: 0.72; position: absolute; right: -70px; top: -80px; width: 210px; }
+.react-product-card-skit::after { background: #ffd18e; }
+.react-product-card-speak::after { background: #a9c1ff; }
+.react-product-number { color: var(--react-muted); font: 700 0.75rem/1 ui-monospace, monospace; }
+.react-product-card p { font-weight: 900; margin: 68px 0 8px; }
+.react-product-card h2 { font-size: clamp(1.6rem, 3vw, 2.6rem); letter-spacing: -0.04em; margin: 0 0 16px; }
+.react-product-card > span:not(.react-product-number) { color: var(--react-muted); line-height: 1.7; max-width: 470px; }
+.react-product-card strong { margin-top: auto; padding-top: 28px; }
+
+.react-product-header {
+  align-items: center;
+  border-bottom: 1px solid var(--react-line);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 38px;
+  padding-bottom: 22px;
+}
+.react-product-heading { align-items: center; display: flex; gap: 16px; }
+.react-product-heading h1 { font-size: clamp(1.5rem, 3vw, 2.3rem); letter-spacing: -0.04em; margin: 0; }
+.react-back-link { align-items: center; border: 1px solid var(--react-line); border-radius: 50%; color: inherit; display: flex; height: 42px; justify-content: center; text-decoration: none; width: 42px; }
+.react-auth-panel { background: rgba(255,255,255,.72); border: 1px solid var(--react-line); border-radius: 999px; padding: 9px 14px; }
+
+.react-intro-grid { align-items: start; display: grid; gap: 24px; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); margin-bottom: 28px; }
+.react-intro-copy { padding: 34px 4px; }
+.react-intro-copy h2 { font-size: clamp(2rem, 4vw, 3.6rem); letter-spacing: -0.055em; line-height: 1.08; margin: 0 0 18px; }
+.react-intro-copy > p:last-child { color: var(--react-muted); line-height: 1.85; max-width: 660px; }
+.react-status-stack, .react-sample-stack { display: grid; gap: 12px; }
+.react-sample-card, .react-privacy-note { backdrop-filter: blur(12px); background: rgba(255,255,255,.7); border: 1px solid var(--react-line); border-radius: 20px; }
+
+.react-toolbar { background: var(--react-paper); border: 1px solid var(--react-line); border-radius: 18px; box-shadow: none; margin-bottom: 18px; }
+.react-practice-flow { gap: 18px; }
+.react-flow-card, .react-work-card, .react-generate-card, .react-result-card { background: var(--react-paper); border: 1px solid var(--react-line); border-radius: 26px; box-shadow: 0 24px 70px rgba(35,43,63,.07); }
+.react-flow-card { min-height: 360px; padding: clamp(24px, 4vw, 42px); }
+.react-flow-card .practice-card-copy h2 { font-size: clamp(1.7rem, 3vw, 2.6rem); }
+
+.react-skit-grid { align-items: start; grid-template-columns: minmax(0, 1fr) 330px; }
+.react-skit-form .vibevoice-simple-col-main { display: grid; gap: 18px; }
+.react-work-card, .react-generate-card { padding: clamp(22px, 3vw, 34px); }
+.react-generate-card { position: sticky; top: 24px; }
+.react-skit-form #vibevoice-script { background: #fff; border: 1px solid var(--react-line); border-radius: 16px; font-size: 1rem; line-height: 1.75; padding: 18px; }
+.react-voice-slot { background: #fff; border-color: var(--react-line); border-radius: 18px; }
+.react-skit-form .vibevoice-generate-button { border-radius: 14px; min-height: 54px; width: 100%; }
+
+@media (max-width: 820px) {
+  .react-product-grid, .react-intro-grid, .react-skit-grid { grid-template-columns: 1fr; }
+  .react-product-card { min-height: 280px; }
+  .react-product-header { align-items: flex-start; gap: 18px; }
+  .react-auth-panel { border-radius: 16px; }
+  .react-generate-card { position: static; }
+}
+
+@media (max-width: 560px) {
+  .react-page-shell, .react-portal-shell { padding-left: 14px; padding-right: 14px; }
+  .react-product-header { flex-direction: column; }
+  .react-product-card { border-radius: 22px; }
+  .react-flow-card, .react-work-card, .react-generate-card, .react-result-card { border-radius: 20px; }
+}
+
 body {
   margin: 0;
   overflow-x: hidden;
@@ -3376,6 +3509,22 @@ fieldset.public-samples-admin {
   .vibevoice-script-panel textarea {
     min-height: 300px;
   }
+}
+
+/* Keep React layout decisions above the legacy public-page rules. */
+.react-public-body .react-page-shell,
+.react-public-body .react-portal-shell { margin: 0 auto; max-width: 1240px; padding: 34px clamp(18px, 4vw, 54px) 70px; }
+.react-public-body .react-flow-card,
+.react-public-body .react-work-card,
+.react-public-body .react-generate-card,
+.react-public-body .react-result-card { background: rgba(255,255,255,.88); border: 1px solid rgba(23,32,51,.12); border-radius: 26px; box-shadow: 0 24px 70px rgba(35,43,63,.07); }
+.react-public-body .react-skit-grid { align-items: start; grid-template-columns: minmax(0,1fr) 330px; }
+.react-public-body .react-generate-card { position: sticky; top: 24px; }
+@media (max-width: 820px) {
+  .react-public-body .react-product-grid,
+  .react-public-body .react-intro-grid,
+  .react-public-body .react-skit-grid { grid-template-columns: 1fr; }
+  .react-public-body .react-generate-card { position: static; }
 }
 
 @media (max-width: 640px) {
