@@ -416,6 +416,7 @@ OpenAI Realtime翻訳の扱い:
 レスポンス:
 
 - 発音練習用の `practice-prompts` と `practice-attempts` の履歴だけを返す。
+- SpeakLoopで生成したお手本音声は `outputs` として保存し、管理画面の「お手本音声」に表示する。
 - `/admin` が使う `GET /api/audio-history` では、発音練習用の履歴は除外する。
 - 練習履歴を確認する管理画面は `/practice/admin` とし、通常の音声変換管理画面と混ぜない。
 

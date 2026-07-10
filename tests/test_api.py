@@ -386,6 +386,25 @@ def test_vibevoice_generate_api_translates_script_before_generation(monkeypatch)
     assert diagnostics["model"] == "test-vv-translation-model"
 
 
+def test_vibevoice_script_api_generates_exact_five_lines(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "mo_speech.api._openai_vibevoice_generate_script",
+        lambda: "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう",
+    )
+    client = TestClient(create_app())
+
+    response = client.post("/api/vibevoice/scripts")
+
+    assert response.status_code == 200
+    assert response.json()["script"].splitlines() == [
+        "1 こんにちは",
+        "2 久しぶりです",
+        "1 元気でしたか",
+        "2 元気です",
+        "1 また話しましょう",
+    ]
+
+
 def test_vibevoice_generate_api_defaults_to_directed_retry_mode() -> None:
     class FakeVibeVoiceResult:
         audio_bytes = b"RIFFfakewav"
@@ -1045,6 +1064,30 @@ def test_practice_recording_api_detects_new_prompt_while_target_exists() -> None
     assert payload["target_text"] == "明天天气好吗？"
     assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:明天天气好吗？".encode()).decode()
     assert payload["classification"]["kind"] == "prompt"
+
+
+def test_practice_recording_api_saves_generated_prompt_audio_to_practice_history(tmp_path) -> None:
+    from mo_speech.audio_history import AudioHistoryStore
+
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "明日は天気がいいですか"}),
+        translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "明天天气好吗？"}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, audio_history_store=history_store))
+
+    response = client.post(
+        "/api/practice/recordings",
+        data={"target_language": "zh-CN"},
+        files={"audio": ("recording.webm", b"new prompt audio", "audio/webm")},
+    )
+    history = client.get("/api/practice-history").json()
+
+    assert response.status_code == 200
+    assert len(history["outputs"]) == 1
+    assert history["outputs"][0]["metadata"]["endpoint"] == "practice-prompts"
+    assert history["outputs"][0]["metadata"]["tts_text"] == "明天天气好吗？"
 
 
 def test_audio_history_excludes_practice_entries_and_practice_history_lists_them(tmp_path) -> None:

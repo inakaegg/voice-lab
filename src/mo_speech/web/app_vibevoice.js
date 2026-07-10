@@ -19,6 +19,9 @@ const progressBar = document.querySelector(".vibevoice-progress-bar");
 const progressFill = progressBar?.querySelector("span");
 const scriptInput = document.querySelector("#vibevoice-script");
 const scriptFileInput = document.querySelector("#vibevoice-script-file");
+const generateScriptButton = document.querySelector("#vibevoice-generate-script-button");
+const translatedScriptSection = document.querySelector("#vibevoice-translated-script-section");
+const translatedScript = document.querySelector("#vibevoice-translated-script");
 const resetSettingsButton = document.querySelector("#vibevoice-reset-settings-button");
 const backendSelect = form.elements.backend;
 const modelSelect = form.elements.model_id;
@@ -55,7 +58,7 @@ const vibevoicePageMode = document.body?.dataset.vibevoiceMode || "advanced";
 let referenceUrlSourcesEnabled = computeReferenceUrlSourcesEnabled();
 const vibevoiceSettingsStorageKey =
   vibevoicePageMode === "simple" ? "mo-speech-vibevoice-simple-draft" : "mo-speech-vibevoice-draft";
-const defaultSimpleScript = "1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか。どうしてました？";
+const defaultSimpleScript = "1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか？最近、どうしてます？\n2 いや〜、仕事が忙しくて。AIの進化がすごくて大変なことになってます\n1 AIの進化凄いですよね〜。どんどん賢くなってますよね";
 const autoLineByLineMinLines = 4;
 const autoLineByLineMinChars = 180;
 const directedTargetMaxChars = 120;
@@ -112,6 +115,7 @@ referenceUrlCancelButton?.addEventListener("click", closeReferenceUrlDialog);
 referenceUrlOpenButtons.forEach((button) => button.addEventListener("click", openReferenceUrlDialog));
 recordVoiceButtons.forEach((button) => button.addEventListener("click", toggleVoiceRecording));
 tabAudioButtons.forEach((button) => button.addEventListener("click", toggleTabAudioRecording));
+generateScriptButton?.addEventListener("click", handleGenerateScript);
 referenceUrlDialog?.addEventListener("click", (event) => {
   if (event.target === referenceUrlDialog) {
     closeReferenceUrlDialog();
@@ -662,7 +666,7 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
-  if (!rightsConfirmedControl?.checked) {
+  if (rightsConfirmedControl && !rightsConfirmedControl.checked) {
     message.dataset.state = "error";
     message.textContent = "参照音声の利用許諾を確認してください。";
     rightsConfirmedControl?.focus();
@@ -700,7 +704,9 @@ async function handleGenerate(event) {
     body.set("line_by_line", effectiveLineByLineEnabled() ? "true" : "false");
     body.set("directed_line_mode", directedLineModeControl.checked ? "true" : "false");
     body.set("directed_retry_low_score", effectiveDirectedRetryLowScoreEnabled() ? "true" : "false");
-    if (form.elements.translate_script) {
+    if (vibevoicePageMode === "simple") {
+      body.set("translate_script", "auto");
+    } else if (form.elements.translate_script) {
       body.set("translate_script", form.elements.translate_script.checked ? "true" : "false");
     }
     const response = await fetch("/api/vibevoice/jobs", {
@@ -740,6 +746,30 @@ async function handleScriptFileChange() {
   } catch (error) {
     message.dataset.state = "error";
     message.textContent = `テキストファイルを読み込めませんでした: ${error.message || error}`;
+  }
+}
+
+async function handleGenerateScript() {
+  generateScriptButton.disabled = true;
+  message.dataset.state = "busy";
+  message.textContent = "5行の台本を生成しています。";
+  try {
+    const response = await fetch("/api/vibevoice/scripts", { method: "POST" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `script generation failed: ${response.status}`);
+    }
+    scriptInput.value = payload.script || "";
+    updateLineByLineAutoState();
+    updateDirectedLineModeState();
+    saveVibeVoiceDraft();
+    message.dataset.state = "ready";
+    message.textContent = "2話者・5行の台本を生成しました。";
+  } catch (error) {
+    message.dataset.state = "error";
+    message.textContent = `台本を生成できませんでした: ${error.message || error}`;
+  } finally {
+    generateScriptButton.disabled = false;
   }
 }
 
@@ -844,18 +874,7 @@ async function toggleTabAudioRecording(event) {
     message.textContent = `Speaker ${activeVoiceRecording.slot} の${activeRecordingLabel()}を停止してから、Speaker ${slot} のタブ音声を録音してください。`;
     return;
   }
-  if (!confirmTabAudioRights()) {
-    message.dataset.state = "error";
-    message.textContent = "タブ音声録音を中止しました。利用権限を確認できる音声だけ使用してください。";
-    return;
-  }
   await startTabAudioRecording(slot, button);
-}
-
-function confirmTabAudioRights() {
-  return window.confirm(
-    "ブラウザの共有許可は、音声の利用許諾ではありません。自分の音声、許諾済み音声、またはライセンス上この用途で利用できる音声だけを録音してください。条件を満たす音声ですか？",
-  );
 }
 
 async function startTabAudioRecording(slot, button) {
@@ -1674,6 +1693,11 @@ function renderResult(payload) {
   downloadLink.download = `vibevoice-output.${extensionForMimeType(audioMimeType)}`;
   downloadLink.textContent = `${labelForMimeType(audioMimeType)}を保存`;
   normalizedScript.textContent = payload.normalized_script || "";
+  const translation = payload.diagnostics?.script_translation || {};
+  if (translatedScript && translatedScriptSection) {
+    translatedScript.textContent = translation.translated_script || "";
+    translatedScriptSection.hidden = !translation.enabled;
+  }
   const directedDiagnostics = payload.diagnostics?.directed_line_mode || {};
   diagnostics.textContent = JSON.stringify(
     {
@@ -1733,6 +1757,10 @@ function clearResult() {
   audio.removeAttribute("src");
   downloadLink.href = "#";
   normalizedScript.textContent = "";
+  if (translatedScript && translatedScriptSection) {
+    translatedScript.textContent = "";
+    translatedScriptSection.hidden = true;
+  }
   diagnostics.textContent = "";
   updateCopyDiagnosticsButtonState();
   speakerScriptsContainer.replaceChildren();

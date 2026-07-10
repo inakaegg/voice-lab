@@ -3106,6 +3106,29 @@ fieldset.public-samples-admin {
   margin-top: 2px;
 }
 
+.vibevoice-script-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.vibevoice-translated-script {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-color, #d8dde6);
+  border-radius: 0.75rem;
+}
+
+.vibevoice-translated-script h3 {
+  margin-top: 0;
+}
+
+.vibevoice-translated-script pre {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
 .vibevoice-generate-button,
 .vibevoice-cancel-button {
   background: #1d75dc;

@@ -373,9 +373,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /URL\.createObjectURL\(record\.blob\)/);
   assert.match(vibevoiceSource, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(vibevoiceSource, /navigator\.mediaDevices\.getDisplayMedia/);
-  assert.match(vibevoiceSource, /function confirmTabAudioRights\(\)/);
-  assert.match(vibevoiceSource, /ブラウザの共有許可は、音声の利用許諾ではありません/);
-  assert.match(vibevoiceSource, /if \(!confirmTabAudioRights\(\)\)[\s\S]*タブ音声録音を中止しました/s);
+  assert.doesNotMatch(vibevoiceSource, /function confirmTabAudioRights\(\)/);
   assert.match(vibevoiceSource, /getAudioTracks\(\)/);
   assert.match(vibevoiceSource, /YouTube JS Runtime/);
   assert.match(vibevoiceSource, /タブの音声を共有/);
@@ -404,7 +402,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /vibevoiceSettingsStorageKey/);
   assert.match(vibevoiceSource, /dataset\.vibevoiceMode/);
   assert.match(vibevoiceSource, /mo-speech-vibevoice-simple-draft/);
-  assert.match(vibevoiceSource, /1 あっ、こんにちは〜\\n2 こんにちは。ご無沙汰してます。\\n1 元気ですか。どうしてました？/);
+  assert.match(vibevoiceSource, /1 あっ、こんにちは〜\\n2 こんにちは。ご無沙汰してます。\\n1 元気ですか？最近、どうしてます？/);
   assert.match(vibevoiceSource, /loadVibeVoiceDraft/);
   assert.match(vibevoiceSource, /saveVibeVoiceDraft/);
   assert.match(vibevoiceSource, /reference_urls: serializeReferenceUrlRecords\(\)/);
@@ -464,10 +462,8 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /\/auth\/google\/login\?next=\/skitvoice/);
   assert.match(vibevoiceSimpleHtml, /data-public-sample-feature="skitvoice"/);
   assert.match(vibevoiceSimpleHtml, /data-public-privacy-notice/);
-  assert.match(vibevoiceSimpleHtml, /name="rights_confirmed"[^>]*required/s);
-  assert.match(vibevoiceSimpleHtml, /本人の同意、利用許諾、またはライセンス上/);
-  assert.match(vibevoiceSimpleHtml, /タブ音声を含む/);
-  assert.match(vibevoiceSimpleHtml, /なりすましや誤認を招く用途ではありません/);
+  assert.doesNotMatch(vibevoiceSimpleHtml, /name="rights_confirmed"/);
+  assert.match(vibevoiceSimpleHtml, /個人・家庭内の私的利用を超えて公開・共有する場合/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-grid"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-main"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-side"/);
@@ -482,12 +478,13 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /value="vibevoice-large-aoi-pinned"[^>]*selected/s);
   assert.match(vibevoiceSimpleHtml, /name="output_language"/);
   assert.match(vibevoiceSimpleHtml, /value="zh-CN"[^>]*selected[^>]*>中国語/);
-  assert.match(vibevoiceSimpleHtml, /name="translate_script"[^>]*checked/);
-  assert.match(vibevoiceSimpleHtml, /日本語台本を出力言語へ翻訳/);
+  assert.doesNotMatch(vibevoiceSimpleHtml, /name="translate_script"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-script-button"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-translated-script"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-script"/);
   assert.match(
     vibevoiceSimpleHtml,
-    /id="vibevoice-script"[\s\S]*rows="6"[\s\S]*>1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか。どうしてました？<\/textarea>/,
+    /id="vibevoice-script"[\s\S]*rows="6"[\s\S]*>1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか？最近、どうしてます？\n2 いや〜、仕事が忙しくて。AIの進化がすごくて大変なことになってます\n1 AIの進化凄いですよね〜。どんどん賢くなってますよね<\/textarea>/,
   );
   assert.match(vibevoiceSimpleHtml, /name="voice_file_1"/);
   assert.match(vibevoiceSimpleHtml, /name="voice_file_4"/);
@@ -522,7 +519,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSource, /hostname === "127\.0\.0\.1"/);
   assert.match(vibevoiceSource, /function configureReferenceUrlAvailability\(\)/);
   assert.match(vibevoiceSource, /const rightsConfirmedControl = form\.elements\.rights_confirmed/);
-  assert.match(vibevoiceSource, /if \(!rightsConfirmedControl\?\.checked\)/);
+  assert.match(vibevoiceSource, /if \(rightsConfirmedControl && !rightsConfirmedControl\.checked\)/);
   assert.match(vibevoiceSource, /参照音声の利用許諾を確認してください/);
   assert.match(vibevoiceSource, /data-local-reference-url/);
   assert.match(vibevoiceSource, /if \(!referenceUrlSourcesEnabled\)\s*\{\s*return false;\s*\}/);
@@ -551,7 +548,7 @@ test("vibevoice auto line-by-line state is reflected in the UI without overwriti
   assert.match(vibevoiceSource, /lineByLineControl\.checked = directedLineModeEnabled \? false : autoLineByLine \|\| lineByLineUserPreference/);
   assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
   assert.match(vibevoiceSource, /"output_language"/);
-  assert.match(vibevoiceSource, /"translate_script"/);
+  assert.match(vibevoiceSource, /body\.set\("translate_script", "auto"\)/);
   assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
   assert.match(vibevoiceSource, /function updateDirectedLineModeState\(\)/);
   assert.match(vibevoiceHtml, /data-auto-line-by-line/);

@@ -628,6 +628,32 @@ test("Cloudflare worker translates SkitVoice script before RunPod generation", a
   });
 });
 
+test("Cloudflare worker generates a five-line two-speaker SkitVoice script without consuming generation quota", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: { skitvoice: { daily_limit: 2, total_limit: 2 } },
+  }));
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({ output_text: "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう" });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv });
+  const cookie = await publicCookie(env, "/skitvoice");
+
+  const response = await handleRequest(new Request("https://example.com/api/vibevoice/scripts", {
+    method: "POST",
+    headers: { cookie },
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).script.split("\n").length, 5);
+  assert.equal(await kv.get("public-quota:skitvoice:viewer@example.com"), null);
+});
+
 test("Cloudflare worker rejects SkitVoice URL references before RunPod", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({

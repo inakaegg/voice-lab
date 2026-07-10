@@ -44,19 +44,24 @@
                   <p class="vibevoice-section-label">Script</p>
                   <h2>台本</h2>
                 </div>
-                <label class="vibevoice-file-button">
-                  <span>テキストファイル</span>
-                  <input id="vibevoice-script-file" type="file" name="script_file" accept=".txt,text/plain" />
-                </label>
+                <div class="vibevoice-script-actions">
+                  <button id="vibevoice-generate-script-button" class="secondary-button" type="button">AIで5行生成</button>
+                  <label class="vibevoice-file-button">
+                    <span>テキストファイル</span>
+                    <input id="vibevoice-script-file" type="file" name="script_file" accept=".txt,text/plain" />
+                  </label>
+                </div>
               </div>
               <textarea
                 id="vibevoice-script"
                 name="script"
                 rows="6"
-                placeholder="1 あっ、こんにちは〜&#10;2 こんにちは。ご無沙汰してます。&#10;1 元気ですか。どうしてました？"
+                placeholder="1 あっ、こんにちは〜&#10;2 こんにちは。ご無沙汰してます。"
               >1 あっ、こんにちは〜
 2 こんにちは。ご無沙汰してます。
-1 元気ですか。どうしてました？</textarea>
+1 元気ですか？最近、どうしてます？
+2 いや〜、仕事が忙しくて。AIの進化がすごくて大変なことになってます
+1 AIの進化凄いですよね〜。どんどん賢くなってますよね</textarea>
               <p class="vibevoice-help">行頭に 1-4 / A-D を付けると話者を指定できます。話者ごとに対応する参照音声を指定してください。</p>
             </section>
           </div>
@@ -103,14 +108,7 @@
                   <option value="ja-JP">日本語（低品質）</option>
                 </select>
               </label>
-              <label class="vibevoice-switch">
-                <input name="translate_script" type="checkbox" checked />
-                <span>日本語台本を出力言語へ翻訳</span>
-              </label>
-              <label class="vibevoice-rights-confirmation">
-                <input name="rights_confirmed" type="checkbox" required />
-                <span>参照音声（タブ音声を含む）は、本人の同意、利用許諾、またはライセンス上、この用途で利用できます。なりすましや誤認を招く用途ではありません。</span>
-              </label>
+              <p class="vibevoice-rights-confirmation">個人・家庭内の私的利用を超えて公開・共有する場合は、音声の利用許諾またはライセンスを確認してください。タブ共有の許可は公開・再利用の許諾ではありません。</p>
               <div class="vibevoice-actions">
                 <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
                 <button id="vibevoice-cancel-button" class="vibevoice-cancel-button" type="button" hidden>キャンセル</button>
@@ -234,6 +232,10 @@
           <a id="vibevoice-download" class="vibevoice-download" href="#" download="vibevoice-output.wav">音声を保存</a>
         </div>
         <audio id="vibevoice-audio" controls></audio>
+        <section id="vibevoice-translated-script-section" class="vibevoice-translated-script" hidden>
+          <h3>翻訳後の台本</h3>
+          <pre id="vibevoice-translated-script"></pre>
+        </section>
         <section class="vibevoice-artifacts-section" aria-label="中間音声">
           <h3>行ごとの音声</h3>
           <div id="vibevoice-artifacts" class="vibevoice-artifacts"></div>

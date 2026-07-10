@@ -865,6 +865,9 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "POST" && url.pathname === "/api/vibevoice/reference-audio-from-url") {
       return jsonResponse(await createVibeVoiceReferenceAudioFromUrl(request, env));
     }
+    if (request.method === "POST" && url.pathname === "/api/vibevoice/scripts") {
+      return jsonResponse(await createVibeVoiceScript(request, env));
+    }
     if (request.method === "POST" && url.pathname === "/api/vibevoice/jobs") {
       return jsonResponse(await createVibeVoiceJob(request, env));
     }
@@ -2552,26 +2555,28 @@ function normalizeVibeVoiceScriptLineEndings(text) {
 
 async function prepareVibeVoiceScriptForGeneration(form, env, script) {
   const outputLanguage = supportedVibeVoiceOutputLanguage(stringFormValue(form, "output_language", "zh-CN"));
-  const requested = optionEnabled(stringFormValue(form, "translate_script", "false"));
+  const translationMode = stringFormValue(form, "translate_script", "false").trim().toLowerCase();
+  const auto = translationMode === "auto";
+  const requested = auto || optionEnabled(translationMode);
   const diagnostics = {
     requested,
     enabled: false,
     output_language: outputLanguage,
-    source_language: "ja-JP",
+    source_language: auto ? "auto" : "ja-JP",
     source_script: script,
     translated_script: script,
     model: "",
     provider: "",
   };
-  if (!requested || outputLanguage === "ja-JP") {
+  if (!requested) {
     return { script, diagnostics };
   }
   const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
   const translated = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
     model,
     instructions: [
-      "Translate a Japanese skit script for speech generation.",
-      `Translate only dialogue text into natural spoken ${VIBEVOICE_OUTPUT_LANGUAGES[outputLanguage].speech_name}.`,
+      "Detect the dialogue language of this skit script.",
+      `If it is not ${VIBEVOICE_OUTPUT_LANGUAGES[outputLanguage].speech_name}, translate only dialogue text into that language; if it is already the target language, return it unchanged.`,
       "Preserve speaker tags exactly.",
       "Preserve the number of non-empty lines and preserve line order.",
       "Return only the translated script with no notes.",
@@ -2583,12 +2588,40 @@ async function prepareVibeVoiceScriptForGeneration(form, env, script) {
     script: translated,
     diagnostics: {
       ...diagnostics,
-      enabled: true,
+      enabled: translated !== script,
       translated_script: translated,
       model,
       provider: "openai-responses",
     },
   };
+}
+
+async function createVibeVoiceScript(request, env) {
+  const settings = await readPublicAccessSettings(env);
+  if (settings.google_login_required) {
+    if (!publicGoogleAuthConfigured(env)) {
+      throw httpError(503, "Google login is not configured");
+    }
+    if (!(await readPublicSession(request, env))) {
+      throw httpError(401, "Google login is required");
+    }
+  }
+  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
+  const script = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
+    model,
+    instructions: [
+      "Write a natural, friendly Japanese everyday conversation for speech synthesis.",
+      "Return exactly five non-empty lines, alternating speakers 1, 2, 1, 2, 1.",
+      "Every line must start with the speaker number and one space.",
+      "Return only the script with no title or notes.",
+    ].join(" "),
+    input: "2人が久しぶりに会った短い会話を作ってください。",
+  }));
+  const lines = script.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length !== 5 || lines.map((line) => line.trim().split(/\s+/, 1)[0]).join(",") !== "1,2,1,2,1") {
+    throw httpError(502, "AI script generation must return exactly five alternating speaker lines");
+  }
+  return { script: lines.join("\n") };
 }
 
 function supportedVibeVoiceOutputLanguage(value) {
