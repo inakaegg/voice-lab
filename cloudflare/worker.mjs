@@ -2572,23 +2572,26 @@ async function prepareVibeVoiceScriptForGeneration(form, env, script) {
     return { script, diagnostics };
   }
   const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
-  const translated = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
+  const translationResult = parseVibeVoiceTranslationResult(await openAiText(env, {
     model,
     instructions: [
       "Detect the dialogue language of this skit script.",
       `If it is not ${VIBEVOICE_OUTPUT_LANGUAGES[outputLanguage].speech_name}, translate only dialogue text into that language; if it is already the target language, return it unchanged.`,
       "Preserve speaker tags exactly.",
       "Preserve the number of non-empty lines and preserve line order.",
-      "Return only the translated script with no notes.",
+      "Return strict JSON with keys source_language and script.",
+      "source_language must be a BCP 47 language code and script must contain the final script.",
     ].join(" "),
     input: script,
   }));
+  const translated = normalizeVibeVoiceTranslatedScript(translationResult.script);
   validateVibeVoiceTranslatedScript(script, translated);
   return {
     script: translated,
     diagnostics: {
       ...diagnostics,
       enabled: translated !== script,
+      source_language: translationResult.source_language,
       translated_script: translated,
       model,
       provider: "openai-responses",
@@ -2606,6 +2609,11 @@ async function createVibeVoiceScript(request, env) {
       throw httpError(401, "Google login is required");
     }
   }
+  const payload = await request.json().catch(() => ({}));
+  const seedScript = String(payload?.seed_script || "").trim();
+  if (seedScript.length > 5_000) {
+    throw httpError(413, "seed_script must be 5000 characters or fewer");
+  }
   const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
   const script = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
     model,
@@ -2615,13 +2623,34 @@ async function createVibeVoiceScript(request, env) {
       "Every line must start with the speaker number and one space.",
       "Return only the script with no title or notes.",
     ].join(" "),
-    input: "2人が久しぶりに会った短い会話を作ってください。",
+    input: seedScript
+      ? `次の台本を着想元として、話題や状況を自然に連想・発展させて再構成してください。\n\n${seedScript}`
+      : "短い日常会話を新規に作ってください。",
   }));
   const lines = script.split(/\r?\n/).filter((line) => line.trim());
   if (lines.length !== 5 || lines.map((line) => line.trim().split(/\s+/, 1)[0]).join(",") !== "1,2,1,2,1") {
     throw httpError(502, "AI script generation must return exactly five alternating speaker lines");
   }
   return { script: lines.join("\n") };
+}
+
+function parseVibeVoiceTranslationResult(value) {
+  const text = normalizeVibeVoiceTranslatedScript(value);
+  try {
+    const payload = JSON.parse(text);
+    if (!payload || typeof payload !== "object" || !String(payload.script || "").trim()) {
+      throw new Error("missing script");
+    }
+    return {
+      source_language: String(payload.source_language || "auto"),
+      script: String(payload.script),
+    };
+  } catch (error) {
+    if (text.startsWith("{")) {
+      throw httpError(502, `VibeVoice script translation returned invalid JSON: ${error.message || error}`);
+    }
+    return { source_language: "auto", script: text };
+  }
 }
 
 function supportedVibeVoiceOutputLanguage(value) {

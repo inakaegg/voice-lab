@@ -359,7 +359,7 @@ def test_vibevoice_generate_api_translates_script_before_generation(monkeypatch)
         assert script_text == "1 こんにちは\n2 元気ですか"
         assert output_language == "zh-CN"
         assert model == "test-vv-translation-model"
-        return "1 你好。\n2 你好吗？"
+        return '{"source_language":"ja-JP","script":"1 你好。\\n2 你好吗？"}'
 
     monkeypatch.setenv("OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL", "test-vv-translation-model")
     monkeypatch.setattr("mo_speech.api._openai_vibevoice_translate_script", fake_translate, raising=False)
@@ -380,22 +380,30 @@ def test_vibevoice_generate_api_translates_script_before_generation(monkeypatch)
     assert service.calls[0][0] == "1 你好。\n2 你好吗？"
     diagnostics = response.json()["diagnostics"]["script_translation"]
     assert diagnostics["enabled"] is True
+    assert diagnostics["source_language"] == "ja-JP"
     assert diagnostics["output_language"] == "zh-CN"
     assert diagnostics["source_script"] == "1 こんにちは\n2 元気ですか"
     assert diagnostics["translated_script"] == "1 你好。\n2 你好吗？"
     assert diagnostics["model"] == "test-vv-translation-model"
 
 
-def test_vibevoice_script_api_generates_exact_five_lines(monkeypatch) -> None:
+def test_vibevoice_script_api_generates_exact_five_lines_from_current_script(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_generate(seed_script: str) -> str:
+        captured["seed_script"] = seed_script
+        return "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう"
+
     monkeypatch.setattr(
         "mo_speech.api._openai_vibevoice_generate_script",
-        lambda: "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう",
+        fake_generate,
     )
     client = TestClient(create_app())
 
-    response = client.post("/api/vibevoice/scripts")
+    response = client.post("/api/vibevoice/scripts", json={"seed_script": "1 AIについて話そう\n2 いいですね"})
 
     assert response.status_code == 200
+    assert captured["seed_script"] == "1 AIについて話そう\n2 いいですね"
     assert response.json()["script"].splitlines() == [
         "1 こんにちは",
         "2 久しぶりです",

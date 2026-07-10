@@ -464,6 +464,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /data-public-privacy-notice/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /name="rights_confirmed"/);
   assert.match(vibevoiceSimpleHtml, /個人・家庭内の私的利用を超えて公開・共有する場合/);
+  assert.doesNotMatch(vibevoiceSimpleHtml, /タブ共有の許可は公開・再利用の許諾ではありません/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-grid"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-main"/);
   assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-side"/);
@@ -479,7 +480,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /name="output_language"/);
   assert.match(vibevoiceSimpleHtml, /value="zh-CN"[^>]*selected[^>]*>中国語/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /name="translate_script"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-script-button"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-script-button"[^>]*>台本自動生成/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-translated-script"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-script"/);
   assert.match(
@@ -549,6 +550,7 @@ test("vibevoice auto line-by-line state is reflected in the UI without overwriti
   assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
   assert.match(vibevoiceSource, /"output_language"/);
   assert.match(vibevoiceSource, /body\.set\("translate_script", "auto"\)/);
+  assert.match(vibevoiceSource, /JSON\.stringify\(\{ seed_script: scriptInput\.value \}\)/);
   assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);
   assert.match(vibevoiceSource, /function updateDirectedLineModeState\(\)/);
   assert.match(vibevoiceHtml, /data-auto-line-by-line/);

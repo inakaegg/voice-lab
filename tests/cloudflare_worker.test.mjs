@@ -590,7 +590,7 @@ test("Cloudflare worker translates SkitVoice script before RunPod generation", a
       return json({ email: "viewer@example.com", email_verified: true });
     }
     if (url === "https://api.openai.com/v1/responses") {
-      return json({ output_text: "1 Hello.\n2 How are you?" });
+      return json({ output_text: JSON.stringify({ source_language: "ja-JP", script: "1 Hello.\n2 How are you?" }) });
     }
     if (url.endsWith("/run")) {
       return json({ id: "vv-job", status: "IN_QUEUE" });
@@ -634,10 +634,12 @@ test("Cloudflare worker generates a five-line two-speaker SkitVoice script witho
     google_login_required: true,
     features: { skitvoice: { daily_limit: 2, total_limit: 2 } },
   }));
-  const env = publicAuthEnv(async (url) => {
+  let scriptGenerationInput = "";
+  const env = publicAuthEnv(async (url, init = {}) => {
     if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
     if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
     if (url === "https://api.openai.com/v1/responses") {
+      scriptGenerationInput = parseJsonBody(init.body).input;
       return json({ output_text: "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう" });
     }
     throw new Error(`unexpected url: ${url}`);
@@ -646,10 +648,12 @@ test("Cloudflare worker generates a five-line two-speaker SkitVoice script witho
 
   const response = await handleRequest(new Request("https://example.com/api/vibevoice/scripts", {
     method: "POST",
-    headers: { cookie },
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ seed_script: "1 AIについて話そう\n2 いいですね" }),
   }), env);
 
   assert.equal(response.status, 200);
+  assert.match(scriptGenerationInput, /AIについて話そう/);
   assert.equal((await response.json()).script.split("\n").length, 5);
   assert.equal(await kv.get("public-quota:skitvoice:viewer@example.com"), null);
 });

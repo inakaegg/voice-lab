@@ -754,7 +754,11 @@ async function handleGenerateScript() {
   message.dataset.state = "busy";
   message.textContent = "5行の台本を生成しています。";
   try {
-    const response = await fetch("/api/vibevoice/scripts", { method: "POST" });
+    const response = await fetch("/api/vibevoice/scripts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seed_script: scriptInput.value }),
+    });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload.detail || `script generation failed: ${response.status}`);

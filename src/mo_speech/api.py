@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import re
@@ -565,13 +566,14 @@ def _prepare_vibevoice_script_for_generation(
         return script_text, diagnostics
 
     model = _vibevoice_script_translation_model()
-    translated_script = _normalize_vibevoice_translated_script(
-        _openai_vibevoice_translate_script(script_text, language, model)
-    )
+    translation_result = _openai_vibevoice_translate_script(script_text, language, model)
+    source_language, translated_text = _parse_vibevoice_translation_result(translation_result)
+    translated_script = _normalize_vibevoice_translated_script(translated_text)
     _validate_vibevoice_translated_script(script_text, translated_script)
     diagnostics["script_translation"].update(
         {
             "enabled": translated_script != script_text,
+            "source_language": source_language,
             "translated_script": translated_script,
             "model": model,
             "provider": "openai-responses",
@@ -596,7 +598,8 @@ def _openai_vibevoice_translate_script(script_text: str, output_language: str, m
             f"If it is not {language_name}, translate only dialogue text into natural spoken {language_name}; "
             "if it is already the target language, return it unchanged. "
             "Preserve speaker tags exactly, preserve the number of non-empty lines, "
-            "preserve line order, and return only the translated script with no notes."
+            "preserve line order, and return strict JSON with keys source_language and script. "
+            "source_language must be a BCP 47 language code and script must contain the final script."
         ),
         input=script_text,
     )
@@ -612,7 +615,20 @@ def _openai_vibevoice_translate_script(script_text: str, output_language: str, m
     return str(response)
 
 
-def _openai_vibevoice_generate_script() -> str:
+def _parse_vibevoice_translation_result(value: object) -> tuple[str, str]:
+    if isinstance(value, tuple) and len(value) == 2:
+        return str(value[0]), str(value[1])
+    text = _normalize_vibevoice_translated_script(str(value))
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return "auto", text
+    if not isinstance(payload, dict) or not str(payload.get("script") or "").strip():
+        raise ValueError("VibeVoice script translation returned invalid JSON")
+    return str(payload.get("source_language") or "auto"), str(payload["script"])
+
+
+def _openai_vibevoice_generate_script(seed_script: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         raise ValueError("OPENAI_API_KEY is required for VibeVoice script generation")
     try:
@@ -626,7 +642,12 @@ def _openai_vibevoice_generate_script() -> str:
             "Return exactly five non-empty lines, alternating speakers 1, 2, 1, 2, 1. "
             "Every line must start with the speaker number and one space. Use only the script, with no title or notes."
         ),
-        input="2人が久しぶりに会った短い会話を作ってください。",
+        input=(
+            "次の台本を着想元として、話題や状況を自然に連想・発展させて再構成してください。\n\n"
+            + seed_script.strip()
+            if seed_script.strip()
+            else "短い日常会話を新規に作ってください。"
+        ),
     )
     text = str(getattr(response, "output_text", "") or "")
     script = _normalize_vibevoice_translated_script(text)
@@ -1004,9 +1025,16 @@ def create_app(
         return _serialize_pipeline_result(result)
 
     @app.post("/api/vibevoice/scripts")
-    async def generate_vibevoice_script() -> dict[str, str]:
+    async def generate_vibevoice_script(request: Request) -> dict[str, str]:
         try:
-            return {"script": _openai_vibevoice_generate_script()}
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+            seed_script = str(payload.get("seed_script") or "") if isinstance(payload, dict) else ""
+            if len(seed_script) > 5_000:
+                raise ValueError("seed_script must be 5000 characters or fewer")
+            return {"script": _openai_vibevoice_generate_script(seed_script)}
         except ValueError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
