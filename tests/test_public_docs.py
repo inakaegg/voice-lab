@@ -50,7 +50,6 @@ def test_public_demo_roadmap_tracks_tab_audio_and_rights_notice() -> None:
     assert "権利" in roadmap
     assert "プライバシー" in roadmap
 
-
 def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     workflow = read_text(".github/workflows/ci.yml")
 
@@ -84,6 +83,14 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     assert "CREATE TABLE IF NOT EXISTS quota_usage_total" in migration
     assert "CREATE TABLE IF NOT EXISTS audit_events" in migration
     assert "CREATE TABLE IF NOT EXISTS job_metadata" in migration
+
+
+def test_wrangler_binds_production_and_preview_r2_buckets() -> None:
+    wrangler = read_text("wrangler.toml")
+
+    assert 'binding = "MO_SPEECH_AUDIO_R2"' in wrangler
+    assert 'bucket_name = "mo-speech-audio"' in wrangler
+    assert 'preview_bucket_name = "mo-speech-audio-preview"' in wrangler
 
 
 def test_frontend_migration_plan_preserves_current_api_and_state_boundaries() -> None:

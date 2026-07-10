@@ -11,7 +11,7 @@
 | ユーザー設定、公開アクセス設定 | Workers KV | 実装済み |
 | 短期job snapshot、warmup ready | Workers KV | 実装済み。TTL付き |
 | 音声履歴metadata/index | Workers KV | 実装済み |
-| 音声履歴blob | R2（bindingあり）/ KV fallback | R2 pilot実装済み |
+| 音声履歴blob | R2（bindingあり）/ KV fallback | production/preview bucketとbinding作成済み |
 | 公開サンプル音声metadata/blob | Workers KV | 実装済み。R2移行前 |
 | quota使用数、簡易audit log | Workers KV | D1 resource/schema作成済み。Worker移行前 |
 
@@ -21,7 +21,7 @@
 
 ## R2 binding
 
-実Cloudflare環境ではR2がまだアカウント単位で有効化されておらず、APIはcode `10042` を返す。Cloudflare DashboardのR2画面で利用条件と必要な支払い設定を確認して有効化した後、bucketを作成し、`wrangler.toml` に次を追加する。
+実Cloudflare環境ではR2を有効化し、production bucket `mo-speech-audio`、preview bucket `mo-speech-audio-preview`、binding `MO_SPEECH_AUDIO_R2` を作成済み。設定は次のとおり。
 
 ```toml
 [[r2_buckets]]

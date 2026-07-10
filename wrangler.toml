@@ -14,6 +14,11 @@ database_name = "mo-speech-demo-db"
 database_id = "3e526561-0c28-42f9-8ff2-e84d091d0d70"
 migrations_dir = "migrations"
 
+[[r2_buckets]]
+binding = "MO_SPEECH_AUDIO_R2"
+bucket_name = "mo-speech-audio"
+preview_bucket_name = "mo-speech-audio-preview"
+
 [vars]
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
