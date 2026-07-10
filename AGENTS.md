@@ -13,6 +13,7 @@
 
 - 合意事項、前提、要件はチャットではなく `docs/` に残す。
 - 実装前に [docs/speech-translation/SPEC.md](docs/speech-translation/SPEC.md) と [docs/speech-translation/OPEN_QUESTIONS.md](docs/speech-translation/OPEN_QUESTIONS.md) を確認する。
+- 見える公開UIを変更する前に [docs/UI_STYLE.md](docs/UI_STYLE.md) と [docs/deployment/FRONTEND_MIGRATION.md](docs/deployment/FRONTEND_MIGRATION.md) を確認する。
 - 未確定の内部メモ、AI会話ログ、調査途中のメモは `_ai/` に置く。
 - 公開docsは、外部の読み手がプロダクトの価値、使い方、仕様、設計判断、検証方法を理解する助けになる内容だけを書く。
 - 公開docsに書く前に、「第三者がプロジェクトを理解、利用、評価、再現するために必要か」を確認する。答えが弱い内容は `_ai/` または `tmp/` に置く。
@@ -40,6 +41,17 @@
 - FastAPIのルート/API実装を変更した場合、ローカル確認前に必ずUvicornプロセスを再起動する。静的ファイルは再起動なしで更新される一方、Pythonのルート/APIは起動中プロセスに古い実装が残るため、「フロントだけ最新、API/routeは古い」状態で確認しない。
 - 既存サーバーを使って確認する場合は、`lsof -nP -iTCP:<port> -sTCP:LISTEN` と `ps -p <pid> -o pid,lstart,command` で起動時刻とコマンドを確認する。再起動できない場合は別ポートで新しく起動し、確認に使ったURLを報告する。
 - ルート追加・変更時は、ユーザーが開く可能性のある末尾スラッシュ有無も確認する。例: `/practice/admin` と `/practice/admin/`。
+
+### 公開UIの品質契約
+
+- 見えるUI変更では、利用可能なら共通の `$ui-quality` Skillを使う。
+- 現行の正は、React共通部品と `src/mo_speech/web/styles.css` のsemantic tokenである。Tailwind等の別方式を局所的に追加して混在させない。方式を変える場合は先に移行方針をdocsへ固定する。
+- `/` を視覚基準とし、`/speakloop` と `/skitvoice` を同じ製品群として確認する。
+- 基準幅は `1440px`、`1024px`、`390px` とし、Light／Dark、長い日本語、初期状態、主要な動的状態、errorを確認する。
+- Web UIでは実際にレンダリングされた画面を確認する。共有ブラウザが利用できない場合も、それだけで検証を打ち切らず、利用可能なPlaywright、DevTools系手段、ローカルChromeのheadless／CDP等を検討する。
+- `scrollWidth <= clientWidth`、設定の右端位置、列数、カード順、sticky要素の非遮蔽を確認する。DOM寸法の計測だけでなく、スクリーンショットを直接開いて確認する。
+- 検証用スクリーンショットは原則 `tmp/` に置く。公開用またはvisual regression用として採用する場合だけ、意図を確認して管理対象へ移す。
+- 実画面を確認できなければ、最終報告へ `VISUAL_QA_UNVERIFIED` と確認できなかった画面・状態を記載し、UI完成とは報告しない。
 
 ## 実装方針
 
