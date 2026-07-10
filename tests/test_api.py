@@ -29,6 +29,7 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+    monkeypatch.delenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", raising=False)
 
 
 def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch) -> None:
@@ -259,6 +260,20 @@ def test_vibevoice_status_api_uses_service() -> None:
     assert response.status_code == 200
     assert response.json()["available"] is True
     assert response.json()["provider"] == "fake-vibevoice"
+    assert response.json()["url_reference_audio"]["enabled"] is False
+    assert "yt_dlp" in response.json()["url_reference_audio"]["tools"]
+    assert response.json()["url_reference_audio"]["tools"]["javascript_runtime"]["command"] == "node"
+
+
+def test_vibevoice_status_api_reports_loopback_url_reference_availability(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(create_app(), base_url="http://127.0.0.1")
+
+    enabled_response = client.get("/api/vibevoice/status")
+    monkeypatch.setenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", "0")
+    disabled_response = client.get("/api/vibevoice/status")
+
+    assert enabled_response.json()["url_reference_audio"]["enabled"] is True
+    assert disabled_response.json()["url_reference_audio"]["enabled"] is False
 
 
 def test_vibevoice_generate_api_returns_audio() -> None:
@@ -493,7 +508,7 @@ def test_vibevoice_reference_audio_from_url_api_returns_wav() -> None:
             )
 
     extractor = FakeReferenceAudioExtractor()
-    client = TestClient(create_app(reference_audio_extractor=extractor))
+    client = TestClient(create_app(reference_audio_extractor=extractor), base_url="http://127.0.0.1")
 
     response = client.post(
         "/api/vibevoice/reference-audio-from-url",
@@ -508,6 +523,48 @@ def test_vibevoice_reference_audio_from_url_api_returns_wav() -> None:
     assert payload["start_seconds"] == 75.0
     assert payload["detected_start_seconds"] == 75.0
     assert extractor.calls == [("https://youtu.be/example?t=75", None, 5.0)]
+
+
+def test_vibevoice_reference_audio_from_url_api_rejects_non_local_request() -> None:
+    class FailingReferenceAudioExtractor:
+        def extract_from_url(self, *args, **kwargs):
+            raise AssertionError("extractor must not run for a non-local request")
+
+    client = TestClient(create_app(reference_audio_extractor=FailingReferenceAudioExtractor()))
+
+    response = client.post(
+        "/api/vibevoice/reference-audio-from-url",
+        data={"url": "https://youtu.be/example", "duration_seconds": "5"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "URL参照音声取得はローカルFastAPIへのloopback接続でのみ利用できます。"
+    }
+
+
+def test_vibevoice_reference_audio_from_url_api_allows_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeReferenceAudioExtractor:
+        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
+            return ReferenceAudioClip(
+                audio_bytes=b"RIFFurlwav",
+                audio_mime_type="audio/wav",
+                filename="reference.wav",
+                source_url=url,
+                start_seconds=0.0,
+                detected_start_seconds=None,
+                duration_seconds=duration_seconds,
+            )
+
+    monkeypatch.setenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", "1")
+    client = TestClient(create_app(reference_audio_extractor=FakeReferenceAudioExtractor()))
+
+    response = client.post(
+        "/api/vibevoice/reference-audio-from-url",
+        data={"url": "https://example.com/audio", "duration_seconds": "5"},
+    )
+
+    assert response.status_code == 200
 
 
 def test_vibevoice_generate_api_resolves_url_reference_before_runpod_backend() -> None:
@@ -552,7 +609,10 @@ def test_vibevoice_generate_api_resolves_url_reference_before_runpod_backend() -
 
     extractor = FakeReferenceAudioExtractor()
     runpod_service = FakeRunpodVibeVoiceService()
-    client = TestClient(create_app(reference_audio_extractor=extractor, runpod_vibevoice_service=runpod_service))
+    client = TestClient(
+        create_app(reference_audio_extractor=extractor, runpod_vibevoice_service=runpod_service),
+        base_url="http://127.0.0.1",
+    )
 
     response = client.post(
         "/api/vibevoice/generate",
@@ -584,6 +644,36 @@ def test_vibevoice_generate_api_resolves_url_reference_before_runpod_backend() -
     assert len(runpod_service.calls) == 1
     assert runpod_service.voice_bytes == b"RIFFurlwav"
     assert runpod_service.voice_names == ["voice-1.wav"]
+
+
+def test_vibevoice_generate_api_rejects_url_reference_from_non_local_request() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/vibevoice/generate",
+        data={
+            "script": "你好。",
+            "voice_url_1": "https://youtu.be/example",
+            "voice_url_duration_1": "5",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_vibevoice_job_api_rejects_url_reference_from_non_local_request() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/vibevoice/jobs",
+        data={
+            "script": "你好。",
+            "voice_url_1": "https://youtu.be/example",
+            "voice_url_duration_1": "5",
+        },
+    )
+
+    assert response.status_code == 403
 
 
 def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
@@ -741,7 +831,10 @@ def test_vibevoice_job_api_resolves_url_reference_and_reports_diagnostics(tmp_pa
 
     extractor = FakeReferenceAudioExtractor()
     service = FakeVibeVoiceService()
-    client = TestClient(create_app(reference_audio_extractor=extractor, vibevoice_service=service))
+    client = TestClient(
+        create_app(reference_audio_extractor=extractor, vibevoice_service=service),
+        base_url="http://127.0.0.1",
+    )
 
     response = client.post(
         "/api/vibevoice/jobs",

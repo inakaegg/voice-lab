@@ -2733,7 +2733,8 @@ fieldset.public-samples-admin {
 
 .vibevoice-upload-action,
 .vibevoice-url-slot-button,
-.vibevoice-record-slot-button {
+.vibevoice-record-slot-button,
+.vibevoice-tab-audio-slot-button {
   align-items: center;
   appearance: none;
   background: #e5f0ff;
@@ -2755,17 +2756,20 @@ fieldset.public-samples-admin {
 }
 
 .vibevoice-url-slot-button,
-.vibevoice-record-slot-button {
+.vibevoice-record-slot-button,
+.vibevoice-tab-audio-slot-button {
   font: inherit;
 }
 
-.vibevoice-record-slot-button[data-recording="true"] {
+.vibevoice-record-slot-button[data-recording="true"],
+.vibevoice-tab-audio-slot-button[data-recording="true"] {
   background: #ffe8e5;
   border-color: #f2a69c;
   color: #a12414;
 }
 
-.vibevoice-record-slot-button:disabled {
+.vibevoice-record-slot-button:disabled,
+.vibevoice-tab-audio-slot-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }

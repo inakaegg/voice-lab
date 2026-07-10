@@ -35,6 +35,8 @@
 
 ## UI状態
 
+- SkitVoiceの参照音声は、ローカルFastAPI版ではファイル選択、マイク録音、ブラウザタブ音声録音、動画・音声URLの4方式、Cloudflare公開版ではURLを除く3方式で指定できる。タブ音声録音は `getDisplayMedia()` でユーザーが選択したタブの音声trackだけを録音し、映像、URL、cookieは保存・送信しない。音声共有が無効な場合はエラーとし、録音結果は通常の参照音声Blobとして保存・送信する。
+
 - 画面はユーザー用、発音練習用、管理者用に分ける。
   - `/` は `Voice Lab` のポータル画面とし、主要導線は `SkitVoice` と `SpeakLoop` の2つに絞る。従来のジョーク寄り変換デモはトップの主導線に置かない。
   - `/fun` は従来の `へんな へんかん アプリ` の簡易画面とし、大きい録音ボタン、最小限の状態表示、トグルだけを表示する。この画面は半分ジョークの音声変換デモであり、SkitVoiceやSpeakLoopとは別経路として扱う。今後の公開時の扱いは別途判断する。
@@ -319,7 +321,7 @@ OpenAI Realtime翻訳の扱い:
 リクエスト:
 
 - `POST /api/vibevoice/generate` と同じフォーム項目を受け取る。
-- 参照音声は従来の `voice_file_1` から `voice_file_4` を受け取る。ブラウザで録音した参照音声も、保存済みBlobとして同じ `voice_file_N` 経路で送信する。Cloudflare公開版では `voice_url_1` から `voice_url_4` を受け取った場合は拒否する。URL参照はローカルFastAPI版または管理者の事前素材作成用に限り、`voice_url_1` から `voice_url_4`、`voice_url_start_1` から `voice_url_start_4`、`voice_url_duration_1` から `voice_url_duration_4` を扱う。RunPod Serverlessへ送るpayloadでは、URL参照を事前に切り出した `audio_base64` のvoiceとして扱い、RunPod側ではURL取得を行わない。
+- 参照音声は従来の `voice_file_1` から `voice_file_4` を受け取る。ブラウザで録音した参照音声も、保存済みBlobとして同じ `voice_file_N` 経路で送信する。Cloudflare公開版では `voice_url_1` から `voice_url_4` を受け取った場合は拒否する。URL参照はローカルFastAPI版または管理者の事前素材作成用に限り、`voice_url_1` から `voice_url_4`、`voice_url_start_1` から `voice_url_start_4`、`voice_url_duration_1` から `voice_url_duration_4` を扱う。FastAPIは既定でloopback hostからのURL参照だけを許可し、`MO_VIBEVOICE_URL_REFERENCE_ENABLED=1` で明示許可、`0` で明示禁止できる。RunPod Serverlessへ送るpayloadでは、URL参照を事前に切り出した `audio_base64` のvoiceとして扱い、RunPod側ではURL取得を行わない。URL取得の失敗文言はローカルFastAPI上の外部ツールによる失敗として扱い、後続のRunPodを原因として表示しない。
 - 画面からの通常生成はこちらを使う。長い生成をHTTP request内で待ち続けず、ジョブIDを返して以後ポーリングする。
 
 レスポンス:

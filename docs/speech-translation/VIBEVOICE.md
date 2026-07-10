@@ -27,6 +27,22 @@
 
 参照音声は、ローカルファイル、ブラウザのマイク録音、ローカル/詳細画面向けの動画・音声URLから指定できる。Cloudflare公開UIでは、YouTubeなどの動画URL取得がdatacenter IPからbot確認、地域制限、ログイン要求を受けやすいため、URL入力を公開デモの標準機能にしない。公開ユーザー画面では各Speaker枠にファイル選択と録音ボタンを置き、録音した音声は保存済み参照音声としてIndexedDBへ保存して生成時に送信する。Cloudflare WorkerのVibeVoice生成APIも `voice_url_1` から `voice_url_4` を受け取った場合はRunPodへ送らず拒否する。URL切り出しはローカルFastAPI版または管理者の事前素材作成用に残し、`yt-dlp --download-sections` と `ffmpeg` で指定区間を24kHz mono PCM WAVへ切り出してから通常の参照音声として生成リクエストへ渡す。RunPod handlerはURLを受け取らず、`audio_base64` の参照音声だけを扱う。YouTubeなどの `t=`, `start=`, `time_continue=`, `#t=` に含まれる再生開始時刻を開始秒として扱い、UIで開始秒を明示した場合はその値を優先する。参照音声用途では長尺全体の無駄なDLを避けるため、section取得に失敗しても同じURLの全体DLへはフォールバックしない。
 
+URL参照音声の実行境界は次のとおりとする。「管理者の事前素材作成」も、ローカルFastAPIへ接続している画面またはローカル処理を指し、クラウド上の管理画面でURL取得を許可する意味ではない。
+
+| 接続先・実行環境 | ファイル | マイク録音 | タブ音声録音 | URL入力 | URL取得処理 | RunPodへ渡すもの |
+| --- | --- | --- | --- | --- | --- | --- |
+| ローカルFastAPI | 可 | 可 | 可 | 可 | 同じFastAPIプロセスの実行環境で `yt-dlp` / `ffmpeg` を実行 | 選択・録音・切り出し済み音声bytes |
+| Cloudflare公開版 | 可 | 可 | 可 | 不可。Worker APIでも拒否 | 実行しない | 選択または録音した音声bytes |
+| RunPod handler | 音声bytesのみ | 音声bytesのみ | 音声bytesのみ | URLを受け付けない | 実行しない | `audio_base64` の音声のみ |
+
+FastAPIのURL参照APIは、既定ではリクエストURLのhostが `localhost`、`127.0.0.1`、`::1` の場合だけ許可する。`MO_VIBEVOICE_URL_REFERENCE_ENABLED=1` で非loopback接続でも明示許可でき、`0` でloopbackを含めて明示禁止できる。公開環境では許可しない。`GET /api/vibevoice/status` の `url_reference_audio` は、現在のリクエストでの有効状態と `yt-dlp` / `ffmpeg` の検出情報を返し、詳細画面ではyt-dlpのバージョンと90日超の状態を確認できる。
+
+YouTubeのJavaScript challengeを解決するため、ローカルFastAPIのyt-dlpコマンドは `--js-runtimes node` と `--remote-components ejs:github` を指定する。Nodeはyt-dlpが対応する版をPATH上に配置し、`GET /api/vibevoice/status` の `url_reference_audio.tools.javascript_runtime` で検出パスを確認できる。cookieやPO Tokenは既定では使わず、ログイン必須コンテンツを別途仕様化する場合だけ秘密情報の管理方法とアカウントリスクを先に定める。
+
+ローカルFastAPIでURL取得に失敗した時点では、後続のRunPod生成は開始されていない。エラー表示では、外部ツールの取得失敗を先に、更新警告などを別の警告として後に表示し、観測事実と推測上の原因候補を分ける。RunPodやdatacenter制限を確認済みの原因として表示しない。URL参照を設定したSpeaker枠には有効状態を表示し、ダイアログの「URL参照を解除」でブラウザ保存状態と生成フォームの送信対象から明示的に外せる。ファイル選択または録音を行った場合も、同じSpeaker枠のURL参照を解除する。
+
+タブ音声録音はブラウザの `getDisplayMedia()` を使い、ユーザーが共有対象として選択したタブの音声trackだけをMediaRecorderへ渡す。開始時はブラウザの共有ダイアログで対象タブを選び、「タブの音声を共有」を有効にする必要がある。音声trackがない画面・ウインドウ共有は参照音声として受け付けない。録音中にボタンを再度押すか、ブラウザ側で共有を停止すると録音を終了し、通常の参照音声BlobとしてIndexedDBへ保存する。タブ映像は保存・送信しない。タブ音声録音はCloudflare公開版でもブラウザ内だけで完結し、URLやcookieをWorkerまたはRunPodへ送らない。
+
 台本テキストと生成設定はブラウザの `localStorage` へ保存し、次回の表示時に復元する。保存対象は、台本本文、実行先backend、モデル、`cfg_scale`、`inference_steps`、`seed`、`temperature`、`top_p`、`top_k`、`max_voice_seconds`、`line_gap`、`do_sample`、`line_by_line`、`directed_line_mode`、`directed_retry_low_score`、`directed_retry_score_threshold`、`directed_retry_max_multiplier` とする。ローカル/詳細画面でURL参照を使う場合だけ、Speaker枠ごとのURL、開始秒、切り出し秒数も保存対象にする。台本ファイルを読み込んだ場合も、読み込み後のtextarea内容を保存対象にする。生成設定のリセット操作は、台本本文とIndexedDBの参照音声を残したまま、保存対象の生成設定だけを画面初期値へ戻す。保存は同じブラウザ、同じorigin内の作業再開用であり、Googleログインユーザーごとのサーバー保存、別ブラウザ、別端末同期は行わない。履歴管理や別端末同期は今後の生成履歴機能で扱う。
 
 長い台本の生成は同期リクエストではなくVibeVoiceジョブとして扱う。UIはジョブの状態をポーリングし、現在ステージ、経過時間、完了時の生成時間を表示する。ローカル実行ではVibeVoice CLIの `tqdm` 出力に含まれる実進捗値を取り込み、プログレスバーを数値進捗へ切り替える。進捗値がまだ取れない初期化や未知ステージだけ、処理中インジケータとしてアニメーション表示する。成功、失敗、キャンセルなどの終端状態では、完了時の経過時間表示は残してよいが、処理中インジケータのアニメーションは必ず停止する。ローカル実行のジョブでは固定timeoutで停止せず、生成中にキャンセルでき、キャンセル時はVibeVoice CLI subprocessを終了する。互換用の同期 `POST /api/vibevoice/generate` は残すが、画面からの通常生成は `POST /api/vibevoice/jobs` を使う。

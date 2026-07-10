@@ -10,7 +10,7 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from time import perf_counter
 from typing import Annotated
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -252,6 +252,34 @@ def _vibevoice_url_reference_specs(
             "duration_seconds": _required_float_form_value(duration_value, f"voice_url_duration_{slot}"),
         }
     return specs
+
+
+def _url_reference_audio_enabled(request: Request) -> bool:
+    configured = str(os.getenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", "")).strip().lower()
+    if configured in {"1", "true", "yes", "on"}:
+        return True
+    if configured in {"0", "false", "no", "off"}:
+        return False
+    return (request.url.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
+
+
+def _require_url_reference_audio(request: Request, url_references: dict[int, dict[str, object]]) -> None:
+    if url_references and not _url_reference_audio_enabled(request):
+        raise HTTPException(
+            status_code=403,
+            detail="URL参照音声取得はローカルFastAPIへのloopback接続でのみ利用できます。",
+        )
+
+
+def _reference_audio_tool_diagnostics(extractor: object) -> dict[str, object]:
+    diagnostics = getattr(extractor, "diagnostics", None)
+    if not callable(diagnostics):
+        return {}
+    try:
+        value = diagnostics()
+    except Exception as exc:
+        return {"diagnostics_error": str(exc)}
+    return value if isinstance(value, dict) else {}
 
 
 async def _save_vibevoice_voice_uploads(
@@ -777,10 +805,15 @@ def create_app(
         }
 
     @app.get("/api/vibevoice/status")
-    def vibevoice_status() -> dict[str, object]:
+    def vibevoice_status(request: Request) -> dict[str, object]:
         local_status = active_vibevoice_service.status()
         return {
             **local_status,
+            "url_reference_audio": {
+                "enabled": _url_reference_audio_enabled(request),
+                "scope": "loopback_or_explicit_override",
+                "tools": _reference_audio_tool_diagnostics(active_reference_audio_extractor),
+            },
             "backends": {
                 "local": local_status,
                 "runpod_serverless": active_runpod_vibevoice_service.status(),
@@ -789,10 +822,12 @@ def create_app(
 
     @app.post("/api/vibevoice/reference-audio-from-url")
     async def vibevoice_reference_audio_from_url(
+        request: Request,
         url: Annotated[str, Form()] = "",
         start_seconds: Annotated[str | None, Form()] = None,
         duration_seconds: Annotated[str, Form()] = "5",
     ) -> dict[str, object]:
+        _require_url_reference_audio(request, {1: {"url": url}} if str(url or "").strip() else {})
         try:
             clip = active_reference_audio_extractor.extract_from_url(
                 url,
@@ -944,6 +979,7 @@ def create_app(
 
     @app.post("/api/vibevoice/generate")
     async def vibevoice_generate(
+        request: Request,
         script: Annotated[str, Form()] = "",
         script_file: Annotated[UploadFile | None, File()] = None,
         voice_file_1: Annotated[UploadFile | None, File()] = None,
@@ -1022,6 +1058,7 @@ def create_app(
                 voice_url_start_4=voice_url_start_4,
                 voice_url_duration_4=voice_url_duration_4,
             )
+            _require_url_reference_audio(request, url_references)
             with TemporaryDirectory(prefix="mo-vibevoice-api-") as temp_dir:
                 voice_paths, voice_diagnostics = await _save_vibevoice_voice_uploads(
                     [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
@@ -1061,6 +1098,7 @@ def create_app(
 
     @app.post("/api/vibevoice/jobs")
     async def create_vibevoice_job(
+        request: Request,
         script: Annotated[str, Form()] = "",
         script_file: Annotated[UploadFile | None, File()] = None,
         voice_file_1: Annotated[UploadFile | None, File()] = None,
@@ -1140,6 +1178,7 @@ def create_app(
                 voice_url_start_4=voice_url_start_4,
                 voice_url_duration_4=voice_url_duration_4,
             )
+            _require_url_reference_audio(request, url_references)
             voice_paths, voice_diagnostics = await _save_vibevoice_voice_uploads(
                 [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
                 temp_dir,

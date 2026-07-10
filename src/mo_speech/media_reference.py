@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import date
+from importlib import metadata
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Callable
@@ -34,14 +37,29 @@ class MediaReferenceAudioExtractor:
         runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
         yt_dlp_command: str = "yt-dlp",
         ffmpeg_command: str = "ffmpeg",
+        javascript_runtime_command: str = "node",
         timeout_seconds: float = 180.0,
         max_duration_seconds: float = 30.0,
     ) -> None:
         self._runner = runner
         self._yt_dlp_command = yt_dlp_command
         self._ffmpeg_command = ffmpeg_command
+        self._javascript_runtime_command = javascript_runtime_command
         self._timeout_seconds = timeout_seconds
         self._max_duration_seconds = max_duration_seconds
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "yt_dlp": _yt_dlp_diagnostics(self._yt_dlp_command),
+            "ffmpeg": {
+                "command": self._ffmpeg_command,
+                "path": shutil.which(self._ffmpeg_command),
+            },
+            "javascript_runtime": {
+                "command": self._javascript_runtime_command,
+                "path": shutil.which(self._javascript_runtime_command),
+            },
+        }
 
     def extract_from_url(
         self,
@@ -66,6 +84,7 @@ class MediaReferenceAudioExtractor:
                     source_url,
                     output_template=source_template,
                     section=section,
+                    javascript_runtime_command=self._javascript_runtime_command,
                 ),
                 "yt-dlp",
             )
@@ -123,15 +142,62 @@ class MediaReferenceAudioExtractor:
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"{label} によるURL参照音声取得がtimeoutしました。") from exc
         if getattr(completed, "returncode", 1) != 0:
-            stderr = str(getattr(completed, "stderr", "") or getattr(completed, "stdout", "") or "").strip()
-            detail = stderr[-600:] if stderr else "no diagnostic"
+            command_output = str(getattr(completed, "stderr", "") or getattr(completed, "stdout", "") or "").strip()
+            detail, warnings = _split_command_failure_output(command_output)
             if _looks_like_youtube_unavailable(detail):
                 detail = (
                     f"{detail}\n"
-                    "RunPodから対象動画を視聴できません。動画の公開状態、地域制限、ログイン要求、"
-                    "YouTube側のdatacenter制限を確認し、別の公開動画URLまたはローカル音声ファイルを使ってください。"
+                    "ローカル環境のyt-dlpから対象動画を取得できません。動画の公開状態、地域制限、"
+                    "ログイン要求を確認し、別の公開動画URLまたはローカル音声ファイルを使ってください。"
                 )
-            raise RuntimeError(f"{label} によるURL参照音声取得に失敗しました: {detail}")
+            message = f"{label} によるURL参照音声取得失敗: {detail}"
+            if warnings:
+                message = f"{message}\n{label} 警告: {warnings}"
+            raise RuntimeError(message)
+
+
+def _split_command_failure_output(output: str) -> tuple[str, str]:
+    detail_lines: list[str] = []
+    warning_lines: list[str] = []
+    current_target = detail_lines
+    for line in str(output or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("WARNING:"):
+            current_target = warning_lines
+        elif stripped.startswith("ERROR:"):
+            current_target = detail_lines
+        current_target.append(stripped)
+    detail = " ".join(detail_lines)[-600:] if detail_lines else "no diagnostic"
+    warnings = " ".join(warning_lines)[-600:]
+    return detail, warnings
+
+
+def _yt_dlp_diagnostics(command: str) -> dict[str, object]:
+    try:
+        version = metadata.version("yt-dlp")
+    except metadata.PackageNotFoundError:
+        version = None
+    age_days = _dated_version_age_days(version)
+    return {
+        "command": command,
+        "path": shutil.which(command),
+        "version": version,
+        "version_age_days": age_days,
+        "older_than_90_days": age_days is not None and age_days > 90,
+    }
+
+
+def _dated_version_age_days(version: str | None) -> int | None:
+    match = re.fullmatch(r"(\d{4})\.(\d{1,2})\.(\d{1,2})(?:\D.*)?", str(version or ""))
+    if not match:
+        return None
+    try:
+        released = date(*(int(value) for value in match.groups()))
+    except ValueError:
+        return None
+    return max(0, (date.today() - released).days)
 
 
 def _yt_dlp_download_command(
@@ -140,11 +206,14 @@ def _yt_dlp_download_command(
     *,
     output_template: Path,
     section: str,
+    javascript_runtime_command: str,
 ) -> list[str]:
     return [
         yt_dlp_command,
         "--no-playlist",
         "--force-ipv4",
+        "--js-runtimes",
+        javascript_runtime_command,
         "--remote-components",
         "ejs:github",
         "--extractor-args",

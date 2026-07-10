@@ -37,6 +37,7 @@ const referenceUrlInput = document.querySelector("#vibevoice-reference-url");
 const referenceUrlStartInput = document.querySelector("#vibevoice-reference-url-start");
 const referenceUrlDurationInput = document.querySelector("#vibevoice-reference-url-duration");
 const referenceUrlButton = document.querySelector("#vibevoice-reference-url-button");
+const referenceUrlClearButton = document.querySelector("#vibevoice-reference-url-clear");
 const referenceUrlStatus = document.querySelector("#vibevoice-reference-url-status");
 const referenceUrlDialog = document.querySelector("#vibevoice-reference-url-dialog");
 const referenceUrlCancelButton = document.querySelector("#vibevoice-reference-url-cancel");
@@ -45,11 +46,12 @@ const referenceUrlOpenButtons = Array.from(document.querySelectorAll("[data-refe
 const referenceUrlDisplays = Array.from(document.querySelectorAll("[data-reference-url-display-slot]"));
 const localReferenceUrlElements = Array.from(document.querySelectorAll("[data-local-reference-url]"));
 const recordVoiceButtons = Array.from(document.querySelectorAll("[data-record-voice-slot]"));
+const tabAudioButtons = Array.from(document.querySelectorAll("[data-tab-audio-slot]"));
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
 const vibevoicePageMode = document.body?.dataset.vibevoiceMode || "advanced";
-const referenceUrlSourcesEnabled = computeReferenceUrlSourcesEnabled();
+let referenceUrlSourcesEnabled = computeReferenceUrlSourcesEnabled();
 const vibevoiceSettingsStorageKey =
   vibevoicePageMode === "simple" ? "mo-speech-vibevoice-simple-draft" : "mo-speech-vibevoice-draft";
 const defaultSimpleScript = "1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか。どうしてました？";
@@ -104,9 +106,11 @@ cancelButton.addEventListener("click", cancelVibeVoiceJob);
 resetSettingsButton.addEventListener("click", resetVibeVoiceGenerationSettings);
 copyDiagnosticsButton?.addEventListener("click", copyDiagnosticsToClipboard);
 referenceUrlButton?.addEventListener("click", handleReferenceUrlUse);
+referenceUrlClearButton?.addEventListener("click", handleReferenceUrlClear);
 referenceUrlCancelButton?.addEventListener("click", closeReferenceUrlDialog);
 referenceUrlOpenButtons.forEach((button) => button.addEventListener("click", openReferenceUrlDialog));
 recordVoiceButtons.forEach((button) => button.addEventListener("click", toggleVoiceRecording));
+tabAudioButtons.forEach((button) => button.addEventListener("click", toggleTabAudioRecording));
 referenceUrlDialog?.addEventListener("click", (event) => {
   if (event.target === referenceUrlDialog) {
     closeReferenceUrlDialog();
@@ -581,6 +585,14 @@ async function loadStatus() {
 function renderStatus(status) {
   const localStatus = status.backends?.local || status;
   const runpodStatus = status.backends?.runpod_serverless || {};
+  const urlReferenceStatus = status.url_reference_audio || {};
+  const ytDlpStatus = urlReferenceStatus.tools?.yt_dlp || {};
+  const javascriptRuntimeStatus = urlReferenceStatus.tools?.javascript_runtime || {};
+  if (typeof urlReferenceStatus.enabled === "boolean") {
+    referenceUrlSourcesEnabled = referenceUrlSourcesEnabled && urlReferenceStatus.enabled;
+    configureReferenceUrlAvailability();
+    renderAllReferenceUrlRecords();
+  }
   const modelLabels = Array.isArray(localStatus.model_presets)
     ? localStatus.model_presets.map((preset) => preset.label || preset.model_id).join(" / ")
     : "";
@@ -599,6 +611,19 @@ function renderStatus(status) {
     detailItem("Local Model", localStatus.model_cache_found ? localStatus.model_cache_path : "missing"),
     detailItem("Local Tokenizer", localStatus.tokenizer_found ? localStatus.tokenizer_path : "missing"),
     detailItem("RunPod", runpodStatus.available ? `configured (${runpodStatus.request_mode})` : runpodStatus.reason || "not configured"),
+    detailItem("URL Reference", urlReferenceStatus.enabled ? "local enabled" : "disabled"),
+    detailItem(
+      "yt-dlp",
+      ytDlpStatus.version
+        ? `${ytDlpStatus.version}${ytDlpStatus.older_than_90_days ? " (90日超)" : ""}`
+        : ytDlpStatus.path || "missing",
+    ),
+    detailItem(
+      "YouTube JS Runtime",
+      javascriptRuntimeStatus.path
+        ? `${javascriptRuntimeStatus.command || "node"} (${javascriptRuntimeStatus.path})`
+        : "missing",
+    ),
     detailItem("Sync Timeout", `${localStatus.timeout_seconds}s`),
   );
 }
@@ -742,12 +767,12 @@ async function toggleVoiceRecording(event) {
     return;
   }
   if (activeVoiceRecording) {
-    if (activeVoiceRecording.slot === slot) {
+    if (activeVoiceRecording.slot === slot && activeVoiceRecording.recordingType === "microphone") {
       stopActiveVoiceRecording();
       return;
     }
     message.dataset.state = "error";
-    message.textContent = `Speaker ${activeVoiceRecording.slot} の録音を停止してから、Speaker ${slot} を録音してください。`;
+    message.textContent = `Speaker ${activeVoiceRecording.slot} の${activeRecordingLabel()}を停止してから、Speaker ${slot} を録音してください。`;
     return;
   }
   await startVoiceRecording(slot, button);
@@ -770,14 +795,14 @@ async function startVoiceRecording(slot, button) {
     const mimeType = preferredRecordingMimeType();
     const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     const chunks = [];
-    activeVoiceRecording = { slot, button, recorder, stream, chunks };
+    activeVoiceRecording = { slot, button, recorder, stream, chunks, recordingType: "microphone" };
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data && event.data.size > 0) {
         chunks.push(event.data);
       }
     });
     recorder.addEventListener("stop", () => {
-      finishVoiceRecording(slot, recorder.mimeType || mimeType || "audio/webm").catch((error) => {
+      finishReferenceRecording(slot, recorder.mimeType || mimeType || "audio/webm", "microphone").catch((error) => {
         message.dataset.state = "error";
         message.textContent = `録音を保存できませんでした: ${error.message || error}`;
       });
@@ -795,6 +820,86 @@ async function startVoiceRecording(slot, button) {
   }
 }
 
+async function toggleTabAudioRecording(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const button = event.currentTarget;
+  const slot = String(button?.dataset.tabAudioSlot || "");
+  if (!/^[1-4]$/.test(slot)) {
+    return;
+  }
+  if (activeVoiceRecording) {
+    if (activeVoiceRecording.slot === slot && activeVoiceRecording.recordingType === "tab") {
+      stopActiveVoiceRecording();
+      return;
+    }
+    message.dataset.state = "error";
+    message.textContent = `Speaker ${activeVoiceRecording.slot} の${activeRecordingLabel()}を停止してから、Speaker ${slot} のタブ音声を録音してください。`;
+    return;
+  }
+  await startTabAudioRecording(slot, button);
+}
+
+async function startTabAudioRecording(slot, button) {
+  if (generationBusy) {
+    message.dataset.state = "error";
+    message.textContent = "生成中はタブ音声を録音できません。";
+    return;
+  }
+  if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
+    message.dataset.state = "error";
+    message.textContent = "このブラウザではタブ音声録音を使えません。音声ファイルまたはマイク録音を使ってください。";
+    return;
+  }
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true,
+      preferCurrentTab: false,
+      selfBrowserSurface: "exclude",
+      surfaceSwitching: "exclude",
+      systemAudio: "include",
+    });
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      stopStreamTracks(stream);
+      throw new Error("共有したタブに音声がありません。共有画面で対象タブを選び、「タブの音声を共有」を有効にしてください。");
+    }
+    const audioStream = new MediaStream(audioTracks);
+    const mimeType = preferredRecordingMimeType();
+    const recorder = mimeType ? new MediaRecorder(audioStream, { mimeType }) : new MediaRecorder(audioStream);
+    const chunks = [];
+    activeVoiceRecording = { slot, button, recorder, stream, chunks, recordingType: "tab" };
+    recorder.addEventListener("dataavailable", (dataEvent) => {
+      if (dataEvent.data && dataEvent.data.size > 0) {
+        chunks.push(dataEvent.data);
+      }
+    });
+    recorder.addEventListener("stop", () => {
+      finishReferenceRecording(slot, recorder.mimeType || mimeType || "audio/webm", "tab").catch((error) => {
+        message.dataset.state = "error";
+        message.textContent = `タブ音声を保存できませんでした: ${error.message || error}`;
+      });
+    });
+    for (const track of stream.getTracks()) {
+      track.addEventListener("ended", stopActiveVoiceRecording, { once: true });
+    }
+    recorder.start();
+    renderVoiceRecordingButtons();
+    message.dataset.state = "busy";
+    message.textContent = `Speaker ${slot} のタブ音声を録音中です。もう一度押すと停止します。`;
+  } catch (error) {
+    stopStreamTracks(stream);
+    activeVoiceRecording = null;
+    renderVoiceRecordingButtons();
+    message.dataset.state = "error";
+    message.textContent = error?.name === "NotAllowedError"
+      ? "タブ音声の共有がキャンセルされました。"
+      : `タブ音声録音を開始できませんでした: ${error.message || error}`;
+  }
+}
+
 function stopActiveVoiceRecording() {
   const recording = activeVoiceRecording;
   if (!recording) {
@@ -807,7 +912,7 @@ function stopActiveVoiceRecording() {
   message.textContent = `Speaker ${recording.slot} の録音を保存中です。`;
 }
 
-async function finishVoiceRecording(slot, mimeType) {
+async function finishReferenceRecording(slot, mimeType, recordingType) {
   const recording = activeVoiceRecording;
   if (!recording || recording.slot !== slot) {
     return;
@@ -825,22 +930,38 @@ async function finishVoiceRecording(slot, mimeType) {
   if (input) {
     input.value = "";
   }
-  const filename = recordedVoiceFilename(slot, blob.type);
+  const filename = recordedVoiceFilename(slot, blob.type, recordingType);
   await saveVoiceBlob(slot, blob, filename);
   saveVibeVoiceDraft();
   message.dataset.state = "ready";
-  message.textContent = `Speaker ${slot} の録音を参照音声として保存しました。`;
+  message.textContent = `Speaker ${slot} の${recordingType === "tab" ? "タブ音声" : "録音"}を参照音声として保存しました。`;
 }
 
 function renderVoiceRecordingButtons() {
   for (const button of recordVoiceButtons) {
     const slot = String(button.dataset.recordVoiceSlot || "");
-    const isActive = Boolean(activeVoiceRecording && activeVoiceRecording.slot === slot);
+    const isActive = Boolean(
+      activeVoiceRecording && activeVoiceRecording.slot === slot && activeVoiceRecording.recordingType === "microphone",
+    );
     button.disabled = generationBusy || Boolean(activeVoiceRecording && !isActive);
     button.dataset.recording = isActive ? "true" : "false";
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
     button.textContent = isActive ? "停止" : "録音";
   }
+  for (const button of tabAudioButtons) {
+    const slot = String(button.dataset.tabAudioSlot || "");
+    const isActive = Boolean(
+      activeVoiceRecording && activeVoiceRecording.slot === slot && activeVoiceRecording.recordingType === "tab",
+    );
+    button.disabled = generationBusy || Boolean(activeVoiceRecording && !isActive);
+    button.dataset.recording = isActive ? "true" : "false";
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.textContent = isActive ? "停止" : "タブ音声";
+  }
+}
+
+function activeRecordingLabel() {
+  return activeVoiceRecording?.recordingType === "tab" ? "タブ音声録音" : "マイク録音";
 }
 
 function preferredRecordingMimeType() {
@@ -854,9 +975,11 @@ function preferredRecordingMimeType() {
   );
 }
 
-function recordedVoiceFilename(slot, mimeType) {
+function recordedVoiceFilename(slot, mimeType, recordingType = "microphone") {
   const extension = extensionForMimeType(mimeType || "audio/webm");
-  return `speaker-${slot}-recorded-reference.${extension}`;
+  return recordingType === "tab"
+    ? `speaker-${slot}-tab-reference.${extension}`
+    : `speaker-${slot}-recorded-reference.${extension}`;
 }
 
 function stopStreamTracks(stream) {
@@ -888,6 +1011,9 @@ function openReferenceUrlDialog(event) {
   }
   if (referenceUrlDurationInput) {
     referenceUrlDurationInput.value = record?.durationSeconds || "5";
+  }
+  if (referenceUrlClearButton) {
+    referenceUrlClearButton.disabled = !record?.url;
   }
   setReferenceUrlStatus("", "ready");
   if (typeof referenceUrlDialog?.showModal === "function") {
@@ -960,6 +1086,17 @@ function handleReferenceUrlUse() {
     message.dataset.state = "error";
     message.textContent = `URL参照音声を設定できませんでした: ${error.message || error}`;
   }
+}
+
+function handleReferenceUrlClear() {
+  const slot = String(referenceUrlSlotSelect?.value || "1");
+  referenceUrlRecordsBySlot.delete(slot);
+  renderReferenceUrlRecord(slot, null);
+  saveVibeVoiceDraft();
+  setReferenceUrlStatus(`Speaker ${slot} のURL参照を解除しました。`, "ready");
+  message.dataset.state = "ready";
+  message.textContent = `Speaker ${slot} のURL参照を解除しました。`;
+  closeReferenceUrlDialog();
 }
 
 function serializeReferenceUrlRecords() {
@@ -1073,6 +1210,10 @@ function updateReferenceUrlButtonState() {
   if (referenceUrlButton) {
     referenceUrlButton.disabled = generationBusy || !referenceUrlSourcesEnabled;
     referenceUrlButton.textContent = "設定";
+  }
+  if (referenceUrlClearButton) {
+    const slot = String(referenceUrlSlotSelect?.value || "1");
+    referenceUrlClearButton.disabled = generationBusy || !referenceUrlRecordsBySlot.has(slot);
   }
 }
 

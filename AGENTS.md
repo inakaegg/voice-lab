@@ -39,6 +39,16 @@
 - 局所的なヒューリスティクスで1ケースだけ通す調整を避ける。
 - 性能改善や容量削減を主張する変更では、変更前後の計測または見積もりを残す。
 
+## URL参照音声の実行境界
+
+- URL参照音声の取得は、ローカルFastAPIプロセス上の `yt-dlp` と `ffmpeg` だけで行う。
+- YouTube取得では対応版NodeをJS runtimeとして使い、yt-dlpへ `--js-runtimes node` を明示する。cookieやPO Tokenを既定で扱わない。
+- Cloudflare公開版ではURL入力を表示せず、URL付きAPIリクエストもWorkerで拒否する。
+- RunPod handlerはURLを受け取らず、ローカルFastAPIで切り出した音声bytesだけを受け取る。RunPod imageへ `yt-dlp` とURL取得機能を含めない。
+- ローカルFastAPIでURL取得に失敗した場合、後続のRunPod処理はまだ始まっていない。RunPod、Cloudflare、datacenter制限を確認済みの原因としてエラーへ表示しない。
+- URL取得の責任を別環境へ移す場合やRunPod imageへ取得ツールを追加する場合は、実装前に仕様変更として `docs/` へ記録する。
+- URL参照の変更では、ローカルFastAPIで取得すること、Cloudflareが拒否すること、RunPod payloadにURLが含まれないこと、RunPod imageに取得ツールがないことをテストで確認する。期待値は実装と同じ変更だけで正当化せず、仕様上の実行主体と照合する。
+
 ## モデルとデータの扱い
 
 - モデル本体、Hugging Faceキャッシュ、生成音声、録音サンプル、APIキーはgit管理しない。

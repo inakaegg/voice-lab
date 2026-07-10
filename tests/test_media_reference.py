@@ -53,6 +53,8 @@ def test_media_reference_extractor_uses_url_start_and_duration(tmp_path: Path) -
     assert "--force-ipv4" in calls[0]
     assert "--remote-components" in calls[0]
     assert "ejs:github" in calls[0]
+    assert "--js-runtimes" in calls[0]
+    assert calls[0][calls[0].index("--js-runtimes") + 1] == "node"
     assert "--extractor-args" in calls[0]
     assert "youtube:player_client=web_safari,android_vr" in calls[0]
     assert "--download-sections" in calls[0]
@@ -116,7 +118,48 @@ def test_media_reference_extractor_adds_actionable_youtube_unavailable_hint() ->
 
     message = str(exc_info.value)
     assert "Video unavailable" in message
-    assert "RunPodから対象動画を視聴できません" in message
+    assert "ローカル環境のyt-dlpから対象動画を取得できません" in message
+    assert "RunPod" not in message
+    assert "datacenter" not in message
+
+
+def test_media_reference_extractor_separates_warning_from_failure_detail() -> None:
+    def fake_run(command, *, capture_output, text, timeout, check):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr=(
+                "WARNING: Your yt-dlp version (2026.02.04) is older than 90 days!\n"
+                "         It is strongly recommended to always use the latest version.\n"
+                "ERROR: [youtube] example: This video is not available"
+            ),
+        )
+
+    extractor = MediaReferenceAudioExtractor(runner=fake_run)
+    with pytest.raises(RuntimeError) as exc_info:
+        extractor.extract_from_url("https://youtu.be/example", duration_seconds=5)
+
+    message = str(exc_info.value)
+    assert "取得失敗: ERROR: [youtube] example: This video is not available" in message
+    assert "警告: WARNING: Your yt-dlp version" in message
+    assert message.index("取得失敗:") < message.index("警告:")
+
+
+def test_media_reference_extractor_reports_tool_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("mo_speech.media_reference.shutil.which", lambda command: f"/tools/{command}")
+    monkeypatch.setattr("mo_speech.media_reference.metadata.version", lambda package: "2026.02.04")
+
+    diagnostics = MediaReferenceAudioExtractor().diagnostics()
+
+    assert diagnostics["yt_dlp"]["command"] == "yt-dlp"
+    assert diagnostics["yt_dlp"]["path"] == "/tools/yt-dlp"
+    assert diagnostics["yt_dlp"]["version"] == "2026.02.04"
+    assert diagnostics["yt_dlp"]["version_age_days"] > 90
+    assert diagnostics["yt_dlp"]["older_than_90_days"] is True
+    assert diagnostics["ffmpeg"]["path"] == "/tools/ffmpeg"
+    assert diagnostics["javascript_runtime"]["command"] == "node"
+    assert diagnostics["javascript_runtime"]["path"] == "/tools/node"
 
 
 def test_media_reference_extractor_accepts_section_downloaded_combined_media() -> None:

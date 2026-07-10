@@ -273,6 +273,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /data-saved-voice-preview-slot="4"/);
   assert.match(vibevoiceHtml, /data-record-voice-slot="1"/);
   assert.match(vibevoiceHtml, /data-record-voice-slot="4"/);
+  assert.equal((vibevoiceHtml.match(/data-tab-audio-slot=/g) || []).length, 4);
+  assert.doesNotMatch(vibevoiceHtml, /data-tab-audio-slot="1"[^>]*data-local-reference-url/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url"/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-start"/);
   assert.match(vibevoiceHtml, /id="vibevoice-reference-url-duration"/);
@@ -287,7 +289,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-upload-slot\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/s);
   assert.match(styles, /\.vibevoice-upload-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(styles, /\.vibevoice-upload-actions\s*\{[^}]*grid-column:\s*2/s);
-  assert.match(styles, /\.vibevoice-upload-action,\s*\.vibevoice-url-slot-button,\s*\.vibevoice-record-slot-button\s*\{[^}]*min-width:\s*52px/s);
+  assert.match(styles, /\.vibevoice-upload-action,\s*\.vibevoice-url-slot-button,\s*\.vibevoice-record-slot-button,\s*\.vibevoice-tab-audio-slot-button\s*\{[^}]*min-width:\s*52px/s);
   assert.match(vibevoiceHtml, /name="cfg_scale"/);
   assert.match(vibevoiceHtml, /class="vibevoice-workspace"/);
   assert.match(vibevoiceHtml, /class="vibevoice-control-stack"/);
@@ -367,6 +369,12 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /renderSavedVoicePreview/);
   assert.match(vibevoiceSource, /URL\.createObjectURL\(record\.blob\)/);
   assert.match(vibevoiceSource, /navigator\.mediaDevices\.getUserMedia/);
+  assert.match(vibevoiceSource, /navigator\.mediaDevices\.getDisplayMedia/);
+  assert.match(vibevoiceSource, /getAudioTracks\(\)/);
+  assert.match(vibevoiceSource, /YouTube JS Runtime/);
+  assert.match(vibevoiceSource, /タブの音声を共有/);
+  assert.match(vibevoiceSource, /recordingType:\s*"tab"/);
+  assert.match(vibevoiceSource, /speaker-\$\{slot\}-tab-reference/);
   assert.match(vibevoiceSource, /new MediaRecorder/);
   assert.match(vibevoiceSource, /recorded-reference/);
   assert.match(vibevoiceSource, /録音を停止してから生成してください/);
@@ -375,6 +383,8 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /function appendVoiceUrlReference/);
   assert.match(vibevoiceSource, /body\.set\(`voice_url_\$\{slot\}`/);
   assert.match(vibevoiceSource, /handleReferenceUrlUse/);
+  assert.match(vibevoiceSource, /handleReferenceUrlClear/);
+  assert.match(vibevoiceSource, /referenceUrlRecordsBySlot\.delete\(slot\)/);
   assert.match(vibevoiceSource, /openReferenceUrlDialog/);
   assert.match(vibevoiceSource, /closeReferenceUrlDialog/);
   assert.match(vibevoiceSource, /renderReferenceUrlRecord/);
@@ -427,6 +437,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-range-control/);
   assert.match(styles, /\.vibevoice-url-slot-button/);
   assert.match(styles, /\.vibevoice-record-slot-button/);
+  assert.match(styles, /\.vibevoice-tab-audio-slot-button/);
   assert.match(styles, /\.vibevoice-record-slot-button\[data-recording="true"\]/);
   assert.match(styles, /\.vibevoice-reference-url-dialog/);
   assert.match(styles, /\.vibevoice-url-voice/);
@@ -471,10 +482,12 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /name="voice_file_4"/);
   assert.match(vibevoiceSimpleHtml, /data-record-voice-slot="1"/);
   assert.match(vibevoiceSimpleHtml, /data-record-voice-slot="4"/);
+  assert.equal((vibevoiceSimpleHtml.match(/data-tab-audio-slot=/g) || []).length, 4);
   assert.match(vibevoiceSimpleHtml, /data-reference-url-open-slot="1" data-local-reference-url hidden/);
   assert.match(vibevoiceSimpleHtml, /data-reference-url-open-slot="4" data-local-reference-url hidden/);
   assert.match(vibevoiceSimpleHtml, /data-reference-url-display-slot="1" data-local-reference-url hidden/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url"/);
+  assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url-clear"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url-dialog"[^>]*data-local-reference-url hidden/);
   assert.match(vibevoiceSimpleHtml, />URL<\/button>/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /class="vibevoice-reference-url-panel"/);
