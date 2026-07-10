@@ -2709,17 +2709,17 @@ async function saveUploadedAudioHistoryOutput(request, env) {
 
 async function getAudioHistoryFile(kind, filename, env) {
   validateAudioHistoryPath(kind, filename);
-  const kv = requireStateKv(env);
+  requireStateKv(env);
   const index = await readAudioHistoryIndex(env);
   const entry = index[kind].find((item) => item.filename === filename);
   if (!entry) {
     throw httpError(404, "audio history file not found");
   }
-  const audioBase64 = await kv.get(entry.audio_key);
-  if (!audioBase64) {
+  const audioBytes = await readAudioHistoryBlob(env, entry);
+  if (!audioBytes) {
     throw httpError(404, "audio history file not found");
   }
-  return new Response(base64ToBytes(audioBase64), {
+  return new Response(audioBytes, {
     headers: {
       "Content-Type": entry.media_type || "application/octet-stream",
       "Cache-Control": "no-store",
@@ -2736,7 +2736,7 @@ async function deleteAudioHistoryFile(kind, filename, env) {
     throw httpError(404, "audio history file not found");
   }
   index[kind] = index[kind].filter((entry) => entry.filename !== filename);
-  await kv.delete(existing.audio_key);
+  await deleteAudioHistoryBlob(env, existing);
   await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
   return { deleted: true };
 }
@@ -2997,14 +2997,15 @@ async function saveAudioHistoryEntry(env, kind, { audio_base64, audio_mime_type,
     kind,
     filename: safeFilename,
     audio_key: audioKey,
+    audio_storage: audioHistoryBlobStore(env) ? "r2" : "kv",
     media_type: mediaType,
     size_bytes: base64ByteLength(audio_base64),
     created_at: new Date().toISOString(),
     metadata: normalizedMetadata,
   };
-  await kv.put(audioKey, audio_base64);
+  await writeAudioHistoryBlob(env, entry, audio_base64);
   index[kind] = [entry, ...index[kind].filter((item) => item.filename !== safeFilename)];
-  await trimAudioHistoryIndex(kv, index, kind, audioHistoryLimit(env));
+  await trimAudioHistoryIndex(env, index, kind, audioHistoryLimit(env));
   await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
   return entry;
 }
@@ -3025,10 +3026,10 @@ async function updateAudioHistoryEntryMetadata(env, entry, metadata = {}) {
   return target;
 }
 
-async function trimAudioHistoryIndex(kv, index, kind, limit) {
+async function trimAudioHistoryIndex(env, index, kind, limit) {
   const overflow = index[kind].slice(limit);
   index[kind] = index[kind].slice(0, limit);
-  await Promise.all(overflow.map((entry) => kv.delete(entry.audio_key)));
+  await Promise.all(overflow.map((entry) => deleteAudioHistoryBlob(env, entry)));
 }
 
 async function readAudioHistoryIndex(env) {
@@ -3053,6 +3054,7 @@ function normalizeAudioHistoryEntries(entries, kind) {
       kind,
       filename: String(entry.filename),
       audio_key: String(entry.audio_key),
+      audio_storage: entry.audio_storage === "r2" ? "r2" : "kv",
       media_type: normalizeMimeType(entry.media_type) || "application/octet-stream",
       size_bytes: Number(entry.size_bytes || 0),
       created_at: String(entry.created_at || ""),
@@ -3066,6 +3068,7 @@ function serializeAudioHistoryEntry(entry) {
   return {
     kind: entry.kind,
     filename: entry.filename,
+    audio_storage: entry.audio_storage === "r2" ? "r2" : "kv",
     url: `/api/audio-history/${entry.kind}/${encodeURIComponent(entry.filename)}`,
     label: audioHistoryLabel(entry.kind, metadata, preview),
     media_type: entry.media_type,
@@ -3083,11 +3086,18 @@ function serializeAudioHistoryEntry(entry) {
 
 function audioHistorySettings(env) {
   const enabled = Boolean(stateKv(env));
-  const root = enabled ? "Cloudflare Workers KV: MO_SPEECH_KV" : "Cloudflare Workers KV未設定";
+  const blobStore = audioHistoryBlobStore(env) ? "r2" : "kv";
+  const root = enabled
+    ? blobStore === "r2"
+      ? "Cloudflare R2: MO_SPEECH_AUDIO_R2 / metadata: MO_SPEECH_KV"
+      : "Cloudflare Workers KV: MO_SPEECH_KV"
+    : "Cloudflare Workers KV未設定";
   return {
     enabled,
     root,
     resolved_root: root,
+    metadata_store: enabled ? "kv" : "none",
+    blob_store: enabled ? blobStore : "none",
     recordings_dir: "audio-history:recordings",
     outputs_dir: "audio-history:outputs",
     limit: audioHistoryLimit(env),
@@ -3247,6 +3257,46 @@ function validateAudioHistoryPath(kind, filename) {
 
 function stateKv(env) {
   return env.MO_SPEECH_KV || null;
+}
+
+function audioHistoryBlobStore(env) {
+  return env.MO_SPEECH_AUDIO_R2 || null;
+}
+
+function requireAudioHistoryBlobStore(env) {
+  const r2 = audioHistoryBlobStore(env);
+  if (!r2) {
+    throw httpError(503, "MO_SPEECH_AUDIO_R2 binding is required for this audio history entry");
+  }
+  return r2;
+}
+
+async function writeAudioHistoryBlob(env, entry, audioBase64) {
+  const r2 = audioHistoryBlobStore(env);
+  if (entry.audio_storage === "r2" && r2) {
+    await r2.put(entry.audio_key, base64ToBytes(audioBase64), {
+      httpMetadata: { contentType: entry.media_type || "application/octet-stream" },
+    });
+    return;
+  }
+  await requireStateKv(env).put(entry.audio_key, audioBase64);
+}
+
+async function readAudioHistoryBlob(env, entry) {
+  if (entry.audio_storage === "r2") {
+    const object = await requireAudioHistoryBlobStore(env).get(entry.audio_key);
+    return object ? new Uint8Array(await object.arrayBuffer()) : null;
+  }
+  const audioBase64 = await requireStateKv(env).get(entry.audio_key);
+  return audioBase64 ? base64ToBytes(audioBase64) : null;
+}
+
+async function deleteAudioHistoryBlob(env, entry) {
+  if (entry.audio_storage === "r2") {
+    await requireAudioHistoryBlobStore(env).delete(entry.audio_key);
+    return;
+  }
+  await requireStateKv(env).delete(entry.audio_key);
 }
 
 function requireStateKv(env) {
