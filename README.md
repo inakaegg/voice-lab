@@ -1,119 +1,113 @@
-# mo speech translation
+# Voice Lab — SpeakLoop / SkitVoice
 
-音声入力を別言語の音声として返す、ローカル優先の音声翻訳Webアプリです。
+音声を「学ぶ」「演じる」ための、ローカル実行と公開デモに対応したWebアプリです。公開ポータルから、発音練習の **SpeakLoop** と、複数話者スキット生成の **SkitVoice** を利用できます。
 
-現在の対応ルート:
+## できること
 
-- インドネシア語音声 -> 日本語音声
-- 日本語音声 -> 中国語（普通話）音声
+### SpeakLoop — 言いたいことで発音練習
 
-## 現在の状態
+1. 母語で言いたい内容を録音する
+2. 学習言語の文と模範音声を生成する
+3. その文を発音して録音する
+4. ASR結果、類似度、フレーズ単位の交互再生で聞き比べる
 
-- FastAPI backendとブラウザUIで、録音または音声アップロードから結果表示まで動きます。
-- `MO_PROVIDER_MODE=local` では、faster-whisper、Qwen3翻訳、Qwen3-TTS/Seed-VCを使ったローカル縦切りを動かします。
-- OpenAI API経路では、3段方式の音声翻訳、Realtime一括翻訳、Realtime streaming翻訳をUIから選べます。
-- テキスト読み上げでは、Google Translate TTS endpointとOpenAI TTS APIをUIから選べます。
-- ローカル開発では、直近10件の録音と生成音声をUIから再生できます。
-- `voice_mode=default` はfake provider専用です。
-- `MO_TTS_PROVIDER=qwen-seed-vc` では、`voice_mode=clone` をQwen3-TTS、`voice_mode=convert` をSeed-VCで比較できます。
-- RunPod向けにはDockerfileとServerless handlerを用意済みです。実デプロイはRunPod認証とモデルvolume設定が必要です。
+日本語、中国語、英語を学習対象として選べます。
 
-## セットアップ
+### SkitVoice — かんたんスキット生成
+
+台本と最大4人分の参照音声から、複数話者のセリフ音声を生成します。VibeVoiceの生成結果をASR timestampで検査し、話者位置の補正、低スコア行の再生成、Seed-VCによる声質変換を組み合わせます。
+
+参照音声は次の方法で指定できます。
+
+| 実行環境 | ファイル | マイク録音 | タブ音声録音 | URL切り出し |
+| --- | --- | --- | --- | --- |
+| ローカルFastAPI | ○ | ○ | ○ | ○ |
+| Cloudflare公開版 | ○ | ○ | ○ | — |
+| RunPod handler | 音声bytesのみ受領 | 音声bytesのみ受領 | 音声bytesのみ受領 | — |
+
+URL切り出しはローカル版の `yt-dlp` と `ffmpeg` だけが担当します。CloudflareとRunPodへURL、ブラウザcookie、ログイン情報は送りません。
+
+## アーキテクチャ
+
+```mermaid
+flowchart LR
+    Browser[Browser\nSpeakLoop / SkitVoice] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
+    Worker --> OpenAI[OpenAI API\nASR / Translation / TTS]
+    Worker --> RunPod[RunPod Serverless\nVibeVoice / Seed-VC]
+    Worker --> KV[Workers KV\nSettings / Short-lived Jobs / Demo History]
+    Worker -. planned migration .-> D1[D1\nQuota / Audit / Metadata]
+    Worker -. planned migration .-> R2[R2\nAudio Blobs]
+    Local[Local FastAPI\nyt-dlp / ffmpeg / Local Providers] --> RunPod
+```
+
+- ブラウザへOpenAI/RunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
+- 公開版はGoogleログイン、feature別quota、入力上限、管理者quota除外、簡易監査ログをWorkerで処理します。
+- GPU課金が必要なテストと、fake modelで検証できるrequest・job・error処理を分離しています。
+
+詳細は [Cloudflare構成](docs/deployment/CLOUDFLARE.md)、[RunPod構成](docs/deployment/RUNPOD.md)、[SkitVoice仕様](docs/speech-translation/VIBEVOICE.md) を参照してください。
+
+## ローカルセットアップ
+
+Python 3.11以上とNode.jsを使います。UI/APIとfake providerを動かす最小構成は次のとおりです。
 
 ```sh
 python3 -m pip install -e ".[dev]"
-```
-
-ASR/翻訳のローカル実プロバイダも使う場合:
-
-```sh
-python3 -m pip install -e ".[dev,local]"
-```
-
-声質クローンproviderも使う場合は、依存が重いため専用環境を推奨します。設定は [docs/speech-translation/VOICE_CLONE.md](docs/speech-translation/VOICE_CLONE.md) を参照してください。
-
-同じPython環境へ入れる場合:
-
-```sh
-python3 -m pip install -e ".[dev,local,voice]"
-```
-
-OpenAI API経路も使う場合:
-
-```sh
-python3 -m pip install -e ".[dev,openai]"
-cp .env.example .env
-```
-
-`.env` はgit管理しません。OpenAI API経路を使う場合だけ、`.env` に `OPENAI_API_KEY` を設定します。
-
-## 起動
-
-fake provider:
-
-```sh
+npm ci
 PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 ```
 
-fake providerはUI/API確認用で、入力音声の内容に関係なく固定のデモ応答を返します。
+ブラウザで `http://127.0.0.1:8000/` を開きます。fake providerはUI/API検証用で、入力内容に依存しない固定応答を返します。
 
-local provider:
-
-```sh
-MO_PROVIDER_MODE=local MO_TTS_PROVIDER=qwen-seed-vc PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
-```
-
-録音内容を実際に文字起こし、翻訳、音声生成する場合はlocal providerで起動します。
-
-初回リクエスト前にモデルをロードする場合:
+用途に応じた追加依存:
 
 ```sh
-MO_PROVIDER_MODE=local MO_TTS_PROVIDER=qwen-seed-vc MO_PRELOAD_MODELS=1 PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
+# ローカルASR・翻訳
+python3 -m pip install -e ".[dev,local]"
+
+# OpenAI API経路
+python3 -m pip install -e ".[dev,openai]"
+cp .env.example .env
+
+# VibeVoice開発環境（依存が重いため専用環境を推奨）
+python3 -m pip install -e ".[dev,vibevoice]"
 ```
 
-ブラウザで `http://127.0.0.1:8000/` を開きます。
+声質クローン依存とモデル配置は [VOICE_CLONE.md](docs/speech-translation/VOICE_CLONE.md) を参照してください。モデル、生成音声、API key、`.env` はgit管理しません。
 
-## テスト
+## 検証
+
+通常CIと同じ主要検証:
 
 ```sh
 python3 -m pytest
-node --check src/mo_speech/web/app.js
+npm test
+npm run check:js
 ```
 
-## 計測
+RunPod image buildとGPU smokeは費用・実行時間が大きいため、通常CIには含めず手動workflowで実行します。ローカルでhandler、payload、env、シリアライズ、進捗、エラー処理を先に検証します。
 
-```sh
-python3 scripts/benchmark_pipeline.py --provider-mode fake --repeat 3
-```
+## 公開デモ運用
 
-local providerで計測する場合は、短い音声ファイルを指定します。
+Cloudflare Workerは `/` をポータル、`/speakloop` と `/skitvoice` を公開画面として配信します。Google OAuth、quota、管理画面、KV binding、secret、RunPod endpointの設定手順は [CLOUDFLARE.md](docs/deployment/CLOUDFLARE.md) にまとめています。
 
-```sh
-MO_TTS_PROVIDER=qwen-seed-vc \
-python3 scripts/benchmark_pipeline.py \
-  --provider-mode local \
-  --audio path/to/sample.m4a \
-  --source-language ja-JP \
-  --target-language zh-CN \
-  --repeat 3
-```
+音声には個人情報や生体情報が含まれ得ます。公開デモでは機密音声を入力せず、SkitVoiceには本人の同意または利用許諾がある音声だけを使ってください。第三者へのなりすましや誤認を招く用途には使用しないでください。現在のデータ保持範囲は [既知の制限](docs/speech-translation/KNOWN_LIMITS.md) を参照してください。
 
-## デプロイ準備
+## 既知の制限
 
-Docker image:
+- RunPod Serverlessはcold start、queue、GPU利用料金の影響を受けます。
+- VibeVoiceの生成品質は言語、台本、参照音声、乱数に依存します。ASR検査と再生成を行っても完全な話者割当は保証しません。
+- Workers KVは厳密な使用量台帳や大きい音声blobの長期保存には適しません。音声履歴は任意のR2 bindingへ保存でき、D1と公開サンプルを含む全面移行は未完了です。
+- URL音声取得はYouTube等の仕様変更、ログイン要求、地域制限の影響を受けるローカル限定の補助機能です。
+- Safari/Firefox、スマートフォン実機の録音形式・タブ音声共有は継続確認が必要です。
 
-```sh
-docker build -t mo-speech:local .
-```
+詳細は [KNOWN_LIMITS.md](docs/speech-translation/KNOWN_LIMITS.md) を参照してください。
 
-RunPod手順は [docs/deployment/RUNPOD.md](docs/deployment/RUNPOD.md) を参照してください。
+## ドキュメント
 
-## 主要ドキュメント
-
-- [仕様](docs/speech-translation/SPEC.md)
-- [実装フェーズ](docs/speech-translation/PHASES.md)
-- [ローカル実プロバイダ](docs/speech-translation/LOCAL_PROVIDERS.md)
-- [声質クローン方針](docs/speech-translation/VOICE_CLONE.md)
-- [ASR・翻訳モデル評価方針](docs/speech-translation/MODEL_EVALUATION.md)
-- [応答速度と計測](docs/speech-translation/LATENCY.md)
+- [全体仕様](docs/speech-translation/SPEC.md)
+- [SkitVoice / VibeVoice](docs/speech-translation/VIBEVOICE.md)
+- [Cloudflareデモ構成](docs/deployment/CLOUDFLARE.md)
+- [RunPod構成](docs/deployment/RUNPOD.md)
+- [公開デモ品質ロードマップ](docs/deployment/PUBLIC_DEMO_ROADMAP.md)
+- [アプリ分離方針](docs/deployment/APP_SPLIT.md)
 - [既知の制限](docs/speech-translation/KNOWN_LIMITS.md)

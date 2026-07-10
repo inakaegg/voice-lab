@@ -65,4 +65,15 @@
 
 ## 現在の検証コマンド
 
-まだアプリ実装前のため、固定された検証コマンドはない。実装開始時に [TASK.md](TASK.md) に追加する。
+通常の変更では、影響範囲に応じて次を実行する。
+
+```sh
+python3 -m pytest
+npm test
+npm run check:js
+```
+
+- Pythonの全単体・APIテストは `python3 -m pytest` を正とする。
+- Cloudflare WorkerとWeb静的検査は `npm test` と `npm run check:js` を正とする。
+- RunPod Docker buildとGPU smokeは通常CIへ入れず、ローカル検証通過後に手動workflowで実行する。
+- UI変更は上記に加え、可能なら実ブラウザでデスクトップ幅とモバイル幅を確認する。実行できない場合は未確認範囲として報告する。

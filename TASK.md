@@ -1,29 +1,37 @@
-# TASK - 音声翻訳Webアプリ
+# TASK - Voice Lab
 
 ## 現在の状態
 
-- MVPの必須入出力は `id-ID 音声 -> ja-JP 音声` と `ja-JP 音声 -> zh-CN 音声`。
-- 最終的には入力話者の声を出力音声にも反映する。初期実装では、声質クローンなしの縦切りを先に作る。
-- 指定した文字列を出力文の末尾に付加するテキスト加工はMVP範囲に含めるが、最初の実装では後回しでよい。
-- ローカル動作確認後、RunPodまたは別GPUプラットフォームへ載せる。
-- feature branchでは、fake providerを使ったパイプラインと `POST /api/translate-speech` の最小APIが動いている。
-- ブラウザUIから、音声アップロード、録音、末尾付加設定、結果表示、音声再生を操作できる。
-- `MO_PROVIDER_MODE=local` で、faster-whisper、Qwen3翻訳、Qwen3-TTS/Seed-VCを使うローカル実プロバイダを選択できる。
-- `voice_mode` のAPI契約、応答時間計測、Qwen3-TTS/Seed-VC provider、Dockerfile、RunPod handler、README、既知の制限を追加済み。
-- RunPod GPU用DockerfileとCLI補助スクリプトを追加し、初回はPodでWeb UIとAPIを一体確認、その後Serverlessへ分ける方針にした。
+- 公開ポータルの主機能は、発音練習のSpeakLoopと複数話者音声生成のSkitVoice。
+- ローカルFastAPI版とCloudflare Worker公開版を持ち、GPU処理はRunPod Serverlessへ分離している。
+- SpeakLoopは母語録音、翻訳、模範音声、復唱録音、ASR比較、フレーズ単位の比較再生まで実装済み。
+- SkitVoiceは最大4話者、VibeVoice生成、ASR timestampによる再配置、低スコア行再生成、Seed-VC後処理まで実装済み。
+- 参照音声はローカル版でファイル、マイク、タブ音声、URL切り出しの4方式、Cloudflare版でURLを除く3方式を提供する。
+- Cloudflare WorkerはGoogleログイン、feature別quota、入力上限、管理者除外、管理画面、簡易監査ログ、公開サンプル音声を実装済み。
+- Python/Nodeの通常CIを持ち、RunPod image buildとGPU smokeは手動workflowに分離している。
 
-## 次にやること
+## 完了条件として維持する検証
 
-実装フェーズは [docs/speech-translation/PHASES.md](docs/speech-translation/PHASES.md) を正とする。
+```sh
+python3 -m pytest
+npm test
+npm run check:js
+```
 
-1. Qwen3-TTSとSeed-VCの声質、速度、GPU費用を比較し、採用経路を決める。
-2. RunPodのAPIキー、Docker registry、Network Volume IDを設定し、GPU Podを作成する。
-3. RunPod上で、デプロイ先 `/health` と短いfixture音声のスモーク確認を行う。
-4. スマホ実機録音、Safari/Firefox、voice profile保存方針を必要に応じて追加確認する。
+RunPod・GPU・外部APIを使うスモークは、上記のモデル非依存テストが通った後に必要最小限だけ実施する。
 
-## 実装時に追加する検証
+## 次に外部環境で行うこと
 
-- パイプラインのルート選択とプロバイダアダプタの単体テスト。
-- `POST /api/translate-speech` のAPIテスト。
-- 短い録音またはfixture音声を使ったローカルスモークテスト。
-- 録音、アップロード、ローディング状態、文字起こし表示、翻訳表示、音声再生のUIスモークテスト。
+1. 公開URLでGoogle OAuth、quota、管理者除外、SkitVoice生成をスモーク確認する。
+2. SpeakLoopとSkitVoiceの権利確認済みサンプル音声を管理画面から登録する。
+3. 実ブラウザとスマートフォンで録音、タブ音声、比較再生、レスポンシブ表示を確認し、公開用スクリーンショットを取得する。
+4. CloudflareにR2/D1 bindingを作成し、設計済みのKV分離を段階的に有効化する。
+5. 公開ユーザー画面のReact/TypeScript移行は、状態境界ごとに互換テストを追加して段階実施する。
+
+## 仕様の正
+
+- 全体仕様: [docs/speech-translation/SPEC.md](docs/speech-translation/SPEC.md)
+- SkitVoice: [docs/speech-translation/VIBEVOICE.md](docs/speech-translation/VIBEVOICE.md)
+- Cloudflare: [docs/deployment/CLOUDFLARE.md](docs/deployment/CLOUDFLARE.md)
+- 公開デモ改善: [docs/deployment/PUBLIC_DEMO_ROADMAP.md](docs/deployment/PUBLIC_DEMO_ROADMAP.md)
+- 既知の制限: [docs/speech-translation/KNOWN_LIMITS.md](docs/speech-translation/KNOWN_LIMITS.md)

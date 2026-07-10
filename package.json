@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:worker": "node --test tests/*.mjs"
+    "test": "node --test tests/*.mjs",
+    "test:worker": "node --test tests/*.mjs",
+    "check:js": "node --check cloudflare/worker.mjs && node --check src/mo_speech/web/*.js"
   },
   "dependencies": {
     "pinyin-pro": "^3.28.1"

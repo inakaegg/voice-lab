@@ -12,6 +12,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "httpx2>=2.0",
+  "numpy>=1.26",
   "pytest>=8.4",
 ]
 local = [
