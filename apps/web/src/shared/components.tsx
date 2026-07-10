@@ -14,8 +14,8 @@ export function activateCompactLayout(): void {
 
 export function ProductHeader({ product, title, back = true }: { product: string; title: string; back?: boolean }) {
   return <header className="react-product-header">
-    <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label="Voice Labへ">←</a>}<div><p className="react-eyebrow">{product}</p><h1>{title}</h1></div></div>
-    <div className="react-header-tools"><ThemeSettings/><AuthPanel productPath={`/${product.toLowerCase()}`} /></div>
+    <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label="Voice Labへ戻る"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg></a>}<div><p className="react-eyebrow">{product}</p><h1>{title}</h1></div></div>
+    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><ThemeSettings/></div>
   </header>;
 }
 
@@ -38,7 +38,7 @@ export function ThemeSettings() {
     try { window.localStorage.setItem(themeStorageKey, next); } catch { /* 配色変更自体は継続する。 */ }
   };
   return <details className="react-theme-settings">
-    <summary aria-label="配色設定" title="配色設定"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm9 4.8v-2l-2.2-.7a7 7 0 0 0-.6-1.4l1.1-2-1.4-1.4-2 1.1a7 7 0 0 0-1.4-.6L13.8 3h-2L11 5.2a7 7 0 0 0-1.4.6l-2-1.1-1.4 1.4 1.1 2a7 7 0 0 0-.6 1.4L4.5 10v2l2.2.7a7 7 0 0 0 .6 1.4l-1.1 2 1.4 1.4 2-1.1a7 7 0 0 0 1.4.6l.7 2.2h2l.7-2.2a7 7 0 0 0 1.4-.6l2 1.1 1.4-1.4-1.1-2a7 7 0 0 0 .6-1.4L21 13Z"/></svg></summary>
+    <summary aria-label="配色設定" title="配色設定"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/></svg></summary>
     <div className="react-theme-menu" role="radiogroup" aria-label="配色">
       {([['light','明色'],['dark','暗色'],['system','システム']] as const).map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={preference === value} onClick={() => selectTheme(value)}>{label}</button>)}
     </div>

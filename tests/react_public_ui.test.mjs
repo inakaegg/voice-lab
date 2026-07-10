@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [portal, speakloop, skitvoice, shared, worker, pkg] = await Promise.all([
+const [portal, speakloop, skitvoice, shared, styles, worker, pkg] = await Promise.all([
   read("apps/web/src/portal/main.tsx"), read("apps/web/src/speakloop/main.tsx"),
   read("apps/web/src/skitvoice/main.tsx"), read("apps/web/src/shared/components.tsx"),
+  read("src/mo_speech/web/styles.css"),
   read("cloudflare/worker.mjs"), read("package.json"),
 ]);
 
@@ -54,5 +55,20 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
   assert.match(shared, /暗色/);
   assert.match(shared, /システム/);
   assert.match(shared, /mo-speech-theme/);
+  assert.match(shared, /stroke="currentColor"/);
+  assert.match(shared, /strokeLinecap="round"/);
   assert.doesNotMatch(shared, /react-layout-switcher/);
+});
+
+test("SkitVoice output languages include flags", () => {
+  assert.match(skitvoice, /🇺🇸 英語/);
+  assert.match(skitvoice, /🇨🇳 中国語/);
+  assert.match(skitvoice, /🇯🇵 日本語（低品質）/);
+});
+
+test("public workbench keeps settings at the mobile top right and avoids cramped columns", () => {
+  assert.match(styles, /\.react-theme-settings summary svg\s*\{[^}]*fill:\s*none;/s);
+  assert.match(styles, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
+  assert.match(styles, /@media \(min-width:\s*1120px\)/);
+  assert.match(styles, /\.react-practice-flow:has\(#practice-prompt-panel\[hidden\]\)/);
 });

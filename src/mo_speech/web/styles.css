@@ -3735,124 +3735,460 @@ fieldset.public-samples-admin {
   }
 }
 
-/* Public layout candidates: ?layout=compact|guided|studio ---------------- */
-.react-public-body .react-header-tools {
-  align-items: center;
-  display: flex;
-  gap: 10px;
+/* Public application workbench ------------------------------------------ */
+.react-public-body.practice-body,
+.react-public-body.vibevoice-body {
+  --react-accent: #536da8;
+  --react-accent-hover: #40598f;
+  --react-accent-soft: #edf2ff;
+  --react-border: rgba(31, 38, 50, 0.12);
+  --react-focus: rgba(74, 102, 165, 0.32);
+  --react-paper: rgba(255, 255, 255, 0.94);
+  --react-shadow: 0 1px 2px rgba(25, 31, 40, 0.04), 0 16px 42px rgba(35, 43, 63, 0.07);
+  background:
+    radial-gradient(circle at 8% 0, rgba(255, 198, 132, 0.18), transparent 26rem),
+    radial-gradient(circle at 96% 4%, rgba(137, 166, 230, 0.15), transparent 28rem),
+    #f5f4f0;
+  color: var(--react-ink);
 }
 
-/* Compact workbench */
+.react-public-body.vibevoice-body {
+  --react-accent: #9a5b36;
+  --react-accent-hover: #7f4727;
+  --react-accent-soft: #fff2e6;
+  --react-focus: rgba(154, 91, 54, 0.28);
+}
+
 .react-public-body[data-layout="compact"] .react-page-shell {
   max-width: 1480px;
-  padding: 12px clamp(14px, 2vw, 30px) 24px;
+  padding: 12px clamp(14px, 2vw, 30px) 28px;
 }
 
-.react-public-body[data-layout="compact"] .react-product-header {
-  margin-bottom: 8px;
+.react-public-body .react-product-header {
+  align-items: center;
+  border-color: rgba(31, 38, 50, 0.11);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 10px;
   min-height: 48px;
-  padding-bottom: 8px;
+  padding-bottom: 9px;
 }
 
-.react-public-body[data-layout="compact"] .react-product-heading h1 { font-size: clamp(1.15rem, 2vw, 1.55rem); }
-.react-public-body[data-layout="compact"] .react-product-heading .react-eyebrow { display: none; }
-.react-public-body[data-layout="compact"] .react-back-link { height: 34px; width: 34px; }
-.react-public-body[data-layout="compact"] .react-auth-panel { padding: 6px 10px; }
-.react-public-body[data-layout="compact"] .react-intro-grid { display: block; margin: 0 0 7px; }
-.react-public-body[data-layout="compact"] .react-intro-grid { align-items: stretch; display: grid; gap: 7px; grid-template-columns: minmax(0, 1fr) minmax(280px, .65fr); }
-.react-public-body[data-layout="compact"] .react-intro-copy { align-content: center; background: rgba(255,255,255,.58); border: 1px solid rgba(23,32,51,.1); border-radius: 14px; display: grid; padding: 7px 12px; }
+.react-public-body .react-product-heading {
+  gap: 11px;
+  min-width: 0;
+}
+
+.react-public-body .react-product-heading h1 {
+  font-size: clamp(1.18rem, 2vw, 1.58rem);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.react-public-body .react-product-heading .react-eyebrow { display: none; }
+.react-public-body .react-back-link {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: var(--react-border);
+  flex: 0 0 auto;
+  height: 34px;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  width: 34px;
+}
+.react-public-body .react-back-link svg { height: 18px; width: 18px; }
+.react-public-body .react-back-link:hover { background: #fff; border-color: rgba(31, 38, 50, 0.24); transform: translateX(-1px); }
+.react-public-body .react-header-tools { align-items: center; display: flex; gap: 8px; justify-content: flex-end; }
+.react-public-body .react-auth-panel { box-shadow: none; font-size: 12px; padding: 6px 10px; }
+
+.react-public-body .react-back-link:focus-visible,
+.react-public-body .react-theme-settings summary:focus-visible,
+.react-public-body .vibevoice-upload-slot:focus-within,
+.react-public-body button:focus-visible,
+.react-public-body select:focus-visible,
+.react-public-body textarea:focus-visible {
+  outline: 3px solid var(--react-focus);
+  outline-offset: 2px;
+}
+
+.react-public-body[data-layout="compact"] .react-intro-grid {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0 0 9px;
+}
+
+.react-public-body[data-layout="compact"] .react-intro-grid:has(.react-status-stack > :not([hidden])),
+.react-public-body[data-layout="compact"] .react-intro-grid:has(.react-sample-stack > :not([hidden])) {
+  grid-template-columns: minmax(0, 1.25fr) minmax(290px, 0.75fr);
+}
+
+.react-public-body[data-layout="compact"] .react-intro-copy {
+  align-content: center;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid var(--react-accent);
+  border-radius: 0;
+  display: grid;
+  min-width: 0;
+  padding: 4px 0 4px 13px;
+}
 .react-public-body[data-layout="compact"] .react-intro-copy .react-step-label { display: none; }
-.react-public-body[data-layout="compact"] .react-intro-copy h2 { font-size: clamp(.95rem, 1.45vw, 1.2rem); letter-spacing: -.025em; line-height: 1.25; margin: 0 0 2px; }
-.react-public-body[data-layout="compact"] .react-intro-copy > p:last-child { font-size: 10px; line-height: 1.4; margin: 0; max-width: none; }
+.react-public-body[data-layout="compact"] .react-intro-copy h2 {
+  font-size: clamp(1.05rem, 1.55vw, 1.28rem);
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  margin: 0 0 3px;
+}
+.react-public-body[data-layout="compact"] .react-intro-copy > p:last-child {
+  color: var(--react-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 72rem;
+}
 .react-public-body[data-layout="compact"] .react-status-stack,
-.react-public-body[data-layout="compact"] .react-sample-stack { display: flex; gap: 7px; overflow-x: auto; }
-.react-public-body[data-layout="compact"] .react-sample-card { flex: 0 0 250px; min-height: 0; padding: 7px 10px; }
+.react-public-body[data-layout="compact"] .react-sample-stack { align-items: center; display: flex; gap: 8px; min-width: 0; overflow-x: auto; }
+.react-public-body[data-layout="compact"] .react-status-stack:not(:has(> :not([hidden]))),
+.react-public-body[data-layout="compact"] .react-sample-stack:not(:has(> :not([hidden]))) { display: none; }
+.react-public-body[data-layout="compact"] .react-sample-card {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: var(--react-border);
+  border-radius: 12px;
+  box-shadow: none;
+  flex: 0 0 245px;
+  min-height: 0;
+  padding: 8px 10px;
+}
 .react-public-body[data-layout="compact"] .react-sample-card h2 { font-size: 12px; }
 .react-public-body[data-layout="compact"] .react-sample-card audio { height: 30px; }
-.react-public-body[data-layout="compact"] .public-privacy-notice { font-size: 10px; line-height: 1.35; margin: 0; padding: 7px 10px; }
-.react-public-body[data-layout="compact"] .react-toolbar { margin-bottom: 8px; min-height: 46px; padding: 6px 10px; }
-.react-public-body[data-layout="compact"] .react-practice-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.react-public-body[data-layout="compact"] .react-flow-card { min-height: 270px; padding: 18px 22px; }
-.react-public-body[data-layout="compact"] .react-flow-card .practice-card-copy h2 { font-size: clamp(1.35rem, 2.2vw, 2rem); }
-.react-public-body[data-layout="compact"] .react-flow-card .practice-card-copy > p:last-child { margin-bottom: 4px; }
-.react-public-body[data-layout="compact"] .practice-record-orb { height: 118px; width: 118px; }
-.react-public-body[data-layout="compact"] .practice-grade-guide { font-size: 10px; margin: 5px 0 0; }
-.react-public-body[data-layout="compact"] .react-skit-intro { margin-bottom: 4px; }
-.react-public-body[data-layout="compact"] .react-privacy-note { margin-bottom: 7px; }
-.react-public-body[data-layout="compact"] .react-skit-grid { gap: 10px; grid-template-columns: minmax(0, 1fr) 270px; }
-.react-public-body[data-layout="compact"] .react-skit-form .vibevoice-simple-col-main { display: grid; gap: 10px; grid-template-columns: minmax(380px, 1.1fr) minmax(360px, .9fr); }
-.react-public-body[data-layout="compact"] .react-work-card,
-.react-public-body[data-layout="compact"] .react-generate-card { border-radius: 18px; padding: 14px; }
-.react-public-body[data-layout="compact"] .react-work-card .vibevoice-panel-header,
-.react-public-body[data-layout="compact"] .react-generate-card .vibevoice-panel-header { margin-bottom: 8px; }
-.react-public-body[data-layout="compact"] .react-work-card h2,
-.react-public-body[data-layout="compact"] .react-generate-card h2 { font-size: 1.25rem; }
-.react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script { height: 260px; min-height: 260px; padding: 12px; }
-.react-public-body[data-layout="compact"] .vibevoice-voice-grid { gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.react-public-body[data-layout="compact"] .react-voice-slot { min-height: 120px; padding: 10px; }
-.react-public-body[data-layout="compact"] .vibevoice-upload-actions { gap: 4px; }
-.react-public-body[data-layout="compact"] .vibevoice-upload-actions button,
-.react-public-body[data-layout="compact"] .vibevoice-upload-action { font-size: 10px; padding: 5px 6px; }
-.react-public-body[data-layout="compact"] .react-generate-card { top: 10px; }
-.react-public-body[data-layout="compact"] .vibevoice-rights-confirmation { font-size: 10px; padding: 7px; }
+.react-public-body[data-layout="compact"] .public-privacy-notice {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid rgba(100, 112, 134, 0.28);
+  border-radius: 0;
+  color: var(--react-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 3px 0 3px 10px;
+}
+.react-public-body[data-layout="compact"] .react-privacy-note { margin-bottom: 10px; }
 
-@media (max-width: 820px) {
-  .react-public-body .react-page-shell { padding: 8px 10px 18px; }
-  .react-public-body .react-product-header { align-items: center; display: grid; grid-template-columns: 1fr; margin-bottom: 6px; padding-bottom: 6px; }
-  .react-public-body .react-header-tools { align-items: stretch; display: grid; gap: 5px; }
-  .react-public-body .react-auth-panel { display: flex; font-size: 10px; padding: 5px 8px; }
-  .react-public-body[data-layout] .react-intro-grid { display: block; margin: 0 0 5px; }
-  .react-public-body[data-layout] .react-intro-copy { display: grid; padding: 6px 9px; }
-  .react-public-body[data-layout] .react-intro-copy .react-step-label { display: none; }
-  .react-public-body[data-layout] .react-intro-copy h2 { font-size: .95rem; line-height: 1.25; margin: 0 0 2px; }
-  .react-public-body[data-layout] .react-intro-copy > p:last-child { font-size: 9px; line-height: 1.35; margin: 0; }
-  .react-public-body[data-layout] .react-status-stack,
-  .react-public-body[data-layout] .react-sample-stack { display: flex; gap: 5px; overflow-x: auto; }
-  .react-public-body[data-layout] .react-sample-card { flex: 0 0 230px; padding: 6px 8px; }
-  .react-public-body[data-layout] .public-privacy-notice { font-size: 9px; line-height: 1.3; padding: 6px 8px; }
-  .react-public-body[data-layout] .react-toolbar { margin-bottom: 6px; padding: 5px 8px; }
-  .react-public-body[data-layout] .react-practice-flow { grid-template-columns: 1fr; }
-  .react-public-body[data-layout] .react-flow-card { min-height: 250px; padding: 13px; }
-  .react-public-body[data-layout] .practice-record-orb { height: 104px; width: 104px; }
-  .react-public-body[data-layout] .react-skit-grid { display: flex; flex-direction: column; gap: 7px; }
-  .react-public-body[data-layout] .react-skit-form .vibevoice-simple-col-main { display: contents; }
-  .react-public-body[data-layout] .react-skit-form .vibevoice-script-panel { order: 1; }
-  .react-public-body[data-layout] .react-skit-form .vibevoice-simple-col-side { order: 2; width: 100%; }
-  .react-public-body[data-layout] .react-skit-form .vibevoice-voice-panel { order: 3; }
-  .react-public-body[data-layout] .react-work-card,
-  .react-public-body[data-layout] .react-generate-card { border-radius: 16px; padding: 11px; }
-  .react-public-body[data-layout] .react-skit-form #vibevoice-script { height: 180px; min-height: 180px; }
-  .react-public-body[data-layout] .react-generate-card { bottom: 6px; position: sticky; top: auto; z-index: 12; }
-  .react-public-body[data-layout] .react-generate-card .vibevoice-panel-header { display: none; }
-  .react-public-body[data-layout] .react-generate-card .vibevoice-rights-confirmation { display: none; }
-  .react-public-body[data-layout] .react-generate-card .vibevoice-setting-field { align-items: center; display: flex; font-size: 11px; gap: 8px; }
-  .react-public-body[data-layout] .react-generate-card select { flex: 1; }
-  .react-public-body[data-layout] .react-generate-card .vibevoice-actions { display: contents; }
-  .react-public-body[data-layout] .vibevoice-voice-grid { gap: 6px; grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .react-public-body[data-layout] .react-voice-slot { min-height: 112px; padding: 8px; }
+.react-public-body .react-flow-card,
+.react-public-body .react-work-card,
+.react-public-body .react-generate-card,
+.react-public-body .react-result-card {
+  background: var(--react-paper);
+  border: 1px solid var(--react-border);
+  border-radius: 18px;
+  box-sizing: border-box;
+  box-shadow: var(--react-shadow);
+  min-width: 0;
 }
 
-/* Theme settings --------------------------------------------------------- */
+/* SpeakLoop */
+.react-public-body[data-layout="compact"] .react-toolbar {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+  min-height: 0;
+  padding: 0;
+}
+.react-public-body[data-layout="compact"] .practice-current-language,
+.react-public-body[data-layout="compact"] .practice-inline-setting {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: var(--react-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(25, 31, 40, 0.04);
+}
+.react-public-body[data-layout="compact"] .practice-language-select select { color: var(--react-accent-hover); }
+.react-public-body[data-layout="compact"] .react-practice-flow {
+  gap: 12px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+.react-public-body[data-layout="compact"] .react-practice-flow:has(#practice-prompt-panel[hidden]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.react-public-body[data-layout="compact"] .react-practice-flow:has(#practice-prompt-panel[hidden]) #practice-native-panel {
+  justify-self: center;
+  max-width: 1040px;
+  width: 100%;
+}
+.react-public-body[data-layout="compact"] .react-flow-card {
+  min-height: 190px;
+  padding: 20px 22px;
+}
+.react-public-body[data-layout="compact"] #practice-native-panel {
+  align-content: center;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-items: stretch;
+  text-align: left;
+}
+.react-public-body[data-layout="compact"] #practice-native-panel .react-record-control {
+  grid-column: 3;
+  grid-row: 1 / 3;
+}
+.react-public-body[data-layout="compact"] #practice-native-panel .practice-native-transcript-panel { grid-column: 1 / -1; }
+.react-public-body[data-layout="compact"] .react-flow-card .practice-card-copy h2 { font-size: clamp(1.35rem, 2.2vw, 2rem); }
+.react-public-body[data-layout="compact"] .react-flow-card .practice-card-copy > p:last-child { margin-bottom: 4px; }
+.react-public-body[data-layout="compact"] .practice-step-number { background: var(--react-accent-hover); }
+.react-public-body[data-layout="compact"] .react-record-control {
+  align-items: center;
+  color: var(--react-muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 5px;
+  justify-self: center;
+  white-space: nowrap;
+}
+.react-public-body[data-layout="compact"] .practice-record-orb { height: 96px; width: 96px; }
+.react-public-body[data-layout="compact"] .practice-target-practice-row { gap: 14px; }
+.react-public-body[data-layout="compact"] .practice-target-text-box { border-color: var(--react-border); border-radius: 12px; }
+.react-public-body[data-layout="compact"] .practice-play-button { background: var(--react-accent-hover); }
+.react-public-body[data-layout="compact"] .practice-grade-guide { font-size: 11px; margin: 5px 0 0; }
+
+/* SkitVoice: two columns at intermediate widths, three only when spacious. */
+.react-public-body[data-layout="compact"] .react-skit-intro { margin-bottom: 7px; }
+.react-public-body[data-layout="compact"] .react-skit-grid {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 270px;
+}
+.react-public-body[data-layout="compact"] .react-skit-form .vibevoice-simple-col-main,
+.react-public-body[data-layout="compact"] .react-skit-form .vibevoice-simple-col-side { display: contents; }
+.react-public-body[data-layout="compact"] .react-skit-form .vibevoice-script-panel { grid-column: 1; grid-row: 1; }
+.react-public-body[data-layout="compact"] .react-skit-form .vibevoice-voice-panel { grid-column: 1 / -1; grid-row: 2; }
+.react-public-body[data-layout="compact"] .react-skit-form .react-generate-card { grid-column: 2; grid-row: 1; }
+.react-public-body[data-layout="compact"] .react-work-card,
+.react-public-body[data-layout="compact"] .react-generate-card { padding: 16px; }
+.react-public-body[data-layout="compact"] .react-work-card .vibevoice-panel-header,
+.react-public-body[data-layout="compact"] .react-generate-card .vibevoice-panel-header { margin-bottom: 9px; }
+.react-public-body[data-layout="compact"] .react-work-card h2,
+.react-public-body[data-layout="compact"] .react-generate-card h2 { font-size: 1.28rem; letter-spacing: -0.02em; }
+.react-public-body[data-layout="compact"] .vibevoice-section-label { color: var(--react-accent); letter-spacing: 0.08em; }
+.react-public-body[data-layout="compact"] .vibevoice-panel-header > p { color: var(--react-muted); font-size: 12px; }
+.react-public-body[data-layout="compact"] .vibevoice-script-actions { gap: 7px; }
+.react-public-body[data-layout="compact"] .vibevoice-script-actions .secondary-button,
+.react-public-body[data-layout="compact"] .vibevoice-file-button {
+  border-radius: 9px;
+  font-size: 12px;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+.react-public-body[data-layout="compact"] .vibevoice-script-actions .secondary-button { background: #344052; }
+.react-public-body[data-layout="compact"] .vibevoice-file-button { background: var(--react-accent-soft); border-color: rgba(154, 91, 54, 0.22); color: var(--react-accent-hover); }
+.react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script {
+  background: #fff;
+  border-color: var(--react-border);
+  border-radius: 13px;
+  font-size: 14px;
+  height: 232px;
+  line-height: 1.62;
+  min-height: 232px;
+  padding: 13px;
+}
+.react-public-body[data-layout="compact"] .vibevoice-help { color: var(--react-muted); font-size: 12px; }
+.react-public-body[data-layout="compact"] .vibevoice-voice-grid { gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.react-public-body[data-layout="compact"] .react-voice-slot {
+  background: rgba(250, 250, 248, 0.9);
+  border: 1px solid var(--react-border);
+  border-radius: 13px;
+  gap: 6px 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 118px;
+  padding: 10px;
+}
+.react-public-body[data-layout="compact"] .react-voice-slot:hover,
+.react-public-body[data-layout="compact"] .react-voice-slot:focus-within {
+  background: #fff;
+  border-color: rgba(154, 91, 54, 0.42);
+  box-shadow: 0 8px 24px rgba(57, 45, 37, 0.08);
+  transform: none;
+}
+.react-public-body[data-layout="compact"] .vibevoice-upload-index {
+  background: var(--react-accent);
+  grid-row: auto;
+  height: 26px;
+  width: 26px;
+}
+.react-public-body[data-layout="compact"] .vibevoice-upload-slot strong { align-self: center; font-size: 13px; }
+.react-public-body[data-layout="compact"] .vibevoice-upload-actions {
+  display: grid;
+  gap: 5px;
+  grid-column: 1 / -1;
+  grid-row: auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.react-public-body[data-layout="compact"] .vibevoice-upload-actions button,
+.react-public-body[data-layout="compact"] .vibevoice-upload-action {
+  background: #f1f2f2;
+  border: 1px solid rgba(31, 38, 50, 0.1);
+  border-radius: 8px;
+  color: #475365;
+  font-size: 11px;
+  min-height: 29px;
+  min-width: 0;
+  padding: 5px 6px;
+}
+.react-public-body[data-layout="compact"] .vibevoice-url-slot-button { grid-column: 1 / -1; }
+.react-public-body[data-layout="compact"] .vibevoice-saved-voice,
+.react-public-body[data-layout="compact"] .vibevoice-url-voice { color: var(--react-muted); grid-column: 1 / -1; grid-row: auto; }
+.react-public-body[data-layout="compact"] .react-generate-card {
+  background: linear-gradient(180deg, rgba(255, 251, 246, 0.98), rgba(255, 255, 255, 0.94));
+  position: sticky;
+  top: 10px;
+}
+.react-public-body[data-layout="compact"] .react-generate-card select {
+  background: #fff;
+  border: 1px solid var(--react-border);
+  border-radius: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+.react-public-body[data-layout="compact"] .react-generate-card .vibevoice-actions {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.react-public-body[data-layout="compact"] .vibevoice-rights-confirmation { font-size: 11px; padding: 8px 9px; }
+.react-public-body[data-layout="compact"] .vibevoice-generate-button {
+  background: var(--react-accent);
+  border-radius: 11px;
+  min-height: 50px;
+  transition: background 140ms ease, transform 140ms ease;
+  width: 100%;
+}
+.react-public-body[data-layout="compact"] .vibevoice-generate-button:hover { background: var(--react-accent-hover); transform: translateY(-1px); }
+
+@media (min-width: 900px) and (max-width: 1119px) {
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-voice-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1120px) {
+  .react-public-body[data-layout="compact"] .react-skit-grid {
+    grid-template-columns: minmax(420px, 1.2fr) minmax(320px, 0.9fr) 270px;
+  }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-script-panel { grid-column: 1; grid-row: 1; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-voice-panel { grid-column: 2; grid-row: 1; }
+  .react-public-body[data-layout="compact"] .react-skit-form .react-generate-card { grid-column: 3; grid-row: 1; }
+}
+
+@media (max-width: 820px) {
+  .react-public-body[data-layout="compact"] .react-page-shell { padding: 8px 10px 22px; }
+  .react-public-body .react-product-header {
+    gap: 7px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-bottom: 8px;
+    padding-bottom: 7px;
+  }
+  .react-public-body .react-product-heading { gap: 8px; min-width: 0; }
+  .react-public-body .react-product-heading h1 { font-size: clamp(1.02rem, 5.2vw, 1.3rem); }
+  .react-public-body .react-back-link { height: 32px; width: 32px; }
+  .react-public-body .react-header-tools { display: contents; }
+  .react-public-body .react-theme-settings { grid-column: 2; grid-row: 1; justify-self: end; }
+  .react-public-body .react-auth-panel { font-size: 11px; grid-column: 1 / -1; grid-row: 2; padding: 6px 8px; }
+  .react-public-body[data-layout="compact"] .react-intro-grid,
+  .react-public-body[data-layout="compact"] .react-intro-grid:has(.react-status-stack > :not([hidden])),
+  .react-public-body[data-layout="compact"] .react-intro-grid:has(.react-sample-stack > :not([hidden])) { gap: 7px; grid-template-columns: minmax(0, 1fr); margin-bottom: 7px; }
+  .react-public-body[data-layout="compact"] .react-intro-copy { padding: 3px 0 3px 10px; }
+  .react-public-body[data-layout="compact"] .react-intro-copy h2 { font-size: 1rem; line-height: 1.3; }
+  .react-public-body[data-layout="compact"] .react-intro-copy > p:last-child { font-size: 11px; line-height: 1.45; }
+  .react-public-body[data-layout="compact"] .react-status-stack,
+  .react-public-body[data-layout="compact"] .react-sample-stack { gap: 6px; }
+  .react-public-body[data-layout="compact"] .react-sample-card { flex-basis: 230px; padding: 7px 8px; }
+  .react-public-body[data-layout="compact"] .public-privacy-notice { font-size: 10.5px; line-height: 1.45; padding-left: 8px; }
+  .react-public-body[data-layout="compact"] .react-toolbar { margin-bottom: 7px; }
+  .react-public-body[data-layout="compact"] .practice-current-language { min-height: 40px; }
+  .react-public-body[data-layout="compact"] .react-practice-flow { grid-template-columns: minmax(0, 1fr); }
+  .react-public-body[data-layout="compact"] .react-practice-flow:has(#practice-prompt-panel[hidden]) #practice-native-panel { max-width: none; }
+  .react-public-body[data-layout="compact"] .react-flow-card { min-height: 160px; padding: 14px; }
+  .react-public-body[data-layout="compact"] #practice-native-panel { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .react-public-body[data-layout="compact"] .react-flow-card .practice-card-copy h2 { font-size: clamp(1.2rem, 6vw, 1.6rem); }
+  .react-public-body[data-layout="compact"] .practice-record-orb { height: 84px; width: 84px; }
+  .react-public-body[data-layout="compact"] .react-record-control { font-size: 10px; }
+  .react-public-body[data-layout="compact"] .practice-target-practice-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .react-public-body[data-layout="compact"] .react-skit-grid { align-items: stretch; display: flex; flex-direction: column; gap: 8px; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-simple-col-main { display: contents; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-script-panel { order: 1; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-simple-col-side { display: contents; }
+  .react-public-body[data-layout="compact"] .react-skit-form .react-generate-card { order: 2; width: 100%; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-voice-panel { order: 3; }
+  .react-public-body[data-layout="compact"] .react-work-card,
+  .react-public-body[data-layout="compact"] .react-generate-card { border-radius: 15px; padding: 12px; }
+  .react-public-body[data-layout="compact"] .react-work-card .vibevoice-panel-header { align-items: flex-start; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-script-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .react-public-body[data-layout="compact"] .react-skit-form .vibevoice-file-button { justify-content: center; width: auto; }
+  .react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script { height: 176px; min-height: 176px; }
+  .react-public-body[data-layout="compact"] .react-generate-card {
+    align-items: end;
+    bottom: 6px;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    position: sticky;
+    top: auto;
+    z-index: 12;
+  }
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-panel-header,
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-rights-confirmation { display: none; }
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-setting-field { display: grid; font-size: 10px; gap: 3px; grid-column: 1; grid-row: 1; }
+  .react-public-body[data-layout="compact"] .react-generate-card select { min-height: 44px; width: 100%; }
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-actions { display: contents; }
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-generate-button { grid-column: 2; grid-row: 1; min-height: 44px; }
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-cancel-button { grid-column: 1 / -1; }
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-message,
+  .react-public-body[data-layout="compact"] .react-generate-card .vibevoice-job-progress { grid-column: 1 / -1; }
+  .react-public-body[data-layout="compact"] .vibevoice-voice-grid { gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .react-public-body[data-layout="compact"] .react-voice-slot { min-height: 116px; padding: 9px; }
+}
+
+@media (max-width: 480px) {
+  .react-public-body[data-layout="compact"] .practice-current-language { padding: 0 10px; }
+  .react-public-body[data-layout="compact"] .practice-language-select select { font-size: 14px; min-width: 7.5em; }
+  .react-public-body[data-layout="compact"] .react-flow-card { padding: 12px; }
+  .react-public-body[data-layout="compact"] .practice-step-number { height: 22px; width: 22px; }
+  .react-public-body[data-layout="compact"] .practice-record-orb { height: 78px; width: 78px; }
+  .react-public-body[data-layout="compact"] .react-record-control span { white-space: normal; }
+  .react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script { font-size: 13px; }
+  .react-public-body[data-layout="compact"] .vibevoice-upload-actions button,
+  .react-public-body[data-layout="compact"] .vibevoice-upload-action { font-size: 10.5px; padding-inline: 4px; }
+}
+
+/* Theme settings */
 .react-public-body .react-theme-settings { position: relative; }
 .react-public-body .react-theme-settings summary {
   align-items: center;
-  background: rgba(255,255,255,.74);
-  border: 1px solid rgba(23,32,51,.12);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--react-border);
   border-radius: 50%;
+  color: #364153;
   cursor: pointer;
   display: flex;
-  height: 38px;
+  height: 36px;
   justify-content: center;
   list-style: none;
-  width: 38px;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+  width: 36px;
 }
+.react-public-body .react-theme-settings summary:hover,
+.react-public-body .react-theme-settings[open] summary { background: #fff; border-color: rgba(31, 38, 50, 0.26); color: var(--react-accent-hover); transform: rotate(8deg); }
 .react-public-body .react-theme-settings summary::-webkit-details-marker { display: none; }
-.react-public-body .react-theme-settings summary svg { fill: currentColor; height: 18px; width: 18px; }
+.react-public-body .react-theme-settings summary svg { fill: none; height: 19px; stroke: currentColor; width: 19px; }
 .react-public-body .react-theme-menu {
   background: #fff;
-  border: 1px solid rgba(23,32,51,.13);
-  border-radius: 14px;
-  box-shadow: 0 18px 48px rgba(23,32,51,.18);
+  border: 1px solid var(--react-border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(23, 32, 51, 0.17);
   display: grid;
   gap: 3px;
   min-width: 132px;
@@ -3862,31 +4198,64 @@ fieldset.public-samples-admin {
   top: calc(100% + 7px);
   z-index: 50;
 }
-.react-public-body .react-theme-menu button { background: transparent; border: 0; border-radius: 9px; color: #465268; cursor: pointer; font: inherit; padding: 8px 10px; text-align: left; }
-.react-public-body .react-theme-menu button[aria-checked="true"] { background: #182235; color: #fff; font-weight: 800; }
+.react-public-body .react-theme-menu button { background: transparent; border: 0; border-radius: 8px; color: #465268; cursor: pointer; font: inherit; min-height: 36px; padding: 8px 10px; text-align: left; }
+.react-public-body .react-theme-menu button:hover { background: #f3f3f1; }
+.react-public-body .react-theme-menu button[aria-checked="true"] { background: #263142; color: #fff; font-weight: 800; }
 
-html[data-theme="dark"] .react-public-body {
-  --react-ink: #eff4ff;
-  --react-muted: #a8b2c7;
-  background: radial-gradient(circle at 85% 0, #293c5f 0, transparent 38rem), #101622;
+html[data-theme="dark"] { color-scheme: dark; }
+html[data-theme="dark"] .react-public-body.practice-body,
+html[data-theme="dark"] .react-public-body.vibevoice-body {
+  --react-border: rgba(255, 255, 255, 0.13);
+  --react-ink: #edf1f8;
+  --react-muted: #aab4c5;
+  --react-paper: rgba(25, 31, 42, 0.94);
+  --react-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 18px 46px rgba(0, 0, 0, 0.22);
+  background: radial-gradient(circle at 90% 0, rgba(67, 85, 122, 0.52), transparent 34rem), #11151d;
   color: var(--react-ink);
 }
-html[data-theme="dark"] .react-public-body .react-product-header { border-color: rgba(255,255,255,.15); }
-html[data-theme="dark"] .react-public-body .react-back-link { border-color: rgba(255,255,255,.2); color: #fff; }
+html[data-theme="dark"] .react-public-body .react-product-header { border-color: var(--react-border); }
+html[data-theme="dark"] .react-public-body .react-back-link,
 html[data-theme="dark"] .react-public-body .react-auth-panel,
 html[data-theme="dark"] .react-public-body .react-theme-settings summary,
-html[data-theme="dark"] .react-public-body .react-intro-copy,
+html[data-theme="dark"] .react-public-body .react-sample-card,
+html[data-theme="dark"] .react-public-body .practice-current-language,
+html[data-theme="dark"] .react-public-body .practice-inline-setting,
 html[data-theme="dark"] .react-public-body .react-flow-card,
 html[data-theme="dark"] .react-public-body .react-work-card,
-html[data-theme="dark"] .react-public-body .react-generate-card,
-html[data-theme="dark"] .react-public-body .react-result-card,
-html[data-theme="dark"] .react-public-body .react-toolbar,
-html[data-theme="dark"] .react-public-body .react-sample-card,
-html[data-theme="dark"] .react-public-body .react-privacy-note { background: rgba(19,28,43,.9); border-color: rgba(255,255,255,.13); color: #edf3ff; }
-html[data-theme="dark"] .react-public-body .react-theme-menu { background: #182235; border-color: rgba(255,255,255,.14); }
-html[data-theme="dark"] .react-public-body .react-theme-menu button { color: #c6d0e3; }
-html[data-theme="dark"] .react-public-body .react-theme-menu button[aria-checked="true"] { background: #e8efff; color: #162033; }
+html[data-theme="dark"] .react-public-body .react-result-card { background: var(--react-paper); border-color: var(--react-border); color: var(--react-ink); }
+html[data-theme="dark"] .react-public-body .react-generate-card { background: linear-gradient(180deg, rgba(46, 37, 34, 0.98), rgba(25, 31, 42, 0.96)); border-color: var(--react-border); color: var(--react-ink); }
+html[data-theme="dark"] .react-public-body .react-theme-menu { background: #1b2230; border-color: var(--react-border); }
+html[data-theme="dark"] .react-public-body .react-theme-menu button { color: #cbd3e1; }
+html[data-theme="dark"] .react-public-body .react-theme-menu button:hover { background: #283143; }
+html[data-theme="dark"] .react-public-body .react-theme-menu button[aria-checked="true"] { background: #eef2f8; color: #172033; }
 html[data-theme="dark"] .react-public-body .react-voice-slot,
-html[data-theme="dark"] .react-public-body #vibevoice-script,
-html[data-theme="dark"] .react-public-body .practice-target-text-box { background: #0c121d; border-color: rgba(255,255,255,.13); color: #f4f7ff; }
-html[data-theme="dark"] .react-public-body select { background-color: #111a28; color: #f4f7ff; }
+html[data-theme="dark"] .react-public-body .practice-target-text-box,
+html[data-theme="dark"] .react-public-body .practice-native-transcript-panel,
+html[data-theme="dark"] .react-public-body .practice-result-inline,
+html[data-theme="dark"] .react-public-body select { background-color: #111722; border-color: var(--react-border); color: #f2f5fa; }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script,
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-generate-card select {
+  background: #111722;
+  border-color: var(--react-border);
+  color: #f2f5fa;
+}
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { background: transparent; }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { color: #bdcaf0; }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-current-language span,
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .vibevoice-setting-field { color: var(--react-muted); }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .vibevoice-rights-confirmation {
+  background: #2b261f;
+  border-color: rgba(226, 180, 119, 0.28);
+  color: #ead9bd;
+}
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .vibevoice-file-button {
+  background: #2d251f;
+  border-color: rgba(216, 155, 105, 0.32);
+  color: #f1c7a8;
+}
+html[data-theme="dark"] .react-public-body .vibevoice-upload-actions button,
+html[data-theme="dark"] .react-public-body .vibevoice-upload-action { background: #222b3a; border-color: var(--react-border); color: #d3d9e4; }
+html[data-theme="dark"] .react-public-body .practice-card-copy p,
+html[data-theme="dark"] .react-public-body .vibevoice-help,
+html[data-theme="dark"] .react-public-body .vibevoice-panel-header > p,
+html[data-theme="dark"] .react-public-body .vibevoice-saved-voice { color: var(--react-muted); }
