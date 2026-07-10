@@ -6,20 +6,26 @@
   "scripts": {
     "build:web": "vite build --config apps/web/vite.config.ts",
     "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
+    "verify:web-styles": "node scripts/verify_web_style_boundaries.mjs",
     "test": "node --test tests/*.mjs",
     "test:worker": "node --test tests/*.mjs",
     "check:js": "node --check cloudflare/worker.mjs && node --check src/mo_speech/web/*.js",
-    "check:web": "npm run typecheck:web && npm run build:web"
+    "check:web": "npm run typecheck:web && npm run build:web && npm run verify:web-styles"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.24.0",
     "pinyin-pro": "^3.28.1",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.3.2",
     "typescript": "^7.0.2",
     "vite": "^8.1.4"
   }

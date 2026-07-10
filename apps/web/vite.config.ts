@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
@@ -7,6 +8,12 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
 export default defineConfig({
   root: rootDir,
   base: "/react/",
+  plugins: [tailwindcss()],
+  resolve: {
+    alias: {
+      "@": resolve(rootDir, "src"),
+    },
+  },
   build: {
     outDir: resolve(rootDir, "../../src/mo_speech/web/react"),
     emptyOutDir: true,

@@ -8,7 +8,16 @@
 - 暖かいニュートラル背景、控えめな影、明快な見出し、少数のアクセント色、十分な余白を維持する。
 - SpeakLoopとSkitVoiceは同じ製品群と分かる共通骨格を使い、SpeakLoopは青、SkitVoiceは暖色のaccentで識別する。
 - SaaSダッシュボード風のカード乱用や、機能と関係のない装飾を避ける。
-- Tailwind等のCSS方式は本書では決定しない。現行のCSS変数とReact共通部品を正とし、別方式を追加する場合は混在させず、移行方針を先に決める。
+- React公開UIは、route単位でTailwind CSS v4とshadcn/uiへ段階移行する。移行済みrouteでは旧`styles.css`を同時に読み込まず、1画面内に2つのスタイル方式を混在させない。
+
+## CSS/UI基盤
+
+- 新規または移行済みのReact routeでは、Tailwind CSS v4をCSS生成基盤、shadcn/uiのrepo所有コンポーネントをUI部品の起点とする。
+- shadcn/uiは完成テーマをそのまま適用するためではなく、アクセシブルな構造とvariantをrepo内で管理するために使う。配色、余白、角丸、影は本書のVoice Lab方針へ合わせる。
+- 最初の移行単位は公開ポータル`/`とする。ポータルentryだけがTailwind CSSを読み、`/static/styles.css`は読み込まない。
+- SpeakLoopとSkitVoiceはroute移行まで旧`styles.css`と既存React共通部品を正とし、TailwindのPreflightやportal用CSSを読み込ませない。
+- 共通部品へ昇格するのは、利用routeが同じスタイル基盤へ移行してからとする。移行前にTailwind依存の見える部品を旧routeへ持ち込まない。
+- routeを移行する際は、先に対象状態とレスポンシブ契約を固定し、HTMLから旧stylesheetを外し、production buildで他routeへCSSが流入していないことを確認する。
 
 ## 視覚階層
 
@@ -27,7 +36,7 @@
 
 ## トークンと共通部品
 
-現在のsemantic tokenを正とする。
+旧`styles.css`を使うrouteでは、現在のsemantic tokenを正とする。
 
 - `--react-ink`
 - `--react-muted`
@@ -47,7 +56,18 @@
 - アイコンは同一のoutline style（`fill: none`、`stroke: currentColor`、round linecap／join）を使う。文字記号や黒い塗り潰しアイコンを代用しない。
 - hoverだけに意味を持たせず、`:focus-visible`、disabled、processingでも操作対象と状態を判別できるようにする。
 
+Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps/web/src/components/ui/`の部品を正とする。生の色や任意値を画面ごとに増やさず、まずtokenまたは中央のvariantへ意味を付ける。
+
 ## 画面固有の契約
+
+### Voice Labポータル
+
+- 上部はブランドと配色設定だけの短いheaderとし、設定を常に右上へ置く。
+- intro-copyの見出しと説明は維持し、その直後にSkitVoiceとSpeakLoopの2導線を同じ重要度で表示する。
+- `1440x900`、`1024x768`、`390x844`の初期状態では、原則として2導線の内容とactionまでを1viewport内に収める。
+- 文字拡大や長文で収まらない場合はスクロールを許容し、固定高による切れや操作不能を起こさない。
+- モバイルでは見出しを読める大きさのまま段階的に縮め、カードの装飾余白と二重paddingを先に減らす。
+- カード全体を曖昧なclick targetにせず、各製品の説明と明示的なlink actionをセマンティックに構成する。
 
 ### SpeakLoop
 

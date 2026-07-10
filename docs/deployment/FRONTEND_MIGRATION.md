@@ -28,6 +28,20 @@
 - SkitVoiceは1120px以上で台本・参照音声・生成の3列、821〜1119pxで台本と生成の2列＋参照音声下段、820px以下で台本・生成・参照音声の1列にする。スマホの生成操作は台本直後で画面下部へ追従する。
 - 出力言語は、言語名だけでなく対応する国旗を先頭へ表示する。
 
+### CSS/UI基盤の段階移行
+
+2026-07-10以降、新規または移行済みのReact routeはTailwind CSS v4とshadcn/uiを正とする。shadcn/uiは依存先の完成画面を埋め込むライブラリではなく、必要なcomponent sourceをrepoへ追加し、Voice Labのtokenとvariantで管理するために使う。
+
+最初の対象は公開ポータル`/`である。ポータルentryだけがTailwind CSSをimportし、ポータルHTMLから`/static/styles.css`を外す。SpeakLoopとSkitVoiceは既存controllerと見えるUIの回帰範囲が広いため、個別のroute移行が完了するまで旧stylesheetを維持し、Tailwind CSSを読み込ませない。
+
+| route | 現在のスタイル基盤 | 旧`styles.css` | Tailwind CSS |
+| --- | --- | --- | --- |
+| `/` | Tailwind CSS v4 + repo所有shadcn/ui | 読み込まない | portal entryだけで読む |
+| `/speakloop` | 既存React構造 + 旧semantic CSS | 読む | 読まない |
+| `/skitvoice` | 既存React構造 + 旧semantic CSS | 読む | 読まない |
+
+同じrouteで旧stylesheetとTailwindを二重ロードしない。各routeの移行時には、対象HTMLから旧stylesheetを外し、production build後のHTMLを検査して他routeへTailwind assetが流入していないことを完了条件にする。
+
 ## 現在の境界
 
 ```text

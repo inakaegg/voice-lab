@@ -45,7 +45,8 @@
 ### 公開UIの品質契約
 
 - 見えるUI変更では、利用可能なら共通の `$ui-quality` Skillを使う。
-- 現行の正は、React共通部品と `src/mo_speech/web/styles.css` のsemantic tokenである。Tailwind等の別方式を局所的に追加して混在させない。方式を変える場合は先に移行方針をdocsへ固定する。
+- 公開React UIは [docs/UI_STYLE.md](docs/UI_STYLE.md) のroute別移行表を正とする。移行済みrouteはTailwind CSS v4 + repo所有shadcn/ui、未移行routeはReact共通部品 + `src/mo_speech/web/styles.css` を使い、同じrouteで両方式を読み込まない。
+- Tailwind依存の見える共通部品は、利用側routeが同じ基盤へ移行するまで旧routeへ持ち込まない。shadcn/ui componentはrepo内で所有し、Voice Labのtokenとvariantへ合わせる。
 - `/` を視覚基準とし、`/speakloop` と `/skitvoice` を同じ製品群として確認する。
 - 基準幅は `1440px`、`1024px`、`390px` とし、Light／Dark、長い日本語、初期状態、主要な動的状態、errorを確認する。
 - Web UIでは実際にレンダリングされた画面を確認する。共有ブラウザが利用できない場合も、それだけで検証を打ち切らず、利用可能なPlaywright、DevTools系手段、ローカルChromeのheadless／CDP等を検討する。

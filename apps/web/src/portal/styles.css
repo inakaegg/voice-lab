@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  color-scheme: light;
+  --background: oklch(0.972 0.009 82);
+  --foreground: oklch(0.205 0.035 262);
+  --card: oklch(0.995 0.004 82 / 0.9);
+  --card-foreground: oklch(0.205 0.035 262);
+  --muted: oklch(0.938 0.009 82);
+  --muted-foreground: oklch(0.49 0.035 258);
+  --border: oklch(0.83 0.018 76 / 0.78);
+  --ring: oklch(0.57 0.11 251);
+  --radius: 0.875rem;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.175 0.025 259);
+  --foreground: oklch(0.95 0.012 82);
+  --card: oklch(0.225 0.028 259 / 0.9);
+  --card-foreground: oklch(0.95 0.012 82);
+  --muted: oklch(0.285 0.025 259);
+  --muted-foreground: oklch(0.72 0.025 255);
+  --border: oklch(0.43 0.025 255 / 0.7);
+  --ring: oklch(0.72 0.09 245);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    min-width: 320px;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100svh;
+    background: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  summary {
+    font: inherit;
+  }
+}
+
+.portal-atmosphere {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 5% 3%, color-mix(in oklab, #f0b979 28%, transparent), transparent 34rem),
+    radial-gradient(circle at 96% 12%, color-mix(in oklab, #7fa8ef 23%, transparent), transparent 34rem),
+    linear-gradient(145deg, transparent 52%, color-mix(in oklab, #ffffff 28%, transparent));
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .portal-atmosphere {
+  background:
+    radial-gradient(circle at 4% 2%, color-mix(in oklab, #b36a3a 22%, transparent), transparent 32rem),
+    radial-gradient(circle at 96% 10%, color-mix(in oklab, #547dc7 25%, transparent), transparent 34rem);
+}
+
+.portal-product-link-skit {
+  --product-accent: #a85d2d;
+  --product-soft: #fff0dc;
+}
+
+.portal-product-link-speak {
+  --product-accent: #3e68ad;
+  --product-soft: #e8efff;
+}
+
+html[data-theme="dark"] .portal-product-link-skit {
+  --product-accent: #efad79;
+  --product-soft: rgb(126 70 38 / 0.32);
+}
+
+html[data-theme="dark"] .portal-product-link-speak {
+  --product-accent: #9bbcff;
+  --product-soft: rgb(54 84 145 / 0.36);
+}
+
+.portal-body .react-theme-settings {
+  position: relative;
+  z-index: 30;
+}
+
+.portal-body .react-theme-settings summary {
+  align-items: center;
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 8px 28px rgb(31 38 50 / 0.08);
+  color: var(--foreground);
+  cursor: pointer;
+  display: flex;
+  height: 40px;
+  justify-content: center;
+  list-style: none;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+  width: 40px;
+}
+
+.portal-body .react-theme-settings summary:hover,
+.portal-body .react-theme-settings[open] summary {
+  background: var(--card);
+  border-color: color-mix(in oklab, var(--foreground) 24%, var(--border));
+}
+
+.portal-body .react-theme-settings summary:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--ring) 42%, transparent);
+  outline-offset: 3px;
+}
+
+.portal-body .react-theme-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.portal-body .react-theme-settings summary svg {
+  fill: none;
+  height: 19px;
+  stroke: currentColor;
+  width: 19px;
+}
+
+.portal-body .react-theme-menu {
+  background: color-mix(in oklab, var(--card) 96%, var(--background));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 52px rgb(20 26 38 / 0.18);
+  display: grid;
+  gap: 3px;
+  min-width: 132px;
+  padding: 5px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 7px);
+}
+
+.portal-body .react-theme-menu button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  min-height: 36px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.portal-body .react-theme-menu button:hover,
+.portal-body .react-theme-menu button:focus-visible {
+  background: var(--muted);
+  color: var(--foreground);
+  outline: none;
+}
+
+.portal-body .react-theme-menu button[aria-checked="true"] {
+  background: var(--foreground);
+  color: var(--background);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-body *,
+  .portal-body *::before,
+  .portal-body *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

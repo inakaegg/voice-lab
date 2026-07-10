@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [portal, speakloop, skitvoice, shared, styles, worker, pkg] = await Promise.all([
+const [portal, speakloop, skitvoice, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, skitvoiceHtml] = await Promise.all([
   read("apps/web/src/portal/main.tsx"), read("apps/web/src/speakloop/main.tsx"),
   read("apps/web/src/skitvoice/main.tsx"), read("apps/web/src/shared/components.tsx"),
   read("src/mo_speech/web/styles.css"),
-  read("cloudflare/worker.mjs"), read("package.json"),
+  read("cloudflare/worker.mjs"), read("package.json"), read("apps/web/vite.config.ts"),
+  read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/skitvoice.html"),
 ]);
 
 test("public portal SpeakLoop and SkitVoice are React TypeScript entries", () => {
@@ -41,12 +42,29 @@ test("React pages expose the DOM ids required by legacy controllers", () => {
 });
 
 test("React layouts include responsive product and workflow structure", () => {
-  assert.match(portal, /react-product-grid/);
+  assert.match(portal, /aria-label="Voice Lab"/);
+  assert.match(portal, /声から、[\s\S]*ことばの体験を[\s\S]*つくる。/);
+  assert.match(portal, /href:\s*"\/skitvoice"/);
+  assert.match(portal, /href:\s*"\/speakloop"/);
   assert.match(speakloop, /react-practice-flow/);
   assert.match(skitvoice, /react-skit-grid/);
   assert.match(skitvoice, /日本語サンプル/);
   assert.match(skitvoice, /中国語サンプル/);
   assert.match(skitvoice, /英語サンプル/);
+});
+
+test("portal is the isolated Tailwind and shadcn migration route", () => {
+  assert.match(pkg, /"tailwindcss"/);
+  assert.match(pkg, /"@tailwindcss\/vite"/);
+  assert.match(pkg, /"verify:web-styles"/);
+  assert.match(viteConfig, /from "@tailwindcss\/vite"/);
+  assert.match(viteConfig, /tailwindcss\(\)/);
+  assert.match(viteConfig, /alias:/);
+  assert.match(portal, /import "\.\/styles\.css"/);
+  assert.match(portal, /@\/components\/ui\/card/);
+  assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
+  assert.match(speakloopHtml, /\/static\/styles\.css/);
+  assert.match(skitvoiceHtml, /\/static\/styles\.css/);
 });
 
 test("public UI finalizes the compact layout and exposes theme settings", () => {
