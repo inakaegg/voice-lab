@@ -12,7 +12,11 @@ async function loadPublicSampleAudio() {
     }
     const payload = await response.json();
     for (const section of publicSampleAudioSections) {
-      renderPublicSampleAudio(section, payload?.features?.[section.dataset.publicSampleFeature] || null);
+      const featureValue = payload?.features?.[section.dataset.publicSampleFeature] || null;
+      const sample = section.dataset.publicSampleLanguage
+        ? featureValue?.samples?.[section.dataset.publicSampleLanguage] || null
+        : featureValue;
+      renderPublicSampleAudio(section, sample);
     }
   } catch (_error) {
     for (const section of publicSampleAudioSections) {

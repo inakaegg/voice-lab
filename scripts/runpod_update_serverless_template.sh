@@ -7,7 +7,6 @@ source "${SCRIPT_DIR}/runpod_common.sh"
 
 load_runpod_env
 set_default_runpod_app_env
-require_cmd runpodctl
 require_env RUNPOD_SERVERLESS_TEMPLATE_ID
 require_env RUNPOD_IMAGE
 
@@ -26,6 +25,7 @@ if [[ "${RUNPOD_DRY_RUN:-0}" == "1" ]]; then
   exit 0
 fi
 
+require_cmd runpodctl
 "${cmd[@]}" | python3 -c '
 import json
 import re

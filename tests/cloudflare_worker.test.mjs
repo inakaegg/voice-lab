@@ -238,6 +238,27 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
   assert.equal(audit[2].limit_type, "daily");
 });
 
+test("Cloudflare worker stores quota and audit in D1 when bound", async () => {
+  const kv = fakeKv();
+  const db = fakeD1();
+  await kv.put("public-access-settings", JSON.stringify({ google_login_required: true, features: { fun: { daily_limit: 1, total_limit: 1, text_max_chars: 80, audio_max_bytes: 1000 } } }));
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
+    if (url === "https://api.openai.com/v1/audio/speech") return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv, db });
+  const cookie = await publicCookie(env);
+  const request = () => new Request("https://example.com/api/user-text-output", { method: "POST", headers: { cookie }, body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }) });
+
+  assert.equal((await handleRequest(request(), env)).status, 200);
+  assert.equal((await handleRequest(request(), env)).status, 429);
+  assert.equal(db.__tables.daily.size, 1);
+  assert.equal([...db.__tables.daily.values()][0].usage_count, 1);
+  assert.deepEqual(db.__tables.audit.map((event) => event.action), ["google_login_success", "public_quota_consumed", "public_quota_blocked"]);
+  assert.equal(await kv.get("public-audit-log"), null);
+});
+
 test("Cloudflare worker exempts configured admin Google emails from public quota", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
@@ -454,6 +475,43 @@ test("Cloudflare worker lets admins publish sample audios for public pages", asy
   assert.equal(audit.at(-2).action, "public_sample_audios_updated");
   assert.equal(audit.at(-1).action, "public_sample_audio_deleted");
   assert.equal(audit.at(-1).feature, "speakloop");
+});
+
+test("Cloudflare worker stores Japanese Chinese and English SkitVoice samples in D1 and R2", async () => {
+  const kv = fakeKv();
+  const db = fakeD1();
+  const r2 = fakeR2();
+  const env = adminAuthEnv(async () => { throw new Error("unexpected fetch"); }, { kv, db, r2 });
+  const cookie = await adminCookie(env);
+  const sample = (language) => ({ title: language, description: `${language} sample`, filename: `${language}.wav`, audio_mime_type: "audio/wav", audio_base64: Buffer.from(language).toString("base64") });
+  const body = { features: { skitvoice: { samples: { "ja-JP": sample("ja-JP"), "zh-CN": sample("zh-CN"), "en-US": sample("en-US") } } } };
+
+  const saved = await handleRequest(new Request("https://example.com/api/public-sample-audios", { method: "PUT", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify(body) }), env);
+  const payload = await saved.json();
+
+  assert.equal(saved.status, 200);
+  assert.equal(payload.features.skitvoice.samples["ja-JP"].title, "ja-JP");
+  assert.equal(payload.features.skitvoice.samples["zh-CN"].title, "zh-CN");
+  assert.equal(payload.features.skitvoice.samples["en-US"].title, "en-US");
+  assert.equal(db.__tables.samples.size, 3);
+  assert.equal(r2.__store.size, 3);
+  assert.equal(await kv.get("public-sample-audios"), null);
+
+  const deleted = await handleRequest(new Request("https://example.com/api/public-sample-audios/skitvoice?language=zh-CN", { method: "DELETE", headers: { cookie } }), env);
+  assert.equal((await deleted.json()).features.skitvoice.samples["zh-CN"], null);
+  assert.equal(db.__tables.samples.size, 2);
+  assert.equal(r2.__store.size, 2);
+});
+
+test("Cloudflare worker does not recurse while migrating an empty legacy sample document", async () => {
+  const kv = fakeKv();
+  await kv.put("public-sample-audios", JSON.stringify({ features: { speakloop: null, skitvoice: null, fun: null, voice_conversion: null } }));
+  const env = fakeEnv(async () => { throw new Error("unexpected fetch"); }, { kv, db: fakeD1(), r2: fakeR2() });
+
+  const response = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).features.skitvoice.samples["ja-JP"], null);
 });
 
 test("Cloudflare worker rejects oversized public input before consuming quota", async () => {
@@ -1677,6 +1735,7 @@ function fakeEnv(fetchImpl, options = {}) {
     OPENAI_TTS_RESPONSE_FORMAT: "wav",
     MO_SPEECH_KV: options.kv || null,
     MO_SPEECH_AUDIO_R2: options.r2 || null,
+    MO_SPEECH_DB: options.db || null,
     __fetch: fetchImpl,
   };
 }
@@ -1768,6 +1827,69 @@ function fakeR2() {
     },
     async delete(key) {
       store.delete(key);
+    },
+  };
+}
+
+function fakeD1() {
+  const tables = {
+    samples: new Map(),
+    daily: new Map(),
+    total: new Map(),
+    audit: [],
+    users: new Map(),
+  };
+  const db = {
+    __tables: tables,
+    prepare(sql) {
+      return fakeD1Statement(db, String(sql), []);
+    },
+    async batch(statements) {
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
+  };
+  return db;
+}
+
+function fakeD1Statement(db, sql, args) {
+  return {
+    bind(...values) { return fakeD1Statement(db, sql, values); },
+    async all() {
+      if (sql.includes("FROM public_sample_audios")) return { results: [...db.__tables.samples.values()] };
+      if (sql.includes("FROM audit_events")) {
+        const limit = Number(args[0] || 100);
+        return { results: [...db.__tables.audit].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, limit) };
+      }
+      return { results: [] };
+    },
+    async first() {
+      if (sql.includes("quota_usage_daily")) return db.__tables.daily.get(`${args[0]}:${args[1]}:${args[2]}`) || null;
+      if (sql.includes("quota_usage_total")) return db.__tables.total.get(`${args[0]}:${args[1]}`) || null;
+      if (sql.includes("COUNT(*)") && sql.includes("audit_events")) return { count: db.__tables.audit.length };
+      return null;
+    },
+    async run() {
+      if (sql.startsWith("DELETE FROM public_sample_audios")) {
+        db.__tables.samples.delete(`${args[0]}:${args[1]}`);
+      } else if (sql.startsWith("INSERT INTO public_sample_audios")) {
+        db.__tables.samples.set(`${args[0]}:${args[1]}`, {
+          feature: args[0], language: args[1], title: args[2], description: args[3], filename: args[4],
+          audio_mime_type: args[5], audio_r2_key: args[6], size_bytes: args[7], updated_at: args[8],
+        });
+      } else if (sql.startsWith("INSERT INTO public_users")) {
+        db.__tables.users.set(args[0], { email_hash: args[0], created_at: args[1], last_seen_at: args[2] });
+      } else if (sql.startsWith("INSERT INTO quota_usage_daily")) {
+        const key = `${args[0]}:${args[1]}:${args[2]}`;
+        const previous = db.__tables.daily.get(key);
+        db.__tables.daily.set(key, { usage_count: previous ? Number(previous.usage_count) + 1 : Number(args[3]) });
+      } else if (sql.startsWith("INSERT INTO quota_usage_total")) {
+        const key = `${args[0]}:${args[1]}`;
+        const previous = db.__tables.total.get(key);
+        db.__tables.total.set(key, { usage_count: previous ? Number(previous.usage_count) + 1 : Number(args[2]) });
+      } else if (sql.startsWith("INSERT INTO audit_events") || sql.startsWith("INSERT OR IGNORE INTO audit_events")) {
+        db.__tables.audit.push({ id: args[0], occurred_at: args[1], actor_email_hash: args[2], action: args[3], feature: args[4], path: args[5], detail_json: args[6] });
+      }
+      return { success: true };
     },
   };
 }

@@ -264,6 +264,7 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /data-public-samples-admin/);
   assert.match(vibevoiceHtml, /data-public-samples-features="skitvoice"/);
   assert.match(vibevoiceHtml, /data-public-sample-admin-feature="skitvoice"/);
+  assert.equal((vibevoiceHtml.match(/data-public-sample-language="(?:ja-JP|zh-CN|en-US)"/g) || []).length, 3);
   assert.match(vibevoiceHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
@@ -461,6 +462,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /class="public-auth-panel vibevoice-header-auth"/);
   assert.match(vibevoiceSimpleHtml, /\/auth\/google\/login\?next=\/skitvoice/);
   assert.match(vibevoiceSimpleHtml, /data-public-sample-feature="skitvoice"/);
+  assert.equal((vibevoiceSimpleHtml.match(/data-public-sample-language="(?:ja-JP|zh-CN|en-US)"/g) || []).length, 3);
   assert.match(vibevoiceSimpleHtml, /data-public-privacy-notice/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /name="rights_confirmed"/);
   assert.match(vibevoiceSimpleHtml, /個人・家庭内の私的利用を超えて公開・共有する場合/);

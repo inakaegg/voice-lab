@@ -41,7 +41,13 @@ async function savePublicSampleAudios(root) {
         continue;
       }
       const feature = section.dataset.publicSampleAdminFeature;
-      next.features[feature] = await collectPublicSampleFeature(section);
+      const language = section.dataset.publicSampleLanguage || "";
+      if (language) {
+        next.features[feature] = next.features[feature]?.samples ? next.features[feature] : { samples: {} };
+        next.features[feature].samples[language] = await collectPublicSampleFeature(section);
+      } else {
+        next.features[feature] = await collectPublicSampleFeature(section);
+      }
     }
     setPublicSampleAdminStatus("保存中です。");
     const response = await fetch("/api/public-sample-audios", {
@@ -68,7 +74,9 @@ function renderPublicSampleAdmin(root, samples) {
   for (const section of root.querySelectorAll("[data-public-sample-admin-feature]")) {
     const feature = section.dataset.publicSampleAdminFeature;
     section.hidden = visibleFeatures.length > 0 && !visibleFeatures.includes(feature);
-    const sample = samples?.features?.[feature] || null;
+    const language = section.dataset.publicSampleLanguage || "";
+    const featureValue = samples?.features?.[feature] || null;
+    const sample = language ? featureValue?.samples?.[language] || null : featureValue;
     section.querySelector("[data-public-sample-title]").value = sample?.title || "";
     section.querySelector("[data-public-sample-description]").value = sample?.description || "";
     section.querySelector("[data-public-sample-file]").value = "";
@@ -123,7 +131,9 @@ async function previewPublicSampleFile(section) {
 
 async function deletePublicSample(section) {
   const feature = section.dataset.publicSampleAdminFeature;
-  const savedSample = currentPublicSampleAudios?.features?.[feature] || null;
+  const language = section.dataset.publicSampleLanguage || "";
+  const featureValue = currentPublicSampleAudios?.features?.[feature] || null;
+  const savedSample = language ? featureValue?.samples?.[language] || null : featureValue;
   if (!savedSample) {
     clearPublicSampleSection(section);
     setPublicSampleAdminStatus("未保存の選択を取り消しました。");
@@ -134,7 +144,8 @@ async function deletePublicSample(section) {
   }
   try {
     setPublicSampleAdminStatus("削除中です。");
-    const response = await fetch(`/api/public-sample-audios/${encodeURIComponent(feature)}`, {
+    const languageQuery = language ? `?language=${encodeURIComponent(language)}` : "";
+    const response = await fetch(`/api/public-sample-audios/${encodeURIComponent(feature)}${languageQuery}`, {
       method: "DELETE",
     });
     if (!response.ok) {

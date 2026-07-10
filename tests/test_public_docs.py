@@ -79,6 +79,7 @@ def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None
 def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     wrangler = read_text("wrangler.toml")
     migration = read_text("migrations/0001_public_demo_storage.sql")
+    sample_migration = read_text("migrations/0002_public_samples.sql")
 
     assert 'binding = "MO_SPEECH_DB"' in wrangler
     assert 'database_name = "mo-speech-demo-db"' in wrangler
@@ -88,6 +89,7 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     assert "CREATE TABLE IF NOT EXISTS quota_usage_total" in migration
     assert "CREATE TABLE IF NOT EXISTS audit_events" in migration
     assert "CREATE TABLE IF NOT EXISTS job_metadata" in migration
+    assert "CREATE TABLE IF NOT EXISTS public_sample_audios" in sample_migration
 
 
 def test_wrangler_binds_production_and_preview_r2_buckets() -> None:

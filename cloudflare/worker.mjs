@@ -13,9 +13,11 @@ const ADMIN_SESSION_COOKIE = "mo_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
+const PUBLIC_AUDIT_D1_MIGRATED_KV_KEY = "public-audit-log:d1-migrated";
 const PUBLIC_AUDIT_LOG_DEFAULT_LIMIT = 500;
 const PUBLIC_SAMPLE_AUDIOS_KV_KEY = "public-sample-audios";
 const PUBLIC_SAMPLE_AUDIO_MAX_BASE64_CHARS = 2_500_000;
+const PUBLIC_SAMPLE_LANGUAGES = ["ja-JP", "zh-CN", "en-US"];
 const PUBLIC_USAGE_KV_PREFIX = "public-usage:";
 const PUBLIC_SESSION_COOKIE = "mo_public_session";
 const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
@@ -803,7 +805,7 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "DELETE" && url.pathname.startsWith("/api/public-sample-audios/")) {
       const feature = decodeURIComponent(url.pathname.slice("/api/public-sample-audios/".length));
-      const samples = await deletePublicSampleAudioFeature(feature, env);
+      const samples = await deletePublicSampleAudioFeature(feature, env, url.searchParams.get("language") || "");
       await appendPublicAuditEvent(env, {
         action: "public_sample_audio_deleted",
         feature,
@@ -1156,6 +1158,43 @@ async function writePublicAccessSettings(payload, env) {
 }
 
 async function readPublicSampleAudios(env) {
+  if (env.MO_SPEECH_DB && env.MO_SPEECH_AUDIO_R2) {
+    const result = await env.MO_SPEECH_DB.prepare(
+      "SELECT feature, language, title, description, filename, audio_mime_type, audio_r2_key, size_bytes FROM public_sample_audios ORDER BY feature, language",
+    ).all();
+    if ((result.results || []).length === 0 && stateKv(env)) {
+      const legacy = await kvGetJson(stateKv(env), PUBLIC_SAMPLE_AUDIOS_KV_KEY, null);
+      if (legacy && publicSampleRows(coercePublicSampleAudios(legacy)).length > 0) {
+        return writePublicSampleAudios(legacy, env);
+      }
+    }
+    const samples = coercePublicSampleAudios(DEFAULT_PUBLIC_SAMPLE_AUDIOS);
+    samples.features.skitvoice = {
+      samples: Object.fromEntries(PUBLIC_SAMPLE_LANGUAGES.map((language) => [language, null])),
+    };
+    for (const row of result.results || []) {
+      const object = await env.MO_SPEECH_AUDIO_R2.get(row.audio_r2_key);
+      if (!object || !PUBLIC_ACCESS_FEATURES.includes(row.feature)) continue;
+      const sample = {
+        title: row.title,
+        description: row.description,
+        filename: row.filename,
+        audio_mime_type: row.audio_mime_type,
+        audio_base64: bytesToBase64(new Uint8Array(await object.arrayBuffer())),
+        size_bytes: Number(row.size_bytes || 0),
+      };
+      if (row.feature === "skitvoice" && row.language === "und") {
+        samples.features.skitvoice.samples["ja-JP"] = sample;
+      } else if (row.language && row.language !== "und") {
+        samples.features[row.feature] ||= { samples: {} };
+        samples.features[row.feature].samples ||= {};
+        samples.features[row.feature].samples[row.language] = sample;
+      } else {
+        samples.features[row.feature] = sample;
+      }
+    }
+    return samples;
+  }
   const kv = stateKv(env);
   let stored = null;
   if (kv) {
@@ -1172,6 +1211,37 @@ async function readPublicSampleAudios(env) {
 
 async function writePublicSampleAudios(payload, env) {
   const samples = coercePublicSampleAudios(payload);
+  if (env.MO_SPEECH_DB && env.MO_SPEECH_AUDIO_R2) {
+    const existing = await env.MO_SPEECH_DB.prepare(
+      "SELECT feature, language, audio_r2_key FROM public_sample_audios",
+    ).all();
+    const desired = publicSampleRows(samples);
+    const desiredIds = new Set(desired.map((row) => `${row.feature}:${row.language}`));
+    for (const row of existing.results || []) {
+      if (!desiredIds.has(`${row.feature}:${row.language}`)) {
+        await env.MO_SPEECH_DB.prepare("DELETE FROM public_sample_audios WHERE feature = ? AND language = ?")
+          .bind(row.feature, row.language).run();
+        await env.MO_SPEECH_AUDIO_R2.delete(row.audio_r2_key);
+      }
+    }
+    for (const row of desired) {
+      const r2Key = `public-samples/${row.feature}/${row.language}/${crypto.randomUUID()}-${row.sample.filename}`;
+      const previous = (existing.results || []).find((item) => item.feature === row.feature && item.language === row.language);
+      await env.MO_SPEECH_AUDIO_R2.put(r2Key, base64ToBytes(row.sample.audio_base64), {
+        httpMetadata: { contentType: row.sample.audio_mime_type },
+      });
+      await env.MO_SPEECH_DB.prepare(
+        "INSERT INTO public_sample_audios (feature, language, title, description, filename, audio_mime_type, audio_r2_key, size_bytes, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(feature, language) DO UPDATE SET title = excluded.title, description = excluded.description, filename = excluded.filename, audio_mime_type = excluded.audio_mime_type, audio_r2_key = excluded.audio_r2_key, size_bytes = excluded.size_bytes, updated_at = excluded.updated_at",
+      ).bind(
+        row.feature, row.language, row.sample.title, row.sample.description, row.sample.filename,
+        row.sample.audio_mime_type, r2Key, row.sample.size_bytes, new Date().toISOString(),
+      ).run();
+      if (previous?.audio_r2_key && previous.audio_r2_key !== r2Key) {
+        await env.MO_SPEECH_AUDIO_R2.delete(previous.audio_r2_key);
+      }
+    }
+    return readPublicSampleAudios(env);
+  }
   const kv = stateKv(env);
   if (kv) {
     await kv.put(PUBLIC_SAMPLE_AUDIOS_KV_KEY, JSON.stringify(samples));
@@ -1179,12 +1249,16 @@ async function writePublicSampleAudios(payload, env) {
   return samples;
 }
 
-async function deletePublicSampleAudioFeature(feature, env) {
+async function deletePublicSampleAudioFeature(feature, env, language = "") {
   if (!PUBLIC_ACCESS_FEATURES.includes(feature)) {
     throw httpError(404, "sample audio feature is not found");
   }
   const samples = await readPublicSampleAudios(env);
-  samples.features[feature] = null;
+  if (language && samples.features[feature]?.samples) {
+    samples.features[feature].samples[language] = null;
+  } else {
+    samples.features[feature] = null;
+  }
   return writePublicSampleAudios(samples, env);
 }
 
@@ -1193,9 +1267,32 @@ function coercePublicSampleAudios(payload = {}) {
   const features = source.features && typeof source.features === "object" ? source.features : source;
   const normalized = { features: {} };
   for (const feature of PUBLIC_ACCESS_FEATURES) {
-    normalized.features[feature] = coercePublicSampleAudio(features[feature]);
+    const raw = features[feature];
+    if (raw?.samples && typeof raw.samples === "object") {
+      normalized.features[feature] = { samples: {} };
+      for (const language of PUBLIC_SAMPLE_LANGUAGES) {
+        normalized.features[feature].samples[language] = coercePublicSampleAudio(raw.samples[language]);
+      }
+    } else {
+      normalized.features[feature] = coercePublicSampleAudio(raw);
+    }
   }
   return normalized;
+}
+
+function publicSampleRows(samples) {
+  const rows = [];
+  for (const feature of PUBLIC_ACCESS_FEATURES) {
+    const value = samples.features[feature];
+    if (value?.samples) {
+      for (const language of PUBLIC_SAMPLE_LANGUAGES) {
+        if (value.samples[language]) rows.push({ feature, language, sample: value.samples[language] });
+      }
+    } else if (value) {
+      rows.push({ feature, language: feature === "skitvoice" ? "ja-JP" : "und", sample: value });
+    }
+  }
+  return rows;
 }
 
 function coercePublicSampleAudio(raw) {
@@ -1375,6 +1472,9 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
   const dailyLimit = Number(featureSettings.daily_limit ?? -1);
   const totalLimit = Number(featureSettings.total_limit ?? -1);
   const today = new Date().toISOString().slice(0, 10);
+  if (env.MO_SPEECH_DB) {
+    return consumePublicQuotaD1(env, feature, normalizedEmail, featureSettings, request, today);
+  }
   const dailyKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:${today}`;
   const totalKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:total`;
   const dailyUsed = await publicUsageGet(env, dailyKey);
@@ -1417,10 +1517,72 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
   });
 }
 
+async function consumePublicQuotaD1(env, feature, email, featureSettings, request, today) {
+  const emailHash = await publicIdentityHash(email);
+  const dailyLimit = Number(featureSettings.daily_limit ?? -1);
+  const totalLimit = Number(featureSettings.total_limit ?? -1);
+  const daily = await env.MO_SPEECH_DB.prepare(
+    "SELECT usage_count FROM quota_usage_daily WHERE email_hash = ? AND feature = ? AND usage_date = ?",
+  ).bind(emailHash, feature, today).first();
+  const total = await env.MO_SPEECH_DB.prepare(
+    "SELECT usage_count FROM quota_usage_total WHERE email_hash = ? AND feature = ?",
+  ).bind(emailHash, feature).first();
+  const legacyDailyKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${email}:${today}`;
+  const legacyTotalKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${email}:total`;
+  const dailyUsed = daily ? Number(daily.usage_count || 0) : await publicUsageGet(env, legacyDailyKey);
+  const totalUsed = total ? Number(total.usage_count || 0) : await publicUsageGet(env, legacyTotalKey);
+  if (dailyLimit >= 0 && dailyUsed >= dailyLimit) {
+    await appendPublicAuditEvent(env, { action: "public_quota_blocked", email, feature, limit_type: "daily", used: dailyUsed, limit: dailyLimit, ...requestAuditContext(request) });
+    throw httpError(429, "public quota exceeded");
+  }
+  if (totalLimit >= 0 && totalUsed >= totalLimit) {
+    await appendPublicAuditEvent(env, { action: "public_quota_blocked", email, feature, limit_type: "total", used: totalUsed, limit: totalLimit, ...requestAuditContext(request) });
+    throw httpError(429, "public quota exceeded");
+  }
+  const now = new Date().toISOString();
+  await env.MO_SPEECH_DB.batch([
+    env.MO_SPEECH_DB.prepare(
+      "INSERT INTO public_users (email_hash, created_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET last_seen_at = excluded.last_seen_at",
+    ).bind(emailHash, now, now),
+    env.MO_SPEECH_DB.prepare(
+      "INSERT INTO quota_usage_daily (email_hash, feature, usage_date, usage_count, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash, feature, usage_date) DO UPDATE SET usage_count = quota_usage_daily.usage_count + 1, updated_at = excluded.updated_at",
+    ).bind(emailHash, feature, today, dailyUsed + 1, now),
+    env.MO_SPEECH_DB.prepare(
+      "INSERT INTO quota_usage_total (email_hash, feature, usage_count, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(email_hash, feature) DO UPDATE SET usage_count = quota_usage_total.usage_count + 1, updated_at = excluded.updated_at",
+    ).bind(emailHash, feature, totalUsed + 1, now),
+  ]);
+  await appendPublicAuditEvent(env, {
+    action: "public_quota_consumed", email, feature,
+    daily_used: dailyUsed + 1, daily_limit: dailyLimit,
+    total_used: totalUsed + 1, total_limit: totalLimit,
+    ...requestAuditContext(request),
+  });
+}
+
 async function readPublicAuditLog(env, url = null) {
-  const kv = stateKv(env);
   const requestedLimit = url ? Number(new URL(url).searchParams.get("limit") || "") : 0;
   const limit = clampInt(requestedLimit, 1, publicAuditLogLimit(env), 100);
+  if (env.MO_SPEECH_DB) {
+    await migrateLegacyAuditEventsToD1(env);
+    const result = await env.MO_SPEECH_DB.prepare(
+      "SELECT id, occurred_at, actor_email_hash, action, feature, path, detail_json FROM audit_events ORDER BY occurred_at DESC LIMIT ?",
+    ).bind(limit).all();
+    const count = await env.MO_SPEECH_DB.prepare("SELECT COUNT(*) AS count FROM audit_events").first();
+    return {
+      events: (result.results || []).map((row) => ({
+        id: row.id,
+        created_at: row.occurred_at,
+        email_hash: row.actor_email_hash || "",
+        action: row.action,
+        feature: row.feature || "",
+        path: row.path || "",
+        ...safeJsonObject(row.detail_json),
+      })),
+      limit,
+      stored: Number(count?.count || 0),
+    };
+  }
+  const kv = stateKv(env);
   const events = kv ? await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []) : [];
   const normalizedEvents = Array.isArray(events) ? events : [];
   return {
@@ -1431,6 +1593,22 @@ async function readPublicAuditLog(env, url = null) {
 }
 
 async function appendPublicAuditEvent(env, event) {
+  if (env.MO_SPEECH_DB) {
+    await migrateLegacyAuditEventsToD1(env);
+    const now = new Date();
+    const entry = sanitizePublicAuditEvent({ id: crypto.randomUUID(), created_at: now.toISOString(), created_at_unix: Math.floor(now.getTime() / 1000), ...event });
+    const emailHash = entry.email ? await publicIdentityHash(entry.email) : null;
+    const detail = { ...entry };
+    for (const key of ["id", "created_at", "email", "action", "feature", "path"]) delete detail[key];
+    try {
+      await env.MO_SPEECH_DB.prepare(
+        "INSERT INTO audit_events (id, occurred_at, actor_email_hash, action, feature, path, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(entry.id, entry.created_at, emailHash, entry.action || "unknown", entry.feature || null, entry.path || null, JSON.stringify(detail)).run();
+    } catch (_error) {
+      // 監査ログ保存の失敗で本処理を止めない。
+    }
+    return;
+  }
   const kv = stateKv(env);
   if (!kv) {
     return;
@@ -1450,6 +1628,37 @@ async function appendPublicAuditEvent(env, event) {
     await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(events.slice(-limit)));
   } catch (_error) {
     // 監査ログ保存の失敗で、ログインや生成APIの本処理を止めない。
+  }
+}
+
+async function migrateLegacyAuditEventsToD1(env) {
+  const kv = stateKv(env);
+  if (!kv || await kv.get(PUBLIC_AUDIT_D1_MIGRATED_KV_KEY)) return;
+  const legacy = await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []);
+  for (const raw of Array.isArray(legacy) ? legacy : []) {
+    const entry = sanitizePublicAuditEvent(raw);
+    const emailHash = entry.email ? await publicIdentityHash(entry.email) : null;
+    const detail = { ...entry };
+    for (const key of ["id", "created_at", "email", "action", "feature", "path"]) delete detail[key];
+    await env.MO_SPEECH_DB.prepare(
+      "INSERT OR IGNORE INTO audit_events (id, occurred_at, actor_email_hash, action, feature, path, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).bind(entry.id || crypto.randomUUID(), entry.created_at || new Date().toISOString(), emailHash, entry.action || "unknown", entry.feature || null, entry.path || null, JSON.stringify(detail)).run();
+  }
+  await kv.put(PUBLIC_AUDIT_D1_MIGRATED_KV_KEY, "1");
+}
+
+async function publicIdentityHash(email) {
+  const bytes = new TextEncoder().encode(normalizeEmail(email));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function safeJsonObject(value) {
+  try {
+    const parsed = JSON.parse(String(value || "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_error) {
+    return {};
   }
 }
 
@@ -3414,6 +3623,12 @@ function base64ToBytes(base64) {
     bytes[index] = binary.charCodeAt(index);
   }
   return bytes;
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 async function transformUserText(text, targetLanguage, options, env) {

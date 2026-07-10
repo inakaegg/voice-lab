@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import platform
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -285,7 +286,7 @@ def test_qwen3_translation_builds_prompt_and_decodes(tmp_path: Path, monkeypatch
     assert captured["model_path"] == snapshot
     assert captured["model_local_only"] is True
     assert captured["torch_dtype"] == "auto"
-    assert captured["device_map"] == "cpu"
+    assert captured["device_map"] == ("cpu" if platform.system() == "Darwin" else "auto")
     assert captured["messages"] == [
         {
             "role": "system",
