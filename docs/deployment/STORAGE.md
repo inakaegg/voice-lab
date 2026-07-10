@@ -13,7 +13,7 @@
 | 音声履歴metadata/index | Workers KV | 実装済み |
 | 音声履歴blob | R2（bindingあり）/ KV fallback | R2 pilot実装済み |
 | 公開サンプル音声metadata/blob | Workers KV | 実装済み。R2移行前 |
-| quota使用数、簡易audit log | Workers KV | 実装済み。D1移行前 |
+| quota使用数、簡易audit log | Workers KV | D1 resource/schema作成済み。Worker移行前 |
 
 `MO_SPEECH_AUDIO_R2` bindingがある場合、新しく保存する音声履歴blobはR2へ置き、metadataとindexだけを `MO_SPEECH_KV` に置く。bindingがない場合は従来どおりKVへ保存する。
 
@@ -21,7 +21,7 @@
 
 ## R2 binding
 
-実Cloudflare環境でbucketを作る操作は外部リソース変更なので、リポジトリの設定だけでは完了しない。bucket作成後、`wrangler.toml` に次を追加する。
+実Cloudflare環境ではR2がまだアカウント単位で有効化されておらず、APIはcode `10042` を返す。Cloudflare DashboardのR2画面で利用条件と必要な支払い設定を確認して有効化した後、bucketを作成し、`wrangler.toml` に次を追加する。
 
 ```toml
 [[r2_buckets]]
@@ -42,9 +42,9 @@ audio-history:{recordings|outputs}:{safe_filename}:audio
 
 R2 objectには音声bytesを置き、content typeをHTTP metadataへ保存する。公開URLを直接発行せず、認証済みの既存 `/api/audio-history/{kind}/{filename}` からWorkerが返す。これによりbucketをpublicにせず、管理APIの認証境界を維持する。
 
-## D1へ移す対象
+## D1 resourceと移行対象
 
-D1は次の段階で導入する。現在の公開デモquotaはWorkers KVのeventual consistencyを許容する過剰利用防止であり、課金台帳ではない。
+D1 database `mo-speech-demo-db` とbinding `MO_SPEECH_DB` は作成済みで、schemaは `migrations/0001_public_demo_storage.sql` で管理する。現在のWorkerはまだKV経路を使うため、binding追加だけで保存先は切り替わらない。公開デモquotaはWorkers KVのeventual consistencyを許容する過剰利用防止であり、課金台帳ではない。
 
 ```sql
 CREATE TABLE public_users (
@@ -53,14 +53,21 @@ CREATE TABLE public_users (
   last_seen_at TEXT NOT NULL
 );
 
-CREATE TABLE quota_usage (
+CREATE TABLE quota_usage_daily (
   email_hash TEXT NOT NULL,
   feature TEXT NOT NULL,
   usage_date TEXT NOT NULL,
-  daily_count INTEGER NOT NULL DEFAULT 0,
-  total_count INTEGER NOT NULL DEFAULT 0,
+  usage_count INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (email_hash, feature, usage_date)
+);
+
+CREATE TABLE quota_usage_total (
+  email_hash TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  usage_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (email_hash, feature)
 );
 
 CREATE TABLE audit_events (

@@ -8,6 +8,12 @@ assets = { directory = "./src/mo_speech/web", binding = "ASSETS", run_worker_fir
 binding = "MO_SPEECH_KV"
 id = "8eeb96d03f7e4d97ad387a654225b649"
 
+[[d1_databases]]
+binding = "MO_SPEECH_DB"
+database_name = "mo-speech-demo-db"
+database_id = "3e526561-0c28-42f9-8ff2-e84d091d0d70"
+migrations_dir = "migrations"
+
 [vars]
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
