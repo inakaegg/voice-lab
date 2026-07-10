@@ -1,7 +1,7 @@
 [project]
-name = "mo-speech"
+name = "voice-lab"
 version = "0.1.0"
-description = "Local-first speech translation web app prototype."
+description = "Voice Lab - a web app for speech practice, multi-speaker generation, translation, and voice conversion."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.117",
@@ -60,7 +60,14 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mo_speech = ["web/*.html", "web/*.css", "web/*.js"]
+mo_speech = [
+  "web/*.html",
+  "web/*.css",
+  "web/*.js",
+  "web/react/*.html",
+  "web/react/assets/*.css",
+  "web/react/assets/*.js",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

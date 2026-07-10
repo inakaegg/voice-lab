@@ -4,14 +4,14 @@
 
 公開画面の状態管理が大きくなっているため、Vite + React + TypeScriptへの移行は有効。ただし既存画面を一括移行しない。現行のvanilla JavaScriptは実運用されており、録音、IndexedDB、比較再生、job pollingを同時に書き換えると回帰原因を切り分けにくい。
 
-移行対象は公開ポータル、SpeakLoop、SkitVoiceに限定する。管理画面、内部検証画面、旧互換画面は対象外とし、Worker/FastAPIのAPI互換を維持する。
+表示基盤の移行対象は公開ポータル、SpeakLoop、SkitVoice、管理3画面とする。管理画面の状態制御は既存classic JavaScriptを維持し、まずCSS build、共通shell、レスポンシブを移す。内部検証・旧互換画面は最小限の共通shellだけを適用し、Worker/FastAPIのAPI互換を維持する。
 
 ## 実装状況（2026-07-10）
 
 - 公開ポータル、SpeakLoop、SkitVoiceをVite + React + TypeScriptのmulti-page buildへ切り替えた。
 - Reactは公開画面の構造、共通ヘッダー、サンプル表示枠、レスポンシブレイアウトを担当する。
 - 録音、比較再生、IndexedDB、URL参照、RunPod job pollingは、回帰を抑えるため既存controllerをReact mount後に読み込む移行アダプタを使う。
-- WorkerとFastAPIは公開3routeだけReact buildを返す。管理画面と旧互換画面は従来HTML/JavaScriptのまま維持する。
+- WorkerとFastAPIは公開3routeにReact buildを返す。管理画面は従来HTML/JavaScriptのDOM契約を維持しつつ、Viteが生成する共通CSS assetを使う。
 - 次段階では、既存controller内の状態遷移をreducer/hooksへ小単位で移し、移行済み部分から旧controllerを縮小する。
 
 ### 採用レイアウトとテーマ
@@ -32,15 +32,19 @@
 
 2026-07-10以降、新規または移行済みのReact routeはTailwind CSS v4とshadcn/uiを正とする。shadcn/uiは依存先の完成画面を埋め込むライブラリではなく、必要なcomponent sourceをrepoへ追加し、Voice Labのtokenとvariantで管理するために使う。
 
-最初の対象は公開ポータル`/`である。ポータルentryだけがTailwind CSSをimportし、ポータルHTMLから`/static/styles.css`を外す。SpeakLoopとSkitVoiceは既存controllerと見えるUIの回帰範囲が広いため、個別のroute移行が完了するまで旧stylesheetを維持し、Tailwind CSSを読み込ませない。
+公開ポータル`/`は専用の軽量Tailwind assetを使う。SpeakLoop、SkitVoice、管理画面、実験画面は共通Tailwind assetへ既存selector compatibility layerを取り込み、HTMLから`/static/styles.css`の直接参照を外す。これにより、既存controller契約を維持したままtoken、focus、responsive、管理shellを一つのbuild経路で管理する。
 
 | route | 現在のスタイル基盤 | 旧`styles.css` | Tailwind CSS |
 | --- | --- | --- | --- |
 | `/` | Tailwind CSS v4 + repo所有shadcn/ui | 読み込まない | portal entryだけで読む |
-| `/speakloop` | 既存React構造 + 旧semantic CSS | 読む | 読まない |
-| `/skitvoice` | 既存React構造 + 旧semantic CSS | 読む | 読まない |
+| `/speakloop` | React + 共通Tailwind compatibility asset | 読み込まない | 読む |
+| `/skitvoice` | React + 共通Tailwind compatibility asset | 読み込まない | 読む |
+| `/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
+| `/speakloop/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
+| `/skitvoice/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
+| `/fun`, `/seed-vc` | 互換DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
 
-同じrouteで旧stylesheetとTailwindを二重ロードしない。各routeの移行時には、対象HTMLから旧stylesheetを外し、production build後のHTMLを検査して他routeへTailwind assetが流入していないことを完了条件にする。
+同じrouteで旧stylesheetとTailwindを二重ロードしない。production build後に、ポータル専用assetと共通compatibility assetの境界、全active HTMLから旧stylesheet参照が消えていることを検査する。
 
 ## 現在の境界
 

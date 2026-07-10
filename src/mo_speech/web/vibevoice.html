@@ -3,23 +3,32 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SkitVoice 管理</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <title>SkitVoice 管理 | Voice Lab</title>
+    <link rel="stylesheet" href="/react/assets/app.css" />
   </head>
-  <body class="vibevoice-body">
-    <main class="vibevoice-shell" aria-label="SkitVoice 管理">
-      <header class="vibevoice-header">
-        <div>
-          <p class="vibevoice-kicker">SkitVoice Admin</p>
+  <body class="vibevoice-body voice-lab-admin-body" data-admin-page="skitvoice">
+    <main class="vibevoice-shell admin-shell" aria-label="SkitVoice 管理">
+      <header class="vibevoice-header admin-topbar">
+        <div class="admin-title-group">
+          <p class="vibevoice-kicker">VOICE LAB · SKITVOICE</p>
           <h1>SkitVoice 管理</h1>
           <p>台本と最大4つの参照音声から、VibeVoice/RunPodの詳細設定付きでセリフ音声を生成します。</p>
         </div>
-        <nav class="vibevoice-nav" aria-label="関連画面">
-          <a href="/skitvoice">SkitVoice</a>
+        <nav class="vibevoice-nav admin-nav" aria-label="管理画面">
+          <a href="/admin">総合管理</a>
+          <a href="/speakloop/admin">SpeakLoop</a>
+          <a href="/skitvoice/admin" aria-current="page">SkitVoice</a>
+          <a href="/skitvoice">公開画面</a>
         </nav>
       </header>
 
-      <section class="public-access-admin" data-public-access-settings data-public-access-features="skitvoice" aria-label="公開制限">
+      <details class="admin-config-group admin-config-wide">
+        <summary>
+          <span>公開画面の設定</span>
+          <small>利用制限と日・中・英のサンプル音声</small>
+        </summary>
+        <div class="admin-config-grid admin-config-grid-paired">
+          <section class="public-access-admin" data-public-access-settings data-public-access-features="skitvoice" aria-label="公開制限">
         <div class="public-access-header">
           <div>
             <h2>公開制限</h2>
@@ -44,9 +53,9 @@
         </div>
         <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
         <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
-      </section>
+          </section>
 
-      <section class="public-samples-admin" data-public-samples-admin data-public-samples-features="skitvoice" aria-label="公開サンプル音声">
+          <section class="public-samples-admin" data-public-samples-admin data-public-samples-features="skitvoice" aria-label="公開サンプル音声">
         <div class="public-access-header">
           <div>
             <h2>サンプル音声</h2>
@@ -65,7 +74,9 @@
         </div>
         <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
         <p class="public-access-status" data-public-samples-status role="status" aria-live="polite"></p>
-      </section>
+          </section>
+        </div>
+      </details>
 
       <form id="vibevoice-form" class="vibevoice-form">
         <div class="vibevoice-workspace">
@@ -157,7 +168,12 @@
               </div>
             </section>
 
-            <section class="vibevoice-panel vibevoice-settings-panel" aria-label="生成設定">
+            <details class="vibevoice-panel vibevoice-settings-panel admin-advanced-group" aria-label="生成設定">
+              <summary>
+                <span>生成詳細設定</span>
+                <small>モデル、品質、再生成</small>
+              </summary>
+              <div class="admin-advanced-content">
               <div class="vibevoice-panel-header">
                 <div>
                   <p class="vibevoice-section-label">Parameters</p>
@@ -335,7 +351,8 @@
                   </div>
                 </dl>
               </section>
-            </section>
+              </div>
+            </details>
 
             <div class="vibevoice-actions">
               <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>

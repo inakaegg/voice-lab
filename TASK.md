@@ -8,7 +8,9 @@
 - SkitVoiceは最大4話者、VibeVoice生成、ASR timestampによる再配置、低スコア行再生成、Seed-VC後処理まで実装済み。
 - 参照音声はローカル版でファイル、マイク、タブ音声、URL切り出しの4方式、Cloudflare版でURLを除く3方式を提供する。
 - Cloudflare WorkerはGoogleログイン、feature別quota、入力上限、管理者除外、管理画面、簡易監査ログ、公開サンプル音声を実装済み。
-- Python/Nodeの通常CIを持ち、RunPod image buildとGPU smokeは手動workflowに分離している。
+- quota・監査・公開サンプルmetadataはD1、音声blobはR2へ移行済みで、bindingなし環境と旧データ向けのKV fallbackを維持している。
+- 公開ポータル、SpeakLoop、SkitVoiceはVite + React + TypeScript、共通UI生成基盤はTailwind CSS v4とrepo所有のshadcn/ui部品へ移行済み。管理・互換画面も共通Tailwind buildを使う。
+- Python/Nodeの通常CIとPlaywrightの3 viewportレイアウトE2Eを持ち、RunPod image buildとGPU smokeは手動workflowに分離している。
 
 ## 完了条件として維持する検証
 
@@ -16,17 +18,17 @@
 python3 -m pytest
 npm test
 npm run check:js
+npm run check:web
+npm run test:e2e
 ```
 
 RunPod・GPU・外部APIを使うスモークは、上記のモデル非依存テストが通った後に必要最小限だけ実施する。
 
 ## 次に外部環境で行うこと
 
-1. 公開URLでGoogle OAuth、quota、管理者除外、SkitVoice生成をスモーク確認する。
-2. SpeakLoopとSkitVoiceの権利確認済みサンプル音声を管理画面から登録する。
-3. 実ブラウザとスマートフォンで録音、タブ音声、比較再生、レスポンシブ表示を確認し、公開用スクリーンショットを取得する。
-4. 作成済みD1 bindingへquota/audit経路を段階移行し、公開サンプル音声blobも作成済みR2 bindingへ移す。
-5. 公開ユーザー画面のReact/TypeScript移行は、状態境界ごとに互換テストを追加して段階実施する。
+1. SpeakLoopとSkitVoiceの英語・中国語・日本語サンプル生成物を管理画面から登録する。
+2. 最終コピーとサンプル反映後に、公開用のPC／スマホスクリーンショットを取得する。
+3. RunPod imageまたは外部API経路を変更した場合だけ、費用を確認して最小の公開環境smokeを再実行する。
 
 ## 仕様の正
 

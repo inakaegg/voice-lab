@@ -3,18 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SpeakLoop 履歴</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <title>SpeakLoop 管理 | Voice Lab</title>
+    <link rel="stylesheet" href="/react/assets/app.css" />
   </head>
-  <body>
-    <main class="practice-history-admin" aria-label="SpeakLoop 履歴">
-      <header class="practice-history-header">
-        <a href="/admin">管理画面</a>
-        <a href="/speakloop">SpeakLoop</a>
-        <h1>SpeakLoop 履歴</h1>
+  <body class="voice-lab-admin-body" data-admin-page="speakloop">
+    <main class="practice-history-admin admin-shell" aria-label="SpeakLoop 管理">
+      <header class="practice-history-header admin-topbar">
+        <div class="admin-title-group">
+          <p class="eyebrow">VOICE LAB · SPEAKLOOP</p>
+          <h1>SpeakLoop 管理</h1>
+        </div>
+        <nav class="admin-nav" aria-label="管理画面">
+          <a href="/admin">総合管理</a>
+          <a href="/speakloop/admin" aria-current="page">SpeakLoop</a>
+          <a href="/skitvoice/admin">SkitVoice</a>
+          <a href="/speakloop">公開画面</a>
+        </nav>
         <p>通常の音声変換履歴とは分けて、練習用のお手本音声と復唱録音だけを表示します。</p>
       </header>
-      <section class="public-access-admin" data-public-access-settings data-public-access-features="speakloop" aria-label="公開制限">
+      <details class="admin-config-group admin-config-wide">
+        <summary>
+          <span>公開画面の設定</span>
+          <small>利用制限とサンプル音声</small>
+        </summary>
+        <div class="admin-config-grid admin-config-grid-paired">
+          <section class="public-access-admin" data-public-access-settings data-public-access-features="speakloop" aria-label="公開制限">
         <div class="public-access-header">
           <div>
             <h2>公開制限</h2>
@@ -39,8 +52,8 @@
         </div>
         <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
         <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
-      </section>
-      <section class="public-samples-admin" data-public-samples-admin data-public-samples-features="speakloop" aria-label="公開サンプル音声">
+          </section>
+          <section class="public-samples-admin" data-public-samples-admin data-public-samples-features="speakloop" aria-label="公開サンプル音声">
         <div class="public-access-header">
           <div>
             <h2>サンプル音声</h2>
@@ -59,7 +72,9 @@
         </div>
         <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
         <p class="public-access-status" data-public-samples-status role="status" aria-live="polite"></p>
-      </section>
+          </section>
+        </div>
+      </details>
       <section class="practice-history-section" aria-label="練習入力">
         <h2>録音</h2>
         <div id="practice-history-recordings" class="practice-history-list"></div>

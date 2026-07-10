@@ -42,8 +42,50 @@ jobs:
       - name: React typecheck and production build
         run: npm run check:web
 
+      - name: Build wheel and verify bundled web assets
+        run: |
+          python3 -m pip wheel . --no-deps --wheel-dir tmp/wheel
+          python3 scripts/verify_wheel_assets.py tmp/wheel
+
       - name: JavaScript syntax checks
         run: npm run check:js
 
       - name: RunPod Dockerfile is covered by the repository checks
         run: test -f Dockerfile.runpod && test -f .github/workflows/runpod-image.yml
+
+  ui-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install application dependencies
+        run: |
+          python3 -m pip install -e .
+          npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Responsive UI layout tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-ui-failure
+          path: tmp/playwright/
+          if-no-files-found: ignore
+          retention-days: 7

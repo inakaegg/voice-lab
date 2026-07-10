@@ -751,7 +751,7 @@ def create_app(
     audio_history_store: AudioHistoryStore | None = None,
     user_settings_store: UserSettingsStore | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="mo speech translation")
+    app = FastAPI(title="Voice Lab")
     active_pipeline = pipeline or create_pipeline_from_env()
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
     active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()

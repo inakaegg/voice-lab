@@ -1,5 +1,5 @@
 {
-  "name": "mo-speech",
+  "name": "voice-lab",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,6 +7,9 @@
     "build:web": "vite build --config apps/web/vite.config.ts",
     "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
     "verify:web-styles": "node scripts/verify_web_style_boundaries.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:visual": "PLAYWRIGHT_VISUAL_REVIEW=1 playwright test tests/e2e/visual-review.spec.ts",
     "test": "node --test tests/*.mjs",
     "test:worker": "node --test tests/*.mjs",
     "check:js": "node --check cloudflare/worker.mjs && node --check src/mo_speech/web/*.js",
@@ -21,6 +24,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",

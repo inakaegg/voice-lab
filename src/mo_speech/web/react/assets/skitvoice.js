@@ -1,4 +1,4 @@
-import{a as e,n as t,o as n,r,s as i,t as a}from"./components.js";var o=i();e();var s=`1 あっ、こんにちは〜
+import{a as e,n as t,o as n,r,s as i,t as a}from"./components.js";/* empty css   */var o=i();e();var s=`1 あっ、こんにちは〜
 2 こんにちは。ご無沙汰してます。
 1 元気ですか？最近、どうしてます？
 2 いや〜、仕事が忙しくて。AIの進化がすごくて大変なことになってます

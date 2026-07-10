@@ -53,7 +53,7 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(skitvoice, /英語サンプル/);
 });
 
-test("portal is the isolated Tailwind and shadcn migration route", () => {
+test("public React routes use the staged Tailwind and shadcn migration boundary", () => {
   assert.match(pkg, /"tailwindcss"/);
   assert.match(pkg, /"@tailwindcss\/vite"/);
   assert.match(pkg, /"verify:web-styles"/);
@@ -63,8 +63,10 @@ test("portal is the isolated Tailwind and shadcn migration route", () => {
   assert.match(portal, /import "\.\/styles\.css"/);
   assert.match(portal, /@\/components\/ui\/card/);
   assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
-  assert.match(speakloopHtml, /\/static\/styles\.css/);
-  assert.match(skitvoiceHtml, /\/static\/styles\.css/);
+  assert.match(speakloopHtml, /src\/styles\/app\.css/);
+  assert.match(skitvoiceHtml, /src\/styles\/app\.css/);
+  assert.doesNotMatch(speakloopHtml, /\/static\/styles\.css/);
+  assert.doesNotMatch(skitvoiceHtml, /\/static\/styles\.css/);
 });
 
 test("public UI finalizes the compact layout and exposes theme settings", () => {

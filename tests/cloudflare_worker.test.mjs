@@ -19,6 +19,7 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
   await handleRequest(new Request("https://example.com/fun"), env);
   await handleRequest(new Request("https://example.com/speakloop"), env);
   await handleRequest(new Request("https://example.com/skitvoice"), env);
+  await handleRequest(new Request("https://example.com/vibevoice/simple"), env);
   await handleRequest(new Request("https://example.com/seed-vc"), env);
 
   assert.deepEqual(requestedPaths, [
@@ -26,8 +27,22 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
     "/user.html",
     "/react/speakloop.html",
     "/react/skitvoice.html",
+    "/react/skitvoice.html",
     "/seed_vc.html",
   ]);
+});
+
+test("Cloudflare worker protects directly addressed admin HTML assets", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = { fetch: async () => new Response("asset") };
+
+  for (const path of ["/static/index.html", "/static/practice_admin.html", "/static/vibevoice.html"]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`), env);
+    assert.equal(response.status, 302, path);
+    assert.equal(response.headers.get("location"), `/admin/login?next=${encodeURIComponent(path)}`);
+  }
 });
 
 test("Cloudflare worker protects admin pages with a signed password session", async () => {

@@ -25,7 +25,7 @@ async function loadPublicSampleAudios() {
     }
     setPublicSampleAdminStatus("");
   } catch (error) {
-    setPublicSampleAdminStatus(errorMessage(error), "error");
+    setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
 }
 
@@ -65,7 +65,7 @@ async function savePublicSampleAudios(root) {
     }
     setPublicSampleAdminStatus("保存しました。");
   } catch (error) {
-    setPublicSampleAdminStatus(errorMessage(error), "error");
+    setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
 }
 
@@ -125,7 +125,7 @@ async function previewPublicSampleFile(section) {
       audio_base64: audioBase64,
     });
   } catch (error) {
-    setPublicSampleAdminStatus(errorMessage(error), "error");
+    setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
 }
 
@@ -158,7 +158,7 @@ async function deletePublicSample(section) {
     }
     setPublicSampleAdminStatus("削除しました。");
   } catch (error) {
-    setPublicSampleAdminStatus(errorMessage(error), "error");
+    setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
 }
 
@@ -241,6 +241,6 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function errorMessage(error) {
+function publicSampleErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }

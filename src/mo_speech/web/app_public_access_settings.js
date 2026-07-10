@@ -21,7 +21,7 @@ async function loadPublicAccessSettings() {
     }
     setPublicAccessStatus("");
   } catch (error) {
-    setPublicAccessStatus(errorMessage(error), "error");
+    setPublicAccessStatus(publicAccessErrorMessage(error), "error");
   }
 }
 
@@ -57,7 +57,7 @@ async function savePublicAccessSettings(root) {
     }, 2400);
   } catch (error) {
     setPublicAccessSaveButton(root, "保存", false);
-    setPublicAccessStatus(errorMessage(error), "error");
+    setPublicAccessStatus(publicAccessErrorMessage(error), "error");
   }
 }
 
@@ -145,6 +145,6 @@ function clonePublicAccessSettings(settings) {
   return JSON.parse(JSON.stringify(settings));
 }
 
-function errorMessage(error) {
+function publicAccessErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }

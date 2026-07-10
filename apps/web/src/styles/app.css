@@ -1,0 +1,885 @@
+@import "tailwindcss";
+@import "../../../../src/mo_speech/web/styles.css";
+
+@source "../**/*.{ts,tsx,html}";
+@source "../../../../src/mo_speech/web/*.{html,js}";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+}
+
+:root {
+  --background: oklch(0.972 0.009 82);
+  --foreground: oklch(0.205 0.035 262);
+  --card: oklch(0.995 0.004 82 / 0.94);
+  --card-foreground: oklch(0.205 0.035 262);
+  --muted: oklch(0.938 0.009 82);
+  --muted-foreground: oklch(0.49 0.035 258);
+  --border: oklch(0.83 0.018 76 / 0.78);
+  --ring: oklch(0.57 0.11 251);
+}
+
+html[data-theme="dark"] {
+  --background: oklch(0.175 0.025 259);
+  --foreground: oklch(0.95 0.012 82);
+  --card: oklch(0.225 0.028 259 / 0.94);
+  --card-foreground: oklch(0.95 0.012 82);
+  --muted: oklch(0.285 0.025 259);
+  --muted-foreground: oklch(0.72 0.025 255);
+  --border: oklch(0.43 0.025 255 / 0.7);
+  --ring: oklch(0.72 0.09 245);
+}
+
+/* Voice Lab administration ------------------------------------------------ */
+.voice-lab-admin-body {
+  --admin-accent: #3d65a6;
+  --admin-accent-strong: #274f8a;
+  --admin-accent-soft: #eaf0fb;
+  --admin-danger: #b64646;
+  --admin-ink: #182235;
+  --admin-muted: #60708a;
+  --admin-border: rgba(35, 49, 72, 0.14);
+  --admin-paper: rgba(255, 255, 255, 0.9);
+  background:
+    radial-gradient(circle at 3% 0, rgba(232, 174, 105, 0.19), transparent 27rem),
+    radial-gradient(circle at 98% 3%, rgba(104, 145, 218, 0.18), transparent 30rem),
+    #f5f3ee;
+  color: var(--admin-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  margin: 0;
+  min-width: 320px;
+  min-height: 100svh;
+}
+
+.voice-lab-admin-body *,
+.voice-lab-admin-body *::before,
+.voice-lab-admin-body *::after {
+  box-sizing: border-box;
+}
+
+.voice-lab-admin-body .admin-shell {
+  box-sizing: border-box;
+  margin: 0 auto;
+  max-width: 1480px;
+  padding: 18px clamp(14px, 2.6vw, 36px) 52px;
+}
+
+.voice-lab-admin-body .admin-topbar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--admin-border);
+  border-radius: 22px;
+  box-shadow: 0 18px 55px rgba(30, 39, 57, 0.08);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0 0 16px;
+  max-width: none;
+  padding: 18px 20px;
+}
+
+.voice-lab-admin-body .admin-title-group {
+  min-width: 0;
+}
+
+.voice-lab-admin-body .eyebrow,
+.voice-lab-admin-body .vibevoice-kicker {
+  color: #64738a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  margin: 0 0 5px;
+  text-transform: uppercase;
+}
+
+.voice-lab-admin-body .admin-topbar h1 {
+  color: var(--admin-ink);
+  font-size: clamp(1.55rem, 2.4vw, 2.2rem);
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+  margin: 0;
+}
+
+.voice-lab-admin-body .admin-lead,
+.voice-lab-admin-body .admin-topbar .admin-title-group > p:last-of-type,
+.voice-lab-admin-body .practice-history-header > p {
+  color: var(--admin-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 7px 0 0;
+  max-width: 760px;
+}
+
+.voice-lab-admin-body .admin-nav {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.voice-lab-admin-body .admin-nav a {
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  color: #53627a;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  min-height: 34px;
+  padding: 10px 12px;
+  text-decoration: none;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.voice-lab-admin-body .admin-nav a:hover {
+  border-color: rgba(39, 79, 138, 0.28);
+  color: var(--admin-accent-strong);
+  transform: translateY(-1px);
+}
+
+.voice-lab-admin-body .admin-nav a[aria-current="page"] {
+  background: var(--admin-ink);
+  border-color: var(--admin-ink);
+  color: #fff;
+}
+
+.voice-lab-admin-body .status {
+  background: var(--admin-accent-soft);
+  border: 1px solid rgba(61, 101, 166, 0.2);
+  border-radius: 12px;
+  color: var(--admin-accent-strong);
+  font-size: 12px;
+  font-weight: 800;
+  min-width: 104px;
+  padding: 10px 13px;
+}
+
+.voice-lab-admin-body .workspace {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(390px, 480px) minmax(0, 1fr);
+  margin: 0;
+  max-width: none;
+}
+
+.voice-lab-admin-body .control-panel,
+.voice-lab-admin-body .result-panel,
+.voice-lab-admin-body .vibevoice-panel,
+.voice-lab-admin-body .public-access-admin,
+.voice-lab-admin-body .public-samples-admin,
+.voice-lab-admin-body .practice-history-section,
+.voice-lab-admin-body .practice-history-item,
+.voice-lab-admin-body .vibevoice-result,
+.voice-lab-admin-body .vibevoice-debug-runtime {
+  background: var(--admin-paper);
+  border: 1px solid var(--admin-border);
+  border-radius: 18px;
+  box-shadow: 0 12px 38px rgba(31, 41, 58, 0.055);
+  color: var(--admin-ink);
+}
+
+.voice-lab-admin-body .control-panel,
+.voice-lab-admin-body .result-panel {
+  padding: 18px;
+}
+
+.voice-lab-admin-body .result-panel {
+  max-height: calc(100svh - 38px);
+  overflow: auto;
+  position: sticky;
+  top: 18px;
+}
+
+.voice-lab-admin-body .admin-config-group {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  margin: 0 0 16px;
+  overflow: clip;
+}
+
+.voice-lab-admin-body .admin-advanced-group {
+  background: rgba(248, 249, 252, 0.78);
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  margin: 0 0 14px;
+  overflow: clip;
+}
+
+.voice-lab-admin-body .admin-config-wide {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.voice-lab-admin-body .admin-config-group > summary,
+.voice-lab-admin-body .admin-advanced-group > summary {
+  align-items: center;
+  color: #33425a;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  font-weight: 850;
+  gap: 8px;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 46px;
+  padding: 11px 13px;
+}
+
+.voice-lab-admin-body .admin-config-group > summary::-webkit-details-marker,
+.voice-lab-admin-body .admin-advanced-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.voice-lab-admin-body .admin-config-group > summary::after,
+.voice-lab-admin-body .admin-advanced-group > summary::after {
+  border-bottom: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  content: "";
+  flex: 0 0 auto;
+  height: 7px;
+  margin-left: auto;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 150ms ease;
+  width: 7px;
+}
+
+.voice-lab-admin-body .admin-config-group[open] > summary::after,
+.voice-lab-admin-body .admin-advanced-group[open] > summary::after {
+  transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.voice-lab-admin-body .admin-config-group > summary small,
+.voice-lab-admin-body .admin-advanced-group > summary small {
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 650;
+  margin-left: 2px;
+}
+
+.voice-lab-admin-body .admin-config-grid {
+  border-top: 1px solid var(--admin-border);
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.voice-lab-admin-body .admin-advanced-content {
+  border-top: 1px solid var(--admin-border);
+  padding: 12px;
+}
+
+.voice-lab-admin-body .vibevoice-settings-panel.admin-advanced-group {
+  padding: 0;
+}
+
+.voice-lab-admin-body .vibevoice-settings-panel .admin-advanced-content {
+  padding: 17px;
+}
+
+.voice-lab-admin-body .admin-config-grid-paired {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .admin-work-heading {
+  margin: 4px 1px 13px;
+}
+
+.voice-lab-admin-body .admin-work-heading h2 {
+  color: var(--admin-ink);
+  font-size: 1.15rem;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.voice-lab-admin-body fieldset.suffix-panel,
+.voice-lab-admin-body fieldset.public-access-admin,
+.voice-lab-admin-body fieldset.public-samples-admin {
+  background: rgba(248, 249, 252, 0.68);
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  margin: 0 0 14px;
+  padding: 14px;
+}
+
+.voice-lab-admin-body fieldset > legend {
+  color: #33425a;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+  padding: 0 6px;
+}
+
+.voice-lab-admin-body .field-row,
+.voice-lab-admin-body .vibevoice-setting-field,
+.voice-lab-admin-body .public-access-field,
+.voice-lab-admin-body .public-access-feature label,
+.voice-lab-admin-body .public-sample-admin-feature label {
+  color: #43516a;
+  font-size: 12px;
+  font-weight: 750;
+  gap: 6px;
+}
+
+.voice-lab-admin-body input[type="text"],
+.voice-lab-admin-body input[type="url"],
+.voice-lab-admin-body input[type="number"],
+.voice-lab-admin-body input[type="file"],
+.voice-lab-admin-body select,
+.voice-lab-admin-body textarea {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(71, 91, 123, 0.24);
+  border-radius: 10px;
+  color: var(--admin-ink);
+  min-height: 42px;
+  padding: 9px 11px;
+  width: 100%;
+}
+
+.voice-lab-admin-body textarea {
+  line-height: 1.55;
+  min-height: 88px;
+}
+
+.voice-lab-admin-body .public-sample-admin-feature textarea {
+  min-height: 64px;
+}
+
+.voice-lab-admin-body button,
+.voice-lab-admin-body .primary-button,
+.voice-lab-admin-body .secondary-button,
+.voice-lab-admin-body .vibevoice-download,
+.voice-lab-admin-body .vibevoice-file-button {
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 40px;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.voice-lab-admin-body button:not(.record-orb):hover,
+.voice-lab-admin-body .vibevoice-download:hover,
+.voice-lab-admin-body .vibevoice-file-button:hover {
+  transform: translateY(-1px);
+}
+
+.voice-lab-admin-body button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+}
+
+.voice-lab-admin-body button:focus-visible,
+.voice-lab-admin-body a:focus-visible,
+.voice-lab-admin-body input:focus-visible,
+.voice-lab-admin-body select:focus-visible,
+.voice-lab-admin-body textarea:focus-visible,
+.voice-lab-admin-body summary:focus-visible {
+  outline: 3px solid rgba(76, 126, 202, 0.36);
+  outline-offset: 2px;
+}
+
+.voice-lab-admin-body .primary-button,
+.voice-lab-admin-body button[type="submit"],
+.voice-lab-admin-body .vibevoice-generate-button {
+  background: var(--admin-accent-strong);
+  color: #fff;
+}
+
+.voice-lab-admin-body .secondary-button,
+.voice-lab-admin-body .vibevoice-reset-settings-button,
+.voice-lab-admin-body .vibevoice-copy-button {
+  background: #edf1f6;
+  border: 1px solid rgba(63, 82, 111, 0.18);
+  color: #34445d;
+}
+
+.voice-lab-admin-body .vibevoice-file-button input[type="file"],
+.voice-lab-admin-body .vibevoice-upload-slot > input[type="file"] {
+  block-size: 1px;
+  border: 0;
+  inline-size: 1px;
+  margin: -1px;
+  min-height: 0;
+  padding: 0;
+  width: 1px;
+}
+
+.voice-lab-admin-body .vibevoice-file-button:focus-within,
+.voice-lab-admin-body .vibevoice-upload-slot:focus-within {
+  outline: 3px solid rgba(76, 126, 202, 0.36);
+  outline-offset: 2px;
+}
+
+.voice-lab-admin-body .vibevoice-record-slot-button,
+.voice-lab-admin-body .vibevoice-tab-audio-slot-button,
+.voice-lab-admin-body .vibevoice-url-slot-button,
+.voice-lab-admin-body .vibevoice-dialog-close {
+  border-radius: 999px;
+}
+
+.voice-lab-admin-body .public-access-header {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.voice-lab-admin-body .public-access-header h2,
+.voice-lab-admin-body .practice-history-section h2,
+.voice-lab-admin-body .vibevoice-panel h2,
+.voice-lab-admin-body .result-panel h2 {
+  color: var(--admin-ink);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.voice-lab-admin-body .public-access-feature,
+.voice-lab-admin-body .public-sample-admin-feature {
+  background: rgba(247, 249, 253, 0.78);
+  border: 1px solid var(--admin-border);
+  border-radius: 13px;
+  gap: 10px;
+  padding: 12px;
+}
+
+.voice-lab-admin-body .public-access-feature {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .public-sample-admin-feature {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .public-access-note,
+.voice-lab-admin-body .public-access-status,
+.voice-lab-admin-body .route-hint,
+.voice-lab-admin-body .vibevoice-help,
+.voice-lab-admin-body .vibevoice-panel-header > p {
+  color: var(--admin-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.voice-lab-admin-body .history-panel {
+  border-top-color: var(--admin-border);
+  margin-top: 20px;
+}
+
+.voice-lab-admin-body .history-grid {
+  gap: 12px;
+}
+
+.voice-lab-admin-body .history-grid article,
+.voice-lab-admin-body .history-item {
+  background: #f8f9fb;
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+}
+
+/* SpeakLoop admin */
+.voice-lab-admin-body .practice-history-admin {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .practice-history-header {
+  grid-column: 1 / -1;
+}
+
+.voice-lab-admin-body .practice-history-header .admin-nav {
+  margin: 12px 0 0;
+}
+
+.voice-lab-admin-body .practice-history-header > p {
+  grid-column: 1 / -1;
+}
+
+.voice-lab-admin-body .practice-history-section,
+.voice-lab-admin-body .public-access-admin,
+.voice-lab-admin-body .public-samples-admin {
+  margin: 0;
+  padding: 16px;
+}
+
+.voice-lab-admin-body #practice-history-status {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.voice-lab-admin-body .practice-history-item {
+  padding: 13px;
+}
+
+.voice-lab-admin-body .practice-history-item audio {
+  width: 100%;
+}
+
+/* SkitVoice admin */
+.voice-lab-admin-body.vibevoice-body {
+  background:
+    radial-gradient(circle at 4% 0, rgba(226, 160, 99, 0.19), transparent 27rem),
+    radial-gradient(circle at 97% 2%, rgba(105, 143, 211, 0.16), transparent 30rem),
+    #f5f3ee;
+  color: var(--admin-ink);
+}
+
+.voice-lab-admin-body .vibevoice-shell {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  max-width: 1520px;
+}
+
+.voice-lab-admin-body .vibevoice-header,
+.voice-lab-admin-body .vibevoice-form,
+.voice-lab-admin-body .vibevoice-result,
+.voice-lab-admin-body .vibevoice-debug-runtime,
+.voice-lab-admin-body .vibevoice-reference-url-dialog {
+  grid-column: 1 / -1;
+}
+
+.voice-lab-admin-body .vibevoice-shell > .public-access-admin,
+.voice-lab-admin-body .vibevoice-shell > .public-samples-admin {
+  grid-column: span 6;
+}
+
+.voice-lab-admin-body .vibevoice-header {
+  margin: 0;
+}
+
+.voice-lab-admin-body .vibevoice-workspace {
+  gap: 16px;
+  grid-template-columns: minmax(350px, 0.78fr) minmax(560px, 1.22fr);
+}
+
+.voice-lab-admin-body .vibevoice-panel {
+  padding: 17px;
+}
+
+.voice-lab-admin-body .vibevoice-script-panel textarea {
+  min-height: 360px;
+}
+
+.voice-lab-admin-body .vibevoice-control-stack {
+  gap: 16px;
+}
+
+.voice-lab-admin-body .vibevoice-voice-grid {
+  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .vibevoice-upload-slot {
+  background: #f8f9fc;
+  border: 1px solid var(--admin-border);
+  border-radius: 13px;
+  min-width: 0;
+  padding: 11px;
+}
+
+.voice-lab-admin-body .vibevoice-upload-actions {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .vibevoice-upload-actions button,
+.voice-lab-admin-body .vibevoice-upload-action {
+  font-size: 11px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 5px 4px;
+}
+
+.voice-lab-admin-body .vibevoice-settings-grid {
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .vibevoice-actions {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(25, 35, 51, 0.12);
+  display: flex;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 10px;
+  position: static;
+  z-index: 12;
+}
+
+.voice-lab-admin-body .vibevoice-generate-button {
+  min-height: 46px;
+}
+
+/* Utility and compatibility pages --------------------------------------- */
+.voice-lab-utility-body {
+  background-color: #f5f3ee;
+  min-width: 320px;
+}
+
+.voice-lab-utility-body .utility-brand {
+  color: #26354d;
+  font-size: 13px;
+  font-weight: 850;
+  left: 18px;
+  letter-spacing: -0.01em;
+  position: absolute;
+  text-decoration: none;
+  top: 17px;
+  z-index: 20;
+}
+
+.voice-lab-utility-body .utility-brand::before {
+  color: #687790;
+  content: "←";
+  margin-right: 6px;
+}
+
+.voice-lab-utility-body .utility-brand-inline {
+  display: inline-block;
+  left: auto;
+  margin-bottom: 7px;
+  position: relative;
+  top: auto;
+}
+
+.voice-lab-utility-body .utility-shell {
+  margin: 0 auto;
+  max-width: 1240px;
+}
+
+.voice-lab-utility-body .utility-topbar {
+  align-items: center;
+}
+
+.voice-lab-utility-body .utility-details {
+  background: rgba(248, 249, 252, 0.78);
+  border: 1px solid rgba(35, 49, 72, 0.14);
+  border-radius: 12px;
+  margin: 0;
+  overflow: clip;
+}
+
+.voice-lab-utility-body .utility-details > summary {
+  align-items: center;
+  color: #33425a;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 10px 12px;
+}
+
+.voice-lab-utility-body .utility-details > summary small {
+  color: #687790;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.voice-lab-utility-body .utility-details > .suffix-panel {
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid rgba(35, 49, 72, 0.14);
+  margin: 0;
+}
+
+@media (max-width: 1060px) {
+  .voice-lab-admin-body .workspace,
+  .voice-lab-admin-body .vibevoice-workspace {
+    grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.18fr);
+  }
+
+  .voice-lab-admin-body .vibevoice-shell > .public-access-admin,
+  .voice-lab-admin-body .vibevoice-shell > .public-samples-admin {
+    grid-column: 1 / -1;
+  }
+
+  .voice-lab-admin-body .vibevoice-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .voice-lab-admin-body .vibevoice-script-panel textarea {
+    min-height: 330px;
+  }
+
+  .voice-lab-admin-body .admin-config-grid-paired {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 820px) {
+  .voice-lab-admin-body .admin-shell {
+    padding: 10px 10px 34px;
+  }
+
+  .voice-lab-admin-body .admin-topbar {
+    border-radius: 17px;
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .voice-lab-admin-body .admin-nav {
+    flex-wrap: nowrap;
+    margin-left: -2px;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 2px;
+    scrollbar-width: none;
+  }
+
+  .voice-lab-admin-body .admin-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .voice-lab-admin-body .admin-nav a {
+    flex: 0 0 auto;
+    min-height: 38px;
+  }
+
+  .voice-lab-admin-body .status {
+    justify-self: stretch;
+    text-align: left;
+  }
+
+  .voice-lab-admin-body .workspace,
+  .voice-lab-admin-body .practice-history-admin,
+  .voice-lab-admin-body .vibevoice-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .voice-lab-admin-body .result-panel {
+    max-height: none;
+    overflow: visible;
+    position: static;
+  }
+
+  .voice-lab-admin-body .control-panel,
+  .voice-lab-admin-body .result-panel,
+  .voice-lab-admin-body .practice-history-section,
+  .voice-lab-admin-body .public-access-admin,
+  .voice-lab-admin-body .public-samples-admin,
+  .voice-lab-admin-body .vibevoice-panel {
+    border-radius: 15px;
+    padding: 13px;
+  }
+
+  .voice-lab-admin-body .public-access-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .voice-lab-admin-body .public-access-header > button {
+    width: 100%;
+  }
+
+  .voice-lab-admin-body .public-access-feature,
+  .voice-lab-admin-body .public-sample-admin-feature,
+  .voice-lab-admin-body .vibevoice-settings-grid,
+  .voice-lab-admin-body .vibevoice-voice-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .voice-lab-admin-body .vibevoice-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .voice-lab-admin-body .vibevoice-header,
+  .voice-lab-admin-body .vibevoice-form,
+  .voice-lab-admin-body .vibevoice-result,
+  .voice-lab-admin-body .vibevoice-debug-runtime,
+  .voice-lab-admin-body .vibevoice-shell > .public-access-admin,
+  .voice-lab-admin-body .vibevoice-shell > .public-samples-admin {
+    grid-column: 1;
+  }
+
+  .voice-lab-admin-body .vibevoice-script-panel textarea {
+    min-height: 240px;
+  }
+
+  .voice-lab-admin-body .vibevoice-actions {
+    bottom: 6px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .voice-lab-admin-body .vibevoice-actions .vibevoice-message,
+  .voice-lab-admin-body .vibevoice-actions .vibevoice-job-progress {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 480px) {
+  .voice-lab-admin-body .admin-topbar h1 {
+    font-size: 1.45rem;
+  }
+
+  .voice-lab-admin-body .admin-lead,
+  .voice-lab-admin-body .admin-topbar .admin-title-group > p:last-of-type,
+  .voice-lab-admin-body .practice-history-header > p {
+    font-size: 12px;
+  }
+
+  .voice-lab-admin-body fieldset.suffix-panel,
+  .voice-lab-admin-body fieldset.public-access-admin,
+  .voice-lab-admin-body fieldset.public-samples-admin {
+    padding: 11px;
+  }
+
+  .voice-lab-admin-body .admin-config-group > summary,
+  .voice-lab-admin-body .admin-advanced-group > summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .voice-lab-admin-body .admin-config-group > summary small,
+  .voice-lab-admin-body .admin-advanced-group > summary small {
+    flex-basis: calc(100% - 24px);
+    order: 3;
+  }
+
+  .voice-lab-admin-body input[type="text"],
+  .voice-lab-admin-body input[type="url"],
+  .voice-lab-admin-body input[type="number"],
+  .voice-lab-admin-body input[type="file"],
+  .voice-lab-admin-body select,
+  .voice-lab-admin-body textarea,
+  .voice-lab-admin-body button {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 820px) {
+  .react-public-body .react-theme-settings > summary {
+    height: 40px;
+    width: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-lab-admin-body *,
+  .voice-lab-admin-body *::before,
+  .voice-lab-admin-body *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

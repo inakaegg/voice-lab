@@ -2,7 +2,7 @@
 
 ## 目的
 
-音声翻訳Webアプリの公開MVPでは、静的UI、API gateway、GPU推論を分離し、GPUリソースをAI処理にだけ使う。ローカル開発ではFastAPIがUIとAPIを同時に提供してよいが、本番寄りの低アクセス構成では同じ形にこだわらない。
+Voice Labの公開MVPでは、静的UI、API gateway、GPU推論を分離し、GPUリソースをAI処理にだけ使う。ローカル開発ではFastAPIがUIとAPIを同時に提供してよいが、本番寄りの低アクセス構成では同じ形にこだわらない。
 
 発音練習アプリとSkitVoiceは、当面は同一リポジトリ内に置きつつ、デプロイ単位、secret、保存先、公開URLを分ける。2アプリ化の判断とCloudflare上の扱いは [APP_SPLIT.md](APP_SPLIT.md) を正とする。
 

@@ -4093,9 +4093,10 @@ fieldset.public-samples-admin {
   }
   .react-public-body .react-product-heading { gap: 8px; min-width: 0; }
   .react-public-body .react-product-heading h1 { font-size: clamp(1.02rem, 5.2vw, 1.3rem); }
-  .react-public-body .react-back-link { height: 32px; width: 32px; }
+  .react-public-body .react-back-link { height: 40px; width: 40px; }
   .react-public-body .react-header-tools { display: contents; }
   .react-public-body .react-theme-settings { grid-column: 2; grid-row: 1; justify-self: end; }
+  .react-public-body .react-theme-settings summary { height: 40px; width: 40px; }
   .react-public-body .react-auth-panel { font-size: 11px; grid-column: 1 / -1; grid-row: 2; padding: 6px 8px; }
   .react-public-body[data-layout="compact"] .react-intro-grid,
   .react-public-body[data-layout="compact"] .react-intro-grid:has(.react-status-stack > :not([hidden])),

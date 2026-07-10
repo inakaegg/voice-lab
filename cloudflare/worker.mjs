@@ -241,12 +241,15 @@ function isProtectedAdminPagePath(pathname) {
   return new Set([
     "/admin",
     "/index.html",
+    "/static/index.html",
     "/skitvoice/admin",
     "/vibevoice/admin",
     "/vibevoice.html",
+    "/static/vibevoice.html",
     "/speakloop/admin",
     "/practice/admin",
     "/practice_admin.html",
+    "/static/practice_admin.html",
   ]).has(path);
 }
 
@@ -413,7 +416,7 @@ function safeAdminNextPath(next) {
 
 function adminSetupErrorResponse() {
   return new Response(
-    "<!doctype html><meta charset=\"utf-8\"><title>Admin auth setup required</title><h1>管理認証が未設定です</h1><p>Cloudflare Worker secret の ADMIN_PASSWORD_SHA256 と ADMIN_SESSION_SECRET を設定してください。</p>",
+    "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>管理認証が未設定 | Voice Lab</title><style>body{font-family:system-ui,sans-serif;margin:0;min-height:100svh;display:grid;place-items:center;background:#f5f3ee;color:#182235}main{width:min(90vw,520px);padding:28px;background:#fff;border:1px solid #d9d8d3;border-radius:20px;box-shadow:0 24px 70px #1e27391a}.brand{color:#66748a;font-size:12px;font-weight:800;letter-spacing:.14em}h1{font-size:26px;margin:8px 0 12px}p{color:#5c687b;line-height:1.7}</style><main><div class=\"brand\">VOICE LAB · ADMIN</div><h1>管理認証が未設定です</h1><p>Cloudflare Worker secret の ADMIN_PASSWORD_SHA256 と ADMIN_SESSION_SECRET を設定してください。</p></main>",
     { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
@@ -427,15 +430,17 @@ function adminLoginPage(next, errorMessageText = "", status = 200) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>管理ログイン</title>
+  <title>管理ログイン | Voice Lab</title>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #172026; }
-    main { width: min(92vw, 380px); padding: 28px; background: white; border: 1px solid #d7dce2; border-radius: 8px; box-shadow: 0 12px 30px rgba(16, 24, 40, 0.08); }
-    h1 { margin: 0 0 18px; font-size: 22px; }
+    body { margin: 0; min-height: 100svh; display: grid; place-items: center; background: radial-gradient(circle at 8% 4%, rgba(236,174,103,.22), transparent 26rem), radial-gradient(circle at 94% 9%, rgba(104,145,218,.2), transparent 28rem), #f5f3ee; color: #182235; }
+    main { box-sizing: border-box; width: min(92vw, 400px); padding: 28px; background: rgba(255,255,255,.92); border: 1px solid rgba(35,49,72,.14); border-radius: 20px; box-shadow: 0 24px 70px rgba(30,39,57,.12); }
+    .brand { color: #66748a; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+    h1 { margin: 8px 0 20px; font-size: 26px; letter-spacing: -.03em; }
     label { display: grid; gap: 8px; font-weight: 600; }
-    input { box-sizing: border-box; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid #b8c0cc; border-radius: 6px; font-size: 16px; }
-    button { width: 100%; min-height: 44px; margin-top: 16px; border: 0; border-radius: 6px; background: #1d4ed8; color: white; font-weight: 700; font-size: 16px; cursor: pointer; }
+    input { box-sizing: border-box; width: 100%; min-height: 46px; padding: 9px 11px; border: 1px solid #b8c0cc; border-radius: 10px; font-size: 16px; }
+    button { width: 100%; min-height: 46px; margin-top: 16px; border: 0; border-radius: 10px; background: #274f8a; color: white; font-weight: 750; font-size: 16px; cursor: pointer; }
+    input:focus-visible, button:focus-visible { outline: 3px solid rgba(76,126,202,.38); outline-offset: 2px; }
     .error { color: #b42318; font-weight: 700; }
     @media (prefers-color-scheme: dark) {
       body { background: #111827; color: #e5e7eb; }
@@ -446,6 +451,7 @@ function adminLoginPage(next, errorMessageText = "", status = 200) {
 </head>
 <body>
   <main>
+    <div class="brand">VOICE LAB · ADMIN</div>
     <h1>管理ログイン</h1>
     ${errorHtml}
     <form method="post" action="/admin/login">
@@ -927,7 +933,14 @@ async function serveAsset(request, env, url) {
     url.pathname === "/speakloop/admin/"
   ) {
     assetUrl.pathname = "/practice_admin.html";
-  } else if (url.pathname === "/vibevoice" || url.pathname === "/vibevoice/" || url.pathname === "/skitvoice" || url.pathname === "/skitvoice/") {
+  } else if (
+    url.pathname === "/vibevoice" ||
+    url.pathname === "/vibevoice/" ||
+    url.pathname === "/vibevoice/simple" ||
+    url.pathname === "/vibevoice/simple/" ||
+    url.pathname === "/skitvoice" ||
+    url.pathname === "/skitvoice/"
+  ) {
     assetUrl.pathname = "/react/skitvoice.html";
   } else if (
     url.pathname === "/vibevoice/admin" ||

@@ -1,8 +1,8 @@
-# 音声翻訳Webアプリ仕様
+# Voice Lab Webアプリ仕様
 
 ## 目的
 
-音声入力を受け取り、別言語の音声として返すWebアプリを作る。最初はローカルで動く最小版を作り、動作確認後にRunPodまたは別GPUプラットフォームへ載せる。
+`Voice Lab` は、音声を使って「つくる」「練習する」体験をまとめたWebアプリである。SpeakLoop、SkitVoice、音声翻訳、音声変換の各機能を同じumbrella brandの下で提供し、ローカルFastAPI、Cloudflare、RunPodを役割ごとに分離する。
 
 将来のデモ価値として、単なる音声翻訳ではなく、母国語で言いたいことを日本語で言えるようになるまで練習するモードを追加する。詳細な実装順序は [LEARNING_ROADMAP.md](LEARNING_ROADMAP.md) を正とする。
 
@@ -43,7 +43,9 @@
   - `/practice` と `/speakloop` は発音練習用のSpeakLoop画面とし、アプリ名を `SpeakLoop`、サブタイトルを `言いたいことで発音練習` とする。学習対象言語を `ja-JP`、`zh-CN`、`en-US` から選び、母国語入力から模範音声生成、復唱録音、ASR判定までを1画面で行う。SkitVoiceとは別アプリとして扱う。
   - `/vibevoice` と `/skitvoice` はユーザー向けのSkitVoice画面とし、アプリ名を `SkitVoice`、サブタイトルを `かんたんスキット生成` とする。台本テキストと最大4つの話者参照音声から、指定台詞向けの既定設定で音声を生成してブラウザ上で確認できるようにする。
   - `/vibevoice/admin` はSkitVoiceの検証・管理画面とし、backend、モデル、sampling、ASR再配置、低スコア再生成などの詳細設定を表示する。CloudflareへSkitVoice単体として公開する場合は、公開画面を `/`、管理画面を `/admin` に置き、`/admin` だけCloudflare AccessでGoogleアカウント認証を要求し、管理者本人だけ到達できるようにする。
-  - `/admin` は従来の検証・管理画面とし、provider切り替え、履歴、VC比較、Seed-VC詳細設定、ユーザー画面設定を表示する。
+  - `/admin` は `Voice Lab 管理` とし、provider切り替え、履歴、VC比較、Seed-VC詳細設定、ユーザー画面設定を表示する。
+  - `/practice/admin` と `/speakloop/admin` はSpeakLoopの公開制限、サンプル音声、練習履歴を扱う。
+  - `/vibevoice/admin` と `/skitvoice/admin` はSkitVoiceの公開制限、日英中サンプル、詳細生成設定、診断を扱う。
   - 管理者用画面は別URLパスに置くが、同じbackend APIと音声履歴を使う。
 - Cloudflare公開ページのGoogleログイン状態とサンプル音声は補助情報として扱い、主操作カードと同じ強さのカードにしない。ユーザー画面ではログイン状態を右上へコンパクトに置き、サンプル確認やログイン状態が録音、台本入力、生成などの主要操作を押し下げないようにする。
 - ユーザー用画面は、漢字が読めない外国人利用者を想定し、ひらがな中心の短い文言と視覚的な録音状態を使う。

@@ -225,7 +225,8 @@ test("practice page keeps pronunciation training separate from conversion demo",
 });
 
 test("practice history admin uses separated practice history API", () => {
-  assert.match(practiceAdminHtml, /SpeakLoop 履歴/);
+  assert.match(practiceAdminHtml, /SpeakLoop 管理/);
+  assert.match(practiceAdminHtml, /Voice Lab/);
   assert.match(practiceAdminHtml, /data-public-access-settings/);
   assert.match(practiceAdminHtml, /data-public-access-features="speakloop"/);
   assert.match(practiceAdminHtml, /data-public-feature="speakloop"/);

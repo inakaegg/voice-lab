@@ -3,21 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>音声翻訳</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <title>Voice Lab 管理</title>
+    <link rel="stylesheet" href="/react/assets/app.css" />
   </head>
-  <body>
-    <main class="app-shell">
-      <header class="toolbar">
-        <div>
-          <p class="eyebrow">Local speech translation</p>
-          <h1>音声翻訳</h1>
+  <body class="voice-lab-admin-body" data-admin-page="overview">
+    <main class="app-shell admin-shell">
+      <header class="toolbar admin-topbar">
+        <div class="admin-title-group">
+          <p class="eyebrow">VOICE LAB · ADMIN</p>
+          <h1>Voice Lab 管理</h1>
+          <p class="admin-lead">音声翻訳・読み上げ・VCの検証と、公開デモの設定をまとめて管理します。</p>
+          <nav class="admin-nav" aria-label="管理画面">
+            <a href="/admin" aria-current="page">総合管理</a>
+            <a href="/speakloop/admin">SpeakLoop</a>
+            <a href="/skitvoice/admin">SkitVoice</a>
+            <a href="/">公開画面</a>
+          </nav>
         </div>
         <div class="status" id="status" role="status" aria-live="polite">待機中</div>
       </header>
 
       <section class="workspace" aria-label="音声翻訳フォーム">
         <form id="translation-form" class="control-panel">
+          <details class="admin-config-group">
+            <summary>
+              <span>公開・運用設定</span>
+              <small>RunPod準備、公開制限、サンプル音声</small>
+            </summary>
+            <div class="admin-config-grid">
           <fieldset id="runpod-warmup-panel" class="suffix-panel">
             <legend>RunPod手動準備</legend>
             <p class="route-hint">
@@ -87,6 +100,13 @@
             <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
             <p class="public-access-status" data-public-samples-status role="status" aria-live="polite"></p>
           </fieldset>
+            </div>
+          </details>
+
+          <div class="admin-work-heading">
+            <p class="eyebrow">AUDIO WORKBENCH</p>
+            <h2>音声処理</h2>
+          </div>
 
           <div class="field-row">
             <label for="operation_mode">実行内容</label>
@@ -215,6 +235,12 @@
           <p id="recording-details" class="recording-details audio-input-only recorded-audio-only">入力音声なし</p>
           <audio id="input-audio" class="input-audio audio-input-only recorded-audio-only" controls hidden></audio>
 
+          <details class="admin-advanced-group">
+            <summary>
+              <span>詳細設定</span>
+              <small>末尾付加、ユーザー画面、Seed-VC</small>
+            </summary>
+            <div class="admin-advanced-content">
           <fieldset id="realtime-streaming-panel" class="suffix-panel realtime-streaming-only" hidden>
             <legend>Realtime streaming</legend>
             <p class="streaming-note">
@@ -399,6 +425,8 @@
             </div>
             <p class="route-hint">通常は品質優先、速度を見たい時は高速確認、最終比較では最高品質検証を使う。</p>
           </fieldset>
+            </div>
+          </details>
 
           <button type="submit" id="submit-button">変換</button>
           <p id="error-message" class="error-message" hidden></p>

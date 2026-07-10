@@ -162,7 +162,8 @@ def test_practice_admin_serves_practice_history_ui() -> None:
     response = client.get("/speakloop/admin")
 
     assert response.status_code == 200
-    assert "SpeakLoop 履歴" in response.text
+    assert "SpeakLoop 管理" in response.text
+    assert "Voice Lab" in response.text
     assert "/api/practice-history" not in response.text
     assert "/static/app_practice_history.js" in response.text
 

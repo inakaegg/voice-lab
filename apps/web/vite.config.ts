@@ -19,6 +19,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
+        appStyles: resolve(rootDir, "app-styles.html"),
         portal: resolve(rootDir, "portal.html"),
         speakloop: resolve(rootDir, "speakloop.html"),
         skitvoice: resolve(rootDir, "skitvoice.html"),
