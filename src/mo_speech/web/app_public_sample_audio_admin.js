@@ -83,8 +83,14 @@ function renderPublicSampleAdmin(root, samples) {
     const language = section.dataset.publicSampleLanguage || "";
     const featureValue = samples?.features?.[feature] || null;
     const sample = language ? featureValue?.samples?.[language] || null : featureValue;
-    section.querySelector("[data-public-sample-title]").value = sample?.title || "";
-    section.querySelector("[data-public-sample-description]").value = sample?.description || "";
+    const titleInput = section.querySelector("[data-public-sample-title]");
+    if (titleInput) {
+      titleInput.value = sample?.title || "";
+    }
+    const descriptionInput = section.querySelector("[data-public-sample-description]");
+    if (descriptionInput) {
+      descriptionInput.value = sample?.description || "";
+    }
     section.querySelector("[data-public-sample-file]").value = "";
     section.dataset.publicSampleAudioBase64 = sample?.audio_base64 || "";
     section.dataset.publicSampleAudioMimeType = sample?.audio_mime_type || "";
@@ -99,7 +105,7 @@ async function collectPublicSampleFeature(section) {
     return null;
   }
   return {
-    title: section.querySelector("[data-public-sample-title]")?.value || "",
+    title: section.querySelector("[data-public-sample-title]")?.value || publicSampleLanguageLabel(section),
     description: section.querySelector("[data-public-sample-description]")?.value || "",
     filename: section.dataset.publicSampleFilename || "",
     audio_mime_type: section.dataset.publicSampleAudioMimeType || "audio/wav",
@@ -120,11 +126,12 @@ async function previewPublicSampleFile(section) {
     section.dataset.publicSampleAudioBase64 = audioBase64;
     section.dataset.publicSampleAudioMimeType = file.type || "audio/wav";
     section.dataset.publicSampleFilename = file.name || "sample.wav";
-    if (!section.querySelector("[data-public-sample-title]")?.value) {
-      section.querySelector("[data-public-sample-title]").value = file.name.replace(/\.[^.]+$/, "");
+    const titleInput = section.querySelector("[data-public-sample-title]");
+    if (titleInput && !titleInput.value) {
+      titleInput.value = file.name.replace(/\.[^.]+$/, "");
     }
     renderPublicSamplePreview(section, {
-      title: section.querySelector("[data-public-sample-title]")?.value || "サンプル音声",
+      title: titleInput?.value || publicSampleLanguageLabel(section),
       description: section.querySelector("[data-public-sample-description]")?.value || "",
       filename: section.dataset.publicSampleFilename,
       audio_mime_type: section.dataset.publicSampleAudioMimeType,
@@ -187,18 +194,26 @@ function clearPublicSampleSection(section) {
 function renderPublicSamplePreview(section, sample) {
   const preview = section.querySelector("[data-public-sample-preview]");
   const details = section.querySelector("[data-public-sample-details]");
-  if (!preview || !details) {
+  if (!preview) {
     return;
   }
   if (!sample?.audio_base64) {
     preview.hidden = true;
     preview.removeAttribute("src");
-    details.textContent = "未設定";
+    if (details) {
+      details.textContent = "未設定";
+    }
     return;
   }
   preview.hidden = false;
   preview.src = `data:${sample.audio_mime_type || "audio/wav"};base64,${sample.audio_base64}`;
-  details.textContent = `${sample.filename || "sample"} / ${sample.audio_mime_type || "audio"} / ${formatBytes(sample.size_bytes || base64ByteLength(sample.audio_base64))}`;
+  if (details) {
+    details.textContent = `${sample.audio_mime_type || "audio"} / ${formatBytes(sample.size_bytes || base64ByteLength(sample.audio_base64))}`;
+  }
+}
+
+function publicSampleLanguageLabel(section) {
+  return { "en-US": "英語", "zh-CN": "中国語", "ja-JP": "日本語" }[section.dataset.publicSampleLanguage] || "サンプル音声";
 }
 
 function allowedPublicSampleFeatures(root) {

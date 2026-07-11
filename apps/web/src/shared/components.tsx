@@ -59,6 +59,6 @@ export function PageShell({ children, className = "" }: { children: ReactNode; c
   return <main className={`react-page-shell ${className}`.trim()}>{children}</main>;
 }
 
-export function SampleAudio({ feature, language, label }: { feature: string; language?: string; label: string }) {
-  return <section className="public-sample-audio react-sample-card" data-public-sample-feature={feature} data-public-sample-language={language} hidden aria-label={`${label} サンプル音声`}><div><p className="public-sample-kicker">Sample</p><h2 data-public-sample-title>{label}</h2><p data-public-sample-description hidden /></div><audio data-public-sample-audio controls preload="metadata" /></section>;
+export function SampleAudio({ feature, language, label, fixedTitle = false }: { feature: string; language?: string; label: string; fixedTitle?: boolean }) {
+  return <section className="public-sample-audio react-sample-card" data-public-sample-feature={feature} data-public-sample-language={language} data-public-sample-fixed-title={fixedTitle || undefined} hidden aria-label={`${label} サンプル音声`}><div><p className="public-sample-kicker">Sample</p><h2 data-public-sample-title>{label}</h2><p data-public-sample-description hidden /></div><audio data-public-sample-audio controls preload="metadata" /></section>;
 }

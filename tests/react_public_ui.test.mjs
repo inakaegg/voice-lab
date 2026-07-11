@@ -48,11 +48,12 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(portal, /href:\s*"\/speakloop"/);
   assert.match(speakloop, /react-practice-flow/);
   assert.match(skitvoice, /react-skit-grid/);
-  assert.match(skitvoice, /日本語サンプル/);
-  assert.match(skitvoice, /中国語サンプル/);
-  assert.match(skitvoice, /英語サンプル/);
-  assert.ok(skitvoice.indexOf("英語サンプル") < skitvoice.indexOf("中国語サンプル"));
-  assert.ok(skitvoice.indexOf("中国語サンプル") < skitvoice.indexOf("日本語サンプル"));
+  assert.match(skitvoice, /出力音声サンプル/);
+  assert.match(skitvoice, /fixedTitle/);
+  assert.ok(skitvoice.indexOf('label="英語"') < skitvoice.indexOf('label="中国語"'));
+  assert.ok(skitvoice.indexOf('label="中国語"') < skitvoice.indexOf('label="日本語"'));
+  assert.ok(skitvoice.indexOf("react-output-samples") < skitvoice.indexOf("vibevoice-form"));
+  assert.ok(skitvoice.indexOf("vibevoice-form") < skitvoice.indexOf("参照音声と生成内容は外部の音声処理APIへ送信"));
 });
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {

@@ -155,14 +155,13 @@ test("SkitVoice follows the documented three, two, and one-column task order", a
 test("SkitVoice sample save reports progress and appears on the public page", async ({ page }) => {
   await page.goto("/skitvoice/admin");
   await page.locator(".admin-config-group > summary").click();
-  for (const [language, title] of [["en-US", "英語サンプル"], ["zh-CN", "中国語サンプル"], ["ja-JP", "日本語サンプル"]]) {
+  for (const [language] of [["en-US"], ["zh-CN"], ["ja-JP"]]) {
     const section = page.locator(`[data-public-sample-language="${language}"]`);
     await section.locator("[data-public-sample-file]").setInputFiles({
       name: `${language}.wav`,
       mimeType: "audio/wav",
       buffer: Buffer.from(`RIFF ${language} sample audio`),
     });
-    await section.locator("[data-public-sample-title]").fill(title);
   }
   const saveButton = page.locator("[data-public-samples-save]");
   await saveButton.click();
@@ -170,18 +169,33 @@ test("SkitVoice sample save reports progress and appears on the public page", as
   await expect(saveButton).toHaveText("保存中…");
   await expect(saveButton).toHaveText("保存済み");
   await expect(page.locator("[data-public-samples-status]")).toContainText("ユーザー画面へ反映");
+  await expect(page.getByText(/\.wav/)).toHaveCount(0);
+  const adminSampleBoxes = await Promise.all(["en-US", "zh-CN", "ja-JP"].map((language) => page.locator(`[data-public-sample-language="${language}"]`).boundingBox()));
+  if ((page.viewportSize()?.width || 0) > 820) {
+    expect(Math.abs((adminSampleBoxes[0]?.y || 0) - (adminSampleBoxes[1]?.y || 0))).toBeLessThanOrEqual(8);
+    expect(adminSampleBoxes[0]?.x || 0).toBeLessThan(adminSampleBoxes[1]?.x || 0);
+    expect(adminSampleBoxes[1]?.x || 0).toBeLessThan(adminSampleBoxes[2]?.x || 0);
+  }
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
     await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-sample-save-success.png`, fullPage: true });
   }
 
   await page.goto("/skitvoice");
-  for (const [language, title] of [["en-US", "英語サンプル"], ["zh-CN", "中国語サンプル"], ["ja-JP", "日本語サンプル"]]) {
+  await expect(page.getByRole("heading", { name: "出力音声サンプル" })).toBeVisible();
+  for (const [language, title] of [["en-US", "英語"], ["zh-CN", "中国語"], ["ja-JP", "日本語"]]) {
     const sample = page.locator(`[data-public-sample-language="${language}"]`);
     await expect(sample).toBeVisible();
     await expect(sample.getByText(title)).toBeVisible();
     await expect(sample.locator("audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
   }
+  const [samplesBox, formBox, privacyBox] = await Promise.all([
+    page.locator(".react-output-samples").boundingBox(),
+    page.locator("#vibevoice-form").boundingBox(),
+    page.locator("[data-public-privacy-notice]").boundingBox(),
+  ]);
+  expect((samplesBox?.y || 0) + (samplesBox?.height || 0)).toBeLessThanOrEqual((formBox?.y || 0) + 1);
+  expect(privacyBox?.y || 0).toBeGreaterThanOrEqual((formBox?.y || 0) + (formBox?.height || 0) - 1);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-three-public-samples.png`, fullPage: true });
   }

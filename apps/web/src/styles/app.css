@@ -491,30 +491,103 @@ html[data-theme="dark"] {
   color: #972f21;
 }
 
-@media (min-width: 821px) {
-  .react-public-body[data-layout="compact"] .react-skit-intro:has(.react-sample-stack > :not([hidden])) {
-    grid-template-columns: minmax(300px, 0.7fr) minmax(0, 1.3fr);
-  }
+.react-public-body[data-layout="compact"] .react-output-samples {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0 0 10px;
+}
 
-  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-stack {
-    overflow: visible;
-  }
+.react-public-body[data-layout="compact"] .react-output-samples:not(:has(.react-sample-card:not([hidden]))) {
+  display: none;
+}
 
-  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-card {
-    flex: 1 1 0;
-    grid-template-columns: minmax(80px, 0.45fr) minmax(0, 1fr);
-    min-width: 0;
-  }
+.react-public-body[data-layout="compact"] .react-output-samples > h2 {
+  color: var(--react-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  white-space: nowrap;
+}
 
-  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-card audio {
-    min-width: 0;
-    width: 100%;
-  }
+.react-public-body[data-layout="compact"] .react-output-samples .react-sample-stack {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: visible;
+}
 
-  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-card h2 {
-    overflow-wrap: anywhere;
-    white-space: nowrap;
-  }
+.react-public-body[data-layout="compact"] .react-output-samples .react-sample-card {
+  grid-template-columns: minmax(42px, auto) minmax(0, 1fr);
+  min-width: 0;
+  width: auto;
+}
+
+.react-public-body[data-layout="compact"] .react-output-samples .public-sample-kicker {
+  display: none;
+}
+
+.react-public-body[data-layout="compact"] .react-output-samples .react-sample-card h2 {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.react-public-body[data-layout="compact"] .react-output-samples .react-sample-card audio {
+  min-width: 0;
+  width: 100%;
+}
+
+.react-public-body[data-layout="compact"] .react-form-privacy-note {
+  margin: 10px 0 0;
+}
+
+.voice-lab-admin-body .admin-config-grid-paired > .skitvoice-samples-admin {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.voice-lab-admin-body .admin-config-grid-paired > .skitvoice-public-access {
+  grid-column: 1 / -1;
+}
+
+.voice-lab-admin-body .skitvoice-samples-admin > .public-access-header,
+.voice-lab-admin-body .skitvoice-samples-admin > .public-access-note {
+  grid-column: 1 / -1;
+}
+
+.voice-lab-admin-body .skitvoice-samples-admin .public-sample-admin-feature {
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.voice-lab-admin-body .public-sample-file-button {
+  align-items: center;
+  background: #edf1f6;
+  border: 1px solid rgba(63, 82, 111, 0.18);
+  border-radius: 10px;
+  color: #34445d;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 12px;
+  width: fit-content;
+}
+
+.voice-lab-admin-body .public-sample-file-button input[type="file"] {
+  block-size: 1px;
+  border: 0;
+  inline-size: 1px;
+  margin: -1px;
+  min-height: 0;
+  padding: 0;
+  position: absolute;
+}
+
+.voice-lab-admin-body .public-sample-file-button:focus-within {
+  outline: 3px solid rgba(76, 126, 202, 0.36);
+  outline-offset: 2px;
 }
 
 .voice-lab-admin-body .public-access-note,
@@ -781,6 +854,25 @@ html[data-theme="dark"] {
 }
 
 @media (max-width: 820px) {
+  .react-public-body[data-layout="compact"] .react-output-samples {
+    align-items: stretch;
+    gap: 7px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .react-public-body[data-layout="compact"] .react-output-samples .react-sample-stack {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .react-public-body[data-layout="compact"] .react-output-samples .react-sample-card {
+    flex: 0 0 230px;
+  }
+
+  .voice-lab-admin-body .admin-config-grid-paired > .skitvoice-samples-admin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .voice-lab-admin-body .admin-shell {
     padding: 10px 10px 34px;
   }

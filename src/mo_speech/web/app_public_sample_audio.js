@@ -34,7 +34,7 @@ function renderPublicSampleAudio(section, sample) {
   section.hidden = false;
   const title = section.querySelector("[data-public-sample-title]");
   const description = section.querySelector("[data-public-sample-description]");
-  if (title) {
+  if (title && section.dataset.publicSampleFixedTitle !== "true") {
     title.textContent = sample.title || "サンプル音声";
   }
   if (description) {

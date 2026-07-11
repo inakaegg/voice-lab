@@ -278,6 +278,11 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.equal((vibevoiceHtml.match(/data-public-sample-language="(?:ja-JP|zh-CN|en-US)"/g) || []).length, 3);
   assert.ok(vibevoiceHtml.indexOf('data-public-sample-language="en-US"') < vibevoiceHtml.indexOf('data-public-sample-language="zh-CN"'));
   assert.ok(vibevoiceHtml.indexOf('data-public-sample-language="zh-CN"') < vibevoiceHtml.indexOf('data-public-sample-language="ja-JP"'));
+  assert.match(vibevoiceHtml, /<h2>出力音声サンプル<\/h2>/);
+  assert.match(vibevoiceHtml, /skitvoice-samples-admin/);
+  assert.doesNotMatch(vibevoiceHtml, /<label>タイトル/);
+  assert.doesNotMatch(vibevoiceHtml, /data-public-sample-details/);
+  assert.match(vibevoiceHtml, /public-sample-file-button/);
   assert.match(vibevoiceHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(vibevoiceHtml, /public-samples-header-status/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
