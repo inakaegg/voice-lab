@@ -16,6 +16,7 @@ const userEffectMinSilenceMsInput = document.querySelector("#user_effect_min_sil
 const userThemeSelect = document.querySelector("#user_theme");
 const userSettingsSaveButton = document.querySelector("#user-settings-save");
 const userSettingsStatus = document.querySelector("#user-settings-status");
+const userSettingsSaveLabel = userSettingsSaveButton?.textContent || "ユーザー画面設定を保存";
 
 let adminEffectAudios = [];
 
@@ -54,7 +55,9 @@ async function loadAdminUserSettings() {
 
 async function saveUserSettings() {
   userSettingsSaveButton.disabled = true;
-  renderUserSettingsStatus("保存中");
+  userSettingsSaveButton.textContent = "保存中…";
+  userSettingsSaveButton.dataset.state = "loading";
+  renderUserSettingsStatus("保存中です。");
   try {
     const response = await fetch("/api/user-settings", {
       method: "PUT",
@@ -84,8 +87,18 @@ async function saveUserSettings() {
     renderUserSettingsStatus(
       `保存しました（元 ${settings.joke_texts?.length || 0}件 / 生成 ${settings.joke_variants?.length || 0}件 / 合計 ${settings.joke_pool?.length || 0}件 / 効果音 ${settings.effect_audios?.length || 0}件）`,
     );
+    userSettingsSaveButton.textContent = "保存済み";
+    userSettingsSaveButton.dataset.state = "success";
+    window.setTimeout(() => {
+      if (userSettingsSaveButton.textContent === "保存済み") {
+        userSettingsSaveButton.textContent = userSettingsSaveLabel;
+        userSettingsSaveButton.dataset.state = "";
+      }
+    }, 2400);
   } catch (error) {
     renderUserSettingsStatus(error.message || "ユーザー画面設定を保存できませんでした");
+    userSettingsSaveButton.textContent = "再試行";
+    userSettingsSaveButton.dataset.state = "error";
   } finally {
     userSettingsSaveButton.disabled = false;
   }

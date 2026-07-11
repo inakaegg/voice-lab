@@ -77,7 +77,7 @@
             <legend>公開サンプル音声</legend>
             <div class="public-access-header">
               <p class="route-hint">各ユーザー画面に表示する出力例を登録します。</p>
-              <button type="button" class="secondary-button" data-public-samples-save>保存</button>
+              <div class="public-samples-header-actions"><p class="public-access-status public-samples-header-status" data-public-samples-status role="status" aria-live="polite"></p><button type="button" class="secondary-button" data-public-samples-save>保存</button></div>
             </div>
             <div class="public-sample-admin-feature" data-public-sample-admin-feature="fun">
               <h3>へんな変換/翻訳/TTS</h3>
@@ -98,7 +98,6 @@
               <p class="public-access-note public-sample-details" data-public-sample-details>未設定</p>
             </div>
             <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
-            <p class="public-access-status" data-public-samples-status role="status" aria-live="polite"></p>
           </fieldset>
             </div>
           </details>
@@ -349,7 +348,7 @@
               </select>
             </div>
             <button type="button" id="user-settings-save" class="secondary-button">ユーザー画面設定を保存</button>
-            <p id="user-settings-status" class="route-hint"></p>
+            <p id="user-settings-status" class="route-hint" role="status" aria-live="polite"></p>
           </fieldset>
 
           <fieldset id="seed-vc-settings" class="suffix-panel" hidden>

@@ -51,6 +51,8 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(skitvoice, /日本語サンプル/);
   assert.match(skitvoice, /中国語サンプル/);
   assert.match(skitvoice, /英語サンプル/);
+  assert.ok(skitvoice.indexOf("英語サンプル") < skitvoice.indexOf("中国語サンプル"));
+  assert.ok(skitvoice.indexOf("中国語サンプル") < skitvoice.indexOf("日本語サンプル"));
 });
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {

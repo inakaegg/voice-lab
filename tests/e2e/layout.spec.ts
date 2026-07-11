@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
 
 import { assertNoHorizontalOverflow, assertVisibleControlsInsideViewport, installUiApiFixtures } from "./fixtures";
 
@@ -148,6 +149,68 @@ test("SkitVoice follows the documented three, two, and one-column task order", a
   } else {
     expect(generateBox?.y || 0).toBeGreaterThan((scriptBox?.y || 0) + (scriptBox?.height || 0) - 2);
     expect(voicesBox?.y || 0).toBeGreaterThan((generateBox?.y || 0) + (generateBox?.height || 0) - 2);
+  }
+});
+
+test("SkitVoice sample save reports progress and appears on the public page", async ({ page }) => {
+  await page.goto("/skitvoice/admin");
+  await page.locator(".admin-config-group > summary").click();
+  for (const [language, title] of [["en-US", "英語サンプル"], ["zh-CN", "中国語サンプル"], ["ja-JP", "日本語サンプル"]]) {
+    const section = page.locator(`[data-public-sample-language="${language}"]`);
+    await section.locator("[data-public-sample-file]").setInputFiles({
+      name: `${language}.wav`,
+      mimeType: "audio/wav",
+      buffer: Buffer.from(`RIFF ${language} sample audio`),
+    });
+    await section.locator("[data-public-sample-title]").fill(title);
+  }
+  const saveButton = page.locator("[data-public-samples-save]");
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await expect(saveButton).toHaveText("保存中…");
+  await expect(saveButton).toHaveText("保存済み");
+  await expect(page.locator("[data-public-samples-status]")).toContainText("ユーザー画面へ反映");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-sample-save-success.png`, fullPage: true });
+  }
+
+  await page.goto("/skitvoice");
+  for (const [language, title] of [["en-US", "英語サンプル"], ["zh-CN", "中国語サンプル"], ["ja-JP", "日本語サンプル"]]) {
+    const sample = page.locator(`[data-public-sample-language="${language}"]`);
+    await expect(sample).toBeVisible();
+    await expect(sample.getByText(title)).toBeVisible();
+    await expect(sample.locator("audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
+  }
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-three-public-samples.png`, fullPage: true });
+  }
+});
+
+test("sample save failure leaves a visible retry action", async ({ page }) => {
+  await page.route("**/api/public-sample-audios", async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "保存先へ書き込めませんでした" }) });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto("/skitvoice/admin");
+  await page.locator(".admin-config-group > summary").click();
+  const englishSection = page.locator('[data-public-sample-language="en-US"]');
+  await englishSection.locator("[data-public-sample-file]").setInputFiles({
+    name: "english-sample.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from("RIFF sample audio"),
+  });
+  const saveButton = page.locator("[data-public-samples-save]");
+  await saveButton.click();
+  await expect(saveButton).toHaveText("再試行");
+  await expect(page.locator("[data-public-samples-status]")).toHaveText("保存先へ書き込めませんでした");
+  await expect(page.locator("[data-public-samples-status]")).toHaveAttribute("data-state", "error");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-sample-save-error.png`, fullPage: true });
   }
 });
 

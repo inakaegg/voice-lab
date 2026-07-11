@@ -59,6 +59,7 @@ from .practice import (
     practice_comparison_alignment,
     supported_practice_target_language,
 )
+from .public_sample_audio import PublicSampleAudioStore
 from .providers.openai_api import (
     AsrTranscription,
     OpenAiAsrProvider,
@@ -750,6 +751,7 @@ def create_app(
     reference_audio_extractor: MediaReferenceAudioExtractor | None = None,
     audio_history_store: AudioHistoryStore | None = None,
     user_settings_store: UserSettingsStore | None = None,
+    public_sample_audio_store: PublicSampleAudioStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Voice Lab")
     active_pipeline = pipeline or create_pipeline_from_env()
@@ -769,6 +771,7 @@ def create_app(
     active_reference_audio_extractor = reference_audio_extractor or MediaReferenceAudioExtractor()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
+    active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
@@ -912,6 +915,28 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/public-sample-audios")
+    def public_sample_audios() -> dict[str, object]:
+        return active_public_sample_audio_store.read()
+
+    @app.put("/api/public-sample-audios")
+    def update_public_sample_audios(payload: dict[str, object] = Body(...)) -> dict[str, object]:
+        try:
+            return active_public_sample_audio_store.write(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="サンプル音声を保存できませんでした") from exc
+
+    @app.delete("/api/public-sample-audios/{feature}")
+    def delete_public_sample_audio(feature: str, language: str = "") -> dict[str, object]:
+        try:
+            return active_public_sample_audio_store.delete(feature, language)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="サンプル音声を削除できませんでした") from exc
 
     @app.post("/api/user-display-text")
     def user_display_text(payload: dict[str, str] = Body(...)) -> dict[str, str]:

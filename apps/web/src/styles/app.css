@@ -462,6 +462,61 @@ html[data-theme="dark"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.voice-lab-admin-body .public-samples-header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.voice-lab-admin-body .public-samples-header-status {
+  max-width: 32rem;
+  text-align: right;
+}
+
+.voice-lab-admin-body button[data-state="loading"] {
+  cursor: wait;
+}
+
+.voice-lab-admin-body button[data-state="success"] {
+  background: #e4f5ec;
+  border-color: #8dc9aa;
+  color: #176443;
+}
+
+.voice-lab-admin-body button[data-state="error"] {
+  background: #fff0ed;
+  border-color: #e4a59a;
+  color: #972f21;
+}
+
+@media (min-width: 821px) {
+  .react-public-body[data-layout="compact"] .react-skit-intro:has(.react-sample-stack > :not([hidden])) {
+    grid-template-columns: minmax(300px, 0.7fr) minmax(0, 1.3fr);
+  }
+
+  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-stack {
+    overflow: visible;
+  }
+
+  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-card {
+    flex: 1 1 0;
+    grid-template-columns: minmax(80px, 0.45fr) minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-card audio {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .react-public-body[data-layout="compact"] .react-skit-intro .react-sample-card h2 {
+    overflow-wrap: anywhere;
+    white-space: nowrap;
+  }
+}
+
 .voice-lab-admin-body .public-access-note,
 .voice-lab-admin-body .public-access-status,
 .voice-lab-admin-body .route-hint,

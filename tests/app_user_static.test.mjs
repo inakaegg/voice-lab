@@ -20,6 +20,7 @@ const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.ht
 const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
+const adminSettingsSource = await readFile(new URL("../src/mo_speech/web/app_admin_settings.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
 
 test("portal page links to SkitVoice and SpeakLoop only", () => {
@@ -251,6 +252,15 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(publicSampleAudioAdminSource, /method:\s*"DELETE"/);
   assert.match(publicSampleAudioAdminSource, /data-public-sample-admin-feature/);
   assert.match(publicSampleAudioAdminSource, /data-public-sample-delete/);
+  assert.match(publicSampleAudioAdminSource, /setPublicSampleActionButton/);
+  assert.match(publicSampleAudioAdminSource, /保存中…/);
+  assert.match(publicSampleAudioAdminSource, /保存済み/);
+  assert.match(publicSampleAudioAdminSource, /削除中…/);
+  assert.match(publicSampleAudioAdminSource, /dataset\.state.*success/s);
+  assert.match(practiceAdminHtml, /public-samples-header-status/);
+  assert.match(adminHtml, /id="user-settings-status"[^>]*role="status"/);
+  assert.match(adminSettingsSource, /保存中…/);
+  assert.match(adminSettingsSource, /保存済み/);
 });
 
 test("vibevoice page provides local skit generation controls", () => {
@@ -266,7 +276,10 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /data-public-samples-features="skitvoice"/);
   assert.match(vibevoiceHtml, /data-public-sample-admin-feature="skitvoice"/);
   assert.equal((vibevoiceHtml.match(/data-public-sample-language="(?:ja-JP|zh-CN|en-US)"/g) || []).length, 3);
+  assert.ok(vibevoiceHtml.indexOf('data-public-sample-language="en-US"') < vibevoiceHtml.indexOf('data-public-sample-language="zh-CN"'));
+  assert.ok(vibevoiceHtml.indexOf('data-public-sample-language="zh-CN"') < vibevoiceHtml.indexOf('data-public-sample-language="ja-JP"'));
   assert.match(vibevoiceHtml, /\/static\/app_public_sample_audio_admin\.js/);
+  assert.match(vibevoiceHtml, /public-samples-header-status/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);
   assert.match(vibevoiceHtml, /name="script_file"/);
   assert.match(vibevoiceHtml, /id="vibevoice-script-file"/);

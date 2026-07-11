@@ -1,4 +1,10 @@
-async function loadAudioHistory() {
+async function loadAudioHistory({ announce = false } = {}) {
+  if (announce && historyRefreshButton) {
+    historyRefreshButton.disabled = true;
+    historyRefreshButton.textContent = "更新中…";
+    historyRefreshButton.dataset.state = "loading";
+    setStatus("音声履歴を更新中です");
+  }
   try {
     const response = await fetch("/api/audio-history");
     if (!response.ok) {
@@ -8,10 +14,30 @@ async function loadAudioHistory() {
     renderAudioHistorySettings(payload.settings || {});
     renderAudioHistoryList(historyRecordings, payload.recordings || []);
     renderAudioHistoryList(historyOutputs, payload.outputs || []);
+    if (announce) {
+      setStatus("音声履歴を更新しました");
+      historyRefreshButton.textContent = "更新済み";
+      historyRefreshButton.dataset.state = "success";
+      window.setTimeout(() => {
+        if (historyRefreshButton.textContent === "更新済み") {
+          historyRefreshButton.textContent = "更新";
+          historyRefreshButton.dataset.state = "";
+        }
+      }, 1600);
+    }
   } catch {
     historyStorage.textContent = "保存先を取得できませんでした。";
     historyRecordings.textContent = "履歴を取得できませんでした。";
     historyOutputs.textContent = "履歴を取得できませんでした。";
+    if (announce) {
+      historyRefreshButton.textContent = "再試行";
+      historyRefreshButton.dataset.state = "error";
+      renderError("音声履歴を取得できませんでした");
+    }
+  } finally {
+    if (announce && historyRefreshButton) {
+      historyRefreshButton.disabled = false;
+    }
   }
 }
 
@@ -75,7 +101,7 @@ function renderAudioHistoryList(container, entries) {
     deleteButton.title = "削除";
     deleteButton.setAttribute("aria-label", `${entry.label || entry.filename || "音声履歴"}を削除`);
     deleteButton.append(createTrashIcon());
-    deleteButton.addEventListener("click", () => deleteHistoryAudio(entry));
+    deleteButton.addEventListener("click", () => deleteHistoryAudio(entry, deleteButton));
     actions.append(useAsInput, useAsReference);
     item.append(title, audio);
     if (entry.tts_text) {
@@ -103,11 +129,14 @@ function renderAudioHistoryList(container, entries) {
   });
 }
 
-async function deleteHistoryAudio(entry) {
+async function deleteHistoryAudio(entry, deleteButton) {
   const label = entry.label || entry.filename || "この音声履歴";
   if (!window.confirm(`${label}を削除しますか？`)) {
     return;
   }
+  deleteButton.disabled = true;
+  deleteButton.dataset.state = "loading";
+  deleteButton.setAttribute("aria-label", `${label}を削除中`);
   try {
     const response = await fetch(entry.url, { method: "DELETE" });
     if (!response.ok) {
@@ -120,6 +149,9 @@ async function deleteHistoryAudio(entry) {
     setStatus("履歴音声を削除しました");
     await loadAudioHistory();
   } catch (error) {
+    deleteButton.disabled = false;
+    deleteButton.dataset.state = "error";
+    deleteButton.setAttribute("aria-label", `${label}の削除を再試行`);
     renderError(error.message || "履歴音声を削除できませんでした");
   }
 }

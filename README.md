@@ -58,6 +58,8 @@ PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 
 ブラウザで `http://127.0.0.1:8000/` を開きます。fake providerはUI/API検証用で、入力内容に依存しない固定応答を返します。
 
+ローカル版でも `/speakloop/admin` と `/skitvoice/admin` から公開サンプル音声を登録でき、公開画面へ即時反映されます。保存先は既定でgit管理外の `tmp/public-sample-audios.json`、変更する場合は `MO_PUBLIC_SAMPLE_AUDIO_PATH` を指定します。
+
 用途に応じた追加依存:
 
 ```sh

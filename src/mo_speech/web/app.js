@@ -1,7 +1,7 @@
 recordButton.addEventListener("click", startRecording);
 stopButton.addEventListener("click", stopRecording);
 audioDeviceRefreshButton.addEventListener("click", loadAudioDevices);
-historyRefreshButton.addEventListener("click", loadAudioHistory);
+historyRefreshButton.addEventListener("click", () => loadAudioHistory({ announce: true }));
 useOutputAsInputButton.addEventListener("click", () => {
   if (currentOutputBlob) {
     useAudioBlobAsInput(currentOutputBlob, currentOutputFileName, "出力音声を入力に設定しました", null, "出力音声を入力");

@@ -8,6 +8,7 @@
 - SkitVoiceは最大4話者、VibeVoice生成、ASR timestampによる再配置、低スコア行再生成、Seed-VC後処理まで実装済み。
 - 参照音声はローカル版でファイル、マイク、タブ音声、URL切り出しの4方式、Cloudflare版でURLを除く3方式を提供する。
 - Cloudflare WorkerはGoogleログイン、feature別quota、入力上限、管理者除外、管理画面、簡易監査ログ、公開サンプル音声を実装済み。
+- 公開サンプル音声はローカルFastAPIでも管理画面から永続保存でき、保存・削除時の処理中／成功／失敗をボタンと状態欄へ表示する。
 - quota・監査・公開サンプルmetadataはD1、音声blobはR2へ移行済みで、bindingなし環境と旧データ向けのKV fallbackを維持している。
 - 公開ポータル、SpeakLoop、SkitVoiceはVite + React + TypeScript、共通UI生成基盤はTailwind CSS v4とrepo所有のshadcn/ui部品へ移行済み。管理・互換画面も共通Tailwind buildを使う。
 - Python/Nodeの通常CIとPlaywrightの3 viewportレイアウトE2Eを持ち、RunPod image buildとGPU smokeは手動workflowに分離している。

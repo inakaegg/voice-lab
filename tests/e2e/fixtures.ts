@@ -16,6 +16,9 @@ const accessSettings = {
 };
 
 export async function installUiApiFixtures(page: Page, options: UiFixtureOptions = {}) {
+  let publicSamples: Record<string, unknown> = {
+    features: { fun: null, voice_conversion: null, speakloop: null, skitvoice: { samples: {} } },
+  };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -27,7 +30,13 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
 
     if (path === "/api/public-session") return json({ google_login_required: false, google_login_configured: true, authenticated: false });
     if (path === "/api/public-access-settings") return json(accessSettings);
-    if (path === "/api/public-sample-audios") return json({ features: { fun: null, voice_conversion: null, speakloop: null, skitvoice: { samples: {} } } });
+    if (path === "/api/public-sample-audios") {
+      if (request.method() === "PUT") {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        publicSamples = request.postDataJSON();
+      }
+      return json(publicSamples);
+    }
     if (path === "/api/practice-history") {
       if (options.historyState === "error") return json({ detail: "履歴fixtureの読み込みに失敗しました" }, 500);
       if (options.historyState === "long") {

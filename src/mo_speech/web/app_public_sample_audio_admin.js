@@ -30,6 +30,7 @@ async function loadPublicSampleAudios() {
 }
 
 async function savePublicSampleAudios(root) {
+  setPublicSampleActionButton(root.querySelector("[data-public-samples-save]"), "保存中…", true);
   try {
     if (!currentPublicSampleAudios) {
       await loadPublicSampleAudios();
@@ -49,7 +50,7 @@ async function savePublicSampleAudios(root) {
         next.features[feature] = await collectPublicSampleFeature(section);
       }
     }
-    setPublicSampleAdminStatus("保存中です。");
+    setPublicSampleAdminStatus("保存中です。", "loading");
     const response = await fetch("/api/public-sample-audios", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -63,8 +64,13 @@ async function savePublicSampleAudios(root) {
     for (const targetRoot of publicSampleAdminRoots) {
       renderPublicSampleAdmin(targetRoot, currentPublicSampleAudios);
     }
-    setPublicSampleAdminStatus("保存しました。");
+    setPublicSampleActionButton(root.querySelector("[data-public-samples-save]"), "保存済み", false);
+    setPublicSampleAdminStatus("保存しました。ユーザー画面へ反映されています。", "success");
+    window.setTimeout(() => {
+      setPublicSampleActionButton(root.querySelector("[data-public-samples-save]"), "保存", false, "保存済み");
+    }, 2400);
   } catch (error) {
+    setPublicSampleActionButton(root.querySelector("[data-public-samples-save]"), "再試行", false);
     setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
 }
@@ -124,6 +130,7 @@ async function previewPublicSampleFile(section) {
       audio_mime_type: section.dataset.publicSampleAudioMimeType,
       audio_base64: audioBase64,
     });
+    setPublicSampleAdminStatus("ファイルを選択しました。保存するとユーザー画面へ反映されます。", "ready");
   } catch (error) {
     setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
@@ -143,7 +150,9 @@ async function deletePublicSample(section) {
     return;
   }
   try {
-    setPublicSampleAdminStatus("削除中です。");
+    const deleteButton = section.querySelector("[data-public-sample-delete]");
+    setPublicSampleActionButton(deleteButton, "削除中…", true);
+    setPublicSampleAdminStatus("削除中です。", "loading");
     const languageQuery = language ? `?language=${encodeURIComponent(language)}` : "";
     const response = await fetch(`/api/public-sample-audios/${encodeURIComponent(feature)}${languageQuery}`, {
       method: "DELETE",
@@ -156,8 +165,13 @@ async function deletePublicSample(section) {
     for (const targetRoot of publicSampleAdminRoots) {
       renderPublicSampleAdmin(targetRoot, currentPublicSampleAudios);
     }
-    setPublicSampleAdminStatus("削除しました。");
+    setPublicSampleActionButton(deleteButton, "削除済み", false);
+    setPublicSampleAdminStatus("削除しました。ユーザー画面からも非表示になりました。", "success");
+    window.setTimeout(() => {
+      setPublicSampleActionButton(deleteButton, "保存済みを削除", false, "削除済み");
+    }, 2400);
   } catch (error) {
+    setPublicSampleActionButton(section.querySelector("[data-public-sample-delete]"), "再試行", false);
     setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
 }
@@ -203,6 +217,15 @@ function setPublicSampleAdminStatus(text, state = "") {
     status.textContent = text;
     status.dataset.state = state;
   }
+}
+
+function setPublicSampleActionButton(button, text, disabled, onlyIfText = "") {
+  if (!button || (onlyIfText && button.textContent !== onlyIfText)) {
+    return;
+  }
+  button.textContent = text;
+  button.disabled = Boolean(disabled);
+  button.dataset.state = text === "保存済み" || text === "削除済み" ? "success" : disabled ? "loading" : "";
 }
 
 function fileToBase64(file) {

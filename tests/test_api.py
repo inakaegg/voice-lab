@@ -26,10 +26,63 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "default-audio-history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
     monkeypatch.setenv("MO_VIBEVOICE_DEBUG_RESULT_DIR", str(tmp_path / "vibevoice-debug"))
+    monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(tmp_path / "public-sample-audios.json"))
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
     monkeypatch.delenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", raising=False)
+
+
+def test_local_public_sample_audio_api_persists_and_serves_skitvoice_samples(tmp_path, monkeypatch) -> None:
+    storage_path = tmp_path / "public-sample-audios.json"
+    monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(storage_path))
+    sample = {
+        "title": "中国語サンプル",
+        "description": "短い会話",
+        "filename": "zh.wav",
+        "audio_mime_type": "audio/wav",
+        "audio_base64": base64.b64encode(b"sample audio").decode("ascii"),
+    }
+    payload = {"features": {"skitvoice": {"samples": {"zh-CN": sample}}}}
+
+    first_client = TestClient(create_app())
+    saved = first_client.put("/api/public-sample-audios", json=payload)
+
+    assert saved.status_code == 200
+    assert saved.json()["features"]["skitvoice"]["samples"]["zh-CN"]["title"] == "中国語サンプル"
+    assert saved.json()["features"]["skitvoice"]["samples"]["zh-CN"]["size_bytes"] == len(b"sample audio")
+    assert storage_path.is_file()
+
+    reloaded_client = TestClient(create_app())
+    fetched = reloaded_client.get("/api/public-sample-audios")
+    assert fetched.status_code == 200
+    assert fetched.json()["features"]["skitvoice"]["samples"]["zh-CN"]["audio_base64"] == sample["audio_base64"]
+
+    deleted = reloaded_client.delete("/api/public-sample-audios/skitvoice?language=zh-CN")
+    assert deleted.status_code == 200
+    assert deleted.json()["features"]["skitvoice"]["samples"]["zh-CN"] is None
+
+
+def test_local_public_sample_audio_api_rejects_unsupported_language() -> None:
+    client = TestClient(create_app())
+    payload = {
+        "features": {
+            "skitvoice": {
+                "samples": {
+                    "fr-FR": {
+                        "title": "unsupported",
+                        "filename": "fr.wav",
+                        "audio_mime_type": "audio/wav",
+                        "audio_base64": base64.b64encode(b"sample").decode("ascii"),
+                    }
+                }
+            }
+        }
+    }
+
+    response = client.put("/api/public-sample-audios", json=payload)
+
+    assert response.status_code == 400
 
 
 def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch) -> None:
