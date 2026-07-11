@@ -135,8 +135,10 @@ const nativeUiLabels = {
   },
 };
 const practiceSettingsStorageKey = "mo:practice-settings";
+const defaultPracticeTargetLanguage = "zh-CN";
+const selectablePracticeTargetLanguages = new Set(["zh-CN", "en-US"]);
 
-let selectedTargetLanguage = "ja-JP";
+let selectedTargetLanguage = defaultPracticeTargetLanguage;
 let detectedNativeLanguage = "";
 let mediaRecorder = null;
 let recordingStream = null;
@@ -165,7 +167,7 @@ let progressTarget = 0;
 let isComparisonPlaying = false;
 let comparisonPlaybackToken = 0;
 
-targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || "ja-JP"));
+targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
 nativeRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("native");
   toggleRecording("native");
@@ -200,7 +202,7 @@ function selectTargetLanguage(language) {
   if (isBusy || mediaRecorder) {
     return;
   }
-  selectedTargetLanguage = languageLabels[language] ? language : "ja-JP";
+  selectedTargetLanguage = selectablePracticeTargetLanguages.has(language) ? language : defaultPracticeTargetLanguage;
   targetLanguageSelect.value = selectedTargetLanguage;
   if (selectedTargetLanguage === "zh-CN") {
     pinyinToggle.checked = true;
@@ -1084,7 +1086,9 @@ function clearError() {
 
 function loadPracticeSettings() {
   const settings = readPracticeSettings();
-  selectedTargetLanguage = languageLabels[settings.target_language] ? settings.target_language : "ja-JP";
+  selectedTargetLanguage = selectablePracticeTargetLanguages.has(settings.target_language)
+    ? settings.target_language
+    : defaultPracticeTargetLanguage;
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   if (autoPlayComparisonControl) {
@@ -1129,7 +1133,9 @@ function syncPinyinSettingVisibility() {
 }
 
 function syncCurrentLanguageLabel() {
-  targetLanguageSelect.value = languageLabels[selectedTargetLanguage] ? selectedTargetLanguage : "ja-JP";
+  targetLanguageSelect.value = selectablePracticeTargetLanguages.has(selectedTargetLanguage)
+    ? selectedTargetLanguage
+    : defaultPracticeTargetLanguage;
 }
 
 function normalizePracticeLanguage(language) {

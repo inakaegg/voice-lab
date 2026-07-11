@@ -79,7 +79,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.doesNotMatch(practiceHtml, /发音练习/);
   assert.match(practiceHtml, /学習する言語/);
   assert.match(practiceHtml, /id="practice-target-language-select"/);
-  assert.match(practiceHtml, /🇯🇵 日本語/);
+  assert.doesNotMatch(practiceHtml, /🇯🇵 日本語/);
   assert.match(practiceHtml, /🇨🇳 中文/);
   assert.match(practiceHtml, /🇺🇸 English/);
   assert.match(practiceHtml, /practice-header-auth/);
@@ -94,7 +94,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.doesNotMatch(practiceHtml, /id="practice-settings-overlay"/);
   assert.doesNotMatch(practiceHtml, /role="dialog"/);
   assert.match(practiceHtml, /言いたいことを話す/);
-  assert.match(practiceHtml, /value="ja-JP"/);
+  assert.doesNotMatch(practiceHtml, /value="ja-JP"/);
   assert.match(practiceHtml, /value="zh-CN"/);
   assert.match(practiceHtml, /value="en-US"/);
   assert.match(practiceHtml, /id="practice-native-record-button"/);

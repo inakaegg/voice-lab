@@ -82,6 +82,7 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 
 ### SpeakLoop
 
+- 現在は日本語話者向けとし、公開UIの学習言語は `🇨🇳 中文` と `🇺🇸 English` の2つだけを表示する。旧保存値や未対応値は `zh-CN` へ戻す。
 - prompt未生成時は録音Stepを横長1枚で表示する。
 - prompt表示後だけ録音Stepと復唱Stepを2列へ切り替える。
 - 録音操作と短い行動ラベルを近接させる。

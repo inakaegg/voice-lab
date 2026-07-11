@@ -53,6 +53,12 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(skitvoice, /英語サンプル/);
 });
 
+test("SpeakLoop only exposes Chinese and English as learning languages", () => {
+  assert.doesNotMatch(speakloop, /<option value="ja-JP">/);
+  assert.match(speakloop, /<option value="zh-CN">🇨🇳 中文<\/option>/);
+  assert.match(speakloop, /<option value="en-US">🇺🇸 English<\/option>/);
+});
+
 test("public React routes use the staged Tailwind and shadcn migration boundary", () => {
   assert.match(pkg, /"tailwindcss"/);
   assert.match(pkg, /"@tailwindcss\/vite"/);
