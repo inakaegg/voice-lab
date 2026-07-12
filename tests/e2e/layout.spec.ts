@@ -102,6 +102,21 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
   const flow = page.locator(".react-practice-flow");
   await expect(promptPanel).toBeHidden();
 
+  const microphone = page.locator("#practice-native-record-button .record-icon");
+  const recordButton = page.locator("#practice-native-record-button");
+  const caption = page.locator("#practice-native-record-button + span");
+  const [microphoneBox, recordButtonBox, captionBox] = await Promise.all([
+    microphone.boundingBox(),
+    recordButton.boundingBox(),
+    caption.boundingBox(),
+  ]);
+  expect(microphoneBox).not.toBeNull();
+  expect(recordButtonBox).not.toBeNull();
+  expect(captionBox).not.toBeNull();
+  expect((microphoneBox?.y || 0) + (microphoneBox?.height || 0)).toBeLessThanOrEqual((recordButtonBox?.y || 0) + (recordButtonBox?.height || 0));
+  expect(captionBox?.y || 0).toBeGreaterThanOrEqual((recordButtonBox?.y || 0) + (recordButtonBox?.height || 0));
+  await expect(microphone.locator("svg")).toBeVisible();
+
   const [idleCard, flowBox] = await Promise.all([nativePanel.boundingBox(), flow.boundingBox()]);
   expect(idleCard).not.toBeNull();
   expect(flowBox).not.toBeNull();

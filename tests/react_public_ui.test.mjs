@@ -41,6 +41,13 @@ test("React pages expose the DOM ids required by legacy controllers", () => {
   }
 });
 
+test("SpeakLoop uses a contained microphone icon instead of oversized legacy pseudo-elements", () => {
+  assert.match(speakloop, /className="record-microphone-icon"/);
+  assert.match(speakloop, /viewBox="0 0 24 24"/);
+  assert.match(styles, /\.practice-record-orb \.record-icon::before/);
+  assert.match(styles, /\.practice-record-orb \.record-icon::after/);
+});
+
 test("React layouts include responsive product and workflow structure", () => {
   assert.match(portal, /aria-label="Voice Lab"/);
   assert.match(portal, /声から、[\s\S]*ことばの体験を[\s\S]*つくる。/);

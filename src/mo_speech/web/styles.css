@@ -2075,7 +2075,30 @@ fieldset.public-samples-admin {
 }
 
 .practice-record-orb .record-icon {
-  transform: scale(0.7);
+  align-items: center;
+  background: transparent;
+  border-radius: 0;
+  color: #ffffff;
+  display: flex;
+  height: 48px;
+  justify-content: center;
+  transform: none;
+  width: 48px;
+}
+
+.practice-record-orb .record-icon::before,
+.practice-record-orb .record-icon::after {
+  display: none;
+}
+
+.practice-record-orb .record-microphone-icon {
+  display: block;
+  height: 44px;
+  width: 44px;
+}
+
+.practice-record-orb.is-processing .record-microphone-icon {
+  display: none;
 }
 
 .practice-record-orb .record-timer {

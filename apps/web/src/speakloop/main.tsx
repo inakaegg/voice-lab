@@ -6,7 +6,7 @@ activateCompactLayout();
 const Meter = ({ id }: { id: string }) => <span id={id} className="record-level-meter" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <span className="record-level-bar" key={index} />)}</span>;
 
 function RecordButton({ id, levelId, label, className = "" }: { id: string; levelId: string; label: string; className?: string }) {
-  return <button id={id} className={`record-orb practice-record-orb ${className}`.trim()} type="button" aria-label={label}><span className="record-progress" aria-hidden="true"/><span className="record-waves" aria-hidden="true"/><span className="record-icon" aria-hidden="true"/><Meter id={levelId}/><span className="record-timer" aria-hidden="true">REC</span></button>;
+  return <button id={id} className={`record-orb practice-record-orb ${className}`.trim()} type="button" aria-label={label}><span className="record-progress" aria-hidden="true"/><span className="record-waves" aria-hidden="true"/><span className="record-icon" aria-hidden="true"><svg className="record-microphone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg></span><Meter id={levelId}/><span className="record-timer" aria-hidden="true">REC</span></button>;
 }
 
 function SpeakLoop() {
