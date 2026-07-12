@@ -92,6 +92,15 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     assert "CREATE TABLE IF NOT EXISTS public_sample_audios" in sample_migration
 
 
+def test_cloudflare_worker_uses_the_voice_lab_public_name() -> None:
+    wrangler = read_text("wrangler.toml")
+    cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
+
+    assert 'name = "voice-lab"' in wrangler
+    assert "https://voice-lab.functional-dog.workers.dev/" in cloudflare
+    assert "https://voice-lab.functional-dog.workers.dev/auth/google/callback" in cloudflare
+
+
 def test_wrangler_binds_production_and_preview_r2_buckets() -> None:
     wrangler = read_text("wrangler.toml")
 

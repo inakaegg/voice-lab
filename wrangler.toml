@@ -1,4 +1,4 @@
-name = "mo-speech-demo"
+name = "voice-lab"
 main = "cloudflare/worker.mjs"
 compatibility_date = "2025-06-27"
 
