@@ -170,6 +170,8 @@ test("SkitVoice sample save reports progress and appears on the public page", as
   await expect(saveButton).toHaveText("保存済み");
   await expect(page.locator("[data-public-samples-status]")).toContainText("ユーザー画面へ反映");
   await expect(page.getByText(/\.wav/)).toHaveCount(0);
+  await expect(page.locator(".skitvoice-samples-admin .sample-audio-control")).toHaveCount(3);
+  await expect(page.locator(".skitvoice-samples-admin audio[data-sample-audio-custom]").first()).toBeHidden();
   const adminSampleBoxes = await Promise.all(["en-US", "zh-CN", "ja-JP"].map((language) => page.locator(`[data-public-sample-language="${language}"]`).boundingBox()));
   if ((page.viewportSize()?.width || 0) > 820) {
     expect(Math.abs((adminSampleBoxes[0]?.y || 0) - (adminSampleBoxes[1]?.y || 0))).toBeLessThanOrEqual(8);
@@ -188,7 +190,31 @@ test("SkitVoice sample save reports progress and appears on the public page", as
     await expect(sample).toBeVisible();
     await expect(sample.getByText(title)).toBeVisible();
     await expect(sample.locator("audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
+    await expect(sample.locator("audio")).toBeHidden();
+    await expect(sample.locator(".sample-audio-control")).toBeVisible();
   }
+  const englishSample = page.locator('[data-public-sample-language="en-US"]');
+  const englishAudio = englishSample.locator("audio");
+  await englishAudio.evaluate((audio: HTMLAudioElement) => {
+    let currentTime = 0;
+    let paused = true;
+    Object.defineProperty(audio, "duration", { configurable: true, get: () => 120 });
+    Object.defineProperty(audio, "currentTime", { configurable: true, get: () => currentTime, set: (value) => { currentTime = Number(value); } });
+    Object.defineProperty(audio, "paused", { configurable: true, get: () => paused });
+    audio.play = async () => { paused = false; audio.dispatchEvent(new Event("play")); };
+    audio.pause = () => { paused = true; audio.dispatchEvent(new Event("pause")); };
+    audio.dispatchEvent(new Event("loadedmetadata"));
+  });
+  const playButton = englishSample.locator(".sample-audio-play-button");
+  const seek = englishSample.locator(".sample-audio-seek");
+  await expect(playButton).toHaveAttribute("aria-label", "英語を再生");
+  await playButton.click();
+  await expect(englishSample.locator(".sample-audio-control")).toHaveAttribute("data-state", "playing");
+  await expect(playButton).toHaveAttribute("aria-label", "英語を一時停止");
+  await seek.fill("30");
+  await expect(englishSample.locator(".sample-audio-time")).toHaveText("0:30 / 2:00");
+  await playButton.click();
+  await expect(englishSample.locator(".sample-audio-control")).toHaveAttribute("data-state", "paused");
   const [samplesBox, formBox, privacyBox] = await Promise.all([
     page.locator(".react-output-samples").boundingBox(),
     page.locator("#vibevoice-form").boundingBox(),
@@ -197,7 +223,13 @@ test("SkitVoice sample save reports progress and appears on the public page", as
   expect((samplesBox?.y || 0) + (samplesBox?.height || 0)).toBeLessThanOrEqual((formBox?.y || 0) + 1);
   expect(privacyBox?.y || 0).toBeGreaterThanOrEqual((formBox?.y || 0) + (formBox?.height || 0) - 1);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.locator(".react-sample-stack").evaluate((element) => { element.scrollLeft = 0; });
+    await page.locator("body").click({ position: { x: 1, y: 1 } });
     await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-three-public-samples.png`, fullPage: true });
+    await page.evaluate(() => localStorage.setItem("mo-speech-theme", "dark"));
+    await page.reload();
+    await expect(page.locator(".react-output-samples .sample-audio-control")).toHaveCount(3);
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-three-public-samples-dark.png`, fullPage: true });
   }
 });
 

@@ -42,4 +42,7 @@ function renderPublicSampleAudio(section, sample) {
     description.hidden = !sample.description;
   }
   audio.src = `data:${sample.audio_mime_type || "audio/wav"};base64,${sample.audio_base64}`;
+  if (audio.hasAttribute("data-sample-audio-custom")) {
+    window.ensureSampleAudioControl?.(audio, title?.textContent || "サンプル音声");
+  }
 }

@@ -50,6 +50,8 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(skitvoice, /react-skit-grid/);
   assert.match(skitvoice, /出力音声サンプル/);
   assert.match(skitvoice, /fixedTitle/);
+  assert.match(skitvoice, /customControls/);
+  assert.match(skitvoice, /app_sample_audio_controls\.js/);
   assert.ok(skitvoice.indexOf('label="英語"') < skitvoice.indexOf('label="中国語"'));
   assert.ok(skitvoice.indexOf('label="中国語"') < skitvoice.indexOf('label="日本語"'));
   assert.ok(skitvoice.indexOf("react-output-samples") < skitvoice.indexOf("vibevoice-form"));

@@ -16,6 +16,7 @@ const publicSessionSource = await readFile(new URL("../src/mo_speech/web/app_pub
 const publicAccessSettingsSource = await readFile(new URL("../src/mo_speech/web/app_public_access_settings.js", import.meta.url), "utf8");
 const publicSampleAudioSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio.js", import.meta.url), "utf8");
 const publicSampleAudioAdminSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio_admin.js", import.meta.url), "utf8");
+const sampleAudioControlsSource = await readFile(new URL("../src/mo_speech/web/app_sample_audio_controls.js", import.meta.url), "utf8");
 const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.html", import.meta.url), "utf8");
 const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
@@ -283,6 +284,13 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.doesNotMatch(vibevoiceHtml, /<label>タイトル/);
   assert.doesNotMatch(vibevoiceHtml, /data-public-sample-details/);
   assert.match(vibevoiceHtml, /public-sample-file-button/);
+  assert.equal((vibevoiceHtml.match(/data-sample-audio-custom/g) || []).length, 3);
+  assert.match(vibevoiceHtml, /\/static\/app_sample_audio_controls\.js/);
+  assert.match(sampleAudioControlsSource, /sample-audio-play-button/);
+  assert.match(sampleAudioControlsSource, /sample-audio-seek/);
+  assert.match(sampleAudioControlsSource, /timeupdate/);
+  assert.match(sampleAudioControlsSource, /loadedmetadata/);
+  assert.match(sampleAudioControlsSource, /aria-label/);
   assert.match(vibevoiceHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(vibevoiceHtml, /public-samples-header-status/);
   assert.match(vibevoiceHtml, /id="vibevoice-script"/);

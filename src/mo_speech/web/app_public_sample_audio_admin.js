@@ -207,6 +207,9 @@ function renderPublicSamplePreview(section, sample) {
   }
   preview.hidden = false;
   preview.src = `data:${sample.audio_mime_type || "audio/wav"};base64,${sample.audio_base64}`;
+  if (preview.hasAttribute("data-sample-audio-custom")) {
+    window.ensureSampleAudioControl?.(preview, `${publicSampleLanguageLabel(section)}サンプル`);
+  }
   if (details) {
     details.textContent = `${sample.audio_mime_type || "audio"} / ${formatBytes(sample.size_bytes || base64ByteLength(sample.audio_base64))}`;
   }
