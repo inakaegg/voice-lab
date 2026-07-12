@@ -105,6 +105,12 @@ test("SkitVoice output languages include flags", () => {
   assert.match(skitvoice, /🇯🇵 日本語（低品質）/);
 });
 
+test("SkitVoice uses the Voice Lab player for references and generated audio", () => {
+  assert.match(skitvoice, /data-voice-lab-audio-label={`Speaker \$\{slot\} 参照音声`}/);
+  assert.match(skitvoice, /data-voice-lab-audio-label="生成結果"/);
+  assert.doesNotMatch(skitvoice, /id="vibevoice-audio" controls/);
+});
+
 test("public workbench keeps settings at the mobile top right and avoids cramped columns", () => {
   assert.match(styles, /\.react-theme-settings summary svg\s*\{[^}]*fill:\s*none;/s);
   assert.match(styles, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);

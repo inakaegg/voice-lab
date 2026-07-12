@@ -241,9 +241,11 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /id="practice-history-recordings"/);
   assert.match(practiceAdminHtml, /id="practice-history-outputs"/);
   assert.match(practiceAdminHtml, /\/static\/app_public_access_settings\.js/);
+  assert.match(practiceAdminHtml, /\/static\/app_sample_audio_controls\.js/);
   assert.match(practiceAdminHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
+  assert.match(practiceHistorySource, /ensureVoiceLabAudioControl/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
   assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
   assert.match(publicAccessSettingsSource, /data-public-feature-setting/);
@@ -579,6 +581,8 @@ test("vibevoice auto line-by-line state is reflected in the UI without overwriti
   assert.match(vibevoiceSource, /lineByLineControl\.checked = directedLineModeEnabled \? false : autoLineByLine \|\| lineByLineUserPreference/);
   assert.match(vibevoiceSource, /settings\[control\.name\] = lineByLineUserPreference/);
   assert.match(vibevoiceSource, /"output_language"/);
+  assert.match(vibevoiceSource, /ensureVoiceLabAudioControl/);
+  assert.match(vibevoiceSource, /hideVoiceLabAudioControl/);
   assert.match(vibevoiceSource, /body\.set\("translate_script", "auto"\)/);
   assert.match(vibevoiceSource, /JSON\.stringify\(\{ seed_script: scriptInput\.value \}\)/);
   assert.match(vibevoiceSource, /body\.set\("line_by_line",\s*effectiveLineByLineEnabled\(\) \? "true" : "false"\)/);

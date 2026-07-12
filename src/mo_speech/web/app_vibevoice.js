@@ -1590,6 +1590,7 @@ function renderSavedVoicePreview(slot, preview, record) {
   revokeSavedVoicePreviewUrl(slot);
   if (!preview || !record?.blob) {
     if (preview) {
+      window.hideVoiceLabAudioControl?.(preview);
       preview.hidden = true;
       preview.removeAttribute("src");
       preview.load();
@@ -1601,6 +1602,7 @@ function renderSavedVoicePreview(slot, preview, record) {
   preview.src = url;
   preview.hidden = false;
   preview.load();
+  window.ensureVoiceLabAudioControl?.(preview, preview.dataset.voiceLabAudioLabel || `Speaker ${slot} 参照音声`);
 }
 
 function revokeSavedVoicePreviewUrl(slot) {
@@ -1693,6 +1695,7 @@ function renderResult(payload) {
   const blob = new Blob([audioBytes], { type: audioMimeType });
   currentAudioUrl = URL.createObjectURL(blob);
   audio.src = currentAudioUrl;
+  window.ensureVoiceLabAudioControl?.(audio, audio.dataset.voiceLabAudioLabel || "生成結果");
   downloadLink.href = currentAudioUrl;
   downloadLink.download = `vibevoice-output.${extensionForMimeType(audioMimeType)}`;
   downloadLink.textContent = `${labelForMimeType(audioMimeType)}を保存`;
@@ -1878,6 +1881,7 @@ function renderArtifacts(artifacts, runpodArtifactSummary = null) {
 
     const player = document.createElement("audio");
     player.controls = true;
+    player.dataset.voiceLabAudioLabel = artifact.label || artifact.kind || "行ごとの音声";
     const audioBytes = base64ToBytes(audioBase64);
     const blob = new Blob([audioBytes], { type: artifact.audio_mime_type || "audio/wav" });
     const url = URL.createObjectURL(blob);
@@ -1899,6 +1903,7 @@ function renderArtifacts(artifacts, runpodArtifactSummary = null) {
     }
     item.append(player);
     artifactsContainer.append(item);
+    window.ensureVoiceLabAudioControl?.(player, player.dataset.voiceLabAudioLabel);
     renderedCount += 1;
   }
   if (renderedCount === 0) {

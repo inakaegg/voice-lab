@@ -168,6 +168,37 @@ test("SkitVoice follows the documented three, two, and one-column task order", a
   }
 });
 
+test("SkitVoice uses Voice Lab audio controls for references and generated results", async ({ page }) => {
+  for (const route of ["/skitvoice", "/skitvoice/admin"]) {
+    await page.goto(route);
+    const referenceInput = page.locator('input[name="voice_file_1"]');
+    await referenceInput.setInputFiles({ name: "voice.wav", mimeType: "audio/wav", buffer: Buffer.from("RIFF reference") });
+    const referenceAudio = page.locator('[data-saved-voice-preview-slot="1"]');
+    const referenceControl = referenceAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
+    await expect(referenceAudio).toBeHidden();
+    await expect(referenceControl).toBeVisible();
+
+    await page.evaluate(() => {
+      const result = document.querySelector<HTMLElement>("#vibevoice-result");
+      const audio = document.querySelector<HTMLAudioElement>("#vibevoice-audio");
+      if (!result || !audio) return;
+      result.hidden = false;
+      audio.src = "data:audio/wav;base64,UklGRg==";
+      window.ensureVoiceLabAudioControl?.(audio, "生成結果");
+    });
+    const resultAudio = page.locator("#vibevoice-audio");
+    const resultControl = resultAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
+    await expect(resultAudio).toBeHidden();
+    await expect(resultControl).toBeVisible();
+    await expect(resultControl.locator(".sample-audio-play-button")).toHaveAttribute("aria-label", "生成結果を再生");
+    await assertNoHorizontalOverflow(page);
+    if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+      const slug = `${route.includes("admin") ? "admin-" : ""}voice-lab-players`;
+      await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-${slug}.png`, fullPage: true });
+    }
+  }
+});
+
 test("SkitVoice sample save reports progress and appears on the public page", async ({ page }) => {
   await page.goto("/skitvoice/admin");
   await page.locator(".admin-config-group > summary").click();
