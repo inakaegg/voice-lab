@@ -83,16 +83,16 @@ test("system theme follows the browser color scheme on every public route", asyn
   }
 });
 
-test("SpeakLoop offers Chinese and English and normalizes a saved Japanese target", async ({ page }) => {
+test("SpeakLoop defaults to English and normalizes a saved Japanese target", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("mo:practice-settings", JSON.stringify({ target_language: "ja-JP" }));
   });
   await page.goto("/speakloop");
   const language = page.locator("#practice-target-language-select");
   await expect(language.locator("option")).toHaveCount(2);
-  await expect(language.locator("option").nth(0)).toHaveAttribute("value", "zh-CN");
-  await expect(language.locator("option").nth(1)).toHaveAttribute("value", "en-US");
-  await expect(language).toHaveValue("zh-CN");
+  await expect(language.locator("option").nth(0)).toHaveAttribute("value", "en-US");
+  await expect(language.locator("option").nth(1)).toHaveAttribute("value", "zh-CN");
+  await expect(language).toHaveValue("en-US");
 });
 
 test("SpeakLoop switches from one task card to a responsive two-step flow", async ({ page }) => {

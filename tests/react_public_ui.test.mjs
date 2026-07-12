@@ -60,8 +60,8 @@ test("React layouts include responsive product and workflow structure", () => {
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {
   assert.doesNotMatch(speakloop, /<option value="ja-JP">/);
-  assert.match(speakloop, /<option value="zh-CN">🇨🇳 中文<\/option>/);
-  assert.match(speakloop, /<option value="en-US">🇺🇸 English<\/option>/);
+  assert.match(speakloop, /defaultValue="en-US"/);
+  assert.ok(speakloop.indexOf('<option value="en-US">🇺🇸 English<\/option>') < speakloop.indexOf('<option value="zh-CN">🇨🇳 中文<\/option>'));
 });
 
 test("public React routes use the staged Tailwind and shadcn migration boundary", () => {
@@ -93,8 +93,8 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
 
 test("SkitVoice output languages include flags", () => {
   assert.match(skitvoice, /id="vibevoice-output-language" defaultValue="en-US"/);
-  assert.match(skitvoice, /🇺🇸 英語/);
-  assert.match(skitvoice, /🇨🇳 中国語/);
+  assert.match(skitvoice, /🇺🇸 English/);
+  assert.match(skitvoice, /🇨🇳 中文/);
   assert.match(skitvoice, /🇯🇵 日本語（低品質）/);
 });
 

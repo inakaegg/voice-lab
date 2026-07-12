@@ -84,6 +84,7 @@ test("practice page keeps pronunciation training separate from conversion demo",
   assert.doesNotMatch(practiceHtml, /🇯🇵 日本語/);
   assert.match(practiceHtml, /🇨🇳 中文/);
   assert.match(practiceHtml, /🇺🇸 English/);
+  assert.ok(practiceHtml.indexOf("🇺🇸 English") < practiceHtml.indexOf("🇨🇳 中文"));
   assert.match(practiceHtml, /practice-header-auth/);
   assert.match(practiceHtml, /data-public-auth-panel/);
   assert.match(practiceHtml, /\/auth\/google\/login\?next=\/speakloop/);
@@ -337,9 +338,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.doesNotMatch(vibevoiceHtml, /value="vibevoice-realtime-0\.5b-latest"/);
   assert.match(vibevoiceHtml, /value="vibevoice-large-aoi-pinned"[^>]*data-vibevoice-backends="runpod_serverless"/);
   assert.match(vibevoiceHtml, /name="output_language"/);
-  assert.match(vibevoiceHtml, /value="en-US"[^>]*>英語/);
-  assert.match(vibevoiceHtml, /value="zh-CN"[^>]*>中国語/);
-  assert.match(vibevoiceHtml, /value="ja-JP"[^>]*>日本語（低品質）/);
+  assert.match(vibevoiceHtml, /value="en-US"[^>]*selected[^>]*>🇺🇸 English/);
+  assert.match(vibevoiceHtml, /value="zh-CN"[^>]*>🇨🇳 中文/);
+  assert.match(vibevoiceHtml, /value="ja-JP"[^>]*>🇯🇵 日本語（低品質）/);
   assert.match(vibevoiceHtml, /name="translate_script"/);
   assert.match(vibevoiceHtml, /日本語台本を出力言語へ翻訳/);
   assert.match(vibevoiceHtml, /name="inference_steps"/);
@@ -507,7 +508,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /name="model_id"/);
   assert.match(vibevoiceSimpleHtml, /value="vibevoice-large-aoi-pinned"[^>]*selected/s);
   assert.match(vibevoiceSimpleHtml, /name="output_language"/);
-  assert.match(vibevoiceSimpleHtml, /value="en-US"[^>]*selected[^>]*>英語/);
+  assert.match(vibevoiceSimpleHtml, /value="en-US"[^>]*selected[^>]*>🇺🇸 English/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /name="translate_script"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-script-button"[^>]*>台本自動生成/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-translated-script"/);

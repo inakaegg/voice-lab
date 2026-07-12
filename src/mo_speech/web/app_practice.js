@@ -135,7 +135,7 @@ const nativeUiLabels = {
   },
 };
 const practiceSettingsStorageKey = "mo:practice-settings";
-const defaultPracticeTargetLanguage = "zh-CN";
+const defaultPracticeTargetLanguage = "en-US";
 const selectablePracticeTargetLanguages = new Set(["zh-CN", "en-US"]);
 
 let selectedTargetLanguage = defaultPracticeTargetLanguage;
