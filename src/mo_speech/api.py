@@ -794,15 +794,11 @@ def create_app(
     def fun() -> FileResponse:
         return FileResponse(WEB_DIR / "user.html")
 
-    @app.get("/practice")
-    @app.get("/practice/")
     @app.get("/speakloop")
     @app.get("/speakloop/")
     def practice() -> FileResponse:
         return FileResponse(WEB_DIR / "react" / "speakloop.html")
 
-    @app.get("/practice/admin")
-    @app.get("/practice/admin/")
     @app.get("/speakloop/admin")
     @app.get("/speakloop/admin/")
     def practice_admin() -> FileResponse:

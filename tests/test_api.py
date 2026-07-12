@@ -154,10 +154,10 @@ def test_fun_serves_simple_user_ui() -> None:
     assert response.text.index("user-toggles") < response.text.index("user-replay-button")
 
 
-def test_practice_serves_pronunciation_practice_ui() -> None:
+def test_speakloop_is_the_only_pronunciation_practice_ui_route() -> None:
     client = TestClient(create_app())
 
-    response = client.get("/practice")
+    response = client.get("/speakloop")
 
     assert response.status_code == 200
     assert "SpeakLoop" in response.text
@@ -173,6 +173,9 @@ def test_practice_serves_pronunciation_practice_ui() -> None:
     assert "whisper-1（フレーズ比較）" not in response.text
     assert "通常は whisper-1" not in response.text
     assert "gpt-4o/mini は全体比較再生" not in response.text
+
+    for legacy_path in ("/practice", "/practice/", "/practice/admin", "/practice/admin/", "/static/practice.html"):
+        assert client.get(legacy_path).status_code == 404
     assert "practice-segment-mode" not in response.text
     assert "practice-next-prompt-button" not in response.text
     assert "practice-repeat-audio-button" not in response.text

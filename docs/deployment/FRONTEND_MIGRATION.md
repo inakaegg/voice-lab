@@ -51,7 +51,7 @@
 ```text
 src/mo_speech/web/
   portal.html                 公開ポータル
-  practice.html               SpeakLoop
+  react/speakloop.html        SpeakLoopのproduction build
   app_practice.js             録音・prompt・比較再生・表示状態
   vibevoice_simple.html       SkitVoice
   app_vibevoice.js            draft・参照音声・job・結果状態

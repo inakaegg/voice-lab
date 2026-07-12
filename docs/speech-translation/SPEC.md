@@ -40,11 +40,11 @@
 - 画面はユーザー用、発音練習用、管理者用に分ける。
   - `/` は `Voice Lab` のポータル画面とし、主要導線は `SkitVoice` と `SpeakLoop` の2つに絞る。従来のジョーク寄り変換デモはトップの主導線に置かない。
   - `/fun` は従来の `へんな へんかん アプリ` の簡易画面とし、大きい録音ボタン、最小限の状態表示、トグルだけを表示する。この画面は半分ジョークの音声変換デモであり、SkitVoiceやSpeakLoopとは別経路として扱う。今後の公開時の扱いは別途判断する。
-  - `/practice` と `/speakloop` は日本語話者向けの発音練習用SpeakLoop画面とし、アプリ名を `SpeakLoop`、サブタイトルを `言いたいことで発音練習` とする。公開UIの学習対象言語は `zh-CN` と `en-US` から選び、母国語入力から模範音声生成、復唱録音、ASR判定までを1画面で行う。既存APIの `ja-JP` 受付は互換性のため維持するが、公開UIの選択肢には表示しない。SkitVoiceとは別アプリとして扱う。
+  - `/speakloop` は日本語話者向けの発音練習用SpeakLoop画面とし、アプリ名を `SpeakLoop`、サブタイトルを `言いたいことで発音練習` とする。公開UIの学習対象言語は `zh-CN` と `en-US` から選び、母国語入力から模範音声生成、復唱録音、ASR判定までを1画面で行う。既存APIの `ja-JP` 受付は互換性のため維持するが、公開UIの選択肢には表示しない。SkitVoiceとは別アプリとして扱う。
   - `/vibevoice` と `/skitvoice` はユーザー向けのSkitVoice画面とし、アプリ名を `SkitVoice`、サブタイトルを `かんたんスキット生成` とする。台本テキストと最大4つの話者参照音声から、指定台詞向けの既定設定で音声を生成してブラウザ上で確認できるようにする。
   - `/vibevoice/admin` はSkitVoiceの検証・管理画面とし、backend、モデル、sampling、ASR再配置、低スコア再生成などの詳細設定を表示する。CloudflareへSkitVoice単体として公開する場合は、公開画面を `/`、管理画面を `/admin` に置き、`/admin` だけCloudflare AccessでGoogleアカウント認証を要求し、管理者本人だけ到達できるようにする。
   - `/admin` は `Voice Lab 管理` とし、provider切り替え、履歴、VC比較、Seed-VC詳細設定、ユーザー画面設定を表示する。
-  - `/practice/admin` と `/speakloop/admin` はSpeakLoopの公開制限、サンプル音声、練習履歴を扱う。
+  - `/speakloop/admin` はSpeakLoopの公開制限、サンプル音声、練習履歴を扱う。
   - `/vibevoice/admin` と `/skitvoice/admin` はSkitVoiceの公開制限、日英中サンプル、詳細生成設定、診断を扱う。
   - 管理者用画面は別URLパスに置くが、同じbackend APIと音声履歴を使う。
 - Cloudflare公開ページのGoogleログイン状態とサンプル音声は補助情報として扱い、主操作カードと同じ強さのカードにしない。ユーザー画面ではログイン状態を右上へコンパクトに置き、サンプル確認やログイン状態が録音、台本入力、生成などの主要操作を押し下げないようにする。
@@ -425,7 +425,7 @@ OpenAI Realtime翻訳の扱い:
 - 発音練習用の `practice-prompts` と `practice-attempts` の履歴だけを返す。
 - SpeakLoopで生成したお手本音声は `outputs` として保存し、管理画面の「お手本音声」に表示する。
 - `/admin` が使う `GET /api/audio-history` では、発音練習用の履歴は除外する。
-- 練習履歴を確認する管理画面は `/practice/admin` とし、通常の音声変換管理画面と混ぜない。
+- 練習履歴を確認する管理画面は `/speakloop/admin` とし、通常の音声変換管理画面と混ぜない。
 
 `POST /api/text-to-speech-jobs`
 
@@ -536,7 +536,7 @@ UIでの読み上げ言語の扱い:
 - `recordings` の実保存先は `MO_AUDIO_HISTORY_DIR/recordings`、`outputs` の実保存先は `MO_AUDIO_HISTORY_DIR/outputs` とする。
 - 保存先はローカル環境変数 `MO_AUDIO_HISTORY_DIR` で変更する。ブラウザUIからサーバー側の任意パスを書き換える機能は、誤操作とパス露出を避けるため初期実装には含めない。
 - UIでは、直近の `recordings` と `outputs` を一覧し、保存済み音声を再生できる。
-- `metadata.endpoint` が `practice-` で始まる発音練習用履歴は、通常の音声変換履歴から除外し、`/api/practice-history` と `/practice/admin` で分けて扱う。
+- `metadata.endpoint` が `practice-` で始まる発音練習用履歴は、通常の音声変換履歴から除外し、`/api/practice-history` と `/speakloop/admin` で分けて扱う。
 - ブラウザ録音やアップロード由来の履歴音声は、保存前に可能な限り `24kHz / mono / PCM wav` へ正規化する。正規化できない場合はwebmなどの元形式では保存せず、処理本体を優先して履歴保存をスキップする。
 - 正規化した履歴metadataには、元ファイル名、元content type、保存用audio mime typeを残す。
 - 履歴一覧と再利用対象は保存済み音声ファイルだけとし、`.json` metadata、`.DS_Store`、その他の非音声ファイルは表示しない。
