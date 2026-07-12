@@ -92,6 +92,7 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
 });
 
 test("SkitVoice output languages include flags", () => {
+  assert.match(skitvoice, /id="vibevoice-output-language" defaultValue="en-US"/);
   assert.match(skitvoice, /🇺🇸 英語/);
   assert.match(skitvoice, /🇨🇳 中国語/);
   assert.match(skitvoice, /🇯🇵 日本語（低品質）/);

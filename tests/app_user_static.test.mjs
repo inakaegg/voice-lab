@@ -507,7 +507,7 @@ test("vibevoice simple page hides advanced controls behind fixed practical defau
   assert.match(vibevoiceSimpleHtml, /name="model_id"/);
   assert.match(vibevoiceSimpleHtml, /value="vibevoice-large-aoi-pinned"[^>]*selected/s);
   assert.match(vibevoiceSimpleHtml, /name="output_language"/);
-  assert.match(vibevoiceSimpleHtml, /value="zh-CN"[^>]*selected[^>]*>中国語/);
+  assert.match(vibevoiceSimpleHtml, /value="en-US"[^>]*selected[^>]*>英語/);
   assert.doesNotMatch(vibevoiceSimpleHtml, /name="translate_script"/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-script-button"[^>]*>台本自動生成/);
   assert.match(vibevoiceSimpleHtml, /id="vibevoice-translated-script"/);

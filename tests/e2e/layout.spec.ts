@@ -127,6 +127,7 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
 
 test("SkitVoice follows the documented three, two, and one-column task order", async ({ page }) => {
   await page.goto("/skitvoice");
+  await expect(page.locator("#vibevoice-output-language")).toHaveValue("en-US");
   const script = page.locator('[aria-label="台本"]');
   const voices = page.locator('[aria-label="参照音声"]');
   const generate = page.locator('[aria-label="生成"]');
