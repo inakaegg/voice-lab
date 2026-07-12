@@ -177,6 +177,13 @@ test("SkitVoice uses Voice Lab audio controls for references and generated resul
     const referenceControl = referenceAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
     await expect(referenceAudio).toBeHidden();
     await expect(referenceControl).toBeVisible();
+    const [voiceSlotBox, referenceControlBox] = await Promise.all([
+      referenceInput.locator("xpath=..").boundingBox(),
+      referenceControl.boundingBox(),
+    ]);
+    expect(voiceSlotBox).not.toBeNull();
+    expect(referenceControlBox).not.toBeNull();
+    expect(referenceControlBox?.width || 0).toBeGreaterThanOrEqual((voiceSlotBox?.width || 0) * 0.8);
 
     await page.evaluate(() => {
       const result = document.querySelector<HTMLElement>("#vibevoice-result");
