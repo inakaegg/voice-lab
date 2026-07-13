@@ -63,6 +63,7 @@ test("Cloudflare worker returns 404 for retired application routes", async () =>
     "/vibevoice/admin",
     "/seed-vc",
     "/user.html",
+    "/vibevoice.html",
     "/vibevoice_simple.html",
     "/seed_vc.html",
     "/static/user.html",
