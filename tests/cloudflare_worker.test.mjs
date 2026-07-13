@@ -26,7 +26,7 @@ test("Cloudflare worker routes only the current public app pages", async () => {
   ]);
 });
 
-test("Cloudflare worker exposes fun only through an authenticated admin session", async () => {
+test("Cloudflare worker exposes fun only to an allowlisted Google account", async () => {
   const requestedPaths = [];
   const env = adminAuthEnv(async () => {
     throw new Error("unexpected fetch");
@@ -44,7 +44,7 @@ test("Cloudflare worker exposes fun only through an authenticated admin session"
   const directAsset = await handleRequest(new Request("https://example.com/static/user.html", { headers: { cookie } }), env);
 
   assert.equal(blocked.status, 302);
-  assert.equal(blocked.headers.get("location"), "/admin/login?next=%2Ffun");
+  assert.equal(blocked.headers.get("location"), "/auth/google/login?next=%2Ffun");
   assert.equal(allowed.status, 200);
   assert.equal(directAsset.status, 404);
   assert.deepEqual(requestedPaths, ["/user.html"]);
@@ -97,11 +97,11 @@ test("Cloudflare worker protects directly addressed admin HTML assets", async ()
   for (const path of ["/static/index.html", "/static/practice_admin.html", "/static/vibevoice.html"]) {
     const response = await handleRequest(new Request(`https://example.com${path}`), env);
     assert.equal(response.status, 302, path);
-    assert.equal(response.headers.get("location"), `/admin/login?next=${encodeURIComponent(path)}`);
+    assert.equal(response.headers.get("location"), `/auth/google/login?next=${encodeURIComponent(path)}`);
   }
 });
 
-test("Cloudflare worker protects admin pages with a signed password session", async () => {
+test("Cloudflare worker protects admin pages with an allowlisted Google session", async () => {
   const requestedPaths = [];
   const env = adminAuthEnv(async () => {
     throw new Error("unexpected fetch");
@@ -114,50 +114,23 @@ test("Cloudflare worker protects admin pages with a signed password session", as
   };
 
   const blocked = await handleRequest(new Request("https://example.com/skitvoice/admin"), env);
-  const loginForm = await handleRequest(new Request("https://example.com/admin/login?next=%2Fskitvoice%2Fadmin"), env);
-  const badLogin = await handleRequest(
-    new Request("https://example.com/admin/login", {
-      method: "POST",
-      body: new URLSearchParams({ password: "wrong", next: "/skitvoice/admin" }),
-    }),
-    env,
-  );
-  const login = await handleRequest(
-    new Request("https://example.com/admin/login", {
-      method: "POST",
-      body: new URLSearchParams({ password: "secret-pass", next: "/skitvoice/admin" }),
-    }),
-    env,
-  );
-  const cookie = login.headers.get("set-cookie");
+  const cookie = await adminCookie(env, "/skitvoice/admin");
   const allowed = await handleRequest(new Request("https://example.com/skitvoice/admin", { headers: { cookie } }), env);
 
   assert.equal(blocked.status, 302);
-  assert.equal(blocked.headers.get("location"), "/admin/login?next=%2Fskitvoice%2Fadmin");
-  assert.equal(loginForm.status, 200);
-  assert.match(await loginForm.text(), /管理ログイン/);
-  assert.equal(badLogin.status, 401);
-  assert.equal(login.status, 302);
-  assert.equal(login.headers.get("location"), "/skitvoice/admin");
-  assert.match(cookie, /mo_admin_session=/);
+  assert.equal(blocked.headers.get("location"), "/auth/google/login?next=%2Fskitvoice%2Fadmin");
+  assert.match(cookie, /mo_public_session=/);
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /Secure/);
   assert.equal(allowed.status, 200);
   assert.deepEqual(requestedPaths, ["/vibevoice.html"]);
 });
 
-test("Cloudflare worker protects admin APIs with the same password session", async () => {
+test("Cloudflare worker protects admin APIs with the same allowlisted Google session", async () => {
   const env = adminAuthEnv(async () => {
     throw new Error("unexpected fetch");
   }, { kv: fakeKv() });
-  const login = await handleRequest(
-    new Request("https://example.com/admin/login", {
-      method: "POST",
-      body: new URLSearchParams({ password: "secret-pass" }),
-    }),
-    env,
-  );
-  const cookie = login.headers.get("set-cookie");
+  const cookie = await adminCookie(env);
 
   const blockedSettings = await handleRequest(
     new Request("https://example.com/api/user-settings", {
@@ -182,6 +155,34 @@ test("Cloudflare worker protects admin APIs with the same password session", asy
   assert.equal(allowedSettings.status, 200);
   assert.equal(blockedHistory.status, 401);
   assert.equal(allowedHistory.status, 200);
+});
+
+test("Cloudflare worker rejects a signed-in Google account that is not an admin", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
+  const cookie = await publicCookie(env, "/admin");
+
+  const page = await handleRequest(new Request("https://example.com/admin", { headers: { cookie } }), env);
+  const api = await handleRequest(new Request("https://example.com/api/public-access-settings", { headers: { cookie } }), env);
+
+  assert.equal(page.status, 403);
+  assert.match(await page.text(), /管理画面へのアクセス権がありません/);
+  assert.equal(api.status, 403);
+  assert.deepEqual(await api.json(), { detail: "admin access is forbidden" });
+});
+
+test("Cloudflare worker no longer exposes password-admin auth routes or cookies", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = { fetch: async () => new Response("Not Found", { status: 404 }) };
+
+  for (const path of ["/admin/login", "/admin/logout"]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`), env);
+    assert.equal(response.status, 404, path);
+    assert.doesNotMatch(response.headers.get("set-cookie") || "", /mo_admin_session/);
+  }
 });
 
 test("Cloudflare worker signs in public users with Google OAuth", async () => {
@@ -241,19 +242,16 @@ test("Cloudflare worker requires public Google login before costly generation AP
     throw new Error("unexpected fetch");
   }, { kv: fakeKv() });
 
-  const response = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
+  const form = new FormData();
+  form.append("script", "1 Hello");
+  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+  const response = await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", body: form }), env);
 
   assert.equal(response.status, 401);
   assert.deepEqual(await response.json(), { detail: "Google login is required" });
 });
 
-test("Cloudflare worker lets a password admin use fun generation APIs without a second Google login", async () => {
+test("Cloudflare worker lets a Google admin use fun generation APIs without consuming quota", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
     google_login_required: true,
@@ -262,7 +260,7 @@ test("Cloudflare worker lets a password admin use fun generation APIs without a 
     },
   }));
   const calls = [];
-  const env = publicAuthEnv(async (url) => {
+  const env = adminAuthEnv(async (url) => {
     calls.push(url);
     if (url === "https://api.openai.com/v1/audio/speech") {
       return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
@@ -290,7 +288,7 @@ test("Cloudflare worker lets a password admin use fun generation APIs without a 
   const practiceForm = new FormData();
   practiceForm.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
   practiceForm.append("target_language", "en-US");
-  const publicFeatureStillRequiresGoogle = await handleRequest(
+  const publicFeatureUsesSameGoogleSession = await handleRequest(
     new Request("https://example.com/api/practice/prompts", {
       method: "POST",
       headers: { cookie },
@@ -302,13 +300,37 @@ test("Cloudflare worker lets a password admin use fun generation APIs without a 
   assert.equal(allowed.status, 200);
   assert.equal(oversized.status, 413);
   assert.deepEqual(await oversized.json(), { detail: "text is too large" });
-  assert.equal(publicFeatureStillRequiresGoogle.status, 401);
-  assert.deepEqual(await publicFeatureStillRequiresGoogle.json(), { detail: "Google login is required" });
+  assert.notEqual(publicFeatureUsesSameGoogleSession.status, 401);
   assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
   const audit = JSON.parse(await kv.get("public-audit-log"));
-  assert.equal(audit.at(-1).action, "public_quota_exempt");
-  assert.equal(audit.at(-1).feature, "fun");
-  assert.equal(audit.at(-1).auth_method, "admin_session");
+  const funExemption = audit.find((event) => event.action === "public_quota_exempt" && event.feature === "fun");
+  assert.equal(funExemption.email, "admin@example.com");
+});
+
+test("Cloudflare worker always protects fun generation APIs with Google admin auth", async () => {
+  const env = adminAuthEnv(async (url) => {
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
+  const viewerCookie = await publicCookie(env, "/fun");
+  const requestBody = JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" });
+
+  const unauthenticated = await handleRequest(new Request("https://example.com/api/user-text-output", {
+    method: "POST",
+    body: requestBody,
+  }), env);
+  const forbidden = await handleRequest(new Request("https://example.com/api/user-text-output", {
+    method: "POST",
+    headers: { cookie: viewerCookie },
+    body: requestBody,
+  }), env);
+
+  assert.equal(unauthenticated.status, 401);
+  assert.deepEqual(await unauthenticated.json(), { detail: "Google admin login is required" });
+  assert.equal(forbidden.status, 403);
+  assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" });
 });
 
 test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
@@ -316,7 +338,7 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
   await kv.put("public-access-settings", JSON.stringify({
     google_login_required: true,
     features: {
-      fun: { daily_limit: 1, total_limit: 1, text_max_chars: 80, audio_max_bytes: 1000 },
+      skitvoice: { daily_limit: 1, total_limit: 1, script_max_chars: 80, audio_max_bytes: 1000 },
     },
   }));
   const calls = [];
@@ -328,40 +350,32 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
     if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
       return json({ email: "viewer@example.com", email_verified: true });
     }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    if (url.endsWith("/run")) {
+      return json({ id: "quota-job", status: "IN_QUEUE" });
     }
     throw new Error(`unexpected url: ${url}`);
   }, { kv });
   const cookie = await publicCookie(env);
 
-  const first = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const second = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
+  const request = () => {
+    const form = new FormData();
+    form.append("script", "1 Hello");
+    form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+    return new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form });
+  };
+  const first = await handleRequest(request(), env);
+  const second = await handleRequest(request(), env);
 
   assert.equal(first.status, 200);
   assert.equal(second.status, 429);
   assert.deepEqual(await second.json(), { detail: "public quota exceeded" });
-  assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/audio/speech").length, 1);
+  assert.equal(calls.filter((call) => call.url.endsWith("/run")).length, 1);
   const audit = JSON.parse(await kv.get("public-audit-log"));
   assert.deepEqual(
     audit.map((event) => event.action),
     ["google_login_success", "public_quota_consumed", "public_quota_blocked"],
   );
-  assert.equal(audit[1].feature, "fun");
+  assert.equal(audit[1].feature, "skitvoice");
   assert.equal(audit[1].email, "viewer@example.com");
   assert.equal(audit[1].daily_used, 1);
   assert.equal(audit[2].limit_type, "daily");
@@ -370,15 +384,20 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
 test("Cloudflare worker stores quota and audit in D1 when bound", async () => {
   const kv = fakeKv();
   const db = fakeD1();
-  await kv.put("public-access-settings", JSON.stringify({ google_login_required: true, features: { fun: { daily_limit: 1, total_limit: 1, text_max_chars: 80, audio_max_bytes: 1000 } } }));
+  await kv.put("public-access-settings", JSON.stringify({ google_login_required: true, features: { skitvoice: { daily_limit: 1, total_limit: 1, script_max_chars: 80, audio_max_bytes: 1000 } } }));
   const env = publicAuthEnv(async (url) => {
     if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
     if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
-    if (url === "https://api.openai.com/v1/audio/speech") return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    if (url.endsWith("/run")) return json({ id: "quota-job", status: "IN_QUEUE" });
     throw new Error(`unexpected url: ${url}`);
   }, { kv, db });
   const cookie = await publicCookie(env);
-  const request = () => new Request("https://example.com/api/user-text-output", { method: "POST", headers: { cookie }, body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }) });
+  const request = () => {
+    const form = new FormData();
+    form.append("script", "1 Hello");
+    form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+    return new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form });
+  };
 
   assert.equal((await handleRequest(request(), env)).status, 200);
   assert.equal((await handleRequest(request(), env)).status, 429);
@@ -436,8 +455,8 @@ test("Cloudflare worker exempts configured admin Google emails from public quota
   );
 });
 
-test("Cloudflare worker lets password admin edit public access limits", async () => {
-  const env = publicAuthEnv(async () => {
+test("Cloudflare worker lets a Google admin edit public access limits", async () => {
+  const env = adminAuthEnv(async () => {
     throw new Error("unexpected fetch");
   }, { kv: fakeKv() });
   const cookie = await adminCookie(env);
@@ -471,7 +490,7 @@ test("Cloudflare worker lets password admin edit public access limits", async ()
   assert.equal(audit.events[0].action, "public_access_settings_updated");
   assert.equal(audit.events[0].path, "/api/public-access-settings");
   assert.equal(fetched.google_login_required, true);
-  assert.deepEqual(fetched.admin_google_emails, ["owner@example.com"]);
+  assert.deepEqual(fetched.admin_google_emails, ["owner@example.com", "admin@example.com"]);
   assert.equal(fetched.features.speakloop.daily_limit, 9);
   assert.equal(fetched.features.speakloop.total_limit, 90);
   assert.equal(fetched.features.speakloop.audio_max_bytes, 1234);
@@ -493,7 +512,7 @@ test("Cloudflare worker applies saved public admin emails before quota checks", 
       return json({ id: "admin-vv-job", status: "IN_QUEUE" });
     }
     throw new Error(`unexpected url: ${url}`);
-  }, { kv });
+  }, { kv, adminGoogleEmails: "owner@example.com" });
   const adminSession = await adminCookie(env);
 
   const updated = await handleRequest(
@@ -531,7 +550,7 @@ test("Cloudflare worker applies saved public admin emails before quota checks", 
   assert.ok(runCall);
   assert.deepEqual(
     audit.map((event) => event.action),
-    ["public_access_settings_updated", "google_login_success", "public_quota_exempt"],
+    ["google_login_success", "public_access_settings_updated", "google_login_success", "public_quota_exempt"],
   );
 });
 
@@ -643,7 +662,7 @@ test("Cloudflare worker does not recurse while migrating an empty legacy sample 
   assert.equal((await response.json()).features.skitvoice.samples["ja-JP"], null);
 });
 
-test("Cloudflare worker rejects oversized public input before consuming quota", async () => {
+test("Cloudflare worker rejects oversized admin input before calling an external API", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
     google_login_required: true,
@@ -652,7 +671,7 @@ test("Cloudflare worker rejects oversized public input before consuming quota", 
     },
   }));
   const calls = [];
-  const env = publicAuthEnv(async (url) => {
+  const env = adminAuthEnv(async (url) => {
     calls.push(url);
     if (url === "https://oauth2.googleapis.com/token") {
       return json({ access_token: "google-access-token" });
@@ -665,7 +684,7 @@ test("Cloudflare worker rejects oversized public input before consuming quota", 
     }
     throw new Error(`unexpected url: ${url}`);
   }, { kv });
-  const cookie = await publicCookie(env);
+  const cookie = await adminCookie(env);
 
   const tooLong = await handleRequest(
     new Request("https://example.com/api/user-text-output", {
@@ -919,7 +938,7 @@ test("Cloudflare worker reports admin auth setup errors on protected routes", as
   const api = await handleRequest(new Request("https://example.com/api/warmup", { method: "POST" }), env);
 
   assert.equal(page.status, 503);
-  assert.match(await page.text(), /ADMIN_PASSWORD_SHA256/);
+  assert.match(await page.text(), /ADMIN_GOOGLE_EMAILS/);
   assert.equal(api.status, 503);
   assert.deepEqual(await api.json(), { detail: "admin authentication is not configured" });
 });
@@ -957,7 +976,7 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   form.append("text_transform_options", JSON.stringify({ variation: true }));
 
   const response = await handleRequest(
-    new Request("https://example.com/api/translate-speech-jobs", { method: "POST", body: form }),
+    new Request("https://example.com/api/translate-speech-jobs", { method: "POST", headers: { cookie: await adminCookie(env) }, body: form }),
     env,
   );
   const payload = await response.json();
@@ -1365,7 +1384,7 @@ test("Cloudflare worker maps completed RunPod voice conversion status to local j
 
 test("Cloudflare worker creates user text output with OpenAI text transform and TTS", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
     if (url === "https://api.openai.com/v1/responses") {
       return json({ output_text: "めっちゃこんにちは" });
@@ -1376,10 +1395,11 @@ test("Cloudflare worker creates user text output with OpenAI text transform and 
     throw new Error(`unexpected url: ${url}`);
   });
 
+  const cookie = await adminCookie(env);
   const response = await handleRequest(
     new Request("https://example.com/api/user-text-output", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", cookie },
       body: JSON.stringify({
         transcript: "Halo",
         translated_text: "こんにちは",
@@ -1471,11 +1491,12 @@ test("Cloudflare worker does not save joke TTS output", async () => {
     },
     { kv: fakeKv() },
   );
+  const cookie = await adminCookie(env);
 
   const jokeResponse = await handleRequest(
     new Request("https://example.com/api/user-joke-output", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", cookie },
       body: JSON.stringify({ text: "これは冗談です。", target_language: "id-ID" }),
     }),
     env,
@@ -1834,14 +1855,25 @@ function fakeEnv(fetchImpl, options = {}) {
 function adminAuthEnv(fetchImpl, options = {}) {
   return {
     ...fakeEnv(fetchImpl, options),
-    ADMIN_PASSWORD_SHA256: "f38eb016088980f10dcbffce49bc7d0d476d198c43a6fa8a343416709049c9db",
-    ADMIN_SESSION_SECRET: "test-admin-session-secret",
+    GOOGLE_CLIENT_ID: "google-client-id",
+    GOOGLE_CLIENT_SECRET: "google-client-secret",
+    PUBLIC_SESSION_SECRET: "test-public-session-secret",
+    ADMIN_GOOGLE_EMAILS: options.adminGoogleEmails || "admin@example.com",
+    __fetch: async (url, init) => {
+      if (url === "https://oauth2.googleapis.com/token") {
+        return json({ access_token: "google-access-token" });
+      }
+      if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+        return json({ email: options.googleEmail || "admin@example.com", email_verified: true, name: "Admin" });
+      }
+      return fetchImpl(url, init);
+    },
   };
 }
 
 function publicAuthEnv(fetchImpl, options = {}) {
   return {
-    ...adminAuthEnv(fetchImpl, options),
+    ...fakeEnv(fetchImpl, options),
     GOOGLE_CLIENT_ID: "google-client-id",
     GOOGLE_CLIENT_SECRET: "google-client-secret",
     PUBLIC_SESSION_SECRET: "test-public-session-secret",
@@ -1850,15 +1882,8 @@ function publicAuthEnv(fetchImpl, options = {}) {
   };
 }
 
-async function adminCookie(env) {
-  const response = await handleRequest(
-    new Request("https://example.com/admin/login", {
-      method: "POST",
-      body: new URLSearchParams({ password: "secret-pass" }),
-    }),
-    env,
-  );
-  return response.headers.get("set-cookie");
+async function adminCookie(env, next = "/admin") {
+  return publicCookie(env, next);
 }
 
 async function publicCookie(env, next = "/speakloop") {
