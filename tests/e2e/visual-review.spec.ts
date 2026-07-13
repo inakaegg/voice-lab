@@ -12,7 +12,6 @@ const routes = [
   { path: "/speakloop/admin", slug: "speakloop-admin" },
   { path: "/skitvoice/admin", slug: "skitvoice-admin" },
   { path: "/fun", slug: "fun" },
-  { path: "/seed-vc", slug: "seed-vc" },
 ] as const;
 
 test.beforeEach(async ({ page }) => {
@@ -44,6 +43,19 @@ for (const theme of ["light", "dark"] as const) {
     await mkdir(outputDir, { recursive: true });
     await page.screenshot({
       path: `${outputDir}/${testInfo.project.name}-${theme}-speakloop-recording.png`,
+      fullPage: true,
+    });
+  });
+
+  test(`capture Cloudflare admin without local history in ${theme}`, async ({ page }, testInfo) => {
+    await page.unroute("**/api/**");
+    await installUiApiFixtures(page, { historyState: "disabled" });
+    await page.goto("/speakloop/admin");
+    await page.evaluate(() => document.fonts.ready);
+    const outputDir = "tmp/playwright/visual-review";
+    await mkdir(outputDir, { recursive: true });
+    await page.screenshot({
+      path: `${outputDir}/${testInfo.project.name}-${theme}-speakloop-admin-cloudflare.png`,
       fullPage: true,
     });
   });

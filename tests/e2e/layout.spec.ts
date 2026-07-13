@@ -12,7 +12,6 @@ const publicRoutes = [
 const adminRoutes = ["/admin", "/speakloop/admin", "/skitvoice/admin"];
 const utilityRoutes = [
   { path: "/fun", heading: "はなしてください", action: "ろくおん" },
-  { path: "/seed-vc", heading: "Seed-VC単体変換", action: "変換" },
 ] as const;
 const pageErrors = new WeakMap<Page, Error[]>();
 
@@ -422,6 +421,22 @@ test("practice history API errors remain readable inside the admin layout", asyn
   await assertNoHorizontalOverflow(page);
 });
 
+test("Cloudflare mode hides local-only history panels from shared admin pages", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { historyState: "disabled" });
+
+  await page.goto("/admin");
+  await expect(page.locator("[data-audio-history-panel]")).toBeHidden();
+
+  await page.goto("/speakloop/admin");
+  await expect(page.locator(".admin-config-group")).toHaveAttribute("open", "");
+  await expect(page.locator("[data-practice-history-panel]")).toHaveCount(3);
+  for (const panel of await page.locator("[data-practice-history-panel]").all()) {
+    await expect(panel).toBeHidden();
+  }
+  await assertNoHorizontalOverflow(page);
+});
+
 for (const route of utilityRoutes) {
   test(`${route.path} keeps compatibility controls inside the Voice Lab layout`, async ({ page }) => {
     await page.goto(route.path);
@@ -430,12 +445,5 @@ for (const route of utilityRoutes) {
     await expect(page.getByRole("button", { name: route.action, exact: true }).first()).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await assertVisibleControlsInsideViewport(page);
-    if (route.path === "/seed-vc") {
-      const details = page.locator(".utility-details");
-      await expect(details).not.toHaveAttribute("open", "");
-      await details.locator("summary").click();
-      await assertNoHorizontalOverflow(page);
-      await assertVisibleControlsInsideViewport(page);
-    }
   });
 }

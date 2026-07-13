@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "公開model revisionとテスト専用password hash"
+regexTarget = "match"
+regexes = [
+  '''VIBEVOICE_TOKENIZER_REVISION["=: ]+"?(8faed761d45a263340a0528343f099c05c9a4323|d149729398750b98c0af14eb82c78cfe92750796|1b81fecc784a076dcd935678db551871f4598ebf)"?''',
+  '''tokenizer_revision[=: ]+"(8faed761d45a263340a0528343f099c05c9a4323|d149729398750b98c0af14eb82c78cfe92750796|1b81fecc784a076dcd935678db551871f4598ebf)"''',
+  '''ADMIN_PASSWORD_SHA256: "f38eb016088980f10dcbffce49bc7d0d476d198c43a6fa8a343416709049c9db"''',
+]

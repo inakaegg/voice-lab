@@ -1007,16 +1007,11 @@ html[data-theme="dark"] .react-generate-card .vibevoice-generate-button {
   }
 
   .voice-lab-admin-body .admin-nav {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     margin-left: -2px;
     max-width: 100%;
-    overflow-x: auto;
+    overflow-x: visible;
     padding: 2px;
-    scrollbar-width: none;
-  }
-
-  .voice-lab-admin-body .admin-nav::-webkit-scrollbar {
-    display: none;
   }
 
   .voice-lab-admin-body .admin-nav a {

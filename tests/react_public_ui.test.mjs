@@ -62,7 +62,10 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.ok(skitvoice.indexOf('label="英語"') < skitvoice.indexOf('label="中国語"'));
   assert.ok(skitvoice.indexOf('label="中国語"') < skitvoice.indexOf('label="日本語"'));
   assert.ok(skitvoice.indexOf("react-output-samples") < skitvoice.indexOf("vibevoice-form"));
-  assert.ok(skitvoice.indexOf("vibevoice-form") < skitvoice.indexOf("参照音声と生成内容は外部の音声処理APIへ送信"));
+  assert.ok(skitvoice.indexOf("vibevoice-form") < skitvoice.indexOf("音声は生成・評価のため外部サービスで処理されます"));
+  assert.doesNotMatch(speakloop, /<SampleAudio/);
+  assert.doesNotMatch(speakloop, /音声履歴を保存/);
+  assert.doesNotMatch(skitvoice, /履歴を保存/);
 });
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {
