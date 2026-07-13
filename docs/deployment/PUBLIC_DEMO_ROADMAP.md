@@ -11,25 +11,27 @@
 - Python/Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
 - Git履歴のgitleaks検査、Security policy、Dependabot設定を追加済み。
 - `/fun`は管理者専用の実験画面とし、旧routeは廃止済み。
+- SkitVoiceの英語、中国語、日本語サンプル音声を公開環境へ登録済み。
+- 公開Workerの主要route、認証境界、サンプル配信、OpenAI／RunPod接続をsmoke確認済み。
+- GitHub repositoryはpublicへ切り替え、description、homepage、topicsを設定済み。
+- Cloudflare版で履歴保存を廃止した後、旧音声履歴のKV／R2データを削除済み。
 
 ## 公開前に残る作業
 
-### 外部素材・ユーザー判断が必要
+### 外部素材・ユーザー作業が必要
 
-1. SkitVoiceの英語、中国語、日本語サンプル音声を管理画面から登録する。
-2. サンプル反映後、PCとスマートフォンの公開用スクリーンショットを撮影する。
-3. GitHub repositoryをpublicへ切り替える時点を決める。
+1. PCとスマートフォンの公開用スクリーンショットを撮影し、READMEへ追加する。
 
 SpeakLoopにはサンプル音声を表示しない。現時点ではOSSライセンスを付与せず、ポートフォリオとしてソースを公開する。
 
-### 公開直前の確認
+### 完了した公開確認
 
-1. 公開Workerでトップ、OAuth、SpeakLoop、SkitVoice、管理ログインをsmoke確認する。
-2. `/fun`が未認証では管理ログインへ遷移し、認証後だけ表示されることを確認する。
-3. 廃止routeと旧HTML直指定が404になることを確認する。
-4. `gitleaks git --log-opts='--all' .` でGit履歴全体を検査する。
-5. READMEへ確定したスクリーンショットを追加し、デモURLを最上部から到達可能にする。
-6. GitHub description、homepage、topicsを設定する。
+1. 公開Workerでトップ、OAuth開始、SpeakLoop、SkitVoice、管理ログイン境界をsmoke確認した。
+2. `/fun`が未認証では管理ログインへ遷移し、旧routeと旧HTML直指定が404になることを確認した。
+3. SkitVoiceの英語、中国語、日本語サンプルが公開APIから配信されることを確認した。
+4. OpenAIとRunPodの設定、RunPod healthを公開Workerのruntime APIで確認した。
+5. `gitleaks git --log-opts='--all' .` でGit履歴全体を検査し、漏洩なしを確認した。
+6. GitHub description、homepage、topicsを設定した。
 
 ## 公開後の改善
 
