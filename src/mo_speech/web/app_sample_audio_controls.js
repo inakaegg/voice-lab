@@ -1,5 +1,5 @@
 (function initializeSampleAudioControls(global) {
-  function ensureSampleAudioControl(audio, label = "サンプル音声") {
+  function ensureVoiceLabAudioControl(audio, label = "音声") {
     if (!(audio instanceof HTMLAudioElement)) {
       return null;
     }
@@ -13,7 +13,16 @@
     audio.dataset.sampleAudioNative = "true";
     updateLabels(control, label);
     resetControl(audio, control);
+    control.hidden = false;
     return control;
+  }
+
+  function hideVoiceLabAudioControl(audio) {
+    const control = audio?.parentElement?.querySelector(":scope > [data-sample-audio-control]");
+    if (control) {
+      control.hidden = true;
+      setPlaying(control, false);
+    }
   }
 
   function createControl(audio) {
@@ -113,5 +122,7 @@
     return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
   }
 
-  global.ensureSampleAudioControl = ensureSampleAudioControl;
+  global.ensureVoiceLabAudioControl = ensureVoiceLabAudioControl;
+  global.hideVoiceLabAudioControl = hideVoiceLabAudioControl;
+  global.ensureSampleAudioControl = ensureVoiceLabAudioControl;
 })(window);

@@ -83,16 +83,16 @@ test("system theme follows the browser color scheme on every public route", asyn
   }
 });
 
-test("SpeakLoop offers Chinese and English and normalizes a saved Japanese target", async ({ page }) => {
+test("SpeakLoop defaults to English and normalizes a saved Japanese target", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("mo:practice-settings", JSON.stringify({ target_language: "ja-JP" }));
   });
   await page.goto("/speakloop");
   const language = page.locator("#practice-target-language-select");
   await expect(language.locator("option")).toHaveCount(2);
-  await expect(language.locator("option").nth(0)).toHaveAttribute("value", "zh-CN");
-  await expect(language.locator("option").nth(1)).toHaveAttribute("value", "en-US");
-  await expect(language).toHaveValue("zh-CN");
+  await expect(language.locator("option").nth(0)).toHaveAttribute("value", "en-US");
+  await expect(language.locator("option").nth(1)).toHaveAttribute("value", "zh-CN");
+  await expect(language).toHaveValue("en-US");
 });
 
 test("SpeakLoop switches from one task card to a responsive two-step flow", async ({ page }) => {
@@ -101,6 +101,25 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
   const promptPanel = page.locator("#practice-prompt-panel");
   const flow = page.locator(".react-practice-flow");
   await expect(promptPanel).toBeHidden();
+
+  const microphone = page.locator("#practice-native-record-button .record-icon");
+  const recordButton = page.locator("#practice-native-record-button");
+  const caption = page.locator("#practice-native-record-button + span");
+  const [microphoneBox, recordButtonBox, captionBox] = await Promise.all([
+    microphone.boundingBox(),
+    recordButton.boundingBox(),
+    caption.boundingBox(),
+  ]);
+  expect(microphoneBox).not.toBeNull();
+  expect(recordButtonBox).not.toBeNull();
+  expect(captionBox).not.toBeNull();
+  expect((microphoneBox?.y || 0) + (microphoneBox?.height || 0)).toBeLessThanOrEqual((recordButtonBox?.y || 0) + (recordButtonBox?.height || 0));
+  expect(captionBox?.y || 0).toBeGreaterThanOrEqual((recordButtonBox?.y || 0) + (recordButtonBox?.height || 0));
+  await expect(microphone.locator("svg")).toBeVisible();
+  await expect(recordButton).toHaveCSS("background-color", "rgb(230, 90, 67)");
+  await recordButton.evaluate((element) => element.classList.add("is-recording"));
+  await expect(recordButton).toHaveCSS("background-color", "rgb(199, 55, 47)");
+  await recordButton.evaluate((element) => element.classList.remove("is-recording"));
 
   const [idleCard, flowBox] = await Promise.all([nativePanel.boundingBox(), flow.boundingBox()]);
   expect(idleCard).not.toBeNull();
@@ -127,6 +146,7 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
 
 test("SkitVoice follows the documented three, two, and one-column task order", async ({ page }) => {
   await page.goto("/skitvoice");
+  await expect(page.locator("#vibevoice-output-language")).toHaveValue("en-US");
   const script = page.locator('[aria-label="台本"]');
   const voices = page.locator('[aria-label="参照音声"]');
   const generate = page.locator('[aria-label="生成"]');
@@ -149,6 +169,44 @@ test("SkitVoice follows the documented three, two, and one-column task order", a
   } else {
     expect(generateBox?.y || 0).toBeGreaterThan((scriptBox?.y || 0) + (scriptBox?.height || 0) - 2);
     expect(voicesBox?.y || 0).toBeGreaterThan((generateBox?.y || 0) + (generateBox?.height || 0) - 2);
+  }
+});
+
+test("SkitVoice uses Voice Lab audio controls for references and generated results", async ({ page }) => {
+  for (const route of ["/skitvoice", "/skitvoice/admin"]) {
+    await page.goto(route);
+    const referenceInput = page.locator('input[name="voice_file_1"]');
+    await referenceInput.setInputFiles({ name: "voice.wav", mimeType: "audio/wav", buffer: Buffer.from("RIFF reference") });
+    const referenceAudio = page.locator('[data-saved-voice-preview-slot="1"]');
+    const referenceControl = referenceAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
+    await expect(referenceAudio).toBeHidden();
+    await expect(referenceControl).toBeVisible();
+    const [voiceSlotBox, referenceControlBox] = await Promise.all([
+      referenceInput.locator("xpath=..").boundingBox(),
+      referenceControl.boundingBox(),
+    ]);
+    expect(voiceSlotBox).not.toBeNull();
+    expect(referenceControlBox).not.toBeNull();
+    expect(referenceControlBox?.width || 0).toBeGreaterThanOrEqual((voiceSlotBox?.width || 0) * 0.8);
+
+    await page.evaluate(() => {
+      const result = document.querySelector<HTMLElement>("#vibevoice-result");
+      const audio = document.querySelector<HTMLAudioElement>("#vibevoice-audio");
+      if (!result || !audio) return;
+      result.hidden = false;
+      audio.src = "data:audio/wav;base64,UklGRg==";
+      window.ensureVoiceLabAudioControl?.(audio, "生成結果");
+    });
+    const resultAudio = page.locator("#vibevoice-audio");
+    const resultControl = resultAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
+    await expect(resultAudio).toBeHidden();
+    await expect(resultControl).toBeVisible();
+    await expect(resultControl.locator(".sample-audio-play-button")).toHaveAttribute("aria-label", "生成結果を再生");
+    await assertNoHorizontalOverflow(page);
+    if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+      const slug = `${route.includes("admin") ? "admin-" : ""}voice-lab-players`;
+      await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-${slug}.png`, fullPage: true });
+    }
   }
 });
 

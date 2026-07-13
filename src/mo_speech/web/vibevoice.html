@@ -120,7 +120,7 @@
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="1">未保存</small>
                   <small class="vibevoice-url-voice" data-reference-url-display-slot="1" data-local-reference-url hidden></small>
-                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="1" controls preload="metadata" hidden aria-label="Speaker 1 参照音声プレビュー"></audio>
+                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="1" data-voice-lab-audio-label="Speaker 1 参照音声" preload="metadata" hidden aria-label="Speaker 1 参照音声プレビュー"></audio>
                 </label>
                 <label class="vibevoice-upload-slot">
                   <span class="vibevoice-upload-index">2</span>
@@ -134,7 +134,7 @@
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="2">未保存</small>
                   <small class="vibevoice-url-voice" data-reference-url-display-slot="2" data-local-reference-url hidden></small>
-                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="2" controls preload="metadata" hidden aria-label="Speaker 2 参照音声プレビュー"></audio>
+                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="2" data-voice-lab-audio-label="Speaker 2 参照音声" preload="metadata" hidden aria-label="Speaker 2 参照音声プレビュー"></audio>
                 </label>
                 <label class="vibevoice-upload-slot">
                   <span class="vibevoice-upload-index">3</span>
@@ -148,7 +148,7 @@
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="3">未保存</small>
                   <small class="vibevoice-url-voice" data-reference-url-display-slot="3" data-local-reference-url hidden></small>
-                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="3" controls preload="metadata" hidden aria-label="Speaker 3 参照音声プレビュー"></audio>
+                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="3" data-voice-lab-audio-label="Speaker 3 参照音声" preload="metadata" hidden aria-label="Speaker 3 参照音声プレビュー"></audio>
                 </label>
                 <label class="vibevoice-upload-slot">
                   <span class="vibevoice-upload-index">4</span>
@@ -162,7 +162,7 @@
                   </span>
                   <small class="vibevoice-saved-voice" data-saved-voice-slot="4">未保存</small>
                   <small class="vibevoice-url-voice" data-reference-url-display-slot="4" data-local-reference-url hidden></small>
-                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="4" controls preload="metadata" hidden aria-label="Speaker 4 参照音声プレビュー"></audio>
+                  <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="4" data-voice-lab-audio-label="Speaker 4 参照音声" preload="metadata" hidden aria-label="Speaker 4 参照音声プレビュー"></audio>
                 </label>
               </div>
             </section>
@@ -199,9 +199,9 @@
                 <label class="vibevoice-setting-field vibevoice-setting-wide">
                   出力言語
                   <select name="output_language" id="vibevoice-output-language">
-                    <option value="en-US">英語</option>
-                    <option value="zh-CN" selected>中国語</option>
-                    <option value="ja-JP">日本語（低品質）</option>
+                    <option value="en-US" selected>🇺🇸 English</option>
+                    <option value="zh-CN">🇨🇳 中文</option>
+                    <option value="ja-JP">🇯🇵 日本語（低品質）</option>
                   </select>
                 </label>
                 <label class="vibevoice-range-control">
@@ -407,7 +407,7 @@
           </div>
           <a id="vibevoice-download" class="vibevoice-download" href="#" download="vibevoice-output.wav">音声を保存</a>
         </div>
-        <audio id="vibevoice-audio" controls></audio>
+        <audio id="vibevoice-audio" data-voice-lab-audio-label="生成結果"></audio>
         <section id="vibevoice-translated-script-section" class="vibevoice-translated-script" hidden>
           <h3>翻訳後の台本</h3>
           <pre id="vibevoice-translated-script"></pre>

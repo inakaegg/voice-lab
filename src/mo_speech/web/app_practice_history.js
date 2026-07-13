@@ -40,6 +40,7 @@ function renderHistoryList(container, entries) {
 
     const audio = document.createElement("audio");
     audio.controls = true;
+    audio.dataset.voiceLabAudioLabel = entry.label || entry.filename || "音声履歴";
     audio.preload = "none";
     audio.src = entry.url;
 
@@ -49,6 +50,7 @@ function renderHistoryList(container, entries) {
       item.append(createDiagnosticsDetails(diagnostics));
     }
     container.append(item);
+    window.ensureVoiceLabAudioControl?.(audio, audio.dataset.voiceLabAudioLabel);
   });
 }
 

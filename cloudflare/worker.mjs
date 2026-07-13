@@ -247,7 +247,6 @@ function isProtectedAdminPagePath(pathname) {
     "/vibevoice.html",
     "/static/vibevoice.html",
     "/speakloop/admin",
-    "/practice/admin",
     "/practice_admin.html",
     "/static/practice_admin.html",
   ]).has(path);
@@ -924,11 +923,9 @@ async function serveAsset(request, env, url) {
     assetUrl.pathname = "/react/portal.html";
   } else if (url.pathname === "/fun" || url.pathname === "/fun/" || url.pathname === "/user" || url.pathname === "/user/") {
     assetUrl.pathname = "/user.html";
-  } else if (url.pathname === "/practice" || url.pathname === "/practice/" || url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
+  } else if (url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
     assetUrl.pathname = "/react/speakloop.html";
   } else if (
-    url.pathname === "/practice/admin" ||
-    url.pathname === "/practice/admin/" ||
     url.pathname === "/speakloop/admin" ||
     url.pathname === "/speakloop/admin/"
   ) {

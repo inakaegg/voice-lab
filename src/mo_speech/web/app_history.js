@@ -66,6 +66,7 @@ function renderAudioHistoryList(container, entries) {
     item.className = "history-item";
     const audio = document.createElement("audio");
     audio.controls = true;
+    audio.dataset.voiceLabAudioLabel = entry.label || entry.filename || "音声履歴";
     audio.preload = "metadata";
     if (entry.media_type) {
       const source = document.createElement("source");
@@ -126,6 +127,7 @@ function renderAudioHistoryList(container, entries) {
     }
     item.append(actions);
     container.append(item);
+    window.ensureVoiceLabAudioControl?.(audio, audio.dataset.voiceLabAudioLabel);
   });
 }
 

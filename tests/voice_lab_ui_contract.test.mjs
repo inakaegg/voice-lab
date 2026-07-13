@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitvoiceHtml, legacyPortalHtml, legacySpeakloopHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml] = await Promise.all([
+const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitvoiceHtml, legacyPortalHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml] = await Promise.all([
   read("package.json"),
   read("pyproject.toml"),
   read("src/mo_speech/api.py"),
@@ -13,7 +13,6 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitv
   read("apps/web/speakloop.html"),
   read("apps/web/skitvoice.html"),
   read("src/mo_speech/web/portal.html"),
-  read("src/mo_speech/web/practice.html"),
   read("src/mo_speech/web/vibevoice_simple.html"),
   read("src/mo_speech/web/index.html"),
   read("src/mo_speech/web/practice_admin.html"),
@@ -21,6 +20,7 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitv
   read("src/mo_speech/web/user.html"),
   read("src/mo_speech/web/seed_vc.html"),
 ]);
+const portalStyles = await read("apps/web/src/portal/styles.css");
 
 test("Voice Lab is the application and package brand without renaming the Python namespace", () => {
   assert.equal(JSON.parse(pkgText).name, "voice-lab");
@@ -36,16 +36,15 @@ test("Voice Lab is the application and package brand without renaming the Python
 
 test("all active pages use the built Voice Lab style assets instead of direct legacy CSS", () => {
   assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
-  for (const html of [speakloopHtml, skitvoiceHtml, legacyPortalHtml, legacySpeakloopHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml]) {
+  for (const html of [speakloopHtml, skitvoiceHtml, legacyPortalHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml]) {
     assert.doesNotMatch(html, /\/static\/styles\.css/);
   }
   assert.match(viteConfig, /appStyles/);
   assert.match(speakloopHtml, /src\/styles\/app\.css/);
   assert.match(skitvoiceHtml, /src\/styles\/app\.css/);
-  for (const html of [legacyPortalHtml, legacySpeakloopHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml]) {
+  for (const html of [legacyPortalHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml]) {
     assert.match(html, /\/react\/assets\/app\.css/);
   }
-  assert.match(legacySpeakloopHtml, /Voice Lab<\/title>/);
   assert.match(legacySkitvoiceHtml, /Voice Lab<\/title>/);
 });
 
@@ -69,4 +68,9 @@ test("Playwright layout tests are wired into npm and CI", () => {
   assert.match(ci, /npm run test:e2e/);
   assert.match(ci, /pip wheel \. --no-deps/);
   assert.match(ci, /scripts\/verify_wheel_assets\.py/);
+});
+
+test("portal product accents distinguish creation from learning", () => {
+  assert.match(portalStyles, /\.portal-product-link-skit\s*\{[^}]*--product-accent:\s*#a85d2d/s);
+  assert.match(portalStyles, /\.portal-product-link-speak\s*\{[^}]*--product-accent:\s*#3e68ad/s);
 });

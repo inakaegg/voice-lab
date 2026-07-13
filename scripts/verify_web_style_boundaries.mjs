@@ -10,7 +10,6 @@ const [portal, speakloop, skitvoice, appCss, ...staticPages] = await Promise.all
   readFile(new URL("../src/mo_speech/web/react/assets/app.css", import.meta.url), "utf8"),
   ...[
     "portal.html",
-    "practice.html",
     "vibevoice_simple.html",
     "index.html",
     "practice_admin.html",
