@@ -361,6 +361,33 @@ test("Cloudflare worker always protects fun voice conversion jobs with Google ad
   assert.equal(calls.some((url) => url.endsWith("/run")), false);
 });
 
+test("Cloudflare worker protects fun job status endpoints with Google admin auth", async () => {
+  const calls = [];
+  const env = adminAuthEnv(async (url) => {
+    calls.push(url);
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
+  const viewerCookie = await publicCookie(env, "/fun");
+
+  for (const path of [
+    "/api/translate-speech-jobs/job-translation",
+    "/api/voice-conversion-jobs/job-vc",
+  ]) {
+    const unauthenticated = await handleRequest(new Request(`https://example.com${path}`), env);
+    const forbidden = await handleRequest(
+      new Request(`https://example.com${path}`, { headers: { cookie: viewerCookie } }),
+      env,
+    );
+
+    assert.equal(unauthenticated.status, 401, path);
+    assert.deepEqual(await unauthenticated.json(), { detail: "admin authentication required" }, path);
+    assert.equal(forbidden.status, 403, path);
+    assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" }, path);
+  }
+
+  assert.deepEqual(calls, []);
+});
+
 test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
@@ -1002,16 +1029,19 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   form.append("voice_mode", "default");
   form.append("text_transform", "user_effects");
   form.append("text_transform_options", JSON.stringify({ variation: true }));
+  const adminCookieValue = await adminCookie(env);
 
   const response = await handleRequest(
-    new Request("https://example.com/api/translate-speech-jobs", { method: "POST", headers: { cookie: await adminCookie(env) }, body: form }),
+    new Request("https://example.com/api/translate-speech-jobs", { method: "POST", headers: { cookie: adminCookieValue }, body: form }),
     env,
   );
   const payload = await response.json();
   const polled = await (
-    await handleRequest(new Request(`https://example.com/api/translate-speech-jobs/${payload.job_id}`), env)
+    await handleRequest(
+      new Request(`https://example.com/api/translate-speech-jobs/${payload.job_id}`, { headers: { cookie: adminCookieValue } }),
+      env,
+    )
   ).json();
-  const adminCookieValue = await adminCookie(env);
   const history = await (
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
@@ -1395,7 +1425,9 @@ test("Cloudflare worker maps completed RunPod voice conversion status to local j
   );
 
   const response = await handleRequest(
-    new Request("https://example.com/api/voice-conversion-jobs/job-vc"),
+    new Request("https://example.com/api/voice-conversion-jobs/job-vc", {
+      headers: { cookie: await adminCookie(env) },
+    }),
     env,
   );
   const payload = await response.json();
