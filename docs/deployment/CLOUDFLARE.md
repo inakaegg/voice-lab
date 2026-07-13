@@ -146,7 +146,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 `workers.dev` のまま公開ページを認証なしにして管理機能を守るため、Worker内の簡易管理ログインを使う。対象は `/admin`、`/skitvoice/admin`、`/speakloop/admin`、`/fun` と、管理画面が使う設定保存、履歴機能の状態確認、warmup APIである。ログイン成功時は `HttpOnly; Secure; SameSite=Lax` cookieを発行し、以後の管理画面/APIだけで検証する。`ADMIN_PASSWORD_SHA256` または `ADMIN_SESSION_SECRET` が未設定の場合、管理ルートはsetup errorを返し、公開ページと生成APIは動かし続ける。
 
-公開生成APIのGoogleログインは管理画面ログインとは別である。管理画面は従来どおり管理パスワードで守り、公開ユーザーは `/auth/google/login` からGoogle OAuthでログインする。管理者本人が公開ページで生成する場合もGoogleログインは使うが、emailが管理者リストに含まれていればquotaは消費しない。
+公開生成APIのGoogleログインは管理画面ログインとは別である。管理画面は従来どおり管理パスワードで守り、公開ユーザーは `/auth/google/login` からGoogle OAuthでログインする。管理者本人がSpeakLoopまたはSkitVoiceの公開ページで生成する場合もGoogleログインは使うが、emailが管理者リストに含まれていればquotaは消費しない。管理者専用の`/fun`だけは例外とし、有効な管理者セッションで生成APIを利用でき、Googleログインとquota消費を重ねて要求しない。入力サイズ上限はこの例外でも維持する。
 
 現在は単一Workerを正とする。分割は利用量、障害、secret、デプロイ頻度を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
 
