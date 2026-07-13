@@ -6,8 +6,6 @@ const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
-const ADMIN_SESSION_COOKIE = "mo_admin_session";
-const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
 const PUBLIC_AUDIT_D1_MIGRATED_KV_KEY = "public-audit-log:d1-migrated";
@@ -203,9 +201,6 @@ export async function handleRequest(request, env = {}, ctx = {}) {
   if (isPublicAuthPath(url.pathname)) {
     return handlePublicAuthRequest(request, env, url);
   }
-  if (isAdminAuthPath(url.pathname)) {
-    return handleAdminAuthRequest(request, env, url);
-  }
   if (url.pathname.startsWith("/api/")) {
     if (isProtectedAdminApiRequest(request.method, url.pathname)) {
       const authResponse = await adminApiAuthResponse(request, env);
@@ -222,10 +217,6 @@ export async function handleRequest(request, env = {}, ctx = {}) {
     }
   }
   return serveAsset(request, env, url);
-}
-
-function isAdminAuthPath(pathname) {
-  return pathname === "/admin/login" || pathname === "/admin/login/" || pathname === "/admin/logout" || pathname === "/admin/logout/";
 }
 
 function isPublicAuthPath(pathname) {
@@ -290,174 +281,50 @@ function normalizePathname(pathname) {
 }
 
 async function adminPageAuthResponse(request, env, url) {
-  if (!adminAuthConfigured(env)) {
+  const settings = await readPublicAccessSettings(env);
+  if (!adminAuthConfigured(env, settings)) {
     return adminSetupErrorResponse();
   }
-  if (await hasValidAdminSession(request, env)) {
+  const session = await readPublicSession(request, env);
+  if (!session) {
+    return redirectResponse(`/auth/google/login?next=${encodeURIComponent(url.pathname)}`);
+  }
+  if (isPublicAdminEmail(session.email, settings)) {
     return null;
   }
-  return redirectResponse(`/admin/login?next=${encodeURIComponent(url.pathname)}`);
+  return adminAccessDeniedResponse(session.email);
 }
 
 async function adminApiAuthResponse(request, env) {
-  if (!adminAuthConfigured(env)) {
+  const settings = await readPublicAccessSettings(env);
+  if (!adminAuthConfigured(env, settings)) {
     return jsonResponse({ detail: "admin authentication is not configured" }, { status: 503 });
   }
-  if (await hasValidAdminSession(request, env)) {
-    return null;
+  const session = await readPublicSession(request, env);
+  if (!session) {
+    return jsonResponse({ detail: "admin authentication required" }, { status: 401 });
   }
-  return jsonResponse({ detail: "admin authentication required" }, { status: 401 });
+  if (!isPublicAdminEmail(session.email, settings)) {
+    return jsonResponse({ detail: "admin access is forbidden" }, { status: 403 });
+  }
+  return null;
 }
 
-async function handleAdminAuthRequest(request, env, url) {
-  if (url.pathname === "/admin/logout" || url.pathname === "/admin/logout/") {
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: "/admin/login",
-        "Set-Cookie": expiredAdminCookie(),
-      },
-    });
-  }
-  if (!adminAuthConfigured(env)) {
-    return adminSetupErrorResponse();
-  }
-  if (request.method === "GET") {
-    return adminLoginPage(url.searchParams.get("next") || "/admin");
-  }
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, POST" } });
-  }
-  const form = await request.formData();
-  const password = String(form.get("password") || "");
-  const next = safeAdminNextPath(String(form.get("next") || url.searchParams.get("next") || "/admin"));
-  if (!(await adminPasswordMatches(password, env))) {
-    return adminLoginPage(next, "パスワードが違います。", 401);
-  }
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: next,
-      "Set-Cookie": await createAdminSessionCookie(env),
-    },
-  });
-}
-
-function adminAuthConfigured(env) {
-  return Boolean(adminPasswordHash(env) && env.ADMIN_SESSION_SECRET);
-}
-
-function adminPasswordHash(env) {
-  return String(env.ADMIN_PASSWORD_SHA256 || env.ADMIN_PASSWORD_HASH || "").trim().toLowerCase();
-}
-
-async function adminPasswordMatches(password, env) {
-  const expected = adminPasswordHash(env);
-  if (!expected) {
-    return false;
-  }
-  const actual = await sha256Hex(password);
-  return constantTimeEqual(actual, expected);
-}
-
-async function hasValidAdminSession(request, env) {
-  const cookies = parseCookies(request.headers.get("cookie") || "");
-  const value = cookies.get(ADMIN_SESSION_COOKIE);
-  if (!value || !env.ADMIN_SESSION_SECRET) {
-    return false;
-  }
-  const [payload, signature] = value.split(".");
-  if (!payload || !signature) {
-    return false;
-  }
-  const expectedSignature = await hmacSha256Hex(payload, env.ADMIN_SESSION_SECRET);
-  if (!constantTimeEqual(signature, expectedSignature)) {
-    return false;
-  }
-  try {
-    const session = JSON.parse(base64UrlDecodeToString(payload));
-    return Number(session.exp || 0) > Math.floor(Date.now() / 1000);
-  } catch {
-    return false;
-  }
-}
-
-async function createAdminSessionCookie(env) {
-  const now = Math.floor(Date.now() / 1000);
-  const ttl = Number(env.ADMIN_SESSION_TTL_SECONDS || ADMIN_SESSION_TTL_SECONDS) || ADMIN_SESSION_TTL_SECONDS;
-  const payload = base64UrlEncodeString(JSON.stringify({ iat: now, exp: now + ttl }));
-  const signature = await hmacSha256Hex(payload, env.ADMIN_SESSION_SECRET);
-  return `${ADMIN_SESSION_COOKIE}=${payload}.${signature}; Path=/; Max-Age=${ttl}; HttpOnly; Secure; SameSite=Lax`;
-}
-
-function expiredAdminCookie() {
-  return `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
-}
-
-function safeAdminNextPath(next) {
-  if (!next.startsWith("/") || next.startsWith("//")) {
-    return "/admin";
-  }
-  try {
-    const path = new URL(next, "https://example.com").pathname;
-    return isProtectedAdminPagePath(path) ? path : "/admin";
-  } catch {
-    return "/admin";
-  }
+function adminAuthConfigured(env, settings) {
+  return Boolean(publicGoogleAuthConfigured(env) && settings.admin_google_emails.length > 0);
 }
 
 function adminSetupErrorResponse() {
   return new Response(
-    "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>管理認証が未設定 | Voice Lab</title><style>body{font-family:system-ui,sans-serif;margin:0;min-height:100svh;display:grid;place-items:center;background:#f5f3ee;color:#182235}main{width:min(90vw,520px);padding:28px;background:#fff;border:1px solid #d9d8d3;border-radius:20px;box-shadow:0 24px 70px #1e27391a}.brand{color:#66748a;font-size:12px;font-weight:800;letter-spacing:.14em}h1{font-size:26px;margin:8px 0 12px}p{color:#5c687b;line-height:1.7}</style><main><div class=\"brand\">VOICE LAB · ADMIN</div><h1>管理認証が未設定です</h1><p>Cloudflare Worker secret の ADMIN_PASSWORD_SHA256 と ADMIN_SESSION_SECRET を設定してください。</p></main>",
+    "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>管理認証が未設定 | Voice Lab</title><style>:root{color-scheme:light dark}body{font-family:system-ui,sans-serif;margin:0;min-height:100svh;display:grid;place-items:center;background:#f5f3ee;color:#182235}main{box-sizing:border-box;width:min(90vw,520px);padding:28px;background:#fff;border:1px solid #d9d8d3;border-radius:20px;box-shadow:0 24px 70px #1e27391a}.brand{color:#66748a;font-size:12px;font-weight:800;letter-spacing:.14em}h1{font-size:26px;margin:8px 0 12px}p{color:#5c687b;line-height:1.7}@media(prefers-color-scheme:dark){body{background:#111827;color:#e5e7eb}main{background:#1f2937;border-color:#374151}p{color:#cbd5e1}}</style><main><div class=\"brand\">VOICE LAB · ADMIN</div><h1>管理認証が未設定です</h1><p>Google OAuth用のsecretと、ADMIN_GOOGLE_EMAILSに管理者のGoogleメールを設定してください。</p></main>",
     { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
 
-function adminLoginPage(next, errorMessageText = "", status = 200) {
-  const safeNext = safeAdminNextPath(next || "/admin");
-  const errorHtml = errorMessageText ? `<p class="error">${escapeHtml(errorMessageText)}</p>` : "";
+function adminAccessDeniedResponse(email) {
   return new Response(
-    `<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>管理ログイン | Voice Lab</title>
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100svh; display: grid; place-items: center; background: radial-gradient(circle at 8% 4%, rgba(236,174,103,.22), transparent 26rem), radial-gradient(circle at 94% 9%, rgba(104,145,218,.2), transparent 28rem), #f5f3ee; color: #182235; }
-    main { box-sizing: border-box; width: min(92vw, 400px); padding: 28px; background: rgba(255,255,255,.92); border: 1px solid rgba(35,49,72,.14); border-radius: 20px; box-shadow: 0 24px 70px rgba(30,39,57,.12); }
-    .brand { color: #66748a; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
-    h1 { margin: 8px 0 20px; font-size: 26px; letter-spacing: -.03em; }
-    label { display: grid; gap: 8px; font-weight: 600; }
-    input { box-sizing: border-box; width: 100%; min-height: 46px; padding: 9px 11px; border: 1px solid #b8c0cc; border-radius: 10px; font-size: 16px; }
-    button { width: 100%; min-height: 46px; margin-top: 16px; border: 0; border-radius: 10px; background: #274f8a; color: white; font-weight: 750; font-size: 16px; cursor: pointer; }
-    input:focus-visible, button:focus-visible { outline: 3px solid rgba(76,126,202,.38); outline-offset: 2px; }
-    .error { color: #b42318; font-weight: 700; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #111827; color: #e5e7eb; }
-      main { background: #1f2937; border-color: #374151; }
-      input { background: #111827; color: #f9fafb; border-color: #4b5563; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <div class="brand">VOICE LAB · ADMIN</div>
-    <h1>管理ログイン</h1>
-    ${errorHtml}
-    <form method="post" action="/admin/login">
-      <input type="hidden" name="next" value="${escapeHtml(safeNext)}" />
-      <label>
-        パスワード
-        <input type="password" name="password" autocomplete="current-password" required autofocus />
-      </label>
-      <button type="submit">ログイン</button>
-    </form>
-  </main>
-</body>
-</html>`,
-    { status, headers: { "Content-Type": "text/html; charset=utf-8" } },
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>管理画面へのアクセス権がありません | Voice Lab</title><style>:root{color-scheme:light dark}body{font-family:system-ui,sans-serif;margin:0;min-height:100svh;display:grid;place-items:center;background:#f5f3ee;color:#182235}main{box-sizing:border-box;width:min(90vw,520px);padding:28px;background:#fff;border:1px solid #d9d8d3;border-radius:20px;box-shadow:0 24px 70px #1e27391a}.brand{color:#66748a;font-size:12px;font-weight:800;letter-spacing:.14em}h1{font-size:26px;margin:8px 0 12px}p{color:#5c687b;line-height:1.7;overflow-wrap:anywhere}a{color:#274f8a;font-weight:700}@media(prefers-color-scheme:dark){body{background:#111827;color:#e5e7eb}main{background:#1f2937;border-color:#374151}p{color:#cbd5e1}a{color:#93c5fd}}</style><main><div class="brand">VOICE LAB · ADMIN</div><h1>管理画面へのアクセス権がありません</h1><p>${escapeHtml(email)} は管理者として登録されていません。</p><a href="/auth/logout?next=/">別のGoogleアカウントでログイン</a></main>`,
+    { status: 403, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
 
@@ -501,7 +368,7 @@ function publicGoogleAuthConfigured(env) {
 }
 
 function publicSessionSecret(env) {
-  return String(env.PUBLIC_SESSION_SECRET || env.ADMIN_SESSION_SECRET || "").trim();
+  return String(env.PUBLIC_SESSION_SECRET || "").trim();
 }
 
 async function createGoogleLoginRedirect(env, url) {
@@ -605,8 +472,11 @@ function safePublicNextPath(next) {
   try {
     const parsed = new URL(String(next), "https://example.com");
     const path = normalizePathname(parsed.pathname);
-    if (path.includes("/admin") || path === "/index.html" || path.startsWith("/api/") || path.startsWith("/auth/")) {
+    if (path.startsWith("/api/") || path.startsWith("/auth/")) {
       return "/";
+    }
+    if (path === "/index.html" || path.startsWith("/static/")) {
+      return isProtectedAdminPagePath(path) ? path : "/";
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
@@ -1422,15 +1292,25 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
   const settings = await readPublicAccessSettings(env);
   const featureSettings = settings.features[feature] || {};
   validatePublicInputLimits(featureSettings, limits);
-  if (feature === "fun" && await hasValidAdminSession(request, env)) {
+  if (feature === "fun") {
+    if (!adminAuthConfigured(env, settings)) {
+      throw httpError(503, "admin authentication is not configured");
+    }
+    const session = await readPublicSession(request, env);
+    if (!session) {
+      throw httpError(401, "Google admin login is required");
+    }
+    if (!isPublicAdminEmail(session.email, settings)) {
+      throw httpError(403, "admin access is forbidden");
+    }
     await appendPublicAuditEvent(env, {
       action: "public_quota_exempt",
+      email: session.email,
       feature,
       is_admin: true,
-      auth_method: "admin_session",
       ...requestAuditContext(request),
     });
-    return { settings, consumed: false, authenticated: true, is_admin: true, auth_method: "admin_session" };
+    return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email };
   }
   if (!settings.google_login_required) {
     return { settings, consumed: false, authenticated: false, is_admin: false };

@@ -176,7 +176,7 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
   assert.match(publicAccessSettingsSource, /data-public-feature-setting/);
   assert.match(publicAccessSettingsSource, /保存済み/);
-  assert.match(publicAccessSettingsSource, /quota対象外/);
+  assert.match(publicAccessSettingsSource, /管理画面を許可するGoogleメール/);
   assert.match(publicAccessSettingsSource, /setPublicAccessSaveButton/);
   assert.match(publicSampleAudioAdminSource, /\/api\/public-sample-audios/);
   assert.match(publicSampleAudioAdminSource, /method:\s*"DELETE"/);
