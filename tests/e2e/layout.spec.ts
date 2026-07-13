@@ -116,6 +116,10 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
   expect((microphoneBox?.y || 0) + (microphoneBox?.height || 0)).toBeLessThanOrEqual((recordButtonBox?.y || 0) + (recordButtonBox?.height || 0));
   expect(captionBox?.y || 0).toBeGreaterThanOrEqual((recordButtonBox?.y || 0) + (recordButtonBox?.height || 0));
   await expect(microphone.locator("svg")).toBeVisible();
+  await expect(recordButton).toHaveCSS("background-color", "rgb(230, 90, 67)");
+  await recordButton.evaluate((element) => element.classList.add("is-recording"));
+  await expect(recordButton).toHaveCSS("background-color", "rgb(199, 55, 47)");
+  await recordButton.evaluate((element) => element.classList.remove("is-recording"));
 
   const [idleCard, flowBox] = await Promise.all([nativePanel.boundingBox(), flow.boundingBox()]);
   expect(idleCard).not.toBeNull();

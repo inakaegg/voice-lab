@@ -98,6 +98,14 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
   assert.doesNotMatch(shared, /react-layout-switcher/);
 });
 
+test("Voice Lab gives each product a distinct accent and keeps recording red", () => {
+  assert.match(styles, /\.react-public-body\.practice-body,\s*\n\.react-public-body\.vibevoice-body\s*\{[^}]*--react-accent:\s*#536da8/s);
+  assert.match(styles, /\.react-public-body\.vibevoice-body\s*\{[^}]*--react-accent:\s*#9a5b36/s);
+  assert.match(styles, /\.record-orb\s*\{[^}]*background:\s*var\(--user-record-ready\)/s);
+  assert.match(styles, /--user-record-ready:\s*#e65a43/);
+  assert.match(styles, /--user-recording:\s*#c7372f/);
+});
+
 test("SkitVoice output languages include flags", () => {
   assert.match(skitvoice, /id="vibevoice-output-language" defaultValue="en-US"/);
   assert.match(skitvoice, /🇺🇸 English/);

@@ -20,6 +20,7 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitv
   read("src/mo_speech/web/user.html"),
   read("src/mo_speech/web/seed_vc.html"),
 ]);
+const portalStyles = await read("apps/web/src/portal/styles.css");
 
 test("Voice Lab is the application and package brand without renaming the Python namespace", () => {
   assert.equal(JSON.parse(pkgText).name, "voice-lab");
@@ -67,4 +68,9 @@ test("Playwright layout tests are wired into npm and CI", () => {
   assert.match(ci, /npm run test:e2e/);
   assert.match(ci, /pip wheel \. --no-deps/);
   assert.match(ci, /scripts\/verify_wheel_assets\.py/);
+});
+
+test("portal product accents distinguish creation from learning", () => {
+  assert.match(portalStyles, /\.portal-product-link-skit\s*\{[^}]*--product-accent:\s*#a85d2d/s);
+  assert.match(portalStyles, /\.portal-product-link-speak\s*\{[^}]*--product-accent:\s*#3e68ad/s);
 });

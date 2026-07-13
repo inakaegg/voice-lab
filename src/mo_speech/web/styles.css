@@ -757,7 +757,8 @@ audio {
   --user-progress-bg: rgba(38, 72, 118, 0.15);
   --user-progress-start: #0a84ff;
   --user-progress-end: #49c7ff;
-  --user-recording: #e68a2e;
+  --user-record-ready: #e65a43;
+  --user-recording: #c7372f;
   --user-ready: #0a84ff;
   --user-processing: #5b7cfa;
   --user-replay-bg: #1f4f8c;
@@ -936,7 +937,7 @@ audio {
 .record-orb {
   align-items: center;
   aspect-ratio: 1;
-  background: #e6462e;
+  background: var(--user-record-ready);
   border: 8px solid #ffffff;
   border-radius: 50%;
   box-shadow: 0 18px 42px rgba(58, 68, 78, 0.22), inset 0 -10px 0 rgba(95, 15, 7, 0.12);
@@ -956,7 +957,7 @@ audio {
 }
 
 .record-waves {
-  border: 2px solid rgba(230, 70, 46, 0.28);
+  border: 2px solid rgba(230, 90, 67, 0.28);
   border-radius: 50%;
   inset: -20px;
   opacity: 0;
@@ -966,6 +967,7 @@ audio {
 
 .record-orb.is-recording .record-waves {
   animation: record-pulse 1.25s ease-out infinite;
+  border-color: rgba(199, 55, 47, 0.38);
   opacity: 1;
 }
 
@@ -1562,7 +1564,8 @@ audio {
 }
 
 .practice-body {
-  --user-recording: #e68a2e;
+  --user-record-ready: #e65a43;
+  --user-recording: #c7372f;
   --user-ready: #0a84ff;
   --user-processing: #5b7cfa;
   --user-progress-start: #0a84ff;

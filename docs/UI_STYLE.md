@@ -6,7 +6,8 @@
 
 - `/` のVoice Labポータルを視覚基準にする。
 - 暖かいニュートラル背景、控えめな影、明快な見出し、少数のアクセント色、十分な余白を維持する。
-- SpeakLoopとSkitVoiceは同じ製品群と分かる共通骨格を使い、SpeakLoopは青、SkitVoiceは暖色のaccentで識別する。
+- SpeakLoopとSkitVoiceは同じ製品群と分かる共通骨格を使い、SpeakLoopは青、SkitVoiceは落ち着いたテラコッタのaccentで識別する。共通の管理操作とfocusは青を使う。
+- 録音ボタンは待機中から赤系で識別し、録音中はより強い赤、波形、`REC`表示を組み合わせる。エラーと削除は録音色より暗い赤と明示的な文言で区別する。
 - SaaSダッシュボード風のカード乱用や、機能と関係のない装飾を避ける。
 - React公開UIは、route単位でTailwind CSS v4とshadcn/uiへ段階移行する。移行済みrouteでは旧`styles.css`を同時に読み込まず、1画面内に2つのスタイル方式を混在させない。
 
