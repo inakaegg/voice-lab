@@ -42,7 +42,7 @@
 | `/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
 | `/speakloop/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
 | `/skitvoice/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
-| `/fun`, `/seed-vc` | 互換DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
+| `/fun` | 管理者専用DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
 
 同じrouteで旧stylesheetとTailwindを二重ロードしない。production build後に、ポータル専用assetと共通compatibility assetの境界、全active HTMLから旧stylesheet参照が消えていることを検査する。
 
@@ -53,7 +53,7 @@ src/mo_speech/web/
   portal.html                 公開ポータル
   react/speakloop.html        SpeakLoopのproduction build
   app_practice.js             録音・prompt・比較再生・表示状態
-  vibevoice_simple.html       SkitVoice
+  react/skitvoice.html        SkitVoice
   app_vibevoice.js            draft・参照音声・job・結果状態
   app_public_session.js       公開ログイン状態
   app_public_sample_audio.js  公開サンプル

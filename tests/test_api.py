@@ -117,7 +117,7 @@ def test_root_serves_voice_lab_portal() -> None:
     assert "へんな へんかん アプリ" not in response.text
 
 
-def test_fun_serves_simple_user_ui() -> None:
+def test_fun_serves_operator_only_experimental_ui_locally() -> None:
     client = TestClient(create_app())
 
     response = client.get("/fun")
@@ -152,6 +152,21 @@ def test_fun_serves_simple_user_ui() -> None:
     assert response.text.index("user-output-texts") < response.text.index("user-processing-panel")
     assert response.text.index("user-processing-panel") < response.text.index("user-toggles")
     assert response.text.index("user-toggles") < response.text.index("user-replay-button")
+
+
+def test_retired_local_ui_routes_return_not_found() -> None:
+    client = TestClient(create_app())
+
+    for path in (
+        "/user",
+        "/vibevoice",
+        "/vibevoice/simple",
+        "/vibevoice/admin",
+        "/seed-vc",
+        "/static/vibevoice_simple.html",
+        "/static/seed_vc.html",
+    ):
+        assert client.get(path).status_code == 404, path
 
 
 def test_speakloop_is_the_only_pronunciation_practice_ui_route() -> None:
@@ -250,35 +265,6 @@ def test_vibevoice_serves_admin_skit_ui() -> None:
     assert 'id="vibevoice-reference-url-dialog"' in response.text
     assert 'name="directed_retry_max_multiplier"' in response.text
     assert "/static/app_vibevoice.js" in response.text
-
-
-def test_vibevoice_simple_alias_still_serves_user_ui() -> None:
-    client = TestClient(create_app())
-
-    response = client.get("/vibevoice/simple")
-
-    assert response.status_code == 200
-    assert "かんたんスキット生成" in response.text
-    assert 'data-vibevoice-mode="simple"' in response.text
-
-
-def test_seed_vc_serves_direct_conversion_ui() -> None:
-    client = TestClient(create_app())
-
-    response = client.get("/seed-vc")
-
-    assert response.status_code == 200
-    assert "Seed-VC" in response.text
-    assert "seed-vc-source-audio" in response.text
-    assert "seed-vc-reference-audio" in response.text
-    assert "seed-vc-audio-device" in response.text
-    assert "seed-vc-record-button" in response.text
-    assert "seed-vc-stop-button" in response.text
-    assert "seed-vc-input-level" in response.text
-    assert "seed-vc-input-audio" in response.text
-    assert 'type="range"' in response.text
-    assert "data-seed-vc-range-output" in response.text
-    assert "/static/app_seed_vc_direct.js" in response.text
 
 
 def test_vibevoice_status_api_uses_service() -> None:

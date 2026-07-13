@@ -9,13 +9,10 @@ const [portal, speakloop, skitvoice, appCss, ...staticPages] = await Promise.all
   read("skitvoice"),
   readFile(new URL("../src/mo_speech/web/react/assets/app.css", import.meta.url), "utf8"),
   ...[
-    "portal.html",
-    "vibevoice_simple.html",
     "index.html",
     "practice_admin.html",
     "vibevoice.html",
     "user.html",
-    "seed_vc.html",
   ].map(readStatic),
 ]);
 

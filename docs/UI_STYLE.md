@@ -2,7 +2,7 @@
 
 ## 対象と基準
 
-この文書は、Voice Labの公開ポータル、SpeakLoop、SkitVoice、管理3画面に適用する。`/fun`と`/seed-vc`は実験・互換画面だが、ブランドheader、基本token、overflow、focusの最低基準は本方針へ揃える。
+この文書は、Voice Labの公開ポータル、SpeakLoop、SkitVoice、管理3画面に適用する。管理者専用の`/fun`も、ブランドheader、基本token、overflow、focusの最低基準は本方針へ揃える。
 
 - `/` のVoice Labポータルを視覚基準にする。
 - 暖かいニュートラル背景、控えめな影、明快な見出し、少数のアクセント色、十分な余白を維持する。

@@ -239,12 +239,11 @@ function isPublicAuthPath(pathname) {
 function isProtectedAdminPagePath(pathname) {
   const path = normalizePathname(pathname);
   return new Set([
+    "/fun",
     "/admin",
     "/index.html",
     "/static/index.html",
     "/skitvoice/admin",
-    "/vibevoice/admin",
-    "/vibevoice.html",
     "/static/vibevoice.html",
     "/speakloop/admin",
     "/practice_admin.html",
@@ -919,9 +918,25 @@ async function serveAsset(request, env, url) {
     return new Response("Cloudflare static assets binding is not configured.", { status: 503 });
   }
   const assetUrl = new URL(request.url);
+  const retiredPaths = new Set([
+    "/user",
+    "/vibevoice",
+    "/vibevoice/simple",
+    "/vibevoice/admin",
+    "/seed-vc",
+    "/user.html",
+    "/vibevoice_simple.html",
+    "/seed_vc.html",
+    "/static/user.html",
+    "/static/vibevoice_simple.html",
+    "/static/seed_vc.html",
+  ]);
+  if (retiredPaths.has(normalizePathname(url.pathname))) {
+    return new Response("Not Found", { status: 404 });
+  }
   if (url.pathname === "/") {
     assetUrl.pathname = "/react/portal.html";
-  } else if (url.pathname === "/fun" || url.pathname === "/fun/" || url.pathname === "/user" || url.pathname === "/user/") {
+  } else if (url.pathname === "/fun" || url.pathname === "/fun/") {
     assetUrl.pathname = "/user.html";
   } else if (url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
     assetUrl.pathname = "/react/speakloop.html";
@@ -931,23 +946,15 @@ async function serveAsset(request, env, url) {
   ) {
     assetUrl.pathname = "/practice_admin.html";
   } else if (
-    url.pathname === "/vibevoice" ||
-    url.pathname === "/vibevoice/" ||
-    url.pathname === "/vibevoice/simple" ||
-    url.pathname === "/vibevoice/simple/" ||
     url.pathname === "/skitvoice" ||
     url.pathname === "/skitvoice/"
   ) {
     assetUrl.pathname = "/react/skitvoice.html";
   } else if (
-    url.pathname === "/vibevoice/admin" ||
-    url.pathname === "/vibevoice/admin/" ||
     url.pathname === "/skitvoice/admin" ||
     url.pathname === "/skitvoice/admin/"
   ) {
     assetUrl.pathname = "/vibevoice.html";
-  } else if (url.pathname === "/seed-vc" || url.pathname === "/seed-vc/") {
-    assetUrl.pathname = "/seed_vc.html";
   } else if (url.pathname === "/admin" || url.pathname === "/admin/") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {

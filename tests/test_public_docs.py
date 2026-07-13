@@ -43,12 +43,12 @@ def test_status_docs_do_not_claim_cloudflare_gateway_is_unimplemented() -> None:
     assert "D1" in known_limits
 
 
-def test_public_demo_roadmap_tracks_tab_audio_and_rights_notice() -> None:
-    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
+def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
+    spec = read_text("docs/speech-translation/SPEC.md")
 
-    assert "タブ音声" in roadmap
-    assert "権利" in roadmap
-    assert "プライバシー" in roadmap
+    assert "タブ音声" in spec
+    assert "利用条件" in spec
+    assert "プライバシー" in spec
 
     vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
     assert "ブラウザの共有許可" in vibevoice
@@ -120,3 +120,24 @@ def test_frontend_migration_plan_preserves_current_api_and_state_boundaries() ->
     assert "SkitVoice" in migration
     assert "状態遷移" in migration
     assert "一括移行しない" in migration
+
+
+def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None:
+    readme = read_text("README.md")
+    spec = read_text("docs/speech-translation/SPEC.md")
+    architecture = read_text("docs/deployment/ARCHITECTURE.md")
+    cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
+
+    for document in (readme, spec, architecture, cloudflare):
+        assert "/speakloop" in document
+        assert "/skitvoice" in document
+
+    assert "`/fun` は管理者認証済みの場合だけ" in spec
+    assert "`/user`" not in spec
+    assert "`/vibevoice`" not in spec
+    assert "Cloudflare Pages" not in architecture
+    assert "ファイル、マイク、タブ音声" in cloudflare
+    assert "2話者・5行" in spec
+    assert "1120px以上" in spec
+    assert "D1" in spec
+    assert "R2" in spec

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { handleRequest } from "../cloudflare/worker.mjs";
 
-test("Cloudflare worker routes public app pages from the Voice Lab portal", async () => {
+test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
   const env = fakeEnv(async () => {
     throw new Error("unexpected fetch");
@@ -16,20 +16,62 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
   };
 
   await handleRequest(new Request("https://example.com/"), env);
-  await handleRequest(new Request("https://example.com/fun"), env);
   await handleRequest(new Request("https://example.com/speakloop"), env);
   await handleRequest(new Request("https://example.com/skitvoice"), env);
-  await handleRequest(new Request("https://example.com/vibevoice/simple"), env);
-  await handleRequest(new Request("https://example.com/seed-vc"), env);
 
   assert.deepEqual(requestedPaths, [
     "/react/portal.html",
-    "/user.html",
     "/react/speakloop.html",
     "/react/skitvoice.html",
-    "/react/skitvoice.html",
-    "/seed_vc.html",
   ]);
+});
+
+test("Cloudflare worker exposes fun only through an authenticated admin session", async () => {
+  const requestedPaths = [];
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("asset", { status: 200 });
+    },
+  };
+
+  const blocked = await handleRequest(new Request("https://example.com/fun"), env);
+  const cookie = await adminCookie(env);
+  const allowed = await handleRequest(new Request("https://example.com/fun", { headers: { cookie } }), env);
+  const directAsset = await handleRequest(new Request("https://example.com/static/user.html", { headers: { cookie } }), env);
+
+  assert.equal(blocked.status, 302);
+  assert.equal(blocked.headers.get("location"), "/admin/login?next=%2Ffun");
+  assert.equal(allowed.status, 200);
+  assert.equal(directAsset.status, 404);
+  assert.deepEqual(requestedPaths, ["/user.html"]);
+});
+
+test("Cloudflare worker returns 404 for retired application routes", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = { fetch: async () => new Response("unexpected asset", { status: 200 }) };
+
+  for (const path of [
+    "/user",
+    "/vibevoice",
+    "/vibevoice/simple",
+    "/vibevoice/admin",
+    "/seed-vc",
+    "/user.html",
+    "/vibevoice_simple.html",
+    "/seed_vc.html",
+    "/static/user.html",
+    "/static/vibevoice_simple.html",
+    "/static/seed_vc.html",
+  ]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`), env);
+    assert.equal(response.status, 404, path);
+  }
 });
 
 test("Cloudflare worker does not retain legacy practice UI aliases", async () => {

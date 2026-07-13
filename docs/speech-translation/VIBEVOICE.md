@@ -2,7 +2,7 @@
 
 ## 現在の位置づけ
 
-`/skitvoice` は、指定台詞向け生成のユーザー向け通常画面である。台本、最大4つの参照音声、生成ボタン、結果確認に絞り、backend/model/サンプリング、実行環境、診断JSONなどの技術情報は通常表示しない。`/skitvoice/admin` は、`zhskit` のスキット生成機能をこのアプリへ移すための検証・管理画面であり、生成パラメータや診断を直接確認できる。旧 `/vibevoice` と `/vibevoice/simple` は互換用エイリアスとして残す。
+`/skitvoice` は、指定台詞向け生成のユーザー向け通常画面である。台本、最大4つの参照音声、生成ボタン、結果確認に絞り、backend/model/サンプリング、実行環境、診断JSONなどの技術情報は通常表示しない。`/skitvoice/admin` は、`zhskit` のスキット生成機能をこのアプリへ移すための検証・管理画面であり、生成パラメータや診断を直接確認できる。旧routeの互換エイリアスは提供しない。
 
 初期実装では、ローカル実行とRunPod Serverless実行を選べる。ローカル実行は開発機上のVibeVoice CLIを呼ぶ。RunPod実行はFastAPIがRunPod jobを作り、RunPod handlerが `operation_mode=vibevoice` として同じ処理を実行する。
 

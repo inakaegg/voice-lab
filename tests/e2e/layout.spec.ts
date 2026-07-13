@@ -12,7 +12,6 @@ const publicRoutes = [
 const adminRoutes = ["/admin", "/speakloop/admin", "/skitvoice/admin"];
 const utilityRoutes = [
   { path: "/fun", heading: "はなしてください", action: "ろくおん" },
-  { path: "/seed-vc", heading: "Seed-VC単体変換", action: "変換" },
 ] as const;
 const pageErrors = new WeakMap<Page, Error[]>();
 
@@ -430,12 +429,5 @@ for (const route of utilityRoutes) {
     await expect(page.getByRole("button", { name: route.action, exact: true }).first()).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await assertVisibleControlsInsideViewport(page);
-    if (route.path === "/seed-vc") {
-      const details = page.locator(".utility-details");
-      await expect(details).not.toHaveAttribute("open", "");
-      await details.locator("summary").click();
-      await assertNoHorizontalOverflow(page);
-      await assertVisibleControlsInsideViewport(page);
-    }
   });
 }
