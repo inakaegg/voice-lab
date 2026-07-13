@@ -253,6 +253,64 @@ test("Cloudflare worker requires public Google login before costly generation AP
   assert.deepEqual(await response.json(), { detail: "Google login is required" });
 });
 
+test("Cloudflare worker lets a password admin use fun generation APIs without a second Google login", async () => {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    features: {
+      fun: { daily_limit: 0, total_limit: 0, text_max_chars: 5, audio_max_bytes: 1000 },
+    },
+  }));
+  const calls = [];
+  const env = publicAuthEnv(async (url) => {
+    calls.push(url);
+    if (url === "https://api.openai.com/v1/audio/speech") {
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv });
+  const cookie = await adminCookie(env);
+
+  const allowed = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+  const oversized = await handleRequest(
+    new Request("https://example.com/api/user-text-output", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ translated_text: "こんにちは！", target_language: "ja-JP" }),
+    }),
+    env,
+  );
+  const practiceForm = new FormData();
+  practiceForm.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+  practiceForm.append("target_language", "en-US");
+  const publicFeatureStillRequiresGoogle = await handleRequest(
+    new Request("https://example.com/api/practice/prompts", {
+      method: "POST",
+      headers: { cookie },
+      body: practiceForm,
+    }),
+    env,
+  );
+
+  assert.equal(allowed.status, 200);
+  assert.equal(oversized.status, 413);
+  assert.deepEqual(await oversized.json(), { detail: "text is too large" });
+  assert.equal(publicFeatureStillRequiresGoogle.status, 401);
+  assert.deepEqual(await publicFeatureStillRequiresGoogle.json(), { detail: "Google login is required" });
+  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
+  const audit = JSON.parse(await kv.get("public-audit-log"));
+  assert.equal(audit.at(-1).action, "public_quota_exempt");
+  assert.equal(audit.at(-1).feature, "fun");
+  assert.equal(audit.at(-1).auth_method, "admin_session");
+});
+
 test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
