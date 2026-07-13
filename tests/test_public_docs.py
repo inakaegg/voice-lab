@@ -84,6 +84,7 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
 
     assert 'binding = "MO_SPEECH_DB"' in wrangler
     assert 'database_name = "mo-speech-demo-db"' in wrangler
+    assert "CLOUDFLARE_AUDIO_HISTORY_LIMIT" not in wrangler
     assert 'migrations_dir = "migrations"' in wrangler
     assert "CREATE TABLE IF NOT EXISTS public_users" in migration
     assert "CREATE TABLE IF NOT EXISTS quota_usage_daily" in migration
