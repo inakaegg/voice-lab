@@ -69,7 +69,8 @@ def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None
 
     assert "MO_SPEECH_AUDIO_R2" in storage
     assert "音声履歴" in storage
-    assert "混在" in storage
+    assert "Cloudflare公開版では保存しない" in storage
+    assert "ローカルFastAPI版" in storage
     assert "D1" in storage
     assert "quota" in storage
     assert "audit" in storage

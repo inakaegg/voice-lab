@@ -4,11 +4,8 @@ const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
-const AUDIO_HISTORY_INDEX_KV_KEY = "audio-history:index";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
-const AUDIO_HISTORY_DEFAULT_LIMIT = 100;
-const AUDIO_HISTORY_KINDS = new Set(["recordings", "outputs"]);
 const ADMIN_SESSION_COOKIE = "mo_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24;
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
@@ -268,9 +265,6 @@ function isProtectedAdminApiRequest(method, pathname) {
     return true;
   }
   if (method === "GET" && pathname === "/api/audio-history") {
-    return true;
-  }
-  if ((method === "GET" || method === "DELETE") && pathname.startsWith("/api/audio-history/")) {
     return true;
   }
   if (method === "GET" && pathname === "/api/practice-history") {
@@ -822,16 +816,6 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "GET" && url.pathname === "/api/practice-history") {
       return jsonResponse(await listPracticeHistory(env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/audio-history/outputs") {
-      return jsonResponse(await saveUploadedAudioHistoryOutput(request, env));
-    }
-    if ((request.method === "GET" || request.method === "DELETE") && url.pathname.startsWith("/api/audio-history/")) {
-      const [, , , kind, filename] = url.pathname.split("/");
-      if (request.method === "GET") {
-        return getAudioHistoryFile(kind, decodeURIComponent(filename || ""), env);
-      }
-      return jsonResponse(await deleteAudioHistoryFile(kind, decodeURIComponent(filename || ""), env));
     }
     if (request.method === "POST" && url.pathname === "/api/user-display-text") {
       const payload = await request.json();
@@ -1862,12 +1846,10 @@ async function createTranslationJob(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const audioBytes = await audio.arrayBuffer();
-  const audioBase64 = arrayBufferToBase64(audioBytes);
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
   const sourceLanguage = stringFormValue(form, "source_language", "auto");
   const targetLanguage = stringFormValue(form, "target_language", "user-auto");
   const voiceMode = stringFormValue(form, "voice_mode", "default");
-  const translationBackend = stringFormValue(form, "translation_backend", "openai");
   const textTransform = optionalStringFormValue(form, "text_transform");
   const textTransformOptions = parseJsonFormValue(form, "text_transform_options", {});
   const textTransformSuffix = optionalStringFormValue(form, "text_transform_suffix");
@@ -1875,22 +1857,6 @@ async function createTranslationJob(request, env) {
   const jobId = `cf-${crypto.randomUUID()}`;
 
   await enforcePublicFeatureAccess(request, env, "fun", { audioBytes: audioBytes.byteLength });
-
-  await saveAudioHistoryEntry(env, "recordings", {
-    audio_base64: audioBase64,
-    audio_mime_type: audioMimeType,
-    filename: `${safeHistoryToken(jobId)}-input.${extensionForMimeType(audioMimeType)}`,
-    metadata: {
-      endpoint: "translate-speech-jobs",
-      translation_backend: "openai",
-      source_language: sourceLanguage,
-      target_language: targetLanguage,
-      voice_mode: voiceMode,
-      filename: audio.name || "",
-      original_content_type: audio.type || audioMimeType,
-      original_audio_suffix: `.${extensionForMimeType(audioMimeType)}`,
-    },
-  });
 
   const asrStarted = Date.now();
   const transcript = await openAiTranscribe(env, {
@@ -1944,14 +1910,6 @@ async function createTranslationJob(request, env) {
     target_language: translation.target_language,
     detected_source_language: translation.source_language,
   };
-  await savePipelineOutputHistory(env, result, {
-    endpoint: "translate-speech-jobs",
-    translation_backend: "openai",
-    requested_translation_backend: translationBackend,
-    source_language: translation.source_language || sourceLanguage,
-    target_language: translation.target_language,
-    voice_mode: voiceMode,
-  });
   const snapshot = completedJobSnapshot(jobId, "translation", result);
   await saveTranslationJobSnapshot(env, snapshot);
   return snapshot;
@@ -2009,17 +1967,6 @@ async function createVoiceConversionJob(request, env) {
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, "voice_conversion")) {
     await saveRunpodVcReadyState(env, snapshot, "voice_conversion");
   }
-  await saveAudioHistoryEntry(env, "recordings", {
-    audio_base64: sourceAudioBase64,
-    audio_mime_type: sourceAudioMimeType,
-    filename: `${safeHistoryToken(snapshot.job_id || crypto.randomUUID())}-source.${extensionForMimeType(sourceAudioMimeType)}`,
-    metadata: {
-      endpoint: "voice-conversion-jobs",
-      voice_backend: voiceBackend,
-      filename: sourceAudio.name || "",
-      content_type: sourceAudio.type || sourceAudioMimeType,
-    },
-  });
   return snapshot;
 }
 
@@ -2046,9 +1993,6 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
   const snapshot = jobSnapshotFromRunpod(body, kind);
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, kind)) {
     await saveRunpodVcReadyState(env, snapshot, kind);
-  }
-  if (snapshot.status === "succeeded" && snapshot.result?.audio_base64) {
-    await saveRunpodOutputHistory(env, jobId, kind, snapshot.result);
   }
   return snapshot;
 }
@@ -2289,12 +2233,6 @@ async function createUserTextOutput(payload, env) {
     warnings: [],
     target_language: targetLanguage,
   };
-  await savePipelineOutputHistory(env, result, {
-    endpoint: "user-text-output",
-    translation_backend: "openai",
-    target_language: targetLanguage,
-    voice_mode: "default",
-  });
   return result;
 }
 
@@ -2325,12 +2263,6 @@ async function createUserJokeOutput(payload, env) {
     warnings: [],
     target_language: targetLanguage,
   };
-  await savePipelineOutputHistory(env, result, {
-    endpoint: "user-joke-output",
-    translation_backend: "openai",
-    target_language: targetLanguage,
-    voice_mode: "default",
-  });
   return result;
 }
 
@@ -2343,19 +2275,6 @@ async function createPracticePrompt(request, env) {
   await enforcePublicFeatureAccess(request, env, "speakloop", { audioBytes: Number(audio.size || 0) });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  await saveAudioHistoryEntry(env, "recordings", {
-    audio_base64: arrayBufferToBase64(audioBytes),
-    audio_mime_type: audioMimeType,
-    filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-native.${extensionForMimeType(audioMimeType)}`,
-    metadata: {
-      endpoint: "practice-prompts",
-      target_language: targetLanguage,
-      asr_model: asrModel,
-      filename: audio.name || "",
-      content_type: audio.type || audioMimeType,
-    },
-  });
 
   const totalStarted = Date.now();
   const asrStarted = Date.now();
@@ -2406,14 +2325,6 @@ async function createPracticePrompt(request, env) {
     },
     detected_source_language: translation.source_language,
   };
-  await savePipelineOutputHistory(env, result, {
-    endpoint: "practice-prompts",
-    translation_backend: "openai",
-    source_language: translation.source_language || "auto",
-    target_language: targetLanguage,
-    asr_model: asrModel,
-    voice_mode: "default",
-  });
   return result;
 }
 
@@ -2430,20 +2341,6 @@ async function createPracticeRecording(request, env) {
   });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  const recordingEntry = await saveAudioHistoryEntry(env, "recordings", {
-    audio_base64: arrayBufferToBase64(audioBytes),
-    audio_mime_type: audioMimeType,
-    filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-recording.${extensionForMimeType(audioMimeType)}`,
-    metadata: {
-      endpoint: "practice-recordings",
-      target_language: targetLanguage,
-      asr_model: asrModel,
-      current_target_text_preview: currentTargetText.slice(0, 80),
-      filename: audio.name || "",
-      content_type: audio.type || audioMimeType,
-    },
-  });
 
   const autoStarted = Date.now();
   const autoTranscription = await openAiTranscribeDetail(env, {
@@ -2514,7 +2411,6 @@ async function createPracticeRecording(request, env) {
         asr: `openai-asr-${asrModel}`,
       },
     };
-    await updateAudioHistoryEntryMetadata(env, recordingEntry, practiceHistoryDiagnosticsMetadata(result));
     return result;
   }
 
@@ -2557,15 +2453,6 @@ async function createPracticeRecording(request, env) {
     },
     detected_source_language: translation.source_language,
   };
-  await savePipelineOutputHistory(env, result, {
-    endpoint: "practice-recordings",
-    translation_backend: "openai",
-    source_language: translation.source_language || "auto",
-    target_language: targetLanguage,
-    asr_model: asrModel,
-    voice_mode: "default",
-  });
-  await updateAudioHistoryEntryMetadata(env, recordingEntry, practiceHistoryDiagnosticsMetadata(result));
   return result;
 }
 
@@ -2584,19 +2471,6 @@ async function createPracticeAttempt(request, env) {
   });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  const recordingEntry = await saveAudioHistoryEntry(env, "recordings", {
-    audio_base64: arrayBufferToBase64(audioBytes),
-    audio_mime_type: audioMimeType,
-    filename: `${safeHistoryToken(`practice-${crypto.randomUUID()}`)}-repeat.${extensionForMimeType(audioMimeType)}`,
-    metadata: {
-      endpoint: "practice-attempts",
-      target_language: targetLanguage,
-      asr_model: asrModel,
-      filename: audio.name || "",
-      content_type: audio.type || audioMimeType,
-    },
-  });
 
   const totalStarted = Date.now();
   const asrStarted = Date.now();
@@ -2634,7 +2508,6 @@ async function createPracticeAttempt(request, env) {
       asr: `openai-asr-${asrModel}`,
     },
   };
-  await updateAudioHistoryEntryMetadata(env, recordingEntry, practiceHistoryDiagnosticsMetadata(result));
   return result;
 }
 
@@ -2955,108 +2828,33 @@ function createChinesePinyinText(text) {
 }
 
 async function listAudioHistory(env) {
-  const kv = stateKv(env);
-  const index = kv ? await readAudioHistoryIndex(env) : { recordings: [], outputs: [] };
   return {
-    settings: audioHistorySettings(env),
-    recordings: index.recordings.filter((entry) => !isPracticeHistoryEntry(entry)).map(serializeAudioHistoryEntry),
-    outputs: index.outputs.filter((entry) => !isPracticeHistoryEntry(entry)).map(serializeAudioHistoryEntry),
+    settings: cloudflareHistoryDisabledSettings(),
+    recordings: [],
+    outputs: [],
   };
 }
 
 async function listPracticeHistory(env) {
-  const kv = stateKv(env);
-  const index = kv ? await readAudioHistoryIndex(env) : { recordings: [], outputs: [] };
   return {
-    settings: audioHistorySettings(env),
-    recordings: index.recordings.filter(isPracticeHistoryEntry).map(serializeAudioHistoryEntry),
-    outputs: index.outputs.filter(isPracticeHistoryEntry).map(serializeAudioHistoryEntry),
+    settings: cloudflareHistoryDisabledSettings(),
+    recordings: [],
+    outputs: [],
   };
 }
 
-async function saveUploadedAudioHistoryOutput(request, env) {
-  const form = await request.formData();
-  const audio = requiredBlob(form, "audio");
-  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-  const saved = await saveAudioHistoryEntry(env, "outputs", {
-    audio_base64: await blobToBase64(audio),
-    audio_mime_type: audioMimeType,
-    metadata: {
-      endpoint: stringFormValue(form, "endpoint", "manual"),
-      translation_backend: stringFormValue(form, "translation_backend", ""),
-      target_language: stringFormValue(form, "target_language", ""),
-      filename: audio.name || "",
-      content_type: audio.type || audioMimeType,
-    },
-  });
+function cloudflareHistoryDisabledSettings() {
   return {
-    saved: Boolean(saved),
-    entry: saved ? serializeAudioHistoryEntry(saved) : null,
+    enabled: false,
+    root: "Cloudflare公開版では音声履歴を保存しません。",
+    resolved_root: "",
+    metadata_store: "none",
+    blob_store: "none",
+    recordings_dir: "",
+    outputs_dir: "",
+    limit: 0,
+    env_var: "",
   };
-}
-
-async function getAudioHistoryFile(kind, filename, env) {
-  validateAudioHistoryPath(kind, filename);
-  requireStateKv(env);
-  const index = await readAudioHistoryIndex(env);
-  const entry = index[kind].find((item) => item.filename === filename);
-  if (!entry) {
-    throw httpError(404, "audio history file not found");
-  }
-  const audioBytes = await readAudioHistoryBlob(env, entry);
-  if (!audioBytes) {
-    throw httpError(404, "audio history file not found");
-  }
-  return new Response(audioBytes, {
-    headers: {
-      "Content-Type": entry.media_type || "application/octet-stream",
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-async function deleteAudioHistoryFile(kind, filename, env) {
-  validateAudioHistoryPath(kind, filename);
-  const kv = requireStateKv(env);
-  const index = await readAudioHistoryIndex(env);
-  const existing = index[kind].find((entry) => entry.filename === filename);
-  if (!existing) {
-    throw httpError(404, "audio history file not found");
-  }
-  index[kind] = index[kind].filter((entry) => entry.filename !== filename);
-  await deleteAudioHistoryBlob(env, existing);
-  await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
-  return { deleted: true };
-}
-
-async function savePipelineOutputHistory(env, result, metadata = {}) {
-  return saveAudioHistoryEntry(env, "outputs", {
-    audio_base64: result.audio_base64,
-    audio_mime_type: result.audio_mime_type || "audio/wav",
-    metadata: {
-      ...metadata,
-      audio_mime_type: result.audio_mime_type || "audio/wav",
-      ...historyTextMetadataFromResult(result),
-    },
-  });
-}
-
-async function saveRunpodOutputHistory(env, jobId, kind, result) {
-  const endpoint = kind === "voice_conversion" ? "voice-conversion-jobs" : "translate-speech-jobs";
-  return saveAudioHistoryEntry(env, "outputs", {
-    audio_base64: result.audio_base64,
-    audio_mime_type: result.audio_mime_type || "audio/wav",
-    filename: `${safeHistoryToken(jobId)}-output.${extensionForMimeType(result.audio_mime_type || "audio/wav")}`,
-    metadata: {
-      endpoint,
-      translation_backend: kind === "translation" ? "runpod_serverless" : "",
-      voice_backend: kind === "voice_conversion" ? "seed-vc" : "",
-      target_language: result.target_language || "",
-      voice_mode: kind === "voice_conversion" ? "convert" : "",
-      audio_mime_type: result.audio_mime_type || "audio/wav",
-      ...historyTextMetadataFromResult(result),
-    },
-  });
 }
 
 async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage, filename }) {
@@ -3269,330 +3067,8 @@ function appendSuffix(text, suffix, unit) {
   });
 }
 
-async function saveAudioHistoryEntry(env, kind, { audio_base64, audio_mime_type, filename = "", metadata = {} }) {
-  const kv = stateKv(env);
-  if (!kv || !audio_base64 || !AUDIO_HISTORY_KINDS.has(kind)) {
-    return null;
-  }
-  const index = await readAudioHistoryIndex(env);
-  const mediaType = normalizeMimeType(audio_mime_type) || "application/octet-stream";
-  const safeFilename = safeHistoryFilename(
-    filename || `${new Date().toISOString().replace(/[:.]/g, "")}-${crypto.randomUUID()}.${extensionForMimeType(mediaType)}`,
-  );
-  const audioKey = `audio-history:${kind}:${safeFilename}:audio`;
-  const normalizedMetadata = normalizeMetadata(metadata);
-  const entry = {
-    kind,
-    filename: safeFilename,
-    audio_key: audioKey,
-    audio_storage: audioHistoryBlobStore(env) ? "r2" : "kv",
-    media_type: mediaType,
-    size_bytes: base64ByteLength(audio_base64),
-    created_at: new Date().toISOString(),
-    metadata: normalizedMetadata,
-  };
-  await writeAudioHistoryBlob(env, entry, audio_base64);
-  index[kind] = [entry, ...index[kind].filter((item) => item.filename !== safeFilename)];
-  await trimAudioHistoryIndex(env, index, kind, audioHistoryLimit(env));
-  await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
-  return entry;
-}
-
-async function updateAudioHistoryEntryMetadata(env, entry, metadata = {}) {
-  const kv = stateKv(env);
-  if (!kv || !entry || !AUDIO_HISTORY_KINDS.has(entry.kind)) {
-    return null;
-  }
-  const index = await readAudioHistoryIndex(env);
-  const items = index[entry.kind] || [];
-  const target = items.find((item) => item.filename === entry.filename);
-  if (!target) {
-    return null;
-  }
-  target.metadata = normalizeMetadata({ ...(target.metadata || {}), ...metadata });
-  await kv.put(AUDIO_HISTORY_INDEX_KV_KEY, JSON.stringify(index));
-  return target;
-}
-
-async function trimAudioHistoryIndex(env, index, kind, limit) {
-  const overflow = index[kind].slice(limit);
-  index[kind] = index[kind].slice(0, limit);
-  await Promise.all(overflow.map((entry) => deleteAudioHistoryBlob(env, entry)));
-}
-
-async function readAudioHistoryIndex(env) {
-  const kv = stateKv(env);
-  if (!kv) {
-    return { recordings: [], outputs: [] };
-  }
-  const stored = await kvGetJson(kv, AUDIO_HISTORY_INDEX_KV_KEY, null);
-  return {
-    recordings: normalizeAudioHistoryEntries(stored?.recordings, "recordings"),
-    outputs: normalizeAudioHistoryEntries(stored?.outputs, "outputs"),
-  };
-}
-
-function normalizeAudioHistoryEntries(entries, kind) {
-  if (!Array.isArray(entries)) {
-    return [];
-  }
-  return entries
-    .filter((entry) => entry && typeof entry === "object" && entry.filename && entry.audio_key)
-    .map((entry) => ({
-      kind,
-      filename: String(entry.filename),
-      audio_key: String(entry.audio_key),
-      audio_storage: entry.audio_storage === "r2" ? "r2" : "kv",
-      media_type: normalizeMimeType(entry.media_type) || "application/octet-stream",
-      size_bytes: Number(entry.size_bytes || 0),
-      created_at: String(entry.created_at || ""),
-      metadata: normalizeMetadata(entry.metadata || {}),
-    }));
-}
-
-function serializeAudioHistoryEntry(entry) {
-  const metadata = normalizeMetadata(entry.metadata || {});
-  const preview = metadataTextPreview(metadata);
-  return {
-    kind: entry.kind,
-    filename: entry.filename,
-    audio_storage: entry.audio_storage === "r2" ? "r2" : "kv",
-    url: `/api/audio-history/${entry.kind}/${encodeURIComponent(entry.filename)}`,
-    label: audioHistoryLabel(entry.kind, metadata, preview),
-    media_type: entry.media_type,
-    size_bytes: entry.size_bytes,
-    created_at: entry.created_at,
-    metadata,
-    text_preview: preview,
-    tts_text: String(metadata.tts_text || ""),
-    details: audioHistoryDetails(entry.kind, metadata),
-    playable_hint: entry.size_bytes > 0 && entry.size_bytes < 128
-      ? "音声ファイルが小さすぎます。テスト用または失敗したダミー出力の可能性があります。"
-      : "",
-  };
-}
-
-function audioHistorySettings(env) {
-  const enabled = Boolean(stateKv(env));
-  const blobStore = audioHistoryBlobStore(env) ? "r2" : "kv";
-  const root = enabled
-    ? blobStore === "r2"
-      ? "Cloudflare R2: MO_SPEECH_AUDIO_R2 / metadata: MO_SPEECH_KV"
-      : "Cloudflare Workers KV: MO_SPEECH_KV"
-    : "Cloudflare Workers KV未設定";
-  return {
-    enabled,
-    root,
-    resolved_root: root,
-    metadata_store: enabled ? "kv" : "none",
-    blob_store: enabled ? blobStore : "none",
-    recordings_dir: "audio-history:recordings",
-    outputs_dir: "audio-history:outputs",
-    limit: audioHistoryLimit(env),
-    env_var: "CLOUDFLARE_AUDIO_HISTORY_LIMIT",
-  };
-}
-
-function audioHistoryLimit(env) {
-  return clampInt(env.CLOUDFLARE_AUDIO_HISTORY_LIMIT || AUDIO_HISTORY_DEFAULT_LIMIT, 1, 100, AUDIO_HISTORY_DEFAULT_LIMIT);
-}
-
-function historyTextMetadataFromResult(result) {
-  const transformed = textPreview(result.transformed_text);
-  const translated = textPreview(result.translated_text);
-  const transcript = textPreview(result.transcript);
-  const ttsText = String(result.transformed_text || result.translated_text || "").trim();
-  return {
-    text_preview: transformed || translated || transcript,
-    tts_text: ttsText,
-    transcript_preview: transcript,
-    translated_text_preview: translated,
-    transformed_text_preview: transformed,
-  };
-}
-
-function practiceHistoryDiagnosticsMetadata(result) {
-  const diagnostics = {
-    recording_kind: String(result.recording_kind || ""),
-    target_language: String(result.target_language || ""),
-    target_text: String(result.target_text || ""),
-    recognized_text: String(result.recognized_text || ""),
-    transcript: String(result.transcript || ""),
-    asr_model: String(result.asr_model || ""),
-    classification: result.classification || {},
-    phrase_matches: result.phrase_matches || [],
-    comparison_alignment: result.comparison_alignment || {},
-    asr_timestamps: compactAsrTimestamps(result.asr_timestamps || {}),
-    timings_ms: result.timings_ms || {},
-  };
-  return {
-    text_preview: textPreview(result.target_text || result.recognized_text || result.transcript || ""),
-    recognized_text_preview: textPreview(result.recognized_text || result.transcript || ""),
-    practice_diagnostics_json: JSON.stringify(diagnostics),
-  };
-}
-
-function compactAsrTimestamps(timestamps) {
-  const words = Array.isArray(timestamps.words) ? timestamps.words : [];
-  const segments = Array.isArray(timestamps.segments) ? timestamps.segments : [];
-  return {
-    available: Boolean(timestamps.available),
-    model: String(timestamps.model || ""),
-    timestamp_granularities: Array.isArray(timestamps.timestamp_granularities)
-      ? timestamps.timestamp_granularities
-      : [],
-    word_count: words.length,
-    segment_count: segments.length,
-    words: words.slice(0, 120),
-    segments: segments.slice(0, 40),
-    truncated: words.length > 120 || segments.length > 40,
-  };
-}
-
-function metadataTextPreview(metadata) {
-  for (const key of ["text_preview", "recognized_text_preview", "transformed_text_preview", "translated_text_preview", "transcript_preview"]) {
-    const value = String(metadata[key] || "").trim();
-    if (value) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function audioHistoryLabel(kind, metadata, preview) {
-  if (preview) {
-    return preview;
-  }
-  const endpoint = String(metadata.endpoint || "");
-  const filename = String(metadata.filename || metadata.audio_file || "");
-  if (endpoint === "voice-conversion-jobs") {
-    return kind === "outputs" ? "VC出力" : filename || "VC入力音声";
-  }
-  if (endpoint === "user-joke-output") {
-    return "ジョーク音声";
-  }
-  if (endpoint === "user-text-output") {
-    return "ユーザー画面TTS";
-  }
-  if (endpoint === "openai-realtime-streaming") {
-    return "Realtime streaming出力";
-  }
-  if (endpoint.startsWith("translate-speech")) {
-    return kind === "outputs" ? "翻訳音声" : filename || "入力音声";
-  }
-  return filename || (kind === "outputs" ? "出力音声" : "入力音声");
-}
-
-function audioHistoryDetails(kind, metadata) {
-  const details = [String(metadata.endpoint || kind)];
-  const route = audioHistoryRoute(metadata);
-  if (route) {
-    details.push(route);
-  }
-  for (const key of ["translation_backend", "tts_backend", "voice_backend"]) {
-    const value = String(metadata[key] || "");
-    if (value) {
-      details.push(value);
-    }
-  }
-  const filename = String(metadata.filename || "");
-  if (filename) {
-    details.push(filename);
-  }
-  return details;
-}
-
-function audioHistoryRoute(metadata) {
-  const sourceLanguage = String(metadata.source_language || "");
-  const targetLanguage = String(metadata.target_language || "");
-  if (sourceLanguage && targetLanguage) {
-    return `${sourceLanguage} -> ${targetLanguage}`;
-  }
-  return targetLanguage;
-}
-
-function textPreview(value) {
-  const text = String(value || "").trim();
-  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
-}
-
-function normalizeMetadata(metadata) {
-  const normalized = {};
-  if (!metadata || typeof metadata !== "object") {
-    return normalized;
-  }
-  for (const [key, value] of Object.entries(metadata)) {
-    if (value === undefined || value === null) {
-      continue;
-    }
-    normalized[key] = typeof value === "string" ? value : String(value);
-  }
-  return normalized;
-}
-
-function isPracticeHistoryEntry(entry) {
-  return String(entry?.metadata?.endpoint || "").startsWith("practice-");
-}
-
-function validateAudioHistoryPath(kind, filename) {
-  if (!AUDIO_HISTORY_KINDS.has(kind)) {
-    throw httpError(400, "unsupported audio history kind");
-  }
-  if (!filename || filename.includes("/") || filename.includes("\\")) {
-    throw httpError(400, "invalid audio history filename");
-  }
-}
-
 function stateKv(env) {
   return env.MO_SPEECH_KV || null;
-}
-
-function audioHistoryBlobStore(env) {
-  return env.MO_SPEECH_AUDIO_R2 || null;
-}
-
-function requireAudioHistoryBlobStore(env) {
-  const r2 = audioHistoryBlobStore(env);
-  if (!r2) {
-    throw httpError(503, "MO_SPEECH_AUDIO_R2 binding is required for this audio history entry");
-  }
-  return r2;
-}
-
-async function writeAudioHistoryBlob(env, entry, audioBase64) {
-  const r2 = audioHistoryBlobStore(env);
-  if (entry.audio_storage === "r2" && r2) {
-    await r2.put(entry.audio_key, base64ToBytes(audioBase64), {
-      httpMetadata: { contentType: entry.media_type || "application/octet-stream" },
-    });
-    return;
-  }
-  await requireStateKv(env).put(entry.audio_key, audioBase64);
-}
-
-async function readAudioHistoryBlob(env, entry) {
-  if (entry.audio_storage === "r2") {
-    const object = await requireAudioHistoryBlobStore(env).get(entry.audio_key);
-    return object ? new Uint8Array(await object.arrayBuffer()) : null;
-  }
-  const audioBase64 = await requireStateKv(env).get(entry.audio_key);
-  return audioBase64 ? base64ToBytes(audioBase64) : null;
-}
-
-async function deleteAudioHistoryBlob(env, entry) {
-  if (entry.audio_storage === "r2") {
-    await requireAudioHistoryBlobStore(env).delete(entry.audio_key);
-    return;
-  }
-  await requireStateKv(env).delete(entry.audio_key);
-}
-
-function requireStateKv(env) {
-  const kv = stateKv(env);
-  if (!kv) {
-    throw httpError(503, "MO_SPEECH_KV binding is required");
-  }
-  return kv;
 }
 
 async function kvGetJson(kv, key, fallback) {
@@ -3620,11 +3096,6 @@ function extensionForMimeType(mimeType) {
 
 function safeHistoryToken(value) {
   return String(value || "history").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 96) || "history";
-}
-
-function safeHistoryFilename(value) {
-  const filename = safeHistoryToken(value);
-  return filename.includes(".") ? filename : `${filename}.wav`;
 }
 
 function base64ByteLength(base64) {

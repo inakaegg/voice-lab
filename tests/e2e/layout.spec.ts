@@ -421,6 +421,22 @@ test("practice history API errors remain readable inside the admin layout", asyn
   await assertNoHorizontalOverflow(page);
 });
 
+test("Cloudflare mode hides local-only history panels from shared admin pages", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { historyState: "disabled" });
+
+  await page.goto("/admin");
+  await expect(page.locator("[data-audio-history-panel]")).toBeHidden();
+
+  await page.goto("/speakloop/admin");
+  await expect(page.locator(".admin-config-group")).toHaveAttribute("open", "");
+  await expect(page.locator("[data-practice-history-panel]")).toHaveCount(3);
+  for (const panel of await page.locator("[data-practice-history-panel]").all()) {
+    await expect(panel).toBeHidden();
+  }
+  await assertNoHorizontalOverflow(page);
+});
+
 for (const route of utilityRoutes) {
   test(`${route.path} keeps compatibility controls inside the Voice Lab layout`, async ({ page }) => {
     await page.goto(route.path);

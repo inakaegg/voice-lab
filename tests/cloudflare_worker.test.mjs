@@ -923,10 +923,9 @@ test("Cloudflare worker translates speech with OpenAI and stores a completed job
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[2].url, "https://api.openai.com/v1/responses");
   assert.equal(calls[3].url, "https://api.openai.com/v1/audio/speech");
-  assert.equal(history.recordings.length, 1);
-  assert.match(history.recordings[0].metadata.original_content_type, /^audio\/webm(?:;codecs=opus)?$/);
-  assert.equal(history.outputs.length, 1);
-  assert.equal(history.outputs[0].metadata.endpoint, "translate-speech-jobs");
+  assert.equal(history.settings.enabled, false);
+  assert.equal(history.recordings.length, 0);
+  assert.equal(history.outputs.length, 0);
   assert.equal(calls[0].init.body.get("response_format"), "json");
 });
 
@@ -986,8 +985,9 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/responses").length, 1);
   assert.equal(history.recordings.length, 0);
   assert.equal(history.outputs.length, 0);
-  assert.equal(practiceHistory.recordings[0].metadata.endpoint, "practice-prompts");
-  assert.equal(practiceHistory.outputs[0].metadata.endpoint, "practice-prompts");
+  assert.equal(practiceHistory.settings.enabled, false);
+  assert.equal(practiceHistory.recordings.length, 0);
+  assert.equal(practiceHistory.outputs.length, 0);
 });
 
 test("Cloudflare worker auto-classifies a single practice recording as a repeat attempt", async () => {
@@ -1067,7 +1067,8 @@ test("Cloudflare worker auto-classifies a single practice recording as a new pro
   assert.equal(payload.classification.kind, "prompt");
   assert.equal(calls[0].init.body.get("language"), null);
   assert.equal(calls[1].init.body.get("language"), "zh");
-  assert.equal(practiceHistory.outputs[0].metadata.endpoint, "practice-recordings");
+  assert.equal(practiceHistory.settings.enabled, false);
+  assert.deepEqual(practiceHistory.outputs, []);
 });
 
 test("Cloudflare worker requests whisper timestamps for pronunciation practice", async () => {
@@ -1115,10 +1116,8 @@ test("Cloudflare worker requests whisper timestamps for pronunciation practice",
   const history = await (
     await handleRequest(new Request("https://example.com/api/practice-history", { headers: { cookie } }), env)
   ).json();
-  const diagnostics = JSON.parse(history.recordings[0].metadata.practice_diagnostics_json);
-  assert.equal(diagnostics.recognized_text, "I want coffee.");
-  assert.equal(diagnostics.asr_timestamps.word_count, 3);
-  assert.equal(diagnostics.comparison_alignment.complete, true);
+  assert.equal(history.settings.enabled, false);
+  assert.deepEqual(history.recordings, []);
 });
 
 test("Cloudflare worker creates practice pinyin without Latin or numeric tokens", async () => {
@@ -1251,7 +1250,7 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   assert.equal(calls[0].body.input.audio_effect_min_silence_ms, 450);
 });
 
-test("Cloudflare worker saves voice conversion source audio to KV history", async () => {
+test("Cloudflare worker does not save voice conversion source audio", async () => {
   const env = adminAuthEnv(
     async () => json({ id: "job-vc", status: "IN_QUEUE" }),
     { kv: fakeKv() },
@@ -1271,10 +1270,8 @@ test("Cloudflare worker saves voice conversion source audio to KV history", asyn
   ).json();
 
   assert.equal(response.status, 200);
-  assert.equal(history.recordings.length, 1);
-  assert.equal(history.recordings[0].filename, "job-vc-source.webm");
-  assert.equal(history.recordings[0].metadata.endpoint, "voice-conversion-jobs");
-  assert.match(history.recordings[0].metadata.content_type, /^audio\/webm(?:;codecs=opus)?$/);
+  assert.equal(history.settings.enabled, false);
+  assert.deepEqual(history.recordings, []);
 });
 
 test("Cloudflare worker maps completed RunPod voice conversion status to local job snapshot", async () => {
@@ -1304,9 +1301,7 @@ test("Cloudflare worker maps completed RunPod voice conversion status to local j
   assert.equal(payload.status, "succeeded");
   assert.equal(payload.current_stage.stage, "complete");
   assert.equal(payload.result.audio_base64, "AAAA");
-  assert.equal(history.outputs.length, 1);
-  assert.equal(history.outputs[0].filename, "job-vc-output.wav");
-  assert.equal(history.outputs[0].metadata.endpoint, "voice-conversion-jobs");
+  assert.deepEqual(history.outputs, []);
 });
 
 test("Cloudflare worker creates user text output with OpenAI text transform and TTS", async () => {
@@ -1404,7 +1399,7 @@ test("Cloudflare worker persists user settings in KV and generates joke variatio
   assert.equal(calls[0].url, "https://api.openai.com/v1/responses");
 });
 
-test("Cloudflare worker saves joke TTS output to KV audio history", async () => {
+test("Cloudflare worker does not save joke TTS output", async () => {
   const env = adminAuthEnv(
     async (url) => {
       if (url === "https://api.openai.com/v1/responses") {
@@ -1432,30 +1427,13 @@ test("Cloudflare worker saves joke TTS output to KV audio history", async () => 
     env,
   );
   const history = await historyResponse.json();
-  const entry = history.outputs[0];
-  const audioResponse = await handleRequest(new Request(`https://example.com${entry.url}`, { headers: { cookie: adminCookieValue } }), env);
-  const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
-  const deleteResponse = await handleRequest(
-    new Request(`https://example.com${entry.url}`, { method: "DELETE", headers: { cookie: adminCookieValue } }),
-    env,
-  );
-  const afterDelete = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-
   assert.equal(jokeResponse.status, 200);
-  assert.equal(history.settings.enabled, true);
+  assert.equal(history.settings.enabled, false);
   assert.equal(history.recordings.length, 0);
-  assert.equal(history.outputs.length, 1);
-  assert.equal(entry.metadata.endpoint, "user-joke-output");
-  assert.equal(entry.tts_text, "Lucu sekali.");
-  assert.deepEqual([...audioBytes], [4, 5, 6]);
-  assert.equal(audioResponse.headers.get("Content-Type"), "audio/wav");
-  assert.deepEqual(await deleteResponse.json(), { deleted: true });
-  assert.deepEqual(afterDelete.outputs, []);
+  assert.equal(history.outputs.length, 0);
 });
 
-test("Cloudflare worker stores new audio history blobs in R2 while keeping metadata in KV", async () => {
+test("Cloudflare worker does not store generated audio in R2 history", async () => {
   const r2 = fakeR2();
   const env = adminAuthEnv(
     async (url) => {
@@ -1482,27 +1460,13 @@ test("Cloudflare worker stores new audio history blobs in R2 while keeping metad
   const history = await (
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
-  const entry = history.outputs[0];
-
-  assert.equal(history.settings.metadata_store, "kv");
-  assert.equal(history.settings.blob_store, "r2");
-  assert.equal(entry.audio_storage, "r2");
-  assert.equal(r2.__store.size, 1);
-
-  const audioResponse = await handleRequest(
-    new Request(`https://example.com${entry.url}`, { headers: { cookie: adminCookieValue } }),
-    env,
-  );
-  assert.deepEqual([...new Uint8Array(await audioResponse.arrayBuffer())], [7, 8, 9]);
-
-  await handleRequest(
-    new Request(`https://example.com${entry.url}`, { method: "DELETE", headers: { cookie: adminCookieValue } }),
-    env,
-  );
+  assert.equal(history.settings.metadata_store, "none");
+  assert.equal(history.settings.blob_store, "none");
+  assert.deepEqual(history.outputs, []);
   assert.equal(r2.__store.size, 0);
 });
 
-test("Cloudflare worker keeps legacy KV audio readable after enabling R2", async () => {
+test("Cloudflare worker leaves both KV and R2 audio history unused", async () => {
   const kv = fakeKv();
   const r2 = fakeR2();
   let speechCount = 0;
@@ -1536,20 +1500,11 @@ test("Cloudflare worker keeps legacy KV audio readable after enabling R2", async
   const history = await (
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
-  const legacyEntry = history.outputs.find((entry) => entry.audio_storage === "kv");
-  const r2Entry = history.outputs.find((entry) => entry.audio_storage === "r2");
-  const legacyAudio = await handleRequest(
-    new Request(`https://example.com${legacyEntry.url}`, { headers: { cookie: adminCookieValue } }),
-    env,
-  );
-
-  assert.ok(legacyEntry);
-  assert.ok(r2Entry);
-  assert.deepEqual([...new Uint8Array(await legacyAudio.arrayBuffer())], [1]);
-  assert.equal(r2.__store.size, 1);
+  assert.deepEqual(history.outputs, []);
+  assert.equal(r2.__store.size, 0);
 });
 
-test("Cloudflare worker keeps R2 metadata when its binding is temporarily unavailable", async () => {
+test("Cloudflare worker exposes no R2 history when its binding changes", async () => {
   const r2 = fakeR2();
   const env = adminAuthEnv(
     async (url) => {
@@ -1572,30 +1527,37 @@ test("Cloudflare worker keeps R2 metadata when its binding is temporarily unavai
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
   env.MO_SPEECH_AUDIO_R2 = null;
-  const deleteResponse = await handleRequest(
-    new Request(`https://example.com${before.outputs[0].url}`, { method: "DELETE", headers: { cookie: adminCookieValue } }),
-    env,
-  );
   const after = await (
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
 
-  assert.equal(deleteResponse.status, 503);
-  assert.deepEqual(await deleteResponse.json(), { detail: "MO_SPEECH_AUDIO_R2 binding is required for this audio history entry" });
-  assert.equal(after.outputs.length, 1);
-  assert.equal(r2.__store.size, 1);
+  assert.deepEqual(before.outputs, []);
+  assert.deepEqual(after.outputs, []);
+  assert.equal(r2.__store.size, 0);
 });
 
-test("Cloudflare worker can expose one hundred audio history entries per kind", async () => {
+test("Cloudflare worker reports audio history as disabled", async () => {
   const env = adminAuthEnv(async () => json({ ok: true }), { kv: fakeKv() });
-  env.CLOUDFLARE_AUDIO_HISTORY_LIMIT = "100";
   const adminCookieValue = await adminCookie(env);
 
   const history = await (
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
 
-  assert.equal(history.settings.limit, 100);
+  assert.equal(history.settings.enabled, false);
+  assert.equal(history.settings.limit, 0);
+
+  for (const request of [
+    new Request("https://example.com/api/audio-history/outputs", {
+      method: "POST",
+      headers: { cookie: adminCookieValue, "Content-Type": "application/json" },
+      body: JSON.stringify({ audio_base64: "UklGRg==", audio_mime_type: "audio/wav" }),
+    }),
+    new Request("https://example.com/api/audio-history/outputs/old.wav", { headers: { cookie: adminCookieValue } }),
+    new Request("https://example.com/api/audio-history/outputs/old.wav", { method: "DELETE", headers: { cookie: adminCookieValue } }),
+  ]) {
+    assert.equal((await handleRequest(request, env)).status, 404);
+  }
 });
 
 test("Cloudflare worker reports RunPod runtime availability and warm health", async () => {

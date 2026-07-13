@@ -46,4 +46,17 @@ for (const theme of ["light", "dark"] as const) {
       fullPage: true,
     });
   });
+
+  test(`capture Cloudflare admin without local history in ${theme}`, async ({ page }, testInfo) => {
+    await page.unroute("**/api/**");
+    await installUiApiFixtures(page, { historyState: "disabled" });
+    await page.goto("/speakloop/admin");
+    await page.evaluate(() => document.fonts.ready);
+    const outputDir = "tmp/playwright/visual-review";
+    await mkdir(outputDir, { recursive: true });
+    await page.screenshot({
+      path: `${outputDir}/${testInfo.project.name}-${theme}-speakloop-admin-cloudflare.png`,
+      fullPage: true,
+    });
+  });
 }

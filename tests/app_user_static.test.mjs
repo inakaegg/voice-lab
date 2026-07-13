@@ -16,6 +16,7 @@ const publicSampleAudioAdminSource = await readFile(new URL("../src/mo_speech/we
 const sampleAudioControlsSource = await readFile(new URL("../src/mo_speech/web/app_sample_audio_controls.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
+const adminHistorySource = await readFile(new URL("../src/mo_speech/web/app_history.js", import.meta.url), "utf8");
 const adminSettingsSource = await readFile(new URL("../src/mo_speech/web/app_admin_settings.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
 
@@ -158,16 +159,18 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /data-public-feature="speakloop"/);
   assert.match(practiceAdminHtml, /data-public-feature-setting="audio_max_bytes"/);
   assert.match(practiceAdminHtml, /data-public-setting="admin_google_emails"/);
-  assert.match(practiceAdminHtml, /data-public-samples-admin/);
-  assert.match(practiceAdminHtml, /data-public-samples-features="speakloop"/);
-  assert.match(practiceAdminHtml, /data-public-sample-admin-feature="speakloop"/);
+  assert.doesNotMatch(practiceAdminHtml, /data-public-samples-admin/);
+  assert.doesNotMatch(practiceAdminHtml, /data-public-sample-admin-feature="speakloop"/);
   assert.match(practiceAdminHtml, /id="practice-history-recordings"/);
   assert.match(practiceAdminHtml, /id="practice-history-outputs"/);
+  assert.match(practiceAdminHtml, /data-practice-history-panel/);
   assert.match(practiceAdminHtml, /\/static\/app_public_access_settings\.js/);
-  assert.match(practiceAdminHtml, /\/static\/app_sample_audio_controls\.js/);
-  assert.match(practiceAdminHtml, /\/static\/app_public_sample_audio_admin\.js/);
+  assert.doesNotMatch(practiceAdminHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
+  assert.match(practiceHistorySource, /payload\.settings\?\.enabled === false/);
+  assert.match(practiceHistorySource, /panel\.hidden = true/);
+  assert.match(practiceHistorySource, /settingsPanel\.open = true/);
   assert.match(practiceHistorySource, /ensureVoiceLabAudioControl/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
   assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
@@ -184,10 +187,17 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(publicSampleAudioAdminSource, /保存済み/);
   assert.match(publicSampleAudioAdminSource, /削除中…/);
   assert.match(publicSampleAudioAdminSource, /dataset\.state.*success/s);
-  assert.match(practiceAdminHtml, /public-samples-header-status/);
+  assert.doesNotMatch(practiceAdminHtml, /public-samples-header-status/);
   assert.match(adminHtml, /id="user-settings-status"[^>]*role="status"/);
   assert.match(adminSettingsSource, /保存中…/);
   assert.match(adminSettingsSource, /保存済み/);
+});
+
+test("shared admin hides local-only history when the server disables it", () => {
+  assert.match(adminHtml, /data-audio-history-panel/);
+  assert.match(adminHistorySource, /settings\.enabled === false/);
+  assert.match(adminHistorySource, /historyPanel\.hidden = true/);
+  assert.doesNotMatch(adminHistorySource, /MO_AUDIO_HISTORY_ENABLED=1/);
 });
 
 test("vibevoice page provides local skit generation controls", () => {

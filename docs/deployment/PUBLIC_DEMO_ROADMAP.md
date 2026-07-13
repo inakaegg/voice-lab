@@ -6,7 +6,7 @@
 
 - Voice Labポータル、SpeakLoop、SkitVoiceをCloudflare Worker Static Assetsで公開済み。
 - Google OAuth、管理者認証、feature別quota、入力上限、監査ログを実装済み。
-- quota・監査・公開サンプルmetadataはD1、音声blobはR2へ保存済み。
+- quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存済み。ユーザー音声履歴は保存しない。
 - VibeVoice・Seed-VCはRunPod Serverlessへ分離済み。
 - Python/Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
 - Git履歴のgitleaks検査、Security policy、Dependabot設定を追加済み。
@@ -17,10 +17,10 @@
 ### 外部素材・ユーザー判断が必要
 
 1. SkitVoiceの英語、中国語、日本語サンプル音声を管理画面から登録する。
-2. SpeakLoopのサンプルを汎用1件のままにするか、英語・中国語別へ拡張するか決める。
-3. サンプル反映後、PCとスマートフォンの公開用スクリーンショットを撮影する。
-4. OSSライセンスを付けるか、閲覧目的のソース公開にするか決める。
-5. GitHub repositoryをpublicへ切り替える時点を決める。
+2. サンプル反映後、PCとスマートフォンの公開用スクリーンショットを撮影する。
+3. GitHub repositoryをpublicへ切り替える時点を決める。
+
+SpeakLoopにはサンプル音声を表示しない。現時点ではOSSライセンスを付与せず、ポートフォリオとしてソースを公開する。
 
 ### 公開直前の確認
 

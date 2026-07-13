@@ -57,6 +57,7 @@ const audioInputOnlyElements = [...document.querySelectorAll(".audio-input-only"
 const recordedAudioOnlyElements = [...document.querySelectorAll(".recorded-audio-only")];
 const realtimeStreamingOnlyElements = [...document.querySelectorAll(".realtime-streaming-only")];
 const historyRefreshButton = document.querySelector("#history-refresh");
+const historyPanel = document.querySelector("[data-audio-history-panel]");
 const historyRecordings = document.querySelector("#history-recordings");
 const historyOutputs = document.querySelector("#history-outputs");
 const historyStorage = document.querySelector("#history-storage");

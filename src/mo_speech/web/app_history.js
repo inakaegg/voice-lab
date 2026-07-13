@@ -11,7 +11,13 @@ async function loadAudioHistory({ announce = false } = {}) {
       throw new Error("audio history request failed");
     }
     const payload = await response.json();
-    renderAudioHistorySettings(payload.settings || {});
+    const settings = payload.settings || {};
+    if (settings.enabled === false) {
+      historyPanel.hidden = true;
+      return;
+    }
+    historyPanel.hidden = false;
+    renderAudioHistorySettings(settings);
     renderAudioHistoryList(historyRecordings, payload.recordings || []);
     renderAudioHistoryList(historyOutputs, payload.outputs || []);
     if (announce) {
@@ -42,10 +48,6 @@ async function loadAudioHistory({ announce = false } = {}) {
 }
 
 function renderAudioHistorySettings(settings) {
-  if (!settings.enabled) {
-    historyStorage.textContent = "音声履歴は無効です。MO_AUDIO_HISTORY_ENABLED=1 で有効化できます。";
-    return;
-  }
   const root = settings.resolved_root || settings.root || "tmp/audio-history";
   const recordingsDir = settings.recordings_dir || `${root}/recordings`;
   const outputsDir = settings.outputs_dir || `${root}/outputs`;

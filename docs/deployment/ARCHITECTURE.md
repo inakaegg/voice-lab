@@ -39,7 +39,7 @@ Browser
 
 - KV: 設定、短期job snapshot、ready状態、binding不足時のfallback
 - D1: email hashを使うquota、監査イベント、公開サンプルmetadata
-- R2: 音声履歴と公開サンプルのblob
+- R2: 管理者が登録した公開サンプル音声のblob
 - RunPod: GPU jobの入力と結果。長期保存の正にはしない
 
 詳細は [CLOUDFLARE.md](CLOUDFLARE.md)、[STORAGE.md](STORAGE.md)、[RUNPOD.md](RUNPOD.md) を参照する。
