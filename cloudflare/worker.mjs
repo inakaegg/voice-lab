@@ -270,6 +270,12 @@ function isProtectedAdminApiRequest(method, pathname) {
   if (method === "GET" && pathname.startsWith("/api/warmup/")) {
     return true;
   }
+  if (method === "GET" && /^\/api\/translate-speech-jobs\/[^/]+$/.test(pathname)) {
+    return true;
+  }
+  if (method === "GET" && /^\/api\/voice-conversion-jobs\/[^/]+$/.test(pathname)) {
+    return true;
+  }
   return false;
 }
 

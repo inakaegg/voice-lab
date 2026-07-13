@@ -142,7 +142,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 `workers.dev` のまま公開ページを認証なしにして管理機能を守るため、公開生成APIと管理機能の認証をWorker内のGoogle OAuthへ一本化する。対象は `/admin`、`/skitvoice/admin`、`/speakloop/admin`、`/fun` と、管理画面が使う設定保存、履歴機能の状態確認、warmup APIである。未ログインの管理ページはGoogleログインへ遷移し、ログイン済みでもemailが管理者リストにない場合は403を返す。管理APIは同じ条件で401または403を返す。Google OAuth設定または管理者メールが不足する場合はfail closedで503を返す。
 
-`/fun`を含む公開生成APIも同じGoogleセッションを使う。`/fun`のテキスト・音声生成APIとSeed-VC APIは、公開生成のGoogleログイン必須設定にかかわらず管理者だけに許可する。管理者メールに含まれるアカウントはquotaを消費しないが、入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
+`/fun`を含む公開生成APIも同じGoogleセッションを使う。`/fun`のテキスト・音声生成APIとSeed-VC APIは、job作成、status polling、結果取得を含め、公開生成のGoogleログイン必須設定にかかわらず管理者だけに許可する。管理者メールに含まれるアカウントはquotaを消費しないが、入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
 現在は単一Workerを正とする。分割は利用量、障害、secret、デプロイ頻度を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
 
