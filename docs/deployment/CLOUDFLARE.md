@@ -4,6 +4,8 @@
 
 スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置き、GPU推論だけをRunPod Serverlessへ送る。GPU PodでWebサーバーを常時起動しない。
 
+公開Worker名は `voice-lab`、公開URLは `https://voice-lab.functional-dog.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
+
 この文書は現在のCloudflareデモ構成を説明する。発音練習アプリとSkitVoiceを分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすい公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
 ```text
@@ -33,6 +35,20 @@ Browser
 `ADMIN_PASSWORD_SHA256` は管理画面ログイン用パスワードのSHA-256 hex digestである。平文パスワードはsecretにもリポジトリにも保存しない。`ADMIN_SESSION_SECRET` は管理セッションcookieへ署名するためのランダム文字列で、パスワードとは別の値にする。
 
 `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` は、公開デモで生成APIをGoogleログイン必須にするためのOAuth clientである。`PUBLIC_SESSION_SECRET` は公開ユーザーのログインcookie署名に使う。未設定の場合は `ADMIN_SESSION_SECRET` にfallbackできるが、公開運用では別値を推奨する。`ADMIN_GOOGLE_EMAILS` は、quota対象外にする管理者Googleアカウントをカンマ区切りで指定する。管理画面側の設定にも管理者メールを追加でき、secret側とKV設定側の和集合を管理者扱いにする。保存後は管理画面に保存済み表示とquota対象外メール件数を出し、同じメールでGoogleログイン済みの公開ユーザーは次の生成リクエストからquota消費なしで通す。
+
+Google OAuth clientの「承認済みのリダイレクトURI」には `https://voice-lab.functional-dog.workers.dev/auth/google/callback` を登録する。旧Worker URLから切り替える間は旧URIを残してよいが、新URLでログイン確認が完了した後に不要な旧URIを削除する。
+
+### Worker名変更時の移行
+
+`wrangler.toml` の `name` を変えると、既存Workerの名前がその場で変わるのではなく、新しいWorkerが作成される。KV、D1、R2は設定済みbindingを通じて既存resourceを引き継げるが、Worker secretは引き継がれず値も読み戻せない。ブランド変更時は次の順で移行する。
+
+1. 新Workerへ上記secretをすべて登録する。
+2. Google OAuth clientへ新しい承認済みリダイレクトURIを追加する。
+3. `npx wrangler deploy` で新Workerをデプロイする。
+4. 新URLでトップページ、Googleログイン、管理ログイン、SpeakLoop、SkitVoice生成をsmoke確認する。
+5. 利用箇所を新URLへ切り替えた後、旧Workerと旧OAuth redirect URIを削除する。
+
+新Workerのsmoke確認が終わるまで旧Workerを削除しない。secretが不足した状態で新Workerを本番移行先として公開しない。
 
 ## API gateway範囲
 
@@ -128,7 +144,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 `wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleで `/api/*` を処理する。`/` はポータル、`/fun` は従来の簡易変換画面、`/speakloop` は発音練習画面、`/skitvoice` はSkitVoiceユーザー画面、`/admin` は従来の管理画面へ振り分ける必要があるため、Static Assetsの `run_worker_first` を有効にする。Cloudflare AssetsのHTML clean URL redirectで `/user.html` が `/user` へ変換されると既存URL互換が崩れるため、`html_handling="none"` にする。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
 
-`workers.dev` のまま公開ページを認証なしにして管理画面だけを守る場合は、Cloudflare AccessではなくWorker内の簡易管理ログインを使う。対象は `/admin`、`/skitvoice/admin`、`/vibevoice/admin`、`/speakloop/admin`、`/practice/admin` と、管理画面が使う設定保存、履歴閲覧/削除、practice履歴、warmup APIである。ログイン成功時は `HttpOnly; Secure; SameSite=Lax` cookieを発行し、以後の管理画面/APIだけで検証する。`ADMIN_PASSWORD_SHA256` または `ADMIN_SESSION_SECRET` が未設定の場合、管理ルートはsetup errorを返し、公開ページと生成APIは動かし続ける。
+`workers.dev` のまま公開ページを認証なしにして管理画面だけを守る場合は、Cloudflare AccessではなくWorker内の簡易管理ログインを使う。対象は `/admin`、`/skitvoice/admin`、`/vibevoice/admin`、`/speakloop/admin` と、管理画面が使う設定保存、履歴閲覧/削除、practice履歴、warmup APIである。ログイン成功時は `HttpOnly; Secure; SameSite=Lax` cookieを発行し、以後の管理画面/APIだけで検証する。`ADMIN_PASSWORD_SHA256` または `ADMIN_SESSION_SECRET` が未設定の場合、管理ルートはsetup errorを返し、公開ページと生成APIは動かし続ける。
 
 公開生成APIのGoogleログインは管理画面ログインとは別である。管理画面は従来どおり管理パスワードで守り、公開ユーザーは `/auth/google/login` からGoogle OAuthでログインする。管理者本人が公開ページで生成する場合もGoogleログインは使うが、emailが管理者リストに含まれていればquotaは消費しない。
 

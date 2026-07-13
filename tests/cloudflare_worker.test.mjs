@@ -32,6 +32,19 @@ test("Cloudflare worker routes public app pages from the Voice Lab portal", asyn
   ]);
 });
 
+test("Cloudflare worker does not retain legacy practice UI aliases", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = { fetch: async (request) => new Response(new URL(request.url).pathname, { status: 404 }) };
+
+  for (const path of ["/practice", "/practice/", "/practice/admin", "/practice/admin/", "/static/practice.html"]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`), env);
+    assert.equal(response.status, 404, path);
+    assert.equal(await response.text(), path === "/static/practice.html" ? "/practice.html" : path);
+  }
+});
+
 test("Cloudflare worker protects directly addressed admin HTML assets", async () => {
   const env = adminAuthEnv(async () => {
     throw new Error("unexpected fetch");

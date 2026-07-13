@@ -41,6 +41,13 @@ test("React pages expose the DOM ids required by legacy controllers", () => {
   }
 });
 
+test("SpeakLoop uses a contained microphone icon instead of oversized legacy pseudo-elements", () => {
+  assert.match(speakloop, /className="record-microphone-icon"/);
+  assert.match(speakloop, /viewBox="0 0 24 24"/);
+  assert.match(styles, /\.practice-record-orb \.record-icon::before/);
+  assert.match(styles, /\.practice-record-orb \.record-icon::after/);
+});
+
 test("React layouts include responsive product and workflow structure", () => {
   assert.match(portal, /aria-label="Voice Lab"/);
   assert.match(portal, /声から、[\s\S]*ことばの体験を[\s\S]*つくる。/);
@@ -60,8 +67,8 @@ test("React layouts include responsive product and workflow structure", () => {
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {
   assert.doesNotMatch(speakloop, /<option value="ja-JP">/);
-  assert.match(speakloop, /<option value="zh-CN">🇨🇳 中文<\/option>/);
-  assert.match(speakloop, /<option value="en-US">🇺🇸 English<\/option>/);
+  assert.match(speakloop, /defaultValue="en-US"/);
+  assert.ok(speakloop.indexOf('<option value="en-US">🇺🇸 English<\/option>') < speakloop.indexOf('<option value="zh-CN">🇨🇳 中文<\/option>'));
 });
 
 test("public React routes use the staged Tailwind and shadcn migration boundary", () => {
@@ -91,10 +98,25 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
   assert.doesNotMatch(shared, /react-layout-switcher/);
 });
 
+test("Voice Lab gives each product a distinct accent and keeps recording red", () => {
+  assert.match(styles, /\.react-public-body\.practice-body,\s*\n\.react-public-body\.vibevoice-body\s*\{[^}]*--react-accent:\s*#536da8/s);
+  assert.match(styles, /\.react-public-body\.vibevoice-body\s*\{[^}]*--react-accent:\s*#9a5b36/s);
+  assert.match(styles, /\.record-orb\s*\{[^}]*background:\s*var\(--user-record-ready\)/s);
+  assert.match(styles, /--user-record-ready:\s*#e65a43/);
+  assert.match(styles, /--user-recording:\s*#c7372f/);
+});
+
 test("SkitVoice output languages include flags", () => {
-  assert.match(skitvoice, /🇺🇸 英語/);
-  assert.match(skitvoice, /🇨🇳 中国語/);
+  assert.match(skitvoice, /id="vibevoice-output-language" defaultValue="en-US"/);
+  assert.match(skitvoice, /🇺🇸 English/);
+  assert.match(skitvoice, /🇨🇳 中文/);
   assert.match(skitvoice, /🇯🇵 日本語（低品質）/);
+});
+
+test("SkitVoice uses the Voice Lab player for references and generated audio", () => {
+  assert.match(skitvoice, /data-voice-lab-audio-label={`Speaker \$\{slot\} 参照音声`}/);
+  assert.match(skitvoice, /data-voice-lab-audio-label="生成結果"/);
+  assert.doesNotMatch(skitvoice, /id="vibevoice-audio" controls/);
 });
 
 test("public workbench keeps settings at the mobile top right and avoids cramped columns", () => {
