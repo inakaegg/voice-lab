@@ -1422,6 +1422,16 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
   const settings = await readPublicAccessSettings(env);
   const featureSettings = settings.features[feature] || {};
   validatePublicInputLimits(featureSettings, limits);
+  if (feature === "fun" && await hasValidAdminSession(request, env)) {
+    await appendPublicAuditEvent(env, {
+      action: "public_quota_exempt",
+      feature,
+      is_admin: true,
+      auth_method: "admin_session",
+      ...requestAuditContext(request),
+    });
+    return { settings, consumed: false, authenticated: true, is_admin: true, auth_method: "admin_session" };
+  }
   if (!settings.google_login_required) {
     return { settings, consumed: false, authenticated: false, is_admin: false };
   }
@@ -1674,7 +1684,7 @@ function sanitizePublicAuditEvent(event) {
     if (value === undefined || value === null || value === "") {
       continue;
     }
-    if (["email", "action", "feature", "path", "method", "limit_type", "next", "cf_country", "cf_ray"].includes(key)) {
+    if (["email", "action", "feature", "path", "method", "limit_type", "auth_method", "next", "cf_country", "cf_ray"].includes(key)) {
       allowed[key] = String(value).slice(0, 256);
     } else if (["id", "created_at"].includes(key)) {
       allowed[key] = String(value).slice(0, 128);
