@@ -333,6 +333,34 @@ test("Cloudflare worker always protects fun generation APIs with Google admin au
   assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" });
 });
 
+test("Cloudflare worker always protects fun voice conversion jobs with Google admin auth", async () => {
+  const calls = [];
+  const env = adminAuthEnv(async (url) => {
+    calls.push(url);
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
+  const viewerCookie = await publicCookie(env, "/fun");
+  const request = (cookie = "") => {
+    const form = new FormData();
+    form.append("source_audio", new Blob(["source"], { type: "audio/wav" }), "source.wav");
+    form.append("reference_audio", new Blob(["reference"], { type: "audio/wav" }), "reference.wav");
+    return new Request("https://example.com/api/voice-conversion-jobs", {
+      method: "POST",
+      headers: cookie ? { cookie } : undefined,
+      body: form,
+    });
+  };
+
+  const unauthenticated = await handleRequest(request(), env);
+  const forbidden = await handleRequest(request(viewerCookie), env);
+
+  assert.equal(unauthenticated.status, 401);
+  assert.deepEqual(await unauthenticated.json(), { detail: "Google admin login is required" });
+  assert.equal(forbidden.status, 403);
+  assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" });
+  assert.equal(calls.some((url) => url.endsWith("/run")), false);
+});
+
 test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
@@ -1296,7 +1324,7 @@ test("Cloudflare worker forces Chinese practice attempts to Chinese ASR", async 
 
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
     return json({ id: "job-vc", status: "IN_QUEUE" });
   });
@@ -1311,7 +1339,7 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   form.append("audio_effect_min_silence_ms", "450");
 
   const response = await handleRequest(
-    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie: await adminCookie(env) }, body: form }),
     env,
   );
   const payload = await response.json();
@@ -1337,12 +1365,12 @@ test("Cloudflare worker does not save voice conversion source audio", async () =
   form.append("voice_backend", "seed-vc");
   form.append("source_audio", new Blob(["source"], { type: "audio/webm;codecs=opus" }), "source.webm");
   form.append("reference_audio", new Blob(["reference"], { type: "audio/webm;codecs=opus" }), "reference.webm");
+  const adminCookieValue = await adminCookie(env);
 
   const response = await handleRequest(
-    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie: adminCookieValue }, body: form }),
     env,
   );
-  const adminCookieValue = await adminCookie(env);
   const history = await (
     await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
   ).json();
@@ -1760,7 +1788,7 @@ test("Cloudflare worker stores Seed-VC ready state when warmup run completes imm
 
 test("Cloudflare worker stores Seed-VC ready state when voice conversion run completes immediately", async () => {
   const kv = fakeKv();
-  const env = fakeEnv(
+  const env = adminAuthEnv(
     async (url) => {
       if (url.endsWith("/run")) {
         return json({
@@ -1785,7 +1813,7 @@ test("Cloudflare worker stores Seed-VC ready state when voice conversion run com
   form.append("reference_audio", new Blob(["reference"], { type: "audio/webm" }), "reference.webm");
 
   const vcResponse = await handleRequest(
-    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", body: form }),
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie: await adminCookie(env) }, body: form }),
     env,
   );
   const vcJob = await vcResponse.json();

@@ -1292,7 +1292,7 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
   const settings = await readPublicAccessSettings(env);
   const featureSettings = settings.features[feature] || {};
   validatePublicInputLimits(featureSettings, limits);
-  if (feature === "fun") {
+  if (feature === "fun" || feature === "voice_conversion") {
     if (!adminAuthConfigured(env, settings)) {
       throw httpError(503, "admin authentication is not configured");
     }
