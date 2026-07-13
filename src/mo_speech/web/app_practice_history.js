@@ -1,6 +1,8 @@
 const recordingsList = document.querySelector("#practice-history-recordings");
 const outputsList = document.querySelector("#practice-history-outputs");
 const statusText = document.querySelector("#practice-history-status");
+const historyPanels = document.querySelectorAll("[data-practice-history-panel]");
+const settingsPanel = document.querySelector(".admin-config-group");
 
 loadPracticeHistory();
 
@@ -11,6 +13,16 @@ async function loadPracticeHistory() {
     if (!response.ok) {
       throw new Error(payload.detail || `history failed: ${response.status}`);
     }
+    if (payload.settings?.enabled === false) {
+      historyPanels.forEach((panel) => {
+        panel.hidden = true;
+      });
+      settingsPanel.open = true;
+      return;
+    }
+    historyPanels.forEach((panel) => {
+      panel.hidden = false;
+    });
     renderHistoryList(recordingsList, payload.recordings || []);
     renderHistoryList(outputsList, payload.outputs || []);
     statusText.textContent = `録音 ${payload.recordings?.length || 0}件 / お手本 ${payload.outputs?.length || 0}件`;

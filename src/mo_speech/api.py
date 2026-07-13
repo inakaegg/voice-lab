@@ -789,8 +789,6 @@ def create_app(
 
     @app.get("/fun")
     @app.get("/fun/")
-    @app.get("/user")
-    @app.get("/user/")
     def fun() -> FileResponse:
         return FileResponse(WEB_DIR / "user.html")
 
@@ -811,21 +809,8 @@ def create_app(
 
     @app.get("/skitvoice/admin")
     @app.get("/skitvoice/admin/")
-    @app.get("/vibevoice/admin")
-    @app.get("/vibevoice/admin/")
     def vibevoice_admin() -> FileResponse:
         return FileResponse(WEB_DIR / "vibevoice.html")
-
-    @app.get("/vibevoice")
-    @app.get("/vibevoice/")
-    @app.get("/vibevoice/simple")
-    @app.get("/vibevoice/simple/")
-    def vibevoice_simple() -> FileResponse:
-        return FileResponse(WEB_DIR / "react" / "skitvoice.html")
-
-    @app.get("/seed-vc")
-    def seed_vc_direct() -> FileResponse:
-        return FileResponse(WEB_DIR / "seed_vc.html")
 
     @app.get("/admin")
     def admin() -> FileResponse:

@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 
 type UiFixtureOptions = {
-  historyState?: "empty" | "long" | "error";
+  historyState?: "empty" | "long" | "error" | "disabled";
 };
 
 const accessSettings = {
@@ -38,6 +38,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
       return json(publicSamples);
     }
     if (path === "/api/practice-history") {
+      if (options.historyState === "disabled") return json({ settings: { enabled: false }, recordings: [], outputs: [] });
       if (options.historyState === "error") return json({ detail: "履歴fixtureの読み込みに失敗しました" }, 500);
       if (options.historyState === "long") {
         const longLabel = "長い日本語タイトルとファイル名を含む発音練習履歴_".repeat(6);
@@ -53,6 +54,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
       return json({ recordings: [], outputs: [] });
     }
     if (path === "/api/audio-history") {
+      if (options.historyState === "disabled") return json({ settings: { enabled: false }, recordings: [], outputs: [] });
       if (options.historyState === "error") return json({ detail: "音声履歴fixtureの読み込みに失敗しました" }, 500);
       if (options.historyState === "long") {
         const longLabel = "長い音声履歴ファイル名と詳細情報_".repeat(8);

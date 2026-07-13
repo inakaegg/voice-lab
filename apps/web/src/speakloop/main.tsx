@@ -1,5 +1,5 @@
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, PageShell, ProductHeader, SampleAudio } from "../shared/components";
+import { activateCompactLayout, PageShell, ProductHeader } from "../shared/components";
 
 activateCompactLayout();
 
@@ -14,7 +14,7 @@ function SpeakLoop() {
     <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" />
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>自分が言いたい文章だから、練習が続く。</h2><p>母国語で話すと、学習言語のお手本を生成します。聞いて、まねして、発音を比較できます。</p></div>
-      <div className="react-status-stack"><SampleAudio feature="speakloop" label="SpeakLoop サンプル"/><p className="public-privacy-notice" data-public-privacy-notice>音声は外部の音声処理APIへ送信され、公開デモでは設定に応じて短い音声履歴を保存する場合があります。機密情報を含む音声は入力しないでください。</p></div>
+      <div className="react-status-stack"><p className="public-privacy-notice" data-public-privacy-notice>音声は生成・評価のため外部サービスで処理されます。個人情報や機密情報を含む音声は入力しないでください。</p></div>
     </section>
     <section className="practice-quick-settings react-toolbar" aria-label="練習設定"><label className="practice-current-language practice-language-select"><span>学習言語</span><select id="practice-target-language-select" aria-label="学習する言語" defaultValue="en-US"><option value="en-US">🇺🇸 English</option><option value="zh-CN">🇨🇳 中文</option></select></label><label id="practice-pinyin-setting" className="practice-inline-setting" hidden><input id="practice-pinyin-toggle" type="checkbox" defaultChecked/><span>ピンイン</span></label></section>
     <section className="practice-flow react-practice-flow" aria-label="れんしゅう">

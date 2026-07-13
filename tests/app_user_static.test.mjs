@@ -3,39 +3,22 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(new URL("../src/mo_speech/web/app_user.js", import.meta.url), "utf8");
-const portalHtml = await readFile(new URL("../src/mo_speech/web/portal.html", import.meta.url), "utf8");
 const userHtml = await readFile(new URL("../src/mo_speech/web/user.html", import.meta.url), "utf8");
 const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
 const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_admin.html", import.meta.url), "utf8");
 const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_practice_history.js", import.meta.url), "utf8");
 const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
-const vibevoiceSimpleHtml = await readFile(new URL("../src/mo_speech/web/vibevoice_simple.html", import.meta.url), "utf8");
 const vibevoiceSource = await readFile(new URL("../src/mo_speech/web/app_vibevoice.js", import.meta.url), "utf8");
 const publicSessionSource = await readFile(new URL("../src/mo_speech/web/app_public_session.js", import.meta.url), "utf8");
 const publicAccessSettingsSource = await readFile(new URL("../src/mo_speech/web/app_public_access_settings.js", import.meta.url), "utf8");
 const publicSampleAudioSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio.js", import.meta.url), "utf8");
 const publicSampleAudioAdminSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio_admin.js", import.meta.url), "utf8");
 const sampleAudioControlsSource = await readFile(new URL("../src/mo_speech/web/app_sample_audio_controls.js", import.meta.url), "utf8");
-const seedVcDirectHtml = await readFile(new URL("../src/mo_speech/web/seed_vc.html", import.meta.url), "utf8");
-const seedVcDirectSource = await readFile(new URL("../src/mo_speech/web/app_seed_vc_direct.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
+const adminHistorySource = await readFile(new URL("../src/mo_speech/web/app_history.js", import.meta.url), "utf8");
 const adminSettingsSource = await readFile(new URL("../src/mo_speech/web/app_admin_settings.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
-
-test("portal page links to SkitVoice and SpeakLoop only", () => {
-  assert.match(portalHtml, /Voice Lab/);
-  assert.match(portalHtml, /SkitVoice/);
-  assert.match(portalHtml, /かんたんスキット生成/);
-  assert.match(portalHtml, /SpeakLoop/);
-  assert.match(portalHtml, /言いたいことで発音練習/);
-  assert.match(portalHtml, /href="\/skitvoice"/);
-  assert.match(portalHtml, /href="\/speakloop"/);
-  assert.doesNotMatch(portalHtml, /へんな へんかん アプリ/);
-  assert.doesNotMatch(portalHtml, /href="\/fun"/);
-  assert.match(styles, /\.portal-shell/);
-  assert.match(styles, /\.portal-apps/);
-});
 
 test("user page only shows warmup as a passive status dot", () => {
   assert.match(userHtml, /id="user-warmup-status"/);
@@ -176,16 +159,18 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(practiceAdminHtml, /data-public-feature="speakloop"/);
   assert.match(practiceAdminHtml, /data-public-feature-setting="audio_max_bytes"/);
   assert.match(practiceAdminHtml, /data-public-setting="admin_google_emails"/);
-  assert.match(practiceAdminHtml, /data-public-samples-admin/);
-  assert.match(practiceAdminHtml, /data-public-samples-features="speakloop"/);
-  assert.match(practiceAdminHtml, /data-public-sample-admin-feature="speakloop"/);
+  assert.doesNotMatch(practiceAdminHtml, /data-public-samples-admin/);
+  assert.doesNotMatch(practiceAdminHtml, /data-public-sample-admin-feature="speakloop"/);
   assert.match(practiceAdminHtml, /id="practice-history-recordings"/);
   assert.match(practiceAdminHtml, /id="practice-history-outputs"/);
+  assert.match(practiceAdminHtml, /data-practice-history-panel/);
   assert.match(practiceAdminHtml, /\/static\/app_public_access_settings\.js/);
-  assert.match(practiceAdminHtml, /\/static\/app_sample_audio_controls\.js/);
-  assert.match(practiceAdminHtml, /\/static\/app_public_sample_audio_admin\.js/);
+  assert.doesNotMatch(practiceAdminHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.match(practiceAdminHtml, /\/static\/app_practice_history\.js/);
   assert.match(practiceHistorySource, /fetch\("\/api\/practice-history"\)/);
+  assert.match(practiceHistorySource, /payload\.settings\?\.enabled === false/);
+  assert.match(practiceHistorySource, /panel\.hidden = true/);
+  assert.match(practiceHistorySource, /settingsPanel\.open = true/);
   assert.match(practiceHistorySource, /ensureVoiceLabAudioControl/);
   assert.doesNotMatch(practiceHistorySource, /\/api\/audio-history/);
   assert.match(publicAccessSettingsSource, /\/api\/public-access-settings/);
@@ -202,10 +187,17 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(publicSampleAudioAdminSource, /保存済み/);
   assert.match(publicSampleAudioAdminSource, /削除中…/);
   assert.match(publicSampleAudioAdminSource, /dataset\.state.*success/s);
-  assert.match(practiceAdminHtml, /public-samples-header-status/);
+  assert.doesNotMatch(practiceAdminHtml, /public-samples-header-status/);
   assert.match(adminHtml, /id="user-settings-status"[^>]*role="status"/);
   assert.match(adminSettingsSource, /保存中…/);
   assert.match(adminSettingsSource, /保存済み/);
+});
+
+test("shared admin hides local-only history when the server disables it", () => {
+  assert.match(adminHtml, /data-audio-history-panel/);
+  assert.match(adminHistorySource, /settings\.enabled === false/);
+  assert.match(adminHistorySource, /historyPanel\.hidden = true/);
+  assert.doesNotMatch(adminHistorySource, /MO_AUDIO_HISTORY_ENABLED=1/);
 });
 
 test("vibevoice page provides local skit generation controls", () => {
@@ -424,93 +416,6 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(styles, /\.vibevoice-saved-voice/);
 });
 
-test("vibevoice simple page hides advanced controls behind fixed practical defaults", () => {
-  assert.match(vibevoiceSimpleHtml, /data-vibevoice-mode="simple"/);
-  assert.match(vibevoiceSimpleHtml, /SkitVoice/);
-  assert.match(vibevoiceSimpleHtml, /かんたんスキット生成/);
-  assert.match(vibevoiceSimpleHtml, /class="public-status-bar"/);
-  assert.match(vibevoiceSimpleHtml, /data-public-auth-panel/);
-  assert.match(vibevoiceSimpleHtml, /class="public-auth-panel vibevoice-header-auth"/);
-  assert.match(vibevoiceSimpleHtml, /\/auth\/google\/login\?next=\/skitvoice/);
-  assert.match(vibevoiceSimpleHtml, /data-public-sample-feature="skitvoice"/);
-  assert.equal((vibevoiceSimpleHtml.match(/data-public-sample-language="(?:ja-JP|zh-CN|en-US)"/g) || []).length, 3);
-  assert.match(vibevoiceSimpleHtml, /data-public-privacy-notice/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /name="rights_confirmed"/);
-  assert.match(vibevoiceSimpleHtml, /個人・家庭内の私的利用を超えて公開・共有する場合/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /タブ共有の許可は公開・再利用の許諾ではありません/);
-  assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-grid"/);
-  assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-main"/);
-  assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-col-side"/);
-  assert.ok(vibevoiceSimpleHtml.indexOf("vibevoice-simple-settings-panel") < vibevoiceSimpleHtml.indexOf("vibevoice-voice-panel"));
-  assert.match(vibevoiceSimpleHtml, /\/static\/app_public_sample_audio\.js/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/skitvoice\/admin">管理/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /生成モード/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /href="\/practice"/);
-  assert.match(vibevoiceSimpleHtml, /name="backend"/);
-  assert.match(vibevoiceSimpleHtml, /value="runpod_serverless" selected/);
-  assert.match(vibevoiceSimpleHtml, /name="model_id"/);
-  assert.match(vibevoiceSimpleHtml, /value="vibevoice-large-aoi-pinned"[^>]*selected/s);
-  assert.match(vibevoiceSimpleHtml, /name="output_language"/);
-  assert.match(vibevoiceSimpleHtml, /value="en-US"[^>]*selected[^>]*>🇺🇸 English/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /name="translate_script"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-script-button"[^>]*>台本自動生成/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-translated-script"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-script"/);
-  assert.match(
-    vibevoiceSimpleHtml,
-    /id="vibevoice-script"[\s\S]*rows="6"[\s\S]*>1 あっ、こんにちは〜\n2 こんにちは。ご無沙汰してます。\n1 元気ですか？最近、どうしてます？\n2 いや〜、仕事が忙しくて。AIの進化がすごくて大変なことになってます\n1 AIの進化凄いですよね〜。どんどん賢くなってますよね<\/textarea>/,
-  );
-  assert.match(vibevoiceSimpleHtml, /name="voice_file_1"/);
-  assert.match(vibevoiceSimpleHtml, /name="voice_file_4"/);
-  assert.match(vibevoiceSimpleHtml, /data-record-voice-slot="1"/);
-  assert.match(vibevoiceSimpleHtml, /data-record-voice-slot="4"/);
-  assert.equal((vibevoiceSimpleHtml.match(/data-tab-audio-slot=/g) || []).length, 4);
-  assert.match(vibevoiceSimpleHtml, /data-reference-url-open-slot="1" data-local-reference-url hidden/);
-  assert.match(vibevoiceSimpleHtml, /data-reference-url-open-slot="4" data-local-reference-url hidden/);
-  assert.match(vibevoiceSimpleHtml, /data-reference-url-display-slot="1" data-local-reference-url hidden/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url-clear"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-reference-url-dialog"[^>]*data-local-reference-url hidden/);
-  assert.match(vibevoiceSimpleHtml, />URL<\/button>/);
-  assert.doesNotMatch(vibevoiceSimpleHtml, /class="vibevoice-reference-url-panel"/);
-  assert.match(vibevoiceSimpleHtml, /name="directed_retry_score_threshold" type="hidden" value="0\.65"/);
-  assert.match(vibevoiceSimpleHtml, /name="directed_retry_max_multiplier" type="hidden" value="1"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-line-mode"[^>]*checked/s);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-directed-retry-low-score"[^>]*checked/s);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-generate-button"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-job-progress"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-audio"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-artifacts"/);
-  assert.match(vibevoiceSimpleHtml, /id="vibevoice-copy-diagnostics"/);
-  assert.match(vibevoiceSimpleHtml, /class="vibevoice-simple-debug" hidden/);
-  assert.match(vibevoiceSimpleHtml, /class="vibevoice-debug-runtime" hidden/);
-  assert.match(vibevoiceSimpleHtml, /\/static\/app_public_session\.js/);
-  assert.match(vibevoiceSimpleHtml, /\/static\/app_public_sample_audio\.js/);
-  assert.match(vibevoiceSimpleHtml, /\/static\/app_vibevoice\.js/);
-  assert.match(vibevoiceSource, /function computeReferenceUrlSourcesEnabled\(\)/);
-  assert.match(vibevoiceSource, /function isLocalReferenceUrlOrigin\(\)/);
-  assert.match(vibevoiceSource, /hostname === "localhost"/);
-  assert.match(vibevoiceSource, /hostname === "127\.0\.0\.1"/);
-  assert.match(vibevoiceSource, /function configureReferenceUrlAvailability\(\)/);
-  assert.match(vibevoiceSource, /const rightsConfirmedControl = form\.elements\.rights_confirmed/);
-  assert.match(vibevoiceSource, /if \(rightsConfirmedControl && !rightsConfirmedControl\.checked\)/);
-  assert.match(vibevoiceSource, /参照音声の利用許諾を確認してください/);
-  assert.match(vibevoiceSource, /data-local-reference-url/);
-  assert.match(vibevoiceSource, /if \(!referenceUrlSourcesEnabled\)\s*\{\s*return false;\s*\}/);
-  assert.match(styles, /\.vibevoice-simple-shell/);
-  assert.match(styles, /\.vibevoice-header-auth/);
-  assert.match(styles, /\.vibevoice-header-auth\s*\{[^}]*text-align:\s*right/s);
-  assert.match(styles, /\.vibevoice-simple-body\s+\.vibevoice-script-panel textarea\s*\{[^}]*min-height:\s*260px/s);
-  assert.match(styles, /\.vibevoice-simple-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.2fr\) minmax\(320px,\s*0\.8fr\)/s);
-  assert.match(styles, /\.vibevoice-simple-col-main,/);
-  assert.match(styles, /@media \(max-width:\s*640px\)[\s\S]*\.vibevoice-script-panel textarea\s*\{[^}]*height:\s*220px[^}]*min-height:\s*220px/s);
-  assert.doesNotMatch(styles, /\.vibevoice-actions\s*\{[^}]*order:\s*-1/s);
-  assert.match(styles, /\.vibevoice-simple-mode-summary/);
-  assert.match(styles, /\.public-privacy-notice/);
-  assert.match(styles, /\.vibevoice-rights-confirmation/);
-  assert.match(styles, /\.vibevoice-simple-debug/);
-});
-
 test("vibevoice auto line-by-line state is reflected in the UI without overwriting the saved preference", () => {
   assert.match(vibevoiceSource, /const autoLineByLineMinLines = 4/);
   assert.match(vibevoiceSource, /const autoLineByLineMinChars = 180/);
@@ -549,43 +454,4 @@ test("vibevoice progress animation only runs while a job is active", () => {
   );
   assert.match(styles, /\.vibevoice-job-progress\[data-progress="determinate"\]\s+\.vibevoice-progress-bar span/s);
   assert.doesNotMatch(baseProgressSpanRule, /animation:/);
-});
-
-test("seed-vc direct page only exposes direct voice conversion controls", () => {
-  assert.match(seedVcDirectHtml, /Seed-VC/);
-  assert.match(seedVcDirectHtml, /data-public-sample-feature="voice_conversion"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-source-audio"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-audio-device"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-audio-device-refresh"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-record-button"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-stop-button"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-recording-label"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-input-level"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-recording-details"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-input-audio"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-reference-audio"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-reference-preview-button"/);
-  assert.match(seedVcDirectHtml, /id="seed_vc_diffusion_steps"[^>]*type="range"/s);
-  assert.match(seedVcDirectHtml, /data-seed-vc-range-output="seed_vc_diffusion_steps"/);
-  assert.match(seedVcDirectHtml, /class="seed-vc-range-control"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-submit-button"/);
-  assert.match(seedVcDirectHtml, /id="seed-vc-output-audio"/);
-  assert.match(seedVcDirectHtml, /\/static\/app_public_sample_audio\.js/);
-  assert.match(seedVcDirectHtml, /\/static\/app_config\.js/);
-  assert.match(seedVcDirectHtml, /\/static\/app_seed_vc_direct\.js/);
-  assert.doesNotMatch(seedVcDirectHtml, /operation_mode|translation_backend|tts_backend|user-settings-panel|runpod-warmup-panel/);
-  assert.match(seedVcDirectSource, /\/api\/runtime/);
-  assert.match(seedVcDirectSource, /\/api\/voice-conversion-jobs/);
-  assert.match(seedVcDirectSource, /\/api\/seed-vc\/reference-preview/);
-  assert.match(seedVcDirectSource, /pollVoiceConversionJob/);
-  assert.match(seedVcDirectSource, /appendSeedVcSettings/);
-  assert.match(seedVcDirectSource, /seedVcPresets/);
-  assert.match(seedVcDirectSource, /startRecording/);
-  assert.match(seedVcDirectSource, /stopRecording/);
-  assert.match(seedVcDirectSource, /navigator\.mediaDevices\.getUserMedia/);
-  assert.match(seedVcDirectSource, /renderSeedVcRangeValue/);
-  assert.match(seedVcDirectSource, /recordedBlob/);
-  assert.match(seedVcDirectSource, /source_audio", recordedBlob/);
-  assert.match(seedVcDirectSource, /audio_base64/);
-  assert.match(styles, /\.seed-vc-range-control/);
 });

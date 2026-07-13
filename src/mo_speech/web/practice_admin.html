@@ -17,14 +17,15 @@
           <a href="/admin">総合管理</a>
           <a href="/speakloop/admin" aria-current="page">SpeakLoop</a>
           <a href="/skitvoice/admin">SkitVoice</a>
+          <a href="/fun">実験画面</a>
           <a href="/speakloop">公開画面</a>
         </nav>
-        <p>通常の音声変換履歴とは分けて、練習用のお手本音声と復唱録音だけを表示します。</p>
+        <p>SpeakLoopの公開利用制限と、ローカル版で保存した練習履歴を管理します。</p>
       </header>
       <details class="admin-config-group admin-config-wide">
         <summary>
           <span>公開画面の設定</span>
-          <small>利用制限とサンプル音声</small>
+          <small>利用制限</small>
         </summary>
         <div class="admin-config-grid admin-config-grid-paired">
           <section class="public-access-admin" data-public-access-settings data-public-access-features="speakloop" aria-label="公開制限">
@@ -53,40 +54,19 @@
         <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
         <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
           </section>
-          <section class="public-samples-admin" data-public-samples-admin data-public-samples-features="speakloop" aria-label="公開サンプル音声">
-        <div class="public-access-header">
-          <div>
-            <h2>サンプル音声</h2>
-            <p>SpeakLoopユーザー画面に表示する出力例を登録します。</p>
-          </div>
-          <div class="public-samples-header-actions"><p class="public-access-status public-samples-header-status" data-public-samples-status role="status" aria-live="polite"></p><button type="button" class="secondary-button" data-public-samples-save>保存</button></div>
-        </div>
-        <div class="public-sample-admin-feature" data-public-sample-admin-feature="speakloop">
-          <h3>SpeakLoop</h3>
-          <label>タイトル <input type="text" data-public-sample-title maxlength="80" /></label>
-          <label class="public-access-wide">説明 <textarea data-public-sample-description rows="2" maxlength="300"></textarea></label>
-          <label>音声ファイル <input type="file" accept="audio/*" data-public-sample-file /></label>
-          <button type="button" class="secondary-button public-sample-delete-button" data-public-sample-delete>保存済みを削除</button>
-          <audio data-public-sample-preview controls preload="metadata" hidden></audio>
-          <p class="public-access-note public-sample-details" data-public-sample-details>未設定</p>
-        </div>
-        <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
-          </section>
         </div>
       </details>
-      <section class="practice-history-section" aria-label="練習入力">
+      <section class="practice-history-section" data-practice-history-panel aria-label="練習入力">
         <h2>録音</h2>
         <div id="practice-history-recordings" class="practice-history-list"></div>
       </section>
-      <section class="practice-history-section" aria-label="お手本音声">
+      <section class="practice-history-section" data-practice-history-panel aria-label="お手本音声">
         <h2>お手本音声</h2>
         <div id="practice-history-outputs" class="practice-history-list"></div>
       </section>
-      <p id="practice-history-status" class="practice-status" role="status" aria-live="polite">読み込み中です。</p>
+      <p id="practice-history-status" class="practice-status" data-practice-history-panel role="status" aria-live="polite">読み込み中です。</p>
     </main>
     <script src="/static/app_public_access_settings.js" defer></script>
-    <script src="/static/app_sample_audio_controls.js" defer></script>
-    <script src="/static/app_public_sample_audio_admin.js" defer></script>
     <script src="/static/app_practice_history.js" defer></script>
   </body>
 </html>

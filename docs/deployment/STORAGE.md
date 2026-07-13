@@ -1,8 +1,8 @@
-# Cloudflare保存層の分離
+# Cloudflare保存層の境界
 
 ## 目的
 
-公開デモで扱う設定、quota、監査イベント、job metadata、音声blobを、データ特性に合うCloudflareサービスへ段階的に分ける。技術導入自体を目的にせず、既存API互換とKV fallbackを保ちながら移行する。
+公開デモで扱う設定、quota、監査イベント、job metadata、公開サンプル音声を、データ特性に合うCloudflareサービスへ分ける。ユーザーの入力音声と生成音声はCloudflare公開版で履歴保存せず、音声履歴はローカルFastAPI版だけの機能とする。
 
 ## 現在の実装
 
@@ -10,14 +10,11 @@
 | --- | --- | --- |
 | ユーザー設定、公開アクセス設定 | Workers KV | 実装済み |
 | 短期job snapshot、warmup ready | Workers KV | 実装済み。TTL付き |
-| 音声履歴metadata/index | Workers KV | 実装済み |
-| 音声履歴blob | R2（bindingあり）/ KV fallback | production/preview bucketとbinding作成済み |
+| ユーザー音声履歴 | Cloudflare公開版では保存しない | ローカルFastAPI版だけで利用 |
 | 公開サンプル音声metadata/blob | D1 / R2（bindingなしではKV fallback） | 日本語・中国語・英語を含む複数サンプルへ対応 |
 | quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存 |
 
-`MO_SPEECH_AUDIO_R2` bindingがある場合、新しく保存する音声履歴blobはR2へ置き、metadataとindexだけを `MO_SPEECH_KV` に置く。bindingがない場合は従来どおりKVへ保存する。
-
-保存済みindexには各entryの `audio_storage` を `kv` または `r2` として記録する。移行期間はKV entryとR2 entryの混在を許容し、取得・削除・上限超過削除はentryごとの保存先を参照する。旧entryは `audio_storage` がないため `kv` として読む。この方式により一括コピーをせず段階移行できる。
+`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは翻訳、VC、SpeakLoop、SkitVoice、TTSの入力・生成音声を履歴indexやblobとして書き込まない。
 
 ## R2 binding
 
@@ -30,21 +27,17 @@ bucket_name = "mo-speech-audio"
 preview_bucket_name = "mo-speech-audio-preview"
 ```
 
-ローカル/CIではfake R2 bindingを使い、R2保存、取得、削除、KV fallback、旧KV entry互換を検証する。bucket名やCloudflare account IDはコードへハードコードしない。
+ローカル/CIではfake R2 bindingを使い、公開サンプルのR2保存、取得、削除、KV fallbackを検証する。bucket名やCloudflare account IDはコードへハードコードしない。
 
-## R2 key
+## R2の用途
 
-音声履歴は既存の論理keyを維持する。
+R2 objectには公開サンプル音声のbytesを置き、content typeをHTTP metadataへ保存する。bucketをpublicにはせず、Workerの公開サンプルAPIから配信する。ユーザー音声履歴用の `audio-history:*` keyは新規作成しない。
 
-```text
-audio-history:{recordings|outputs}:{safe_filename}:audio
-```
-
-R2 objectには音声bytesを置き、content typeをHTTP metadataへ保存する。公開URLを直接発行せず、認証済みの既存 `/api/audio-history/{kind}/{filename}` からWorkerが返す。これによりbucketをpublicにせず、管理APIの認証境界を維持する。
+以前の実装が作成した `audio-history:*` objectやKV indexが既存環境に残っている場合、新しいWorkerは読み書きしない。production dataの削除はdeployと分離した一回限りの運用作業とし、対象件数とkey prefixを確認してから実施する。
 
 ## D1 resourceと移行対象
 
-D1 database `mo-speech-demo-db` とbinding `MO_SPEECH_DB` は作成済みで、schemaは `migrations/` で管理する。bindingがある環境ではquotaと監査ログをD1へ保存し、公開サンプルmetadataをD1、音声blobをR2へ保存する。bindingがないローカル・テスト環境ではKV fallbackを維持する。
+D1 database `mo-speech-demo-db` とbinding `MO_SPEECH_DB` は作成済みで、schemaは `migrations/` で管理する。bindingがある環境ではquotaと監査ログをD1へ保存し、公開サンプルmetadataをD1、公開サンプル音声blobをR2へ保存する。bindingがないローカル・テスト環境ではKV fallbackを維持する。
 
 ```sql
 CREATE TABLE public_users (
@@ -87,10 +80,10 @@ CREATE INDEX audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
 
 ## 移行順
 
-1. 音声履歴blobのR2保存: 完了。
-2. 公開サンプル音声blobのR2保存とmetadataのD1保存: 完了。
-3. audit logとquota台帳のD1移行: 完了。旧KV auditは初回アクセス時、旧quota値は対象ユーザーの初回利用時に引き継ぐ。
-4. 課金水準の厳密な同時更新が必要になった場合のみDurable Objectsを検討する。現在は公開デモの過剰利用防止を目的とする。
-5. retention jobとユーザー/管理者向け削除手順を追加する。
+1. 公開サンプル音声blobのR2保存とmetadataのD1保存: 完了。
+2. audit logとquota台帳のD1移行: 完了。旧KV auditは初回アクセス時、旧quota値は対象ユーザーの初回利用時に引き継ぐ。
+3. Cloudflare版のユーザー音声履歴保存を廃止: 完了。空のread contractだけを共有管理UIの機能判定用に維持する。
+4. 旧 `audio-history:*` dataが実環境に残る場合は、件数とprefixを確認して一回限りの削除を行う。
+5. 課金水準の厳密な同時更新が必要になった場合のみDurable Objectsを検討する。現在は公開デモの過剰利用防止を目的とする。
 
-各段階で既存JSON responseを変えず、旧保存データを読める期間を設ける。読み書きの切替はbindingの有無で暗黙に行う範囲を最小化し、管理APIのruntime表示またはログから実保存先を確認できるようにする。
+保存先の切替はbindingの有無で暗黙に行う範囲を最小化し、管理APIのruntime表示またはログから実保存先を確認できるようにする。音声履歴をCloudflareへ再導入する場合は、保持期間、削除手段、利用者への表示を先に仕様化する。

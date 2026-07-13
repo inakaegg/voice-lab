@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitvoiceHtml, legacyPortalHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml] = await Promise.all([
+const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml] = await Promise.all([
   read("package.json"),
   read("pyproject.toml"),
   read("src/mo_speech/api.py"),
@@ -12,13 +12,10 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitv
   read("apps/web/portal.html"),
   read("apps/web/speakloop.html"),
   read("apps/web/skitvoice.html"),
-  read("src/mo_speech/web/portal.html"),
-  read("src/mo_speech/web/vibevoice_simple.html"),
   read("src/mo_speech/web/index.html"),
   read("src/mo_speech/web/practice_admin.html"),
   read("src/mo_speech/web/vibevoice.html"),
   read("src/mo_speech/web/user.html"),
-  read("src/mo_speech/web/seed_vc.html"),
 ]);
 const portalStyles = await read("apps/web/src/portal/styles.css");
 
@@ -36,16 +33,15 @@ test("Voice Lab is the application and package brand without renaming the Python
 
 test("all active pages use the built Voice Lab style assets instead of direct legacy CSS", () => {
   assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
-  for (const html of [speakloopHtml, skitvoiceHtml, legacyPortalHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml]) {
+  for (const html of [speakloopHtml, skitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml]) {
     assert.doesNotMatch(html, /\/static\/styles\.css/);
   }
   assert.match(viteConfig, /appStyles/);
   assert.match(speakloopHtml, /src\/styles\/app\.css/);
   assert.match(skitvoiceHtml, /src\/styles\/app\.css/);
-  for (const html of [legacyPortalHtml, legacySkitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml, seedVcHtml]) {
+  for (const html of [adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml]) {
     assert.match(html, /\/react\/assets\/app\.css/);
   }
-  assert.match(legacySkitvoiceHtml, /Voice Lab<\/title>/);
 });
 
 test("all admin pages expose a consistent Voice Lab admin shell and navigation", () => {
@@ -56,6 +52,7 @@ test("all admin pages expose a consistent Voice Lab admin shell and navigation",
     assert.match(html, /href="\/admin"/);
     assert.match(html, /href="\/speakloop\/admin"/);
     assert.match(html, /href="\/skitvoice\/admin"/);
+    assert.match(html, /href="\/fun">実験画面<\/a>/);
   }
 });
 

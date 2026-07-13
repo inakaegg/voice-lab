@@ -43,12 +43,12 @@ def test_status_docs_do_not_claim_cloudflare_gateway_is_unimplemented() -> None:
     assert "D1" in known_limits
 
 
-def test_public_demo_roadmap_tracks_tab_audio_and_rights_notice() -> None:
-    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
+def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
+    spec = read_text("docs/speech-translation/SPEC.md")
 
-    assert "タブ音声" in roadmap
-    assert "権利" in roadmap
-    assert "プライバシー" in roadmap
+    assert "タブ音声" in spec
+    assert "利用条件" in spec
+    assert "プライバシー" in spec
 
     vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
     assert "ブラウザの共有許可" in vibevoice
@@ -69,7 +69,8 @@ def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None
 
     assert "MO_SPEECH_AUDIO_R2" in storage
     assert "音声履歴" in storage
-    assert "混在" in storage
+    assert "Cloudflare公開版では保存しない" in storage
+    assert "ローカルFastAPI版" in storage
     assert "D1" in storage
     assert "quota" in storage
     assert "audit" in storage
@@ -83,6 +84,7 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
 
     assert 'binding = "MO_SPEECH_DB"' in wrangler
     assert 'database_name = "mo-speech-demo-db"' in wrangler
+    assert "CLOUDFLARE_AUDIO_HISTORY_LIMIT" not in wrangler
     assert 'migrations_dir = "migrations"' in wrangler
     assert "CREATE TABLE IF NOT EXISTS public_users" in migration
     assert "CREATE TABLE IF NOT EXISTS quota_usage_daily" in migration
@@ -120,3 +122,24 @@ def test_frontend_migration_plan_preserves_current_api_and_state_boundaries() ->
     assert "SkitVoice" in migration
     assert "状態遷移" in migration
     assert "一括移行しない" in migration
+
+
+def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None:
+    readme = read_text("README.md")
+    spec = read_text("docs/speech-translation/SPEC.md")
+    architecture = read_text("docs/deployment/ARCHITECTURE.md")
+    cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
+
+    for document in (readme, spec, architecture, cloudflare):
+        assert "/speakloop" in document
+        assert "/skitvoice" in document
+
+    assert "`/fun` は管理者認証済みの場合だけ" in spec
+    assert "`/user`" not in spec
+    assert "`/vibevoice`" not in spec
+    assert "Cloudflare Pages" not in architecture
+    assert "ファイル、マイク、タブ音声" in cloudflare
+    assert "2話者・5行" in spec
+    assert "1120px以上" in spec
+    assert "D1" in spec
+    assert "R2" in spec
