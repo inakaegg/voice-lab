@@ -13,7 +13,13 @@ async function loadPublicAccessSettings() {
     setPublicAccessStatus("読み込み中です。");
     const response = await fetch("/api/public-access-settings");
     if (!response.ok) {
-      throw new Error(response.status === 401 ? "管理ログインが必要です。" : `公開制限を取得できませんでした: ${response.status}`);
+      if (response.status === 401) {
+        throw new Error("Googleログインが必要です。");
+      }
+      if (response.status === 403) {
+        throw new Error("このGoogleアカウントには管理権限がありません。");
+      }
+      throw new Error(`公開制限を取得できませんでした: ${response.status}`);
     }
     currentPublicAccessSettings = await response.json();
     for (const root of publicAccessRoots) {
@@ -51,7 +57,7 @@ async function savePublicAccessSettings(root) {
       ? currentPublicAccessSettings.admin_google_emails.length
       : 0;
     setPublicAccessSaveButton(root, "保存済み", false);
-    setPublicAccessStatus(`保存しました。quota対象外の管理者Googleメール: ${adminCount}件。`, "success");
+    setPublicAccessStatus(`保存しました。管理画面を許可するGoogleメール: ${adminCount}件。`, "success");
     window.setTimeout(() => {
       setPublicAccessSaveButton(root, "保存", false, "保存済み");
     }, 2400);

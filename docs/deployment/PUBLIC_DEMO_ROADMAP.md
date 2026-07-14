@@ -5,31 +5,34 @@
 ## 現在地
 
 - Voice Labポータル、SpeakLoop、SkitVoiceをCloudflare Worker Static Assetsで公開済み。
-- Google OAuth、管理者認証、feature別quota、入力上限、監査ログを実装済み。
+- Google OAuthへ一本化した管理者認証、feature別quota、入力上限、監査ログを実装済み。一本化後の公開環境smokeはデプロイ後に行う。
 - quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存済み。ユーザー音声履歴は保存しない。
 - VibeVoice・Seed-VCはRunPod Serverlessへ分離済み。
 - Python/Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
 - Git履歴のgitleaks検査、Security policy、Dependabot設定を追加済み。
 - `/fun`は管理者専用の実験画面とし、旧routeは廃止済み。
+- SkitVoiceの英語、中国語、日本語サンプル音声を公開環境へ登録済み。
+- 公開Workerの主要route、認証境界、サンプル配信、OpenAI／RunPod接続をsmoke確認済み。
+- GitHub repositoryはpublicへ切り替え、description、homepage、topicsを設定済み。
+- Cloudflare版で履歴保存を廃止した後、旧音声履歴のKV／R2データを削除済み。
 
 ## 公開前に残る作業
 
-### 外部素材・ユーザー判断が必要
+### 外部素材・ユーザー作業が必要
 
-1. SkitVoiceの英語、中国語、日本語サンプル音声を管理画面から登録する。
-2. サンプル反映後、PCとスマートフォンの公開用スクリーンショットを撮影する。
-3. GitHub repositoryをpublicへ切り替える時点を決める。
+1. PCとスマートフォンの公開用スクリーンショットを撮影し、READMEへ追加する。
+2. 認証一本化版を公開Workerへ反映し、許可メールの管理ページ、管理API、`/fun`と、許可されていないGoogleアカウントの403をsmoke確認する。
 
 SpeakLoopにはサンプル音声を表示しない。現時点ではOSSライセンスを付与せず、ポートフォリオとしてソースを公開する。
 
-### 公開直前の確認
+### 完了した公開確認
 
-1. 公開Workerでトップ、OAuth、SpeakLoop、SkitVoice、管理ログインをsmoke確認する。
-2. `/fun`が未認証では管理ログインへ遷移し、認証後だけ表示されることを確認する。
-3. 廃止routeと旧HTML直指定が404になることを確認する。
-4. `gitleaks git --log-opts='--all' .` でGit履歴全体を検査する。
-5. READMEへ確定したスクリーンショットを追加し、デモURLを最上部から到達可能にする。
-6. GitHub description、homepage、topicsを設定する。
+1. 公開Workerでトップ、OAuth開始、SpeakLoop、SkitVoiceをsmoke確認した。
+2. 旧認証構成で`/fun`の未認証遷移と、旧route・旧HTML直指定が404になることを確認した。Google OAuthへの一本化後の管理者境界は上記の残作業で再確認する。
+3. SkitVoiceの英語、中国語、日本語サンプルが公開APIから配信されることを確認した。
+4. OpenAIとRunPodの設定、RunPod healthを公開Workerのruntime APIで確認した。
+5. `gitleaks git --log-opts='--all' .` でGit履歴全体を検査し、漏洩なしを確認した。
+6. GitHub description、homepage、topicsを設定した。
 
 ## 公開後の改善
 
