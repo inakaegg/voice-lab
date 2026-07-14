@@ -135,6 +135,10 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
         assert "/skitvoice" in document
 
     assert "`/fun` は管理者認証済みの場合だけ" in spec
+    assert "同じGoogle OAuthセッション" in spec
+    assert "別の管理パスワードや管理者cookieは設けない" in spec
+    assert "管理機能の認証をWorker内のGoogle OAuthへ一本化" in cloudflare
+    assert "管理者専用の別パスワード、別cookie、認証例外は設けない" in cloudflare
     assert "`/user`" not in spec
     assert "`/vibevoice`" not in spec
     assert "Cloudflare Pages" not in architecture
