@@ -1,10 +1,12 @@
 const targetLanguageSelect = document.querySelector("#practice-target-language-select");
 const nativePanel = document.querySelector("#practice-native-panel");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
+const nativeCancelButton = document.querySelector("#practice-native-cancel-button");
 const recordTitle = document.querySelector("#practice-record-title");
 const nativeLevel = document.querySelector("#practice-native-level");
 const promptPanel = document.querySelector("#practice-prompt-panel");
 const repeatRecordButton = document.querySelector("#practice-repeat-record-button");
+const repeatCancelButton = document.querySelector("#practice-repeat-cancel-button");
 const repeatLevel = document.querySelector("#practice-repeat-level");
 const resultPanel = document.querySelector("#practice-result-panel");
 const targetLabel = document.querySelector("#practice-target-label");
@@ -12,7 +14,6 @@ const targetText = document.querySelector("#practice-target-text");
 const targetSubtext = document.querySelector("#practice-target-subtext");
 const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
-const autoPlayComparisonControl = document.querySelector("#practice-auto-play-comparison");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
 const gradeBadge = document.querySelector("#practice-grade-badge");
@@ -144,6 +145,7 @@ let mediaRecorder = null;
 let recordingStream = null;
 let recordingKind = "";
 let recordingChunks = [];
+let recordingCancelled = false;
 let isBusy = false;
 let modelAudioUrl = "";
 let repeatAudioUrl = "";
@@ -172,10 +174,12 @@ nativeRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("native");
   toggleRecording("native");
 });
+nativeCancelButton.addEventListener("click", () => cancelRecording("native"));
 repeatRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("repeat");
   toggleRecording("repeat");
 });
+repeatCancelButton.addEventListener("click", () => cancelRecording("repeat"));
 nativePanel.addEventListener("pointerenter", () => setActiveRecordSlot("native"));
 nativePanel.addEventListener("pointerleave", () => {
   if (currentTargetText && !mediaRecorder && !isBusy) {
@@ -186,7 +190,6 @@ nativePanel.addEventListener("focusin", () => setActiveRecordSlot("native"));
 promptPanel.addEventListener("pointerenter", () => setActiveRecordSlot("repeat"));
 promptPanel.addEventListener("focusin", () => setActiveRecordSlot("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
-autoPlayComparisonControl?.addEventListener("change", savePracticeSettings);
 speedSlider.addEventListener("input", handleSpeedChange);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
 modelAudio.addEventListener("ended", syncPlayButton);
@@ -220,6 +223,7 @@ async function toggleRecording(slot) {
   }
   if (mediaRecorder && mediaRecorder.state === "recording") {
     if (recordingKind === slot) {
+      recordingCancelled = false;
       mediaRecorder.stop();
     }
     return;
@@ -232,6 +236,7 @@ async function startRecording(slot) {
     showError("このブラウザでは録音を使えません。");
     return;
   }
+  pausePlaybackForRecording();
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -243,6 +248,7 @@ async function startRecording(slot) {
   recordingStream = stream;
   recordingKind = slot;
   recordingChunks = [];
+  recordingCancelled = false;
   mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   mediaRecorder.addEventListener("dataavailable", (event) => {
     if (event.data && event.data.size > 0) {
@@ -262,22 +268,38 @@ async function startRecording(slot) {
 
 async function handleRecordingStopped() {
   const kind = recordingKind;
+  const cancelled = recordingCancelled;
   const type = mediaRecorder?.mimeType || preferredRecordingMimeType() || "audio/webm";
   const blob = new Blob(recordingChunks, { type });
   cleanupRecording();
   setRecordingVisual(kind, false);
+  recordingCancelled = false;
+  if (cancelled) {
+    processingKind = "";
+    setStatus("録音をキャンセルしました。");
+    clearError();
+    return;
+  }
   processingKind = kind;
   if (!blob.size) {
     showError("録音できませんでした。");
     return;
   }
-  await submitPracticeRecording(blob);
+  await submitPracticeRecording(blob, kind);
 }
 
-async function submitPracticeRecording(blob) {
-  const hasTarget = Boolean(currentTargetText);
-  setBusy(true, hasTarget ? "聞き取っています。" : "お手本を作っています。", hasTarget ? 88 : 72, activeRecordSlot);
-  if (!hasTarget) {
+function cancelRecording(slot) {
+  if (!mediaRecorder || mediaRecorder.state !== "recording" || recordingKind !== slot) {
+    return;
+  }
+  recordingCancelled = true;
+  mediaRecorder.stop();
+}
+
+async function submitPracticeRecording(blob, kind) {
+  const recordingIntent = kind === "repeat" ? "attempt" : "prompt";
+  setBusy(true, recordingIntent === "attempt" ? "聞き取っています。" : "お手本を作っています。", recordingIntent === "attempt" ? 88 : 72, kind);
+  if (recordingIntent === "prompt" && !currentTargetText) {
     promptPanel.hidden = true;
   }
   resultPanel.hidden = true;
@@ -285,6 +307,7 @@ async function submitPracticeRecording(blob) {
   if (selectedTargetLanguage === "zh-CN") {
     pinyinToggle.checked = true;
   }
+  form.append("recording_intent", recordingIntent);
   form.append("target_language", selectedTargetLanguage);
   form.append("current_target_text", currentTargetText);
   form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
@@ -295,9 +318,7 @@ async function submitPracticeRecording(blob) {
     setRepeatAudio(blob);
     renderAttemptResult(payload);
     setBusy(false, "");
-    if (autoPlayComparisonControl?.checked) {
-      playComparisonAudios().catch((error) => showError(error.message));
-    }
+    playComparisonAudios().catch((error) => showError(error.message));
     return;
   }
   renderPromptResult(payload);
@@ -600,6 +621,13 @@ function stopComparisonPlayback() {
   }
   comparisonPlaybackToken += 1;
   isComparisonPlaying = false;
+  modelAudio.pause();
+  repeatAudio.pause();
+  syncPlayButton();
+}
+
+function pausePlaybackForRecording() {
+  stopComparisonPlayback();
   modelAudio.pause();
   repeatAudio.pause();
   syncPlayButton();
@@ -916,8 +944,11 @@ function levelForRecordSlot(slot) {
 
 function syncRecordSlotVisuals() {
   const repeatAvailable = Boolean(currentTargetText) && !promptPanel.hidden;
-  repeatRecordButton.disabled = isBusy || !repeatAvailable;
-  nativeRecordButton.disabled = isBusy;
+  const activeRecordingKind = mediaRecorder?.state === "recording" ? recordingKind : "";
+  repeatRecordButton.disabled = isBusy || !repeatAvailable || (Boolean(activeRecordingKind) && activeRecordingKind !== "repeat");
+  nativeRecordButton.disabled = isBusy || (Boolean(activeRecordingKind) && activeRecordingKind !== "native");
+  nativeCancelButton.hidden = activeRecordingKind !== "native";
+  repeatCancelButton.hidden = activeRecordingKind !== "repeat";
   if (!repeatAvailable && activeRecordSlot === "repeat") {
     activeRecordSlot = "native";
   }
@@ -1091,9 +1122,6 @@ function loadPracticeSettings() {
     : defaultPracticeTargetLanguage;
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
-  if (autoPlayComparisonControl) {
-    autoPlayComparisonControl.checked = settings.auto_play_comparison !== false;
-  }
   targetLanguageSelect.value = selectedTargetLanguage;
   syncPinyinSettingVisibility();
   syncCurrentLanguageLabel();
@@ -1116,7 +1144,6 @@ function savePracticeSettings() {
         target_language: selectedTargetLanguage,
         show_pinyin: Boolean(pinyinToggle.checked),
         speed: normalizedPlaybackSpeed(speedSlider.value),
-        auto_play_comparison: autoPlayComparisonControl?.checked !== false,
       }),
     );
   } catch (_error) {

@@ -343,63 +343,6 @@ def practice_comparison_alignment(
     }
 
 
-def classify_practice_recording(
-    *,
-    target_text: str,
-    target_language: str,
-    target_recognized_text: str,
-    auto_recognized_text: str,
-) -> dict[str, object]:
-    language = supported_practice_target_language(target_language)
-    if not target_text.strip():
-        return {
-            "kind": "prompt",
-            "attempt_source": "",
-            "target_similarity": 0.0,
-            "auto_similarity": 0.0,
-            "target_language_signal": 0.0,
-            "auto_language_signal": practice_language_signal(auto_recognized_text, language),
-        }
-
-    target_evaluation = evaluate_practice_attempt(target_text, target_recognized_text, language)
-    auto_evaluation = evaluate_practice_attempt(target_text, auto_recognized_text, language)
-    target_similarity = float(target_evaluation["similarity"])
-    auto_similarity = float(auto_evaluation["similarity"])
-    target_signal = practice_language_signal(target_recognized_text, language)
-    auto_signal = practice_language_signal(auto_recognized_text, language)
-    best_similarity = max(target_similarity, auto_similarity if auto_signal >= 0.35 else 0.0)
-    attempt_source = "target" if target_similarity >= auto_similarity else "auto"
-    is_attempt = (
-        best_similarity >= 0.35
-        or (target_similarity >= 0.25 and target_signal >= 0.3)
-        or (auto_similarity >= 0.25 and auto_signal >= 0.55)
-    )
-    return {
-        "kind": "attempt" if is_attempt else "prompt",
-        "attempt_source": attempt_source if is_attempt else "",
-        "target_similarity": round(target_similarity, 3),
-        "auto_similarity": round(auto_similarity, 3),
-        "target_language_signal": round(target_signal, 3),
-        "auto_language_signal": round(auto_signal, 3),
-    }
-
-
-def practice_language_signal(text: str, target_language: str) -> float:
-    language = supported_practice_target_language(target_language)
-    content = [char for char in str(text or "") if not unicodedata.category(char).startswith(("P", "Z", "S"))]
-    if not content:
-        return 0.0
-    if language == "zh-CN":
-        matching = sum(1 for char in content if _is_han_character(char))
-    elif language == "ja-JP":
-        matching = sum(1 for char in content if _is_han_character(char) or "\u3040" <= char <= "\u30ff")
-    elif language == "en-US":
-        matching = sum(1 for char in content if "a" <= char.lower() <= "z")
-    else:
-        matching = 0
-    return matching / len(content)
-
-
 def _best_practice_phrase_match(target_normalized: str, recognized_normalized: str, start_index: int) -> dict[str, float]:
     if not target_normalized or not recognized_normalized or start_index >= len(recognized_normalized):
         start = min(max(0, start_index), len(recognized_normalized))

@@ -1048,9 +1048,9 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     assert captured == {"source_language": "zh-CN"}
 
 
-def test_practice_recording_api_detects_repeat_attempt_while_target_exists() -> None:
+def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
     pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"auto": "La pelan susinja se treak", "zh-CN": "我想要咖啡"}),
+        asr=FakeAsrProvider({"zh-CN": "我想要咖啡"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
@@ -1058,7 +1058,7 @@ def test_practice_recording_api_detects_repeat_attempt_while_target_exists() -> 
 
     response = client.post(
         "/api/practice/recordings",
-        data={"target_language": "zh-CN", "current_target_text": "我想要咖啡。"},
+        data={"recording_intent": "attempt", "target_language": "zh-CN", "current_target_text": "我想要咖啡。"},
         files={"audio": ("recording.webm", b"repeat audio", "audio/webm")},
     )
 
@@ -1066,13 +1066,13 @@ def test_practice_recording_api_detects_repeat_attempt_while_target_exists() -> 
     payload = response.json()
     assert payload["recording_kind"] == "attempt"
     assert payload["recognized_text"] == "我想要咖啡"
-    assert payload["classification"]["attempt_source"] == "target"
+    assert "classification" not in payload
     assert payload["grade"] == "perfect"
 
 
-def test_practice_recording_api_detects_new_prompt_while_target_exists() -> None:
+def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exists() -> None:
     pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"auto": "明日は天気がいいですか", "zh-CN": "请问明天天气怎么样"}),
+        asr=FakeAsrProvider({"auto": "明日は天気がいいですか"}),
         translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "明天天气好吗？"}),
         tts=FakeTtsProvider(),
     )
@@ -1080,7 +1080,12 @@ def test_practice_recording_api_detects_new_prompt_while_target_exists() -> None
 
     response = client.post(
         "/api/practice/recordings",
-        data={"target_language": "zh-CN", "current_target_text": "我想要咖啡。", "include_pinyin": "true"},
+        data={
+            "recording_intent": "prompt",
+            "target_language": "zh-CN",
+            "current_target_text": "我想要咖啡。",
+            "include_pinyin": "true",
+        },
         files={"audio": ("recording.webm", b"new prompt audio", "audio/webm")},
     )
 
@@ -1090,7 +1095,23 @@ def test_practice_recording_api_detects_new_prompt_while_target_exists() -> None
     assert payload["transcript"] == "明日は天気がいいですか"
     assert payload["target_text"] == "明天天气好吗？"
     assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:明天天气好吗？".encode()).decode()
-    assert payload["classification"]["kind"] == "prompt"
+    assert "classification" not in payload
+
+
+def test_practice_recording_api_requires_explicit_recording_intent() -> None:
+    client = TestClient(create_app(openai_pipeline=SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "unused"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )))
+
+    response = client.post(
+        "/api/practice/recordings",
+        data={"target_language": "zh-CN"},
+        files={"audio": ("recording.webm", b"audio", "audio/webm")},
+    )
+
+    assert response.status_code == 422
 
 
 def test_practice_recording_api_saves_generated_prompt_audio_to_practice_history(tmp_path) -> None:
@@ -1106,7 +1127,7 @@ def test_practice_recording_api_saves_generated_prompt_audio_to_practice_history
 
     response = client.post(
         "/api/practice/recordings",
-        data={"target_language": "zh-CN"},
+        data={"recording_intent": "prompt", "target_language": "zh-CN"},
         files={"audio": ("recording.webm", b"new prompt audio", "audio/webm")},
     )
     history = client.get("/api/practice-history").json()

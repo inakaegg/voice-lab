@@ -2231,6 +2231,13 @@ async function createPracticeRecording(request, env) {
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const currentTargetText = stringFormValue(form, "current_target_text", "");
+  const recordingIntent = stringFormValue(form, "recording_intent", "").trim();
+  if (recordingIntent !== "prompt" && recordingIntent !== "attempt") {
+    throw httpError(400, "recording_intent must be prompt or attempt");
+  }
+  if (recordingIntent === "attempt" && !currentTargetText.trim()) {
+    throw httpError(400, "current_target_text is required for attempt recordings");
+  }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0),
@@ -2238,6 +2245,45 @@ async function createPracticeRecording(request, env) {
   });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
+
+  if (recordingIntent === "attempt") {
+    const targetStarted = Date.now();
+    const targetTranscription = await openAiTranscribeDetail(env, {
+      audioBytes,
+      audioMimeType,
+      sourceLanguage: targetLanguage,
+      filename: audio.name || `practice.${extensionForMimeType(audioMimeType)}`,
+      model: asrModel,
+      includeTimestamps: true,
+    });
+    const targetAsrMs = Date.now() - targetStarted;
+    const evaluation = evaluatePracticeAttempt(currentTargetText, targetTranscription.text, targetLanguage);
+    const asrTimestamps = serializeAsrTimestamps(targetTranscription);
+    const result = {
+      recording_kind: "attempt",
+      target_language: targetLanguage,
+      target_text: currentTargetText,
+      recognized_text: targetTranscription.text,
+      asr_model: asrModel,
+      asr_timestamps: asrTimestamps,
+      ...evaluation,
+      comparison_alignment: practiceComparisonAlignment({
+        targetText: currentTargetText,
+        recognizedText: targetTranscription.text,
+        targetLanguage,
+        asrTimestamps,
+      }),
+      timings_ms: {
+        asr: targetAsrMs,
+        compare: 0,
+        total: targetAsrMs,
+      },
+      providers: {
+        asr: `openai-asr-${asrModel}`,
+      },
+    };
+    return result;
+  }
 
   const autoStarted = Date.now();
   const autoTranscription = await openAiTranscribeDetail(env, {
@@ -2249,68 +2295,6 @@ async function createPracticeRecording(request, env) {
     includeTimestamps: true,
   });
   const autoAsrMs = Date.now() - autoStarted;
-  let targetTranscription = null;
-  let targetAsrMs = 0;
-  let classification = {
-    kind: "prompt",
-    attempt_source: "",
-    target_similarity: 0,
-    auto_similarity: 0,
-    target_language_signal: 0,
-    auto_language_signal: practiceLanguageSignal(autoTranscription.text, targetLanguage),
-  };
-
-  if (currentTargetText.trim()) {
-    const targetStarted = Date.now();
-    targetTranscription = await openAiTranscribeDetail(env, {
-      audioBytes,
-      audioMimeType,
-      sourceLanguage: targetLanguage,
-      filename: audio.name || `practice.${extensionForMimeType(audioMimeType)}`,
-      model: asrModel,
-      includeTimestamps: true,
-    });
-    targetAsrMs = Date.now() - targetStarted;
-    classification = classifyPracticeRecording({
-      targetText: currentTargetText,
-      targetLanguage,
-      targetRecognizedText: targetTranscription.text,
-      autoRecognizedText: autoTranscription.text,
-    });
-  }
-
-  if (classification.kind === "attempt" && targetTranscription) {
-    const selectedTranscription = classification.attempt_source === "auto" ? autoTranscription : targetTranscription;
-    const selectedAsrMs = classification.attempt_source === "auto" ? autoAsrMs : targetAsrMs;
-    const evaluation = evaluatePracticeAttempt(currentTargetText, selectedTranscription.text, targetLanguage);
-    const asrTimestamps = serializeAsrTimestamps(selectedTranscription);
-    const result = {
-      recording_kind: "attempt",
-      target_language: targetLanguage,
-      target_text: currentTargetText,
-      recognized_text: selectedTranscription.text,
-      asr_model: asrModel,
-      asr_timestamps: asrTimestamps,
-      ...evaluation,
-      comparison_alignment: practiceComparisonAlignment({
-        targetText: currentTargetText,
-        recognizedText: selectedTranscription.text,
-        targetLanguage,
-        asrTimestamps,
-      }),
-      classification,
-      timings_ms: {
-        asr: selectedAsrMs,
-        compare: 0,
-        total: autoAsrMs + targetAsrMs,
-      },
-      providers: {
-        asr: `openai-asr-${asrModel}`,
-      },
-    };
-    return result;
-  }
-
   const totalStarted = Date.now();
   const translationStarted = Date.now();
   const translation = await translateTranscript(env, {
@@ -2336,12 +2320,11 @@ async function createPracticeRecording(request, env) {
     audio_base64: tts.audio_base64,
     asr_model: asrModel,
     asr_timestamps: serializeAsrTimestamps(autoTranscription),
-    classification,
     timings_ms: {
       asr: autoAsrMs,
       translation: translationMs,
       ...(tts.timings_ms || {}),
-      total: Date.now() - totalStarted + autoAsrMs + targetAsrMs,
+      total: Date.now() - totalStarted + autoAsrMs,
     },
     providers: {
       asr: `openai-asr-${asrModel}`,
@@ -3369,40 +3352,6 @@ function evaluatePracticeAttempt(targetText, recognizedText, targetLanguage) {
   };
 }
 
-function classifyPracticeRecording({ targetText, targetLanguage, targetRecognizedText, autoRecognizedText }) {
-  const language = supportedPracticeTargetLanguage(targetLanguage);
-  if (!String(targetText || "").trim()) {
-    return {
-      kind: "prompt",
-      attempt_source: "",
-      target_similarity: 0,
-      auto_similarity: 0,
-      target_language_signal: 0,
-      auto_language_signal: practiceLanguageSignal(autoRecognizedText, language),
-    };
-  }
-  const targetEvaluation = evaluatePracticeAttempt(targetText, targetRecognizedText, language);
-  const autoEvaluation = evaluatePracticeAttempt(targetText, autoRecognizedText, language);
-  const targetSimilarity = Number(targetEvaluation.similarity) || 0;
-  const autoSimilarity = Number(autoEvaluation.similarity) || 0;
-  const targetSignal = practiceLanguageSignal(targetRecognizedText, language);
-  const autoSignal = practiceLanguageSignal(autoRecognizedText, language);
-  const bestSimilarity = Math.max(targetSimilarity, autoSignal >= 0.35 ? autoSimilarity : 0);
-  const attemptSource = targetSimilarity >= autoSimilarity ? "target" : "auto";
-  const isAttempt =
-    bestSimilarity >= 0.35 ||
-    (targetSimilarity >= 0.25 && targetSignal >= 0.3) ||
-    (autoSimilarity >= 0.25 && autoSignal >= 0.55);
-  return {
-    kind: isAttempt ? "attempt" : "prompt",
-    attempt_source: isAttempt ? attemptSource : "",
-    target_similarity: Math.round(targetSimilarity * 1000) / 1000,
-    auto_similarity: Math.round(autoSimilarity * 1000) / 1000,
-    target_language_signal: Math.round(targetSignal * 1000) / 1000,
-    auto_language_signal: Math.round(autoSignal * 1000) / 1000,
-  };
-}
-
 function splitPracticePhrases(text) {
   const normalized = String(text || "").replace(/\r/g, "\n").trim();
   if (!normalized) {
@@ -3686,22 +3635,6 @@ function safeNumber(value) {
 
 function roundScore(value) {
   return Math.round((Number(value) || 0) * 1000) / 1000;
-}
-
-function practiceLanguageSignal(text, targetLanguage) {
-  const content = Array.from(String(text || "")).filter((char) => !/[\p{P}\p{Z}\p{S}]/u.test(char));
-  if (!content.length) {
-    return 0;
-  }
-  let matching = 0;
-  if (targetLanguage === "zh-CN") {
-    matching = content.filter((char) => isHanCharacter(char)).length;
-  } else if (targetLanguage === "ja-JP") {
-    matching = content.filter((char) => isHanCharacter(char) || /[\u3040-\u30ff]/u.test(char)).length;
-  } else if (targetLanguage === "en-US") {
-    matching = content.filter((char) => /[A-Za-z]/u.test(char)).length;
-  }
-  return Math.max(0, Math.min(1, matching / content.length));
 }
 
 function isHanCharacter(char) {
