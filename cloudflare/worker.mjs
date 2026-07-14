@@ -1,4 +1,5 @@
 import { pinyin } from "pinyin-pro";
+import { Converter } from "opencc-js/t2cn";
 
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
@@ -52,81 +53,7 @@ const PRACTICE_GRADE_LABELS = {
   almost: "まあまあ",
   retry: "もう一回",
 };
-const ZH_TRADITIONAL_TO_SIMPLIFIED = {
-  後: "后",
-  裏: "里",
-  裡: "里",
-  著: "着",
-  麼: "么",
-  麽: "么",
-  樣: "样",
-  嗎: "吗",
-  妳: "你",
-  們: "们",
-  個: "个",
-  這: "这",
-  會: "会",
-  說: "说",
-  話: "话",
-  語: "语",
-  學: "学",
-  習: "习",
-  聽: "听",
-  問: "问",
-  題: "题",
-  現: "现",
-  開: "开",
-  關: "关",
-  見: "见",
-  歡: "欢",
-  愛: "爱",
-  買: "买",
-  賣: "卖",
-  車: "车",
-  輛: "辆",
-  價: "价",
-  還: "还",
-  貴: "贵",
-  綠: "绿",
-  種: "种",
-  點: "点",
-  氣: "气",
-  電: "电",
-  腦: "脑",
-  網: "网",
-  寫: "写",
-  讀: "读",
-  書: "书",
-  時: "时",
-  間: "间",
-  國: "国",
-  東: "东",
-  風: "风",
-  來: "来",
-  過: "过",
-  長: "长",
-  門: "门",
-  無: "无",
-  實: "实",
-  體: "体",
-  應: "应",
-  讓: "让",
-  給: "给",
-  對: "对",
-  從: "从",
-  為: "为",
-  發: "发",
-  聲: "声",
-  區: "区",
-  別: "别",
-  當: "当",
-  幾: "几",
-  難: "难",
-  簡: "简",
-  漢: "汉",
-  雖: "虽",
-  舊: "旧",
-};
+const traditionalChineseToSimplified = Converter({ from: "t", to: "cn" });
 
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
@@ -2193,16 +2120,17 @@ async function createPracticePrompt(request, env) {
     targetLanguage,
   });
   const translationMs = Date.now() - translationStarted;
+  const targetText = canonicalPracticeText(translation.translated_text, targetLanguage);
 
-  const tts = await openAiSpeech(env, translation.translated_text);
+  const tts = await openAiSpeech(env, targetText);
   const result = {
     transcript,
-    target_text: translation.translated_text,
-    translated_text: translation.translated_text,
-    transformed_text: translation.translated_text,
+    target_text: targetText,
+    translated_text: targetText,
+    transformed_text: targetText,
     target_language: targetLanguage,
     target_language_label: PRACTICE_TARGET_LANGUAGES[targetLanguage].label,
-    display_text: await createPracticeDisplayText(translation.translated_text, targetLanguage, env, {
+    display_text: await createPracticeDisplayText(targetText, targetLanguage, env, {
       includePinyin,
     }),
     audio_mime_type: tts.audio_mime_type,
@@ -2247,6 +2175,7 @@ async function createPracticeRecording(request, env) {
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
   if (recordingIntent === "attempt") {
+    const targetText = canonicalPracticeText(currentTargetText, targetLanguage);
     const targetStarted = Date.now();
     const targetTranscription = await openAiTranscribeDetail(env, {
       audioBytes,
@@ -2257,19 +2186,20 @@ async function createPracticeRecording(request, env) {
       includeTimestamps: true,
     });
     const targetAsrMs = Date.now() - targetStarted;
-    const evaluation = evaluatePracticeAttempt(currentTargetText, targetTranscription.text, targetLanguage);
+    const recognizedText = canonicalPracticeText(targetTranscription.text, targetLanguage);
+    const evaluation = evaluatePracticeAttempt(targetText, recognizedText, targetLanguage);
     const asrTimestamps = serializeAsrTimestamps(targetTranscription);
     const result = {
       recording_kind: "attempt",
       target_language: targetLanguage,
-      target_text: currentTargetText,
-      recognized_text: targetTranscription.text,
+      target_text: targetText,
+      recognized_text: recognizedText,
       asr_model: asrModel,
       asr_timestamps: asrTimestamps,
       ...evaluation,
       comparison_alignment: practiceComparisonAlignment({
-        targetText: currentTargetText,
-        recognizedText: targetTranscription.text,
+        targetText,
+        recognizedText,
         targetLanguage,
         asrTimestamps,
       }),
@@ -2303,17 +2233,18 @@ async function createPracticeRecording(request, env) {
     targetLanguage,
   });
   const translationMs = Date.now() - translationStarted;
+  const targetText = canonicalPracticeText(translation.translated_text, targetLanguage);
 
-  const tts = await openAiSpeech(env, translation.translated_text);
+  const tts = await openAiSpeech(env, targetText);
   const result = {
     recording_kind: "prompt",
     transcript: autoTranscription.text,
-    target_text: translation.translated_text,
-    translated_text: translation.translated_text,
-    transformed_text: translation.translated_text,
+    target_text: targetText,
+    translated_text: targetText,
+    transformed_text: targetText,
     target_language: targetLanguage,
     target_language_label: PRACTICE_TARGET_LANGUAGES[targetLanguage].label,
-    display_text: await createPracticeDisplayText(translation.translated_text, targetLanguage, env, {
+    display_text: await createPracticeDisplayText(targetText, targetLanguage, env, {
       includePinyin,
     }),
     audio_mime_type: tts.audio_mime_type,
@@ -2341,7 +2272,7 @@ async function createPracticeAttempt(request, env) {
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
-  const targetText = stringFormValue(form, "target_text", "").trim();
+  const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
   if (!targetText) {
     throw httpError(400, "target_text is required");
   }
@@ -2362,7 +2293,7 @@ async function createPracticeAttempt(request, env) {
     model: asrModel,
     includeTimestamps: true,
   });
-  const recognizedText = transcription.text;
+  const recognizedText = canonicalPracticeText(transcription.text, targetLanguage);
   const asrMs = Date.now() - asrStarted;
   const evaluation = evaluatePracticeAttempt(targetText, recognizedText, targetLanguage);
   const asrTimestamps = serializeAsrTimestamps(transcription);
@@ -3665,9 +3596,13 @@ function normalizePracticeText(text, targetLanguage) {
 }
 
 function normalizeChineseVariants(text) {
-  return Array.from(String(text || ""))
-    .map((char) => ZH_TRADITIONAL_TO_SIMPLIFIED[char] || char)
-    .join("");
+  return traditionalChineseToSimplified(String(text || ""));
+}
+
+function canonicalPracticeText(text, targetLanguage) {
+  return targetLanguage === "zh-CN"
+    ? normalizeChineseVariants(text)
+    : String(text || "");
 }
 
 function practiceSimilarity(normalizedTarget, normalizedRecognized) {

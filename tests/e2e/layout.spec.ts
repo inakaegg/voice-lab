@@ -122,6 +122,108 @@ test("SpeakLoop defaults to English and normalizes a saved Japanese target", asy
   await expect(language).toHaveValue("en-US");
 });
 
+test("SpeakLoop switches Chinese text display without resubmitting audio", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  let recordingRequests = 0;
+  await page.route("**/api/practice/recordings", async (route) => {
+    recordingRequests += 1;
+    const body = route.request().postData() || "";
+    const intent = body.match(/name="recording_intent"\r?\n\r?\n([^\r\n]+)/)?.[1] || "";
+    const payload = intent === "attempt"
+      ? {
+          recording_kind: "attempt",
+          target_language: "zh-CN",
+          target_text: "软件开发者很受欢迎。",
+          recognized_text: "软件开发者受欢迎。",
+          similarity: 0.93,
+          grade: "almost",
+          diff: [],
+          comparison_alignment: null,
+        }
+      : {
+          recording_kind: "prompt",
+          transcript: "ソフトウェア開発者は人気があります",
+          target_text: "软件开发者很受欢迎。",
+          target_language: "zh-CN",
+          display_text: {
+            primary_text: "软件开发者很受欢迎。",
+            pinyin_text: "ruǎn jiàn kāi fā zhě hěn shòu huān yíng",
+            pinyin_status: "ready",
+          },
+          audio_base64: "UklGRg==",
+          audio_mime_type: "audio/wav",
+        };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
+  });
+
+  await page.goto("/speakloop");
+  await page.locator("#practice-target-language-select").selectOption("zh-CN");
+  await expect(page.locator("#practice-chinese-script-setting")).toBeVisible();
+  await expect(page.locator("#practice-script-simplified")).toHaveAttribute("aria-pressed", "true");
+
+  const nativeRecord = page.locator("#practice-native-record-button");
+  await nativeRecord.click();
+  await nativeRecord.click();
+  await expect.poll(() => page.locator("#practice-target-text").evaluate((element) =>
+    Array.from(element.childNodes).map((node) =>
+      node.nodeName === "RUBY" ? node.firstChild?.textContent || "" : node.textContent || ""
+    ).join("")
+  )).toContain("软件开发者很受欢迎");
+  expect(recordingRequests).toBe(1);
+
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  await repeatRecord.click();
+  await repeatRecord.click();
+  await expect(page.locator("#practice-recognized-text")).toContainText("软件开发者受欢迎");
+  expect(recordingRequests).toBe(2);
+
+  await page.locator("#practice-script-traditional").click();
+  await expect(page.locator("#practice-script-traditional")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.locator("#practice-target-text").evaluate((element) =>
+    Array.from(element.childNodes).map((node) =>
+      node.nodeName === "RUBY" ? node.firstChild?.textContent || "" : node.textContent || ""
+    ).join("")
+  )).toContain("軟件開發者很受歡迎");
+  await expect(page.locator("#practice-recognized-text")).toContainText("軟件開發者受歡迎");
+  expect(recordingRequests).toBe(2);
+  await assertNoHorizontalOverflow(page);
+
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-chinese-script-toggle.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-chinese-script-toggle.png`, fullPage: true });
+  }
+
+  await page.reload();
+  await expect(page.locator("#practice-target-language-select")).toHaveValue("zh-CN");
+  await expect(page.locator("#practice-script-traditional")).toHaveAttribute("aria-pressed", "true");
+});
+
 test("SpeakLoop cancels either recording without sending audio", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {

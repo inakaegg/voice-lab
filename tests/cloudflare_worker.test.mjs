@@ -1131,14 +1131,14 @@ test("Cloudflare worker uses explicit attempt intent for a practice recording", 
   const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init });
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return json({ text: "我想要咖啡" });
+      return json({ text: "我想學習軟體開發" });
     }
     throw new Error(`unexpected url: ${url}`);
   });
   const form = new FormData();
   form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "recording.webm");
   form.append("target_language", "zh-CN");
-  form.append("current_target_text", "我想要咖啡。");
+  form.append("current_target_text", "我想学习软体开发");
   form.append("recording_intent", "attempt");
 
   const response = await handleRequest(
@@ -1149,7 +1149,7 @@ test("Cloudflare worker uses explicit attempt intent for a practice recording", 
 
   assert.equal(response.status, 200);
   assert.equal(payload.recording_kind, "attempt");
-  assert.equal(payload.recognized_text, "我想要咖啡");
+  assert.equal(payload.recognized_text, "我想学习软体开发");
   assert.equal("classification" in payload, false);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init.body.get("language"), "zh");
@@ -1167,7 +1167,7 @@ test("Cloudflare worker uses explicit prompt intent even when a target exists", 
         output_text: JSON.stringify({
           source_language: "ja-JP",
           target_language: "zh-CN",
-          translated_text: "明天天气好吗？",
+          translated_text: "我想學習軟體開發。",
         }),
       });
     }
@@ -1196,7 +1196,7 @@ test("Cloudflare worker uses explicit prompt intent even when a target exists", 
   assert.equal(response.status, 200);
   assert.equal(payload.recording_kind, "prompt");
   assert.equal(payload.transcript, "明日は天気がいいですか");
-  assert.equal(payload.target_text, "明天天气好吗？");
+  assert.equal(payload.target_text, "我想学习软体开发。");
   assert.equal(payload.audio_base64, Buffer.from([13, 14, 15]).toString("base64"));
   assert.equal("classification" in payload, false);
   assert.equal(calls[0].init.body.get("language"), null);

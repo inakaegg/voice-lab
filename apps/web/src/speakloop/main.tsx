@@ -3,6 +3,21 @@ import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "
 
 activateCompactLayout();
 
+let toTraditionalChinese: ((text: string) => string) | null = null;
+let traditionalChineseLoader: Promise<void> | null = null;
+const chineseScriptBridge = window as typeof window & {
+  voiceLabChineseScript?: { loadTraditional: () => Promise<void>; toTraditional: (text: string) => string };
+};
+chineseScriptBridge.voiceLabChineseScript = {
+  loadTraditional: () => {
+    traditionalChineseLoader ||= import("opencc-js/cn2t").then(({ Converter }) => {
+      toTraditionalChinese = Converter({ from: "cn", to: "tw" });
+    });
+    return traditionalChineseLoader;
+  },
+  toTraditional: (text) => toTraditionalChinese?.(text) || text,
+};
+
 const Meter = ({ id }: { id: string }) => <span id={id} className="record-level-meter" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <span className="record-level-bar" key={index} />)}</span>;
 
 function RecordButton({ id, levelId, label, className = "" }: { id: string; levelId: string; label: string; className?: string }) {
@@ -19,7 +34,7 @@ function SpeakLoop() {
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>自分が言いたい文章だから、練習が続く。</h2><p>母国語で話すと、学習言語のお手本を生成します。聞いて、まねして、発音を比較できます。</p></div>
     </section>
-    <section className="practice-quick-settings react-toolbar" aria-label="練習設定"><label className="practice-current-language practice-language-select"><span>学習言語</span><select id="practice-target-language-select" aria-label="学習する言語" defaultValue="en-US"><option value="en-US">🇺🇸 English</option><option value="zh-CN">🇨🇳 中文</option></select></label><label id="practice-pinyin-setting" className="practice-inline-setting" hidden><input id="practice-pinyin-toggle" type="checkbox" defaultChecked/><span>ピンイン</span></label></section>
+    <section className="practice-quick-settings react-toolbar" aria-label="練習設定"><label className="practice-current-language practice-language-select"><span>学習言語</span><select id="practice-target-language-select" aria-label="学習する言語" defaultValue="en-US"><option value="en-US">🇺🇸 English</option><option value="zh-CN">🇨🇳 中文</option></select></label><fieldset id="practice-chinese-script-setting" className="practice-script-setting" hidden><legend>字形</legend><div className="practice-script-toggle" role="group" aria-label="中国語の字形"><button id="practice-script-simplified" type="button" aria-pressed="true">简体</button><button id="practice-script-traditional" type="button" aria-pressed="false">繁體</button></div></fieldset><label id="practice-pinyin-setting" className="practice-inline-setting" hidden><input id="practice-pinyin-toggle" type="checkbox" defaultChecked/><span>ピンイン</span></label></section>
     <section className="practice-flow react-practice-flow" aria-label="れんしゅう">
       <article id="practice-native-panel" className="practice-card practice-card-primary react-flow-card" data-practice-record-slot="native"><div className="practice-step-number">1</div><div className="practice-card-copy"><p className="react-step-label">YOUR IDEA</p><h2 id="practice-record-title">言いたいことを話す</h2><p>いつもの言葉で、短く話してください。</p></div><div className="react-record-control"><RecordButton id="practice-native-record-button" levelId="practice-native-level" label="言いたいことを録音"/><span>タップして話す</span><CancelRecordingButton id="practice-native-cancel-button"/></div><div id="practice-native-transcript-panel" className="practice-native-transcript-panel" hidden><p id="practice-native-transcript-label" className="practice-mini-label">言ったこと</p><p id="practice-native-transcript" className="practice-native-transcript"/></div></article>
       <article id="practice-prompt-panel" className="practice-card practice-prompt-card react-flow-card" data-practice-record-slot="repeat" hidden><div className="practice-step-number">2</div><div className="practice-card-copy"><p className="react-step-label">LISTEN & REPEAT</p><h2>聞いて、まねする</h2><p id="practice-target-label">お手本</p></div><div className="practice-target-practice-row"><div className="practice-target-text-box"><p id="practice-target-text" className="practice-target-text"/><p id="practice-target-subtext" className="practice-target-subtext" hidden/></div><div className="react-record-control react-repeat-control"><RecordButton id="practice-repeat-record-button" levelId="practice-repeat-level" label="練習を録音" className="practice-repeat-record-button"/><span>録音して比べる</span><CancelRecordingButton id="practice-repeat-cancel-button"/></div></div>

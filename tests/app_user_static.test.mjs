@@ -62,6 +62,9 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(practiceSource, /current_target_text/);
   assert.match(practiceSource, /localStorage\.getItem/);
   assert.match(practiceSource, /localStorage\.setItem/);
+  assert.match(practiceSource, /chinese_script/);
+  assert.match(practiceSource, /toTraditional/);
+  assert.doesNotMatch(practiceSource, /zhTraditionalToSimplified/);
   assert.match(practiceSource, /speed:/);
   assert.doesNotMatch(practiceSource, /auto_play_comparison|autoPlayComparisonControl/);
   assert.match(practiceSource, /renderAttemptResult\(payload\);[\s\S]*setBusy\(false, ""\);[\s\S]*playComparisonAudios\(\)\.catch/);
