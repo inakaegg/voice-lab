@@ -48,6 +48,34 @@ for (const route of publicRoutes) {
   });
 }
 
+test("SpeakLoop and SkitVoice keep the shared privacy notice at the workflow bottom left", async ({ page }) => {
+  for (const [path, workflowSelector] of [
+    ["/speakloop", ".react-practice-flow"],
+    ["/skitvoice", "#vibevoice-form"],
+  ] as const) {
+    await page.goto(path);
+    const [contentBox, workflowBox, privacyBox] = await Promise.all([
+      page.locator(".react-intro-grid").boundingBox(),
+      page.locator(workflowSelector).boundingBox(),
+      page.locator("[data-public-privacy-notice]").boundingBox(),
+    ]);
+
+    expect(contentBox).not.toBeNull();
+    expect(workflowBox).not.toBeNull();
+    expect(privacyBox).not.toBeNull();
+    expect(privacyBox?.y || 0).toBeGreaterThanOrEqual((workflowBox?.y || 0) + (workflowBox?.height || 0) - 1);
+    expect(Math.abs((privacyBox?.x || 0) - (contentBox?.x || 0))).toBeLessThanOrEqual(1);
+
+    const { viewportHeight, documentHeight } = await page.evaluate(() => ({
+      viewportHeight: window.innerHeight,
+      documentHeight: document.documentElement.scrollHeight,
+    }));
+    if (documentHeight <= viewportHeight + 1) {
+      expect((privacyBox?.y || 0) + (privacyBox?.height || 0)).toBeGreaterThanOrEqual(viewportHeight - 40);
+    }
+  }
+});
+
 test("portal keeps both product actions within the initial viewport", async ({ page }) => {
   await page.goto("/");
   const viewportHeight = await page.evaluate(() => innerHeight);
@@ -94,12 +122,99 @@ test("SpeakLoop defaults to English and normalizes a saved Japanese target", asy
   await expect(language).toHaveValue("en-US");
 });
 
+test("SpeakLoop cancels either recording without sending audio", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  let recordingRequests = 0;
+  const intents: string[] = [];
+  await page.route("**/api/practice/recordings", async (route) => {
+    recordingRequests += 1;
+    const body = route.request().postData() || "";
+    const intent = body.match(/name="recording_intent"\r?\n\r?\n([^\r\n]+)/)?.[1] || "";
+    intents.push(intent);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        recording_kind: "prompt",
+        transcript: "今日は何をしますか",
+        target_text: "What are you doing today?",
+        target_language: "en-US",
+        display_text: { primary_text: "What are you doing today?" },
+        audio_base64: "UklGRg==",
+        audio_mime_type: "audio/wav",
+      }),
+    });
+  });
+
+  await page.goto("/speakloop");
+  const nativeRecord = page.locator("#practice-native-record-button");
+  const nativeCancel = page.locator("#practice-native-cancel-button");
+  await nativeRecord.click();
+  await expect(nativeCancel).toBeVisible();
+  await expect(page.locator("#practice-repeat-record-button")).toBeDisabled();
+  await nativeCancel.click();
+  await expect(page.locator("#practice-status")).toContainText("録音をキャンセルしました");
+  expect(recordingRequests).toBe(0);
+
+  await nativeRecord.click();
+  await nativeRecord.click();
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible();
+  expect(recordingRequests).toBe(1);
+  expect(intents).toEqual(["prompt"]);
+
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  const repeatCancel = page.locator("#practice-repeat-cancel-button");
+  await repeatRecord.click();
+  await expect(repeatCancel).toBeVisible();
+  await expect(nativeRecord).toBeDisabled();
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-recording-cancel.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-recording-cancel.png`, fullPage: true });
+  }
+  await repeatCancel.click();
+  await expect(page.locator("#practice-status")).toContainText("録音をキャンセルしました");
+  expect(recordingRequests).toBe(1);
+
+  await nativeRecord.click();
+  await nativeRecord.click();
+  await expect.poll(() => recordingRequests).toBe(2);
+  expect(intents).toEqual(["prompt", "prompt"]);
+});
+
 test("SpeakLoop switches from one task card to a responsive two-step flow", async ({ page }) => {
   await page.goto("/speakloop");
   const nativePanel = page.locator("#practice-native-panel");
   const promptPanel = page.locator("#practice-prompt-panel");
   const flow = page.locator(".react-practice-flow");
   await expect(promptPanel).toBeHidden();
+  await expect(page.locator("#practice-auto-play-comparison")).toHaveCount(0);
+  await expect(page.getByText("練習終了後すぐ再生", { exact: true })).toHaveCount(0);
 
   const microphone = page.locator("#practice-native-record-button .record-icon");
   const recordButton = page.locator("#practice-native-record-button");
@@ -133,6 +248,8 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
     if (target) target.textContent = "会議が終わったら、駅の近くにある静かな喫茶店で今後の予定を相談したいです。";
   });
   await expect(promptPanel).toBeVisible();
+  await expect(page.locator("#practice-play-model-button")).toBeVisible();
+  await expect(page.locator("#practice-speed-slider")).toBeVisible();
   const [nativeBox, promptBox] = await Promise.all([nativePanel.boundingBox(), promptPanel.boundingBox()]);
   const viewportWidth = page.viewportSize()?.width || 0;
   if (viewportWidth <= 820) {
@@ -141,6 +258,15 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
     expect(Math.abs((nativeBox?.y || 0) - (promptBox?.y || 0))).toBeLessThanOrEqual(8);
   }
   await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-light-speakloop-prompt.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-dark-speakloop-prompt.png`, fullPage: true });
+  }
 });
 
 test("SkitVoice follows the documented three, two, and one-column task order", async ({ page }) => {

@@ -59,6 +59,10 @@ export function PageShell({ children, className = "" }: { children: ReactNode; c
   return <main className={`react-page-shell ${className}`.trim()}>{children}</main>;
 }
 
+export function PrivacyNotice() {
+  return <footer className="react-workflow-privacy-note" data-public-privacy-notice><p className="public-privacy-notice">音声は生成・評価のため外部サービスで処理されます。個人情報や機密情報を含む音声は入力しないでください。</p></footer>;
+}
+
 export function SampleAudio({ feature, language, label, fixedTitle = false, customControls = false }: { feature: string; language?: string; label: string; fixedTitle?: boolean; customControls?: boolean }) {
   return <section className="public-sample-audio react-sample-card" data-public-sample-feature={feature} data-public-sample-language={language} data-public-sample-fixed-title={fixedTitle || undefined} hidden aria-label={`${label} サンプル音声`}><div><p className="public-sample-kicker">Sample</p><h2 data-public-sample-title>{label}</h2><p data-public-sample-description hidden /></div><audio data-public-sample-audio data-sample-audio-custom={customControls || undefined} controls preload="metadata" /></section>;
 }

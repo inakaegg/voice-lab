@@ -33,7 +33,7 @@ test("React public UI preserves legacy controller and storage contracts", () => 
 });
 
 test("React pages expose the DOM ids required by legacy controllers", () => {
-  for (const id of ["practice-target-language-select", "practice-native-record-button", "practice-prompt-panel", "practice-play-model-button", "practice-speed-slider", "practice-status", "practice-error"]) {
+  for (const id of ["practice-target-language-select", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-status", "practice-error"]) {
     assert.match(speakloop, new RegExp(`id=["']${id}["']`));
   }
   for (const id of ["vibevoice-form", "vibevoice-script", "vibevoice-generate-button", "vibevoice-job-progress", "vibevoice-result", "vibevoice-diagnostics"]) {
@@ -62,16 +62,36 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.ok(skitvoice.indexOf('label="英語"') < skitvoice.indexOf('label="中国語"'));
   assert.ok(skitvoice.indexOf('label="中国語"') < skitvoice.indexOf('label="日本語"'));
   assert.ok(skitvoice.indexOf("react-output-samples") < skitvoice.indexOf("vibevoice-form"));
-  assert.ok(skitvoice.indexOf("vibevoice-form") < skitvoice.indexOf("音声は生成・評価のため外部サービスで処理されます"));
   assert.doesNotMatch(speakloop, /<SampleAudio/);
   assert.doesNotMatch(speakloop, /音声履歴を保存/);
   assert.doesNotMatch(skitvoice, /履歴を保存/);
+});
+
+test("SpeakLoop and SkitVoice place the shared privacy notice after their main workflow", () => {
+  assert.match(shared, /export function PrivacyNotice[\s\S]*<footer className="react-workflow-privacy-note" data-public-privacy-notice>/);
+  assert.equal((speakloop.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
+  assert.equal((skitvoice.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
+  assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
+  assert.ok(skitvoice.indexOf("<ResultPanel") < skitvoice.indexOf("<PrivacyNotice"));
 });
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {
   assert.doesNotMatch(speakloop, /<option value="ja-JP">/);
   assert.match(speakloop, /defaultValue="en-US"/);
   assert.ok(speakloop.indexOf('<option value="en-US">🇺🇸 English<\/option>') < speakloop.indexOf('<option value="zh-CN">🇨🇳 中文<\/option>'));
+});
+
+test("SpeakLoop keeps comparison playback simple without an auto-play preference control", () => {
+  assert.doesNotMatch(speakloop, /practice-auto-play-comparison|練習終了後すぐ再生/);
+  assert.match(speakloop, /practice-play-model-button/);
+  assert.match(speakloop, /practice-speed-slider/);
+});
+
+test("SpeakLoop exposes recording cancel controls for both recording actions", () => {
+  assert.match(speakloop, /id="practice-native-cancel-button"/);
+  assert.match(speakloop, /id="practice-repeat-cancel-button"/);
+  assert.match(speakloop, /function CancelRecordingButton[\s\S]*aria-label="録音をキャンセル"/);
+  assert.match(styles, /\.practice-record-cancel-button/);
 });
 
 test("public React routes use the staged Tailwind and shadcn migration boundary", () => {

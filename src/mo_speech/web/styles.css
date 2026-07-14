@@ -2201,20 +2201,6 @@ fieldset.public-samples-admin {
   grid-column: 1 / -1;
 }
 
-.practice-auto-play-control {
-  align-items: center;
-  color: #46576d;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 800;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.practice-auto-play-control input {
-  margin: 0;
-}
-
 .practice-grade-guide {
   color: #60728a;
   font-size: 12px;
@@ -3972,7 +3958,43 @@ fieldset.public-samples-admin {
   font-weight: 800;
   gap: 5px;
   justify-self: center;
+  position: relative;
   white-space: nowrap;
+}
+.react-public-body[data-layout="compact"] .practice-record-cancel-button {
+  align-items: center;
+  background: var(--react-paper);
+  border: 1px solid var(--react-border);
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(21, 35, 58, 0.16);
+  color: var(--react-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0;
+  position: absolute;
+  right: -12px;
+  top: -8px;
+  width: 36px;
+  z-index: 3;
+}
+.react-public-body[data-layout="compact"] .practice-record-cancel-button:hover {
+  border-color: var(--user-recording);
+  color: var(--user-recording);
+  transform: translateY(-1px);
+}
+.react-public-body[data-layout="compact"] .practice-record-cancel-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--user-recording) 35%, transparent);
+  outline-offset: 2px;
+}
+.react-public-body[data-layout="compact"] .practice-record-cancel-button svg {
+  height: 17px;
+  width: 17px;
+}
+.react-public-body[data-layout="compact"] .practice-record-cancel-button[hidden] {
+  display: none !important;
 }
 .react-public-body[data-layout="compact"] .practice-record-orb { height: 96px; width: 96px; }
 .react-public-body[data-layout="compact"] .practice-target-practice-row { gap: 14px; }
