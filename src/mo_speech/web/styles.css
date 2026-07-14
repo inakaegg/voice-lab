@@ -1646,6 +1646,7 @@ audio {
 .practice-quick-settings {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: space-between;
   min-width: 0;
@@ -1704,6 +1705,63 @@ audio {
 
 .practice-inline-setting input {
   accent-color: #2f80ed;
+}
+
+.practice-script-setting {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe8f7;
+  border-radius: 12px;
+  color: #52677f;
+  display: inline-flex;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 3px 4px 3px 10px;
+}
+
+.practice-script-setting[hidden] {
+  display: none;
+}
+
+.practice-script-setting legend {
+  float: left;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0;
+}
+
+.practice-script-toggle {
+  align-items: center;
+  background: rgba(82, 103, 127, 0.08);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.practice-script-toggle button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #52677f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 0 9px;
+}
+
+.practice-script-toggle button[aria-pressed="true"] {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 33, 61, 0.14);
+  color: #0f4da2;
+}
+
+.practice-script-toggle button:focus-visible {
+  outline: 2px solid #2f80ed;
+  outline-offset: 2px;
 }
 
 .practice-header-auth {
@@ -3911,7 +3969,8 @@ fieldset.public-samples-admin {
   padding: 0;
 }
 .react-public-body[data-layout="compact"] .practice-current-language,
-.react-public-body[data-layout="compact"] .practice-inline-setting {
+.react-public-body[data-layout="compact"] .practice-inline-setting,
+.react-public-body[data-layout="compact"] .practice-script-setting {
   background: rgba(255, 255, 255, 0.86);
   border-color: var(--react-border);
   border-radius: 12px;
@@ -4204,6 +4263,7 @@ fieldset.public-samples-admin {
 @media (max-width: 480px) {
   .react-public-body[data-layout="compact"] .practice-current-language { padding: 0 10px; }
   .react-public-body[data-layout="compact"] .practice-language-select select { font-size: 14px; min-width: 7.5em; }
+  .react-public-body[data-layout="compact"] .practice-script-toggle button { min-height: 36px; padding-inline: 10px; }
   .react-public-body[data-layout="compact"] .react-flow-card { padding: 12px; }
   .react-public-body[data-layout="compact"] .practice-step-number { height: 22px; width: 22px; }
   .react-public-body[data-layout="compact"] .practice-record-orb { height: 78px; width: 78px; }
@@ -4269,6 +4329,7 @@ html[data-theme="dark"] .react-public-body .react-theme-settings summary,
 html[data-theme="dark"] .react-public-body .react-sample-card,
 html[data-theme="dark"] .react-public-body .practice-current-language,
 html[data-theme="dark"] .react-public-body .practice-inline-setting,
+html[data-theme="dark"] .react-public-body .practice-script-setting,
 html[data-theme="dark"] .react-public-body .react-flow-card,
 html[data-theme="dark"] .react-public-body .react-work-card,
 html[data-theme="dark"] .react-public-body .react-result-card { background: var(--react-paper); border-color: var(--react-border); color: var(--react-ink); }
@@ -4290,6 +4351,20 @@ html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-generat
 }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { background: transparent; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { color: #bdcaf0; }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button[aria-pressed="true"] {
+  background: rgba(189, 202, 240, 0.16);
+  color: #dce5ff;
+}
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle { background: rgba(255, 255, 255, 0.08); }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button { color: #aab4c5; }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button[aria-pressed="true"] { color: #f2f5fa; }
+html[data-theme="dark"] .react-public-body .practice-recognized-text {
+  background: #111722;
+  border-color: var(--react-border);
+  color: #f2f5fa;
+}
+html[data-theme="dark"] .react-public-body .practice-native-transcript { color: #d9e1ef; }
+html[data-theme="dark"] .react-public-body .practice-mini-label { color: #d8b56f; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-current-language span,
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .vibevoice-setting-field { color: var(--react-muted); }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .vibevoice-rights-confirmation {

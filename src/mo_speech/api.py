@@ -56,6 +56,7 @@ from .practice import (
     PRACTICE_TARGET_LANGUAGES,
     evaluate_practice_attempt,
     practice_comparison_alignment,
+    simplify_chinese_text,
     supported_practice_target_language,
 )
 from .public_sample_audio import PublicSampleAudioStore
@@ -1319,6 +1320,8 @@ def create_app(
                     "auto",
                     practice_target_language,
                 )
+                if practice_target_language == "zh-CN":
+                    target_text = simplify_chinese_text(target_text)
                 timings_ms["translation"] = _elapsed_ms(started)
 
                 started = perf_counter()
@@ -1387,6 +1390,8 @@ def create_app(
         precomputed_asr_result: AsrTranscription | None = None,
         precomputed_asr_ms: float | None = None,
     ) -> dict[str, object]:
+        if practice_target_language == "zh-CN":
+            target_text = simplify_chinese_text(target_text)
         total_started = perf_counter()
         used_precomputed_asr = precomputed_asr_result is not None
         asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
@@ -1402,6 +1407,8 @@ def create_app(
                     asr_result = precomputed_asr_result
                     asr_ms = float(precomputed_asr_ms or 0.0)
                 recognized_text = asr_result.text
+                if practice_target_language == "zh-CN":
+                    recognized_text = simplify_chinese_text(recognized_text)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
@@ -1543,6 +1550,8 @@ def create_app(
                     "auto",
                     practice_target_language,
                 )
+                if practice_target_language == "zh-CN":
+                    target_text = simplify_chinese_text(target_text)
                 timings_ms["translation"] = _elapsed_ms(started)
 
                 started = perf_counter()
@@ -1616,6 +1625,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not target_text.strip():
             raise HTTPException(status_code=400, detail="target_text is required")
+        if practice_target_language == "zh-CN":
+            target_text = simplify_chinese_text(target_text)
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -1640,6 +1651,8 @@ def create_app(
                 asr_started = perf_counter()
                 asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
                 recognized_text = asr_result.text
+                if practice_target_language == "zh-CN":
+                    recognized_text = simplify_chinese_text(recognized_text)
                 asr_ms = _elapsed_ms(asr_started)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc

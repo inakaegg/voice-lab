@@ -33,7 +33,7 @@ test("React public UI preserves legacy controller and storage contracts", () => 
 });
 
 test("React pages expose the DOM ids required by legacy controllers", () => {
-  for (const id of ["practice-target-language-select", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-status", "practice-error"]) {
+  for (const id of ["practice-target-language-select", "practice-chinese-script-setting", "practice-script-simplified", "practice-script-traditional", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-status", "practice-error"]) {
     assert.match(speakloop, new RegExp(`id=["']${id}["']`));
   }
   for (const id of ["vibevoice-form", "vibevoice-script", "vibevoice-generate-button", "vibevoice-job-progress", "vibevoice-result", "vibevoice-diagnostics"]) {
@@ -79,6 +79,15 @@ test("SpeakLoop only exposes Chinese and English as learning languages", () => {
   assert.doesNotMatch(speakloop, /<option value="ja-JP">/);
   assert.match(speakloop, /defaultValue="en-US"/);
   assert.ok(speakloop.indexOf('<option value="en-US">🇺🇸 English<\/option>') < speakloop.indexOf('<option value="zh-CN">🇨🇳 中文<\/option>'));
+});
+
+test("SpeakLoop provides a Chinese script segmented control backed by OpenCC", () => {
+  assert.match(speakloop, /import\("opencc-js\/cn2t"\)/);
+  assert.match(speakloop, /id="practice-chinese-script-setting"/);
+  assert.match(speakloop, /id="practice-script-simplified"[\s\S]*简体/);
+  assert.match(speakloop, /id="practice-script-traditional"[\s\S]*繁體/);
+  assert.match(pkg, /"opencc-js"/);
+  assert.match(styles, /\.practice-script-toggle/);
 });
 
 test("SpeakLoop keeps comparison playback simple without an auto-play preference control", () => {

@@ -26,6 +26,9 @@ const statusText = document.querySelector("#practice-status");
 const errorText = document.querySelector("#practice-error");
 const pinyinSetting = document.querySelector("#practice-pinyin-setting");
 const pinyinToggle = document.querySelector("#practice-pinyin-toggle");
+const chineseScriptSetting = document.querySelector("#practice-chinese-script-setting");
+const simplifiedScriptButton = document.querySelector("#practice-script-simplified");
+const traditionalScriptButton = document.querySelector("#practice-script-traditional");
 const nativeTranscriptPanel = document.querySelector("#practice-native-transcript-panel");
 const nativeTranscriptLabel = document.querySelector("#practice-native-transcript-label");
 const nativeTranscript = document.querySelector("#practice-native-transcript");
@@ -46,81 +49,6 @@ const hanCodePointRanges = [
   [0x2B820, 0x2CEAF],
 ];
 const pinyinTrimCharacters = "，。！？；：、,.!?;:\"'“”‘’（）()[]【】《》<>";
-const zhTraditionalToSimplified = {
-  後: "后",
-  裏: "里",
-  裡: "里",
-  著: "着",
-  麼: "么",
-  麽: "么",
-  樣: "样",
-  嗎: "吗",
-  妳: "你",
-  們: "们",
-  個: "个",
-  這: "这",
-  會: "会",
-  說: "说",
-  話: "话",
-  語: "语",
-  學: "学",
-  習: "习",
-  聽: "听",
-  問: "问",
-  題: "题",
-  現: "现",
-  開: "开",
-  關: "关",
-  見: "见",
-  歡: "欢",
-  愛: "爱",
-  買: "买",
-  賣: "卖",
-  車: "车",
-  輛: "辆",
-  價: "价",
-  還: "还",
-  貴: "贵",
-  綠: "绿",
-  種: "种",
-  點: "点",
-  氣: "气",
-  電: "电",
-  腦: "脑",
-  網: "网",
-  寫: "写",
-  讀: "读",
-  書: "书",
-  時: "时",
-  間: "间",
-  國: "国",
-  東: "东",
-  風: "风",
-  來: "来",
-  過: "过",
-  長: "长",
-  門: "门",
-  無: "无",
-  實: "实",
-  體: "体",
-  應: "应",
-  讓: "让",
-  給: "给",
-  對: "对",
-  從: "从",
-  為: "为",
-  發: "发",
-  聲: "声",
-  區: "区",
-  別: "别",
-  當: "当",
-  幾: "几",
-  難: "难",
-  簡: "简",
-  漢: "汉",
-  雖: "虽",
-  舊: "旧",
-};
 const nativeUiLabels = {
   "ja-JP": {
     transcript: "言ったこと",
@@ -140,6 +68,7 @@ const defaultPracticeTargetLanguage = "en-US";
 const selectablePracticeTargetLanguages = new Set(["zh-CN", "en-US"]);
 
 let selectedTargetLanguage = defaultPracticeTargetLanguage;
+let selectedChineseScript = "simplified";
 let detectedNativeLanguage = "";
 let mediaRecorder = null;
 let recordingStream = null;
@@ -155,6 +84,7 @@ let currentTargetSecondaryText = "";
 let currentTargetPinyinText = "";
 let currentTargetPinyinStatus = "disabled";
 let currentRecognizedText = "";
+let currentAttemptPayload = null;
 let currentAttemptComparisonAlignment = null;
 let currentAudioContext = null;
 let currentAnalyser = null;
@@ -192,6 +122,8 @@ promptPanel.addEventListener("focusin", () => setActiveRecordSlot("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
+simplifiedScriptButton.addEventListener("click", () => selectChineseScript("simplified"));
+traditionalScriptButton.addEventListener("click", () => selectChineseScript("traditional"));
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
@@ -343,6 +275,7 @@ function renderPromptResult(payload) {
   setActiveRecordSlot("repeat");
   stopRepeatAudio();
   currentRecognizedText = "";
+  currentAttemptPayload = null;
   currentAttemptComparisonAlignment = null;
   recognizedText.textContent = "";
   syncPracticeRecordMode();
@@ -379,6 +312,7 @@ function renderAttemptResult(payload) {
   scoreText.textContent = `${percent}%`;
   scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   currentRecognizedText = payload.recognized_text || "";
+  currentAttemptPayload = payload;
   currentAttemptComparisonAlignment = payload.comparison_alignment || null;
   renderRecognizedDiff(payload);
   nativePanel.hidden = false;
@@ -410,6 +344,7 @@ function resetPractice() {
   currentTargetPinyinText = "";
   currentTargetPinyinStatus = "disabled";
   currentRecognizedText = "";
+  currentAttemptPayload = null;
   currentAttemptComparisonAlignment = null;
   detectedNativeLanguage = "";
   activeRecordSlot = "native";
@@ -540,8 +475,35 @@ function handlePinyinSettingChange() {
   renderTargetDisplay();
 }
 
+async function selectChineseScript(script) {
+  const nextScript = script === "traditional" ? "traditional" : "simplified";
+  if (nextScript === "traditional") {
+    try {
+      await window.voiceLabChineseScript?.loadTraditional();
+    } catch (_error) {
+      showError("繁体字表示を読み込めませんでした。");
+      return;
+    }
+  }
+  selectedChineseScript = nextScript;
+  syncChineseScriptControls();
+  savePracticeSettings();
+  renderTargetDisplay();
+  if (currentAttemptPayload) {
+    renderRecognizedDiff(currentAttemptPayload);
+  }
+}
+
+function displayChineseText(text) {
+  const sourceText = String(text || "");
+  if (selectedTargetLanguage !== "zh-CN" || selectedChineseScript !== "traditional") {
+    return sourceText;
+  }
+  return window.voiceLabChineseScript?.toTraditional(sourceText) || sourceText;
+}
+
 function renderTargetDisplay() {
-  const displayText = currentTargetDisplayText || currentTargetText || "";
+  const displayText = displayChineseText(currentTargetDisplayText || currentTargetText || "");
   const pinyinRuby = selectedTargetLanguage === "zh-CN" && pinyinToggle.checked
     ? createPinyinRubyFragment(displayText, currentTargetPinyinText)
     : null;
@@ -1121,11 +1083,23 @@ function loadPracticeSettings() {
     ? settings.target_language
     : defaultPracticeTargetLanguage;
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
+  selectedChineseScript = settings.chinese_script === "traditional" ? "traditional" : "simplified";
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageSelect.value = selectedTargetLanguage;
   syncPinyinSettingVisibility();
+  syncChineseScriptControls();
   syncCurrentLanguageLabel();
   syncModelAudioSpeed();
+  if (selectedChineseScript === "traditional") {
+    window.voiceLabChineseScript?.loadTraditional()
+      .then(() => {
+        renderTargetDisplay();
+        if (currentAttemptPayload) {
+          renderRecognizedDiff(currentAttemptPayload);
+        }
+      })
+      .catch(() => showError("繁体字表示を読み込めませんでした。"));
+  }
 }
 
 function readPracticeSettings() {
@@ -1142,6 +1116,7 @@ function savePracticeSettings() {
       practiceSettingsStorageKey,
       JSON.stringify({
         target_language: selectedTargetLanguage,
+        chinese_script: selectedChineseScript,
         show_pinyin: Boolean(pinyinToggle.checked),
         speed: normalizedPlaybackSpeed(speedSlider.value),
       }),
@@ -1156,7 +1131,15 @@ function practiceAsrModel() {
 }
 
 function syncPinyinSettingVisibility() {
-  pinyinSetting.hidden = selectedTargetLanguage !== "zh-CN";
+  const hidden = selectedTargetLanguage !== "zh-CN";
+  pinyinSetting.hidden = hidden;
+  chineseScriptSetting.hidden = hidden;
+}
+
+function syncChineseScriptControls() {
+  const traditional = selectedChineseScript === "traditional";
+  simplifiedScriptButton.setAttribute("aria-pressed", String(!traditional));
+  traditionalScriptButton.setAttribute("aria-pressed", String(traditional));
 }
 
 function syncCurrentLanguageLabel() {
@@ -1232,7 +1215,7 @@ function renderRecognizedDiff(payload) {
   ].sort((left, right) => left.start - right.start || (left.kind === "missing" ? -1 : 1));
   for (const decoration of decorations) {
     if (cursor < decoration.start) {
-      recognizedText.append(document.createTextNode(recognized.slice(cursor, decoration.start)));
+      recognizedText.append(document.createTextNode(displayChineseText(recognized.slice(cursor, decoration.start))));
     }
     if (decoration.kind === "missing") {
       recognizedText.append(renderMissingTargetDiff(decoration.text));
@@ -1245,7 +1228,7 @@ function renderRecognizedDiff(payload) {
     cursor = decoration.end;
   }
   if (cursor < recognized.length) {
-    recognizedText.append(document.createTextNode(recognized.slice(cursor)));
+    recognizedText.append(document.createTextNode(displayChineseText(recognized.slice(cursor))));
   }
 }
 
@@ -1256,12 +1239,12 @@ function renderRecognizedMismatchDiff(text, correctText = "") {
   if (correctText) {
     const correction = document.createElement("span");
     correction.className = "practice-diff-correction";
-    correction.textContent = correctText;
+    correction.textContent = displayChineseText(correctText);
     button.append(correction);
   }
   const heard = document.createElement("span");
   heard.className = "practice-diff-heard";
-  heard.textContent = text;
+  heard.textContent = displayChineseText(text);
   button.append(heard);
   button.title = "比較再生";
   button.addEventListener("click", playComparisonAudios);
@@ -1274,7 +1257,7 @@ function renderMissingTargetDiff(text) {
   button.className = "practice-diff-missing";
   const heard = document.createElement("span");
   heard.className = "practice-diff-heard";
-  heard.textContent = text;
+  heard.textContent = displayChineseText(text);
   button.append(heard);
   button.title = "抜けた部分を比較再生";
   button.addEventListener("click", playComparisonAudios);
@@ -1303,9 +1286,6 @@ function normalizePracticeChar(char, language) {
     normalized = normalized.replace(/[\u30a1-\u30f6]/g, (value) =>
       String.fromCharCode(value.charCodeAt(0) - 0x60)
     );
-  }
-  if (language === "zh-CN") {
-    normalized = Array.from(normalized).map((value) => zhTraditionalToSimplified[value] || value).join("");
   }
   return normalized;
 }

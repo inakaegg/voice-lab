@@ -1050,7 +1050,7 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
 
 def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
     pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"zh-CN": "我想要咖啡"}),
+        asr=FakeAsrProvider({"zh-CN": "我想學習軟體開發"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
@@ -1058,14 +1058,14 @@ def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
 
     response = client.post(
         "/api/practice/recordings",
-        data={"recording_intent": "attempt", "target_language": "zh-CN", "current_target_text": "我想要咖啡。"},
+        data={"recording_intent": "attempt", "target_language": "zh-CN", "current_target_text": "我想学习软体开发"},
         files={"audio": ("recording.webm", b"repeat audio", "audio/webm")},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["recording_kind"] == "attempt"
-    assert payload["recognized_text"] == "我想要咖啡"
+    assert payload["recognized_text"] == "我想学习软体开发"
     assert "classification" not in payload
     assert payload["grade"] == "perfect"
 
@@ -1073,7 +1073,7 @@ def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
 def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exists() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"auto": "明日は天気がいいですか"}),
-        translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "明天天气好吗？"}),
+        translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "我想學習軟體開發。"}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(create_app(openai_pipeline=pipeline))
@@ -1093,8 +1093,8 @@ def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exi
     payload = response.json()
     assert payload["recording_kind"] == "prompt"
     assert payload["transcript"] == "明日は天気がいいですか"
-    assert payload["target_text"] == "明天天气好吗？"
-    assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:明天天气好吗？".encode()).decode()
+    assert payload["target_text"] == "我想学习软体开发。"
+    assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:我想学习软体开发。".encode()).decode()
     assert "classification" not in payload
 
 
