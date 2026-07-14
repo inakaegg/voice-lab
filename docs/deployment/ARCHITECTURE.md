@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-07-13
+更新日: 2026-07-14
 
 ## 構成
 
@@ -12,8 +12,8 @@ Browser
        /, /speakloop, /skitvoice
   -> Cloudflare Worker module
        Google OAuth / admin auth / quota / API gateway
-       -> OpenAI API: ASR / translation / TTS
-       -> RunPod Serverless: VibeVoice / Seed-VC
+       -> OpenAI API: native-language ASR / English practice ASR / translation / TTS
+       -> RunPod Serverless: Chinese practice FunASR / VibeVoice / Seed-VC
        -> KV: settings / short-lived jobs / fallback
        -> D1: quota / audit / public sample metadata
        -> R2: audio blobs

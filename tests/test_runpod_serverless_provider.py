@@ -8,6 +8,7 @@ import pytest
 from mo_speech.pipeline import PipelineRequest
 from mo_speech.providers.runpod_serverless import (
     RunpodServerlessClient,
+    RunpodServerlessPracticeAsrProvider,
     RunpodServerlessSpeechTranslationPipeline,
     RunpodServerlessVoiceConversionProvider,
     runpod_serverless_pipeline_status,
@@ -130,6 +131,55 @@ def test_runpod_serverless_pipeline_sends_seed_vc_runtime_settings(tmp_path: Pat
     assert client.inputs[0]["seed_vc_reference_auto_select"] is True
 
 
+def test_runpod_practice_asr_provider_uses_sync_job_and_maps_timestamps(tmp_path: Path) -> None:
+    client = FakeRunpodClient(
+        {
+            "text": "你好，你最近怎么样？",
+            "model": "funasr/paraformer-zh",
+            "timestamp_granularities": ["word"],
+            "words": [
+                {"text": "你", "start": 0.1, "end": 0.2},
+                {"text": "好", "start": 0.2, "end": 0.35},
+            ],
+            "segments": [{"text": "你好，你最近怎么样？", "start": 0.1, "end": 1.6}],
+        }
+    )
+    audio_path = tmp_path / "attempt.webm"
+    audio_path.write_bytes(b"chinese attempt")
+    provider = RunpodServerlessPracticeAsrProvider(client=client)
+
+    transcription = provider.transcribe_detail(audio_path, "zh-CN", include_timestamps=True)
+
+    assert client.sync_inputs == [
+        {
+            "operation_mode": "practice_asr",
+            "source_language": "zh-CN",
+            "audio_mime_type": "audio/webm",
+            "audio_base64": base64.b64encode(b"chinese attempt").decode("ascii"),
+        }
+    ]
+    assert transcription.text == "你好，你最近怎么样？"
+    assert transcription.model == "funasr/paraformer-zh"
+    assert transcription.words[0] == {"text": "你", "start": 0.1, "end": 0.2}
+    assert provider.name == "runpod-funasr-paraformer-zh"
+
+
+def test_runpod_client_submit_sync_always_uses_runsync() -> None:
+    client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
+    calls: list[tuple[str, str, object | None]] = []
+
+    def fake_request_json(path: str, *, method: str = "GET", payload: object | None = None, timeout_seconds: float | None = None):
+        calls.append((method, path, payload))
+        return {"status": "COMPLETED", "output": {"text": "你好"}}
+
+    client._request_json = fake_request_json  # type: ignore[method-assign]
+
+    assert client.submit_sync({"operation_mode": "practice_asr"}) == {"text": "你好"}
+    assert calls == [
+        ("POST", "/runsync", {"input": {"operation_mode": "practice_asr"}}),
+    ]
+
+
 def test_runpod_serverless_voice_conversion_provider_maps_request(tmp_path: Path) -> None:
     client = FakeRunpodClient(
         {
@@ -223,9 +273,14 @@ class FakeRunpodClient:
     def __init__(self, output):
         self.output = output
         self.inputs = []
+        self.sync_inputs = []
 
     def submit(self, input_payload):
         self.inputs.append(input_payload)
+        return self.output
+
+    def submit_sync(self, input_payload):
+        self.sync_inputs.append(input_payload)
         return self.output
 
     def warmup(self, input_payload=None):

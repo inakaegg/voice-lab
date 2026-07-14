@@ -27,12 +27,12 @@ def _optional_int_env(name: str) -> int | None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, text-TTS, or voice-conversion smoke request.")
+    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, practice-ASR, text-TTS, or voice-conversion smoke request.")
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
     parser.add_argument(
         "--operation-mode",
-        choices=("translation", "text_tts", "voice_conversion", "warmup", "diagnostics", "vibevoice"),
+        choices=("translation", "practice_asr", "text_tts", "voice_conversion", "warmup", "diagnostics", "vibevoice"),
         default="translation",
     )
     parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
@@ -60,6 +60,11 @@ def main() -> int:
         "--preload-voice-conversion",
         action="store_true",
         default=os.getenv("RUNPOD_SMOKE_PRELOAD_VOICE_CONVERSION") == "1",
+    )
+    parser.add_argument(
+        "--preload-practice-asr",
+        action="store_true",
+        default=os.getenv("RUNPOD_SMOKE_PRELOAD_PRACTICE_ASR") == "1",
     )
     parser.add_argument("--timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--http-timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_HTTP_TIMEOUT_SECONDS", "120")))
@@ -126,8 +131,11 @@ def main() -> int:
         input_payload = {
             "operation_mode": "warmup",
             "translation_backend": args.translation_backend,
-            "preload_translation": args.preload_translation or not args.preload_voice_conversion,
+            "preload_translation": args.preload_translation or not (
+                args.preload_voice_conversion or args.preload_practice_asr
+            ),
             "preload_voice_conversion": args.preload_voice_conversion,
+            "preload_practice_asr": args.preload_practice_asr,
         }
     elif args.operation_mode == "text_tts":
         if not args.text:
@@ -178,9 +186,9 @@ def main() -> int:
         }
     else:
         if not args.audio:
-            raise SystemExit("--audio is required for translation and voice_conversion")
+            raise SystemExit("--audio is required for translation, practice_asr, and voice_conversion")
         audio_path = Path(args.audio)
-        mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+        mime_type = "audio/webm" if audio_path.suffix.lower() == ".webm" else (mimetypes.guess_type(audio_path.name)[0] or "audio/wav")
 
     if args.operation_mode == "voice_conversion":
         if not args.reference_audio:
@@ -204,6 +212,13 @@ def main() -> int:
             "target_language": args.target_language,
             "voice_mode": args.voice_mode,
             "text_transform_unit": args.text_transform_unit,
+        }
+    elif args.operation_mode == "practice_asr":
+        input_payload = {
+            "operation_mode": "practice_asr",
+            "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+            "audio_mime_type": mime_type,
+            "source_language": "zh-CN",
         }
     if args.seed_vc_diffusion_steps is not None:
         input_payload["seed_vc_diffusion_steps"] = args.seed_vc_diffusion_steps

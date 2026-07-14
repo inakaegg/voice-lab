@@ -59,13 +59,18 @@ def test_runpod_common_sets_vibevoice_revision_defaults() -> None:
     }
 
 
-def test_runpod_common_does_not_preload_voice_conversion_by_default() -> None:
+def test_runpod_common_sets_resident_gpu_model_lifecycle_defaults() -> None:
     command = (
         "source scripts/runpod_common.sh; "
         "set_default_runpod_app_env; "
         "runpod_env_json "
         "MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START "
-        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE"
+        "MO_RUNPOD_PRELOAD_FUNASR_ON_START "
+        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE "
+        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR "
+        "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION "
+        "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE "
+        "FUNASR_MODEL FUNASR_VAD_MODEL FUNASR_PUNC_MODEL FUNASR_HUB FUNASR_DEVICE"
     )
 
     result = subprocess.run(
@@ -78,7 +83,16 @@ def test_runpod_common_does_not_preload_voice_conversion_by_default() -> None:
     payload = json.loads(result.stdout)
     assert payload == {
         "MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START": "0",
+        "MO_RUNPOD_PRELOAD_FUNASR_ON_START": "0",
         "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE": "1",
+        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR": "1",
+        "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION": "1",
+        "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE": "1",
+        "FUNASR_MODEL": "funasr/paraformer-zh",
+        "FUNASR_VAD_MODEL": "funasr/fsmn-vad",
+        "FUNASR_PUNC_MODEL": "funasr/ct-punc",
+        "FUNASR_HUB": "hf",
+        "FUNASR_DEVICE": "cuda",
     }
 
 
@@ -146,6 +160,15 @@ def test_runpod_smoke_script_supports_diagnostics_operation() -> None:
 
     assert '"diagnostics"' in script
     assert 'input_payload = {"operation_mode": "diagnostics"}' in script
+
+
+def test_runpod_smoke_script_supports_chinese_practice_asr() -> None:
+    script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
+
+    assert '"practice_asr"' in script
+    assert '"operation_mode": "practice_asr"' in script
+    assert '"source_language": "zh-CN"' in script
+    assert '"preload_practice_asr": args.preload_practice_asr' in script
 
 
 def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:

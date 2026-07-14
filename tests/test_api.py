@@ -13,6 +13,7 @@ from mo_speech.api import create_app
 from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
+from mo_speech.providers.openai_api import AsrTranscription
 from mo_speech.providers.voice import (
     SeedVcRuntimeSettings,
     VoiceConversionBackendInfo,
@@ -1026,17 +1027,23 @@ def test_practice_attempt_api_scores_repeat_audio() -> None:
 def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     captured = {}
 
-    class CapturingAsr(FakeAsrProvider):
-        def transcribe(self, audio_path, source_language):
+    class CapturingRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
             captured["source_language"] = source_language
-            return "绿茶和咖啡，哪一种的咖啡因含量更多呢？"
+            captured["include_timestamps"] = include_timestamps
+            return AsrTranscription(
+                text="绿茶和咖啡，哪一种的咖啡因含量更多呢？",
+                model="funasr/paraformer-zh",
+            )
 
     pipeline = SpeechTranslationPipeline(
-        asr=CapturingAsr({"zh-CN": "unused"}),
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=CapturingRunpodAsr()))
 
     response = client.post(
         "/api/practice/attempts",
@@ -1045,16 +1052,28 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     )
 
     assert response.status_code == 200
-    assert captured == {"source_language": "zh-CN"}
+    assert captured == {"source_language": "zh-CN", "include_timestamps": True}
+    assert response.json()["providers"]["asr"] == "runpod-funasr-paraformer-zh"
 
 
 def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
+    class FakeRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            return AsrTranscription(
+                text="我想學習軟體開發",
+                model="funasr/paraformer-zh",
+                words=[{"text": "我", "start": 0.0, "end": 0.2}],
+                timestamp_granularities=["word"],
+            )
+
     pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"zh-CN": "我想學習軟體開發"}),
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=FakeRunpodAsr()))
 
     response = client.post(
         "/api/practice/recordings",
@@ -1068,6 +1087,7 @@ def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
     assert payload["recognized_text"] == "我想学习软体开发"
     assert "classification" not in payload
     assert payload["grade"] == "perfect"
+    assert payload["asr_model"] == "funasr/paraformer-zh"
 
 
 def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exists() -> None:

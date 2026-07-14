@@ -21,7 +21,11 @@ from ..pipeline import (
     SpeechTranslationPipeline,
     TtsOutput,
 )
-from .openai_api import OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES, OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES
+from .openai_api import (
+    OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES,
+    OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES,
+    AsrTranscription,
+)
 from .voice import SeedVcRuntimeSettings, VoiceConversionBackendInfo
 
 
@@ -75,6 +79,18 @@ class RunpodServerlessClient:
             timeout_seconds=self.timeout_seconds,
         )
         return self._poll_output(body)
+
+    def submit_sync(self, input_payload: dict[str, object]) -> dict[str, object]:
+        if not self.configured:
+            raise RuntimeError("RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.")
+        return self._completed_output(
+            self._request_json(
+                "/runsync",
+                method="POST",
+                payload={"input": input_payload},
+                timeout_seconds=self.timeout_seconds,
+            )
+        )
 
     def warmup(self, input_payload: dict[str, object] | None = None) -> dict[str, object]:
         return self.submit({"operation_mode": "warmup", **(input_payload or {})})
@@ -258,6 +274,41 @@ class RunpodServerlessVoiceConversionProvider:
         return _tts_output_from_output(output)
 
 
+@dataclass
+class RunpodServerlessPracticeAsrProvider:
+    client: RunpodServerlessClient = field(default_factory=RunpodServerlessClient.from_env)
+
+    name = "runpod-funasr-paraformer-zh"
+
+    def transcribe(self, audio_path: Path, source_language: str) -> str:
+        return self.transcribe_detail(audio_path, source_language).text
+
+    def transcribe_detail(
+        self,
+        audio_path: Path,
+        source_language: str,
+        *,
+        include_timestamps: bool = False,
+    ) -> AsrTranscription:
+        if source_language != "zh-CN":
+            raise ValueError("RunPod FunASR practice ASR only supports zh-CN")
+        output = self.client.submit_sync(
+            {
+                "operation_mode": "practice_asr",
+                "source_language": source_language,
+                "audio_mime_type": _audio_mime_type(audio_path),
+                "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+            }
+        )
+        return AsrTranscription(
+            text=str(output.get("text") or "").strip(),
+            model=str(output.get("model") or "funasr/paraformer-zh"),
+            words=_asr_timing_rows(output.get("words")),
+            segments=_asr_timing_rows(output.get("segments")),
+            timestamp_granularities=_string_list(output.get("timestamp_granularities")),
+        )
+
+
 def create_runpod_serverless_pipeline() -> RunpodServerlessSpeechTranslationPipeline:
     return RunpodServerlessSpeechTranslationPipeline()
 
@@ -407,6 +458,8 @@ def _worker_counts(workers: object) -> dict[str, int]:
 
 
 def _audio_mime_type(path: Path) -> str:
+    if path.suffix.lower() == ".webm":
+        return "audio/webm"
     return mimetypes.guess_type(path.name)[0] or "audio/wav"
 
 
@@ -436,6 +489,30 @@ def _float_dict(value: object) -> dict[str, float]:
         except (TypeError, ValueError):
             continue
     return result
+
+
+def _asr_timing_rows(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        try:
+            start = float(item.get("start"))
+            end = float(item.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if start < 0 or end < start:
+            continue
+        rows.append(
+            {
+                "text": str(item.get("text") or item.get("word") or ""),
+                "start": start,
+                "end": end,
+            }
+        )
+    return rows
 
 
 def _runpod_error_message(body: dict[str, object]) -> str:

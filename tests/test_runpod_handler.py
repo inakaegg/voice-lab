@@ -6,6 +6,7 @@ import pytest
 
 from mo_speech import runpod_handler
 from mo_speech.pipeline import PipelineProgress, PipelineResult, TtsOutput
+from mo_speech.providers.openai_api import AsrTranscription
 from mo_speech.providers.voice import VoiceConversionBackendInfo, VoiceConversionService
 
 
@@ -77,6 +78,81 @@ def test_runpod_handler_defaults_to_openai_translation_backend(monkeypatch: pyte
         "translation": "fake-openai-translation",
         "tts": "fake-openai-tts",
     }
+
+
+def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeFunAsrProvider:
+        name = "funasr-paraformer-zh"
+        model = "funasr/paraformer-zh"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            assert audio_path.read_bytes() == b"chinese attempt"
+            assert source_language == "zh-CN"
+            assert include_timestamps is True
+            return AsrTranscription(
+                text="在中国的AI服务方面。",
+                model=self.model,
+                words=[
+                    {"text": "在", "start": 0.1, "end": 0.2},
+                    {"text": "中国", "start": 0.2, "end": 0.5},
+                ],
+                segments=[{"text": "在中国的AI服务方面。", "start": 0.1, "end": 1.4}],
+                timestamp_granularities=["word"],
+            )
+
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "practice_asr",
+                "audio_base64": base64.b64encode(b"chinese attempt").decode("ascii"),
+                "audio_mime_type": "audio/webm;codecs=opus",
+                "source_language": "zh-CN",
+            }
+        }
+    )
+
+    assert payload["text"] == "在中国的AI服务方面。"
+    assert payload["model"] == "funasr/paraformer-zh"
+    assert payload["words"][0] == {"text": "在", "start": 0.1, "end": 0.2}
+    assert payload["timestamp_granularities"] == ["word"]
+    assert payload["providers"] == {"asr": "funasr-paraformer-zh"}
+    assert payload["serverless"]["operation_mode"] == "practice_asr"
+
+
+def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeVoiceConversionService:
+        def release(self):
+            calls.append("release-vc")
+
+    class FakeFunAsrProvider:
+        name = "funasr-paraformer-zh"
+
+        def transcribe_detail(self, _audio_path, _source_language, *, include_timestamps):
+            assert include_timestamps is True
+            calls.append("transcribe-funasr")
+            return AsrTranscription(text="你好", model="funasr/paraformer-zh")
+
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", FakeVoiceConversionService())
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE_LOAD_MS", 1.0)
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
+
+    runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "practice_asr",
+                "audio_base64": base64.b64encode(b"attempt").decode("ascii"),
+                "source_language": "zh-CN",
+            }
+        }
+    )
+
+    assert calls == ["release-vc", "transcribe-funasr"]
+    assert runpod_handler._VOICE_CONVERSION_SERVICE is None
+    assert runpod_handler._VOICE_CONVERSION_SERVICE_LOAD_MS is None
 
 
 def test_runpod_handler_accepts_user_effect_options_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -641,6 +717,56 @@ def test_runpod_handler_releases_voice_conversion_before_vibevoice(monkeypatch: 
     assert calls == ["release-vc", "generate-vibevoice"]
     assert runpod_handler._VOICE_CONVERSION_SERVICE is None
     assert runpod_handler._VOICE_CONVERSION_SERVICE_LOAD_MS is None
+
+
+def test_runpod_handler_releases_funasr_before_vibevoice(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeFunAsrProvider:
+        def release(self):
+            calls.append("release-funasr")
+
+    class FakeVibeVoiceService:
+        def generate(self, *, script_text, voice_paths, options):
+            calls.append("generate-vibevoice")
+            assert runpod_handler._FUNASR_PRACTICE_PROVIDER is None
+            return type(
+                "FakeVibeVoiceResult",
+                (),
+                {
+                    "audio_bytes": b"vv audio",
+                    "audio_mime_type": "audio/wav",
+                    "normalized_script": script_text,
+                    "timings_ms": {"vibevoice": 1.0},
+                    "providers": {"vibevoice": "fake-vibevoice"},
+                    "diagnostics": {},
+                },
+            )()
+
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER_LOAD_MS", 1.0)
+    monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    event = {
+        "input": {
+            "operation_mode": "vibevoice",
+            "response_audio_format": "wav",
+            "script": "Speaker 1: 你好。",
+            "voices": [
+                {
+                    "speaker": 1,
+                    "filename": "voice.wav",
+                    "audio_mime_type": "audio/wav",
+                    "audio_base64": base64.b64encode(b"voice").decode("ascii"),
+                }
+            ],
+            "generation": {"model_id": "vibevoice-large-aoi-pinned", "inference_steps": 2},
+        }
+    }
+
+    runpod_handler.handler(event)
+
+    assert calls == ["release-funasr", "generate-vibevoice"]
+    assert runpod_handler._FUNASR_PRACTICE_PROVIDER_LOAD_MS is None
 
 
 def test_runpod_handler_reports_worker_diagnostics(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

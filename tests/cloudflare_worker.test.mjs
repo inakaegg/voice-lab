@@ -1129,9 +1129,19 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
 test("Cloudflare worker uses explicit attempt intent for a practice recording", async () => {
   const calls = [];
   const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init });
-    if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return json({ text: "我想學習軟體開發" });
+    calls.push({ url, init, body: parseJsonBody(init.body) });
+    if (url === "https://api.runpod.ai/v2/endpoint/runsync") {
+      return json({
+        status: "COMPLETED",
+        output: {
+          text: "我想學習軟體開發",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [{ text: "我", start: 0, end: 0.2 }],
+          segments: [{ text: "我想學習軟體開發", start: 0, end: 1.2 }],
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
     }
     throw new Error(`unexpected url: ${url}`);
   });
@@ -1152,7 +1162,13 @@ test("Cloudflare worker uses explicit attempt intent for a practice recording", 
   assert.equal(payload.recognized_text, "我想学习软体开发");
   assert.equal("classification" in payload, false);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init.body.get("language"), "zh");
+  assert.equal(calls[0].url, "https://api.runpod.ai/v2/endpoint/runsync");
+  assert.equal(calls[0].body.input.operation_mode, "practice_asr");
+  assert.equal(calls[0].body.input.source_language, "zh-CN");
+  assert.equal(calls[0].body.input.audio_mime_type, "audio/webm");
+  assert.equal(calls[0].body.input.audio_base64, Buffer.from("repeat").toString("base64"));
+  assert.equal(payload.providers.asr, "funasr-paraformer-zh");
+  assert.equal(payload.asr_model, "funasr/paraformer-zh");
 });
 
 test("Cloudflare worker uses explicit prompt intent even when a target exists", async () => {
@@ -1340,12 +1356,25 @@ test("Cloudflare worker scores a pronunciation practice attempt", async () => {
   assert.ok(payload.diff.every((entry) => Number.isInteger(entry.recognized_start)));
 });
 
-test("Cloudflare worker forces Chinese practice attempts to Chinese ASR", async () => {
+test("Cloudflare worker routes Chinese practice attempts to RunPod FunASR", async () => {
   const calls = [];
   const env = fakeEnv(async (url, init) => {
-    calls.push({ url, language: init.body?.get?.("language") || "" });
-    if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return json({ text: "你好，你最近怎麼樣?" });
+    calls.push({ url, body: parseJsonBody(init.body) });
+    if (url === "https://api.runpod.ai/v2/endpoint/runsync") {
+      return json({
+        status: "COMPLETED",
+        output: {
+          text: "你好，你最近怎麼樣?",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [
+            { text: "你", start: 0.1, end: 0.2 },
+            { text: "好", start: 0.2, end: 0.4 },
+          ],
+          segments: [{ text: "你好，你最近怎麼樣?", start: 0.1, end: 1.5 }],
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
     }
     throw new Error(`unexpected url: ${url}`);
   });
@@ -1361,10 +1390,38 @@ test("Cloudflare worker forces Chinese practice attempts to Chinese ASR", async 
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(calls[0].language, "zh");
+  assert.equal(calls[0].url, "https://api.runpod.ai/v2/endpoint/runsync");
+  assert.equal(calls[0].body.input.operation_mode, "practice_asr");
+  assert.equal(calls[0].body.input.source_language, "zh-CN");
   assert.equal(payload.grade, "perfect");
   assert.equal(payload.similarity, 1);
   assert.equal(payload.normalized_target, payload.normalized_recognized);
+  assert.equal(payload.asr_timestamps.words[0].text, "你");
+  assert.equal(payload.providers.asr, "funasr-paraformer-zh");
+});
+
+test("Cloudflare worker does not silently fall back when Chinese FunASR fails", async () => {
+  const calls = [];
+  const env = fakeEnv(async (url) => {
+    calls.push(url);
+    if (url === "https://api.runpod.ai/v2/endpoint/runsync") {
+      return json({ error: "FunASR unavailable" }, { status: 503 });
+    }
+    throw new Error(`unexpected fallback url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("target_language", "zh-CN");
+  form.append("target_text", "你好。");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempts", { method: "POST", body: form }),
+    env,
+  );
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(calls, ["https://api.runpod.ai/v2/endpoint/runsync"]);
+  assert.match(await response.text(), /FunASR unavailable/);
 });
 
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {

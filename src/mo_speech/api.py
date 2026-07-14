@@ -66,6 +66,7 @@ from .providers.openai_api import (
     create_openai_realtime_translation_client_secret,
     supported_openai_practice_asr_model,
 )
+from .providers.runpod_serverless import RunpodServerlessPracticeAsrProvider
 from .providers.text_tts import create_text_tts_providers, text_tts_backend_statuses
 from .providers.voice import (
     VoiceConversionRequest,
@@ -186,6 +187,7 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "timings_ms": result.get("timings_ms") or {},
     }
     return {
+        "asr_model": result.get("asr_model") or "",
         "text_preview": str(result.get("target_text") or result.get("recognized_text") or result.get("transcript") or "")[:80],
         "recognized_text_preview": str(result.get("recognized_text") or result.get("transcript") or "")[:80],
         "practice_diagnostics": diagnostics,
@@ -743,6 +745,7 @@ def create_app(
     openai_pipeline: SpeechTranslationPipeline | None = None,
     openai_realtime_pipeline=None,
     runpod_serverless_pipeline: SpeechTranslationPipeline | None = None,
+    runpod_practice_asr_provider: RunpodServerlessPracticeAsrProvider | None = None,
     text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     vibevoice_service: VibeVoiceService | None = None,
@@ -757,6 +760,7 @@ def create_app(
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
     active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()
     active_runpod_serverless_pipeline = runpod_serverless_pipeline or create_runpod_serverless_pipeline()
+    active_runpod_practice_asr_provider = runpod_practice_asr_provider or RunpodServerlessPracticeAsrProvider()
     translation_pipelines = {
         "openai": active_openai_pipeline,
         "openai_realtime": active_openai_realtime_pipeline,
@@ -1394,7 +1398,11 @@ def create_app(
             target_text = simplify_chinese_text(target_text)
         total_started = perf_counter()
         used_precomputed_asr = precomputed_asr_result is not None
-        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        asr_provider = (
+            active_runpod_practice_asr_provider
+            if practice_target_language == "zh-CN"
+            else _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        )
         with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
@@ -1426,7 +1434,7 @@ def create_app(
             "target_language": practice_target_language,
             "target_text": target_text,
             "recognized_text": recognized_text,
-            "asr_model": practice_asr_model,
+            "asr_model": asr_result.model,
             "asr_timestamps": asr_timestamps,
             **evaluation,
             "comparison_alignment": comparison_alignment,
@@ -1642,48 +1650,13 @@ def create_app(
             },
         )
 
-        total_started = perf_counter()
-        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
-        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_audio.flush()
-            try:
-                asr_started = perf_counter()
-                asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
-                recognized_text = asr_result.text
-                if practice_target_language == "zh-CN":
-                    recognized_text = simplify_chinese_text(recognized_text)
-                asr_ms = _elapsed_ms(asr_started)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
-        asr_timestamps = _serialize_asr_timestamps(asr_result)
-        comparison_alignment = practice_comparison_alignment(
+        result = _create_practice_attempt_result(
+            audio_bytes=audio_bytes,
+            filename=audio.filename or "",
+            practice_target_language=practice_target_language,
             target_text=target_text,
-            recognized_text=recognized_text,
-            target_language=practice_target_language,
-            asr_timestamps=asr_timestamps,
+            practice_asr_model=practice_asr_model,
         )
-        result = {
-            "target_language": practice_target_language,
-            "target_text": target_text,
-            "recognized_text": recognized_text,
-            "asr_model": practice_asr_model,
-            "asr_timestamps": asr_timestamps,
-            **evaluation,
-            "comparison_alignment": comparison_alignment,
-            "timings_ms": {
-                "asr": asr_ms,
-                "compare": max(0.0, _elapsed_ms(total_started) - asr_ms),
-                "total": _elapsed_ms(total_started),
-            },
-            "providers": {
-                "asr": asr_provider.name,
-            },
-        }
         active_audio_history_store.update_metadata(
             recording_entry,
             _practice_history_diagnostics_metadata(result),

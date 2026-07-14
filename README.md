@@ -34,8 +34,8 @@ URL切り出しはローカル版の `yt-dlp` と `ffmpeg` だけが担当しま
 ```mermaid
 flowchart LR
     Browser[Browser\nSpeakLoop / SkitVoice] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
-    Worker --> OpenAI[OpenAI API\nASR / Translation / TTS]
-    Worker --> RunPod[RunPod Serverless\nVibeVoice / Seed-VC]
+    Worker --> OpenAI[OpenAI API\nNative + English ASR / Translation / TTS]
+    Worker --> RunPod[RunPod Serverless\nChinese FunASR / VibeVoice / Seed-VC]
     Worker --> KV[Workers KV\nSettings / Short-lived Jobs / Fallback]
     Worker --> D1[D1\nQuota / Audit / Sample Metadata]
     Worker --> R2[R2\nPublic Sample Audio]

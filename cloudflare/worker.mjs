@@ -35,6 +35,7 @@ const OPENAI_LANGUAGE_NAMES = {
 };
 const OPENAI_PRACTICE_ASR_MODELS = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"]);
 const OPENAI_DEFAULT_PRACTICE_ASR_MODEL = "whisper-1";
+const FUNASR_DEFAULT_PRACTICE_ASR_MODEL = "funasr/paraformer-zh";
 const OPENAI_TIMESTAMP_ASR_MODELS = new Set(["whisper-1"]);
 const OPENAI_JSON_ONLY_ASR_MODELS = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]);
 const PRACTICE_TARGET_LANGUAGES = {
@@ -2177,13 +2178,12 @@ async function createPracticeRecording(request, env) {
   if (recordingIntent === "attempt") {
     const targetText = canonicalPracticeText(currentTargetText, targetLanguage);
     const targetStarted = Date.now();
-    const targetTranscription = await openAiTranscribeDetail(env, {
+    const targetTranscription = await practiceAttemptTranscription(env, {
       audioBytes,
       audioMimeType,
-      sourceLanguage: targetLanguage,
+      targetLanguage,
       filename: audio.name || `practice.${extensionForMimeType(audioMimeType)}`,
       model: asrModel,
-      includeTimestamps: true,
     });
     const targetAsrMs = Date.now() - targetStarted;
     const recognizedText = canonicalPracticeText(targetTranscription.text, targetLanguage);
@@ -2194,7 +2194,7 @@ async function createPracticeRecording(request, env) {
       target_language: targetLanguage,
       target_text: targetText,
       recognized_text: recognizedText,
-      asr_model: asrModel,
+      asr_model: targetTranscription.model,
       asr_timestamps: asrTimestamps,
       ...evaluation,
       comparison_alignment: practiceComparisonAlignment({
@@ -2209,7 +2209,7 @@ async function createPracticeRecording(request, env) {
         total: targetAsrMs,
       },
       providers: {
-        asr: `openai-asr-${asrModel}`,
+        asr: targetTranscription.provider,
       },
     };
     return result;
@@ -2285,13 +2285,12 @@ async function createPracticeAttempt(request, env) {
 
   const totalStarted = Date.now();
   const asrStarted = Date.now();
-  const transcription = await openAiTranscribeDetail(env, {
+  const transcription = await practiceAttemptTranscription(env, {
     audioBytes,
     audioMimeType,
-    sourceLanguage: targetLanguage,
+    targetLanguage,
     filename: audio.name || `repeat.${extensionForMimeType(audioMimeType)}`,
     model: asrModel,
-    includeTimestamps: true,
   });
   const recognizedText = canonicalPracticeText(transcription.text, targetLanguage);
   const asrMs = Date.now() - asrStarted;
@@ -2301,7 +2300,7 @@ async function createPracticeAttempt(request, env) {
     target_language: targetLanguage,
     target_text: targetText,
     recognized_text: recognizedText,
-    asr_model: asrModel,
+    asr_model: transcription.model,
     asr_timestamps: asrTimestamps,
     ...evaluation,
     comparison_alignment: practiceComparisonAlignment({
@@ -2316,7 +2315,7 @@ async function createPracticeAttempt(request, env) {
       total: Date.now() - totalStarted,
     },
     providers: {
-      asr: `openai-asr-${asrModel}`,
+      asr: transcription.provider,
     },
   };
   return result;
@@ -2678,6 +2677,56 @@ async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage
     includeTimestamps: false,
   });
   return transcription.text;
+}
+
+async function practiceAttemptTranscription(env, {
+  audioBytes,
+  audioMimeType,
+  targetLanguage,
+  filename,
+  model,
+}) {
+  if (targetLanguage === "zh-CN") {
+    return runpodPracticeAsr(env, {
+      audioBytes,
+      audioMimeType,
+      sourceLanguage: targetLanguage,
+    });
+  }
+  const transcription = await openAiTranscribeDetail(env, {
+    audioBytes,
+    audioMimeType,
+    sourceLanguage: targetLanguage,
+    filename,
+    model,
+    includeTimestamps: true,
+  });
+  return {
+    ...transcription,
+    provider: `openai-asr-${transcription.model}`,
+  };
+}
+
+async function runpodPracticeAsr(env, { audioBytes, audioMimeType, sourceLanguage }) {
+  const body = await submitRunpodSyncJob(env, {
+    operation_mode: "practice_asr",
+    source_language: sourceLanguage,
+    audio_mime_type: normalizeMimeType(audioMimeType) || "audio/wav",
+    audio_base64: arrayBufferToBase64(audioBytes),
+  });
+  const output = runpodSyncOutput(body, "RunPod practice ASR");
+  const model = String(output.model || FUNASR_DEFAULT_PRACTICE_ASR_MODEL);
+  const providers = output.providers && typeof output.providers === "object" ? output.providers : {};
+  return {
+    text: String(output.text || "").trim(),
+    model,
+    timestamp_granularities: Array.isArray(output.timestamp_granularities)
+      ? output.timestamp_granularities.map(String)
+      : [],
+    words: normalizedAsrTimingRows(output.words, "text"),
+    segments: normalizedAsrTimingRows(output.segments, "text"),
+    provider: String(providers.asr || "funasr-paraformer-zh"),
+  };
 }
 
 async function openAiTranscribeDetail(env, {

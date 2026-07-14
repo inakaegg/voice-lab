@@ -1,5 +1,7 @@
 # Cloudflareデモ構成
 
+更新日: 2026-07-14
+
 ## 目的
 
 スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置き、GPU推論だけをRunPod Serverlessへ送る。GPU PodでWebサーバーを常時起動しない。
@@ -12,8 +14,8 @@
 Browser
   -> Cloudflare Worker Static Assets
   -> Cloudflare Worker API gateway
-  -> OpenAI API: ASR、翻訳、TTS、表示用テキスト加工、ジョークTTS
-  -> RunPod Serverless Job API: Seed-VC、SkitVoice/VibeVoice、warmup
+  -> OpenAI API: 母語ASR、英語復唱ASR、翻訳、TTS、表示用テキスト加工、ジョークTTS
+  -> RunPod Serverless Job API: 中国語復唱FunASR、Seed-VC、SkitVoice/VibeVoice、warmup
 ```
 
 ## 秘密情報
@@ -171,5 +173,5 @@ preview_bucket_name = "mo-speech-audio-preview"
 
 - `MO_SPEECH_KV` binding が無い環境では、管理画面の設定を永続化できない。R2を設定してもCloudflare版のユーザー音声履歴は有効にならない。
 - 大きい録音ファイルはWorkerとRunPodのrequest size制限を受ける。ユーザー画面では短い録音を前提にする。
-- OpenAI ASR、翻訳、TTSはWorker内で同期実行するため、細かいstage progressはUI側の推定表示になる。
+- OpenAI ASR、翻訳、TTSとRunPod中国語復唱ASRはWorkerから同期実行するため、細かいstage progressはUI側の推定表示になる。
 - Seed-VCはRunPod endpointのqueue-based Serverlessを使うため、VC処理中の細かいstage progressはRunPod job statusから推定する。

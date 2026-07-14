@@ -37,7 +37,7 @@
 
 低アクセスMVPでは、ワーカーを0までスケールダウンでき、ワーカー実行中だけ計算リソース課金されるRunPod Serverlessが有力。ただし、永続モデル保存の費用は残る。
 
-公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker module、RunPodはVibeVoiceとSeed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
+公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker module、RunPodは中国語練習用FunASR、VibeVoice、Seed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
 初回のGPUスモーク確認では、Web UIとAPIを含むFastAPIをRunPod Podで一体起動する。これはモデルロード、GPU利用、録音またはファイルアップロードから音声出力までを先に確認するための検証構成であり、公開MVPの本番構成ではない。RunPod CLI手順は [RUNPOD.md](RUNPOD.md) を参照する。
 

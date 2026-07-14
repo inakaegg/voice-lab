@@ -15,6 +15,7 @@ from typing import Any
 from .audio_effects import AudioEffectInsertResult, AudioEffectInsertSettings, insert_audio_effect
 from .factory import create_openai_pipeline, create_pipeline_from_env, create_realtime_translation_pipeline
 from .pipeline import PipelineRequest, SpeechTranslationPipeline, TtsOutput
+from .providers.funasr import FunAsrPracticeProvider
 from .providers.text_tts import create_text_tts_providers
 from .providers.voice import (
     SeedVcRuntimeSettings,
@@ -42,6 +43,8 @@ _VOICE_CONVERSION_SERVICE: VoiceConversionService | None = None
 _VOICE_CONVERSION_SERVICE_LOAD_MS: float | None = None
 _VIBEVOICE_SERVICE: VibeVoiceService | None = None
 _VIBEVOICE_SERVICE_LOAD_MS: float | None = None
+_FUNASR_PRACTICE_PROVIDER: FunAsrPracticeProvider | None = None
+_FUNASR_PRACTICE_PROVIDER_LOAD_MS: float | None = None
 _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_FORMAT = "mp3"
 _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_BITRATE = "96k"
 _DEFAULT_RUNPOD_VIBEVOICE_RESPONSE_AUDIO_TIMEOUT_SECONDS = 60.0
@@ -64,6 +67,8 @@ def handler(event: dict[str, Any]) -> dict[str, object]:
         return _handle_text_tts(payload, handler_started)
     if operation_mode == "voice_conversion":
         return _handle_voice_conversion(payload, handler_started)
+    if operation_mode in {"practice_asr", "practice-asr"}:
+        return _handle_practice_asr(payload, handler_started)
     if operation_mode in {"vibevoice", "vibe_voice"}:
         return _handle_vibevoice(payload, handler_started)
     if operation_mode in {"diagnostics", "diag"}:
@@ -136,20 +141,31 @@ def _handle_warmup(payload: dict[str, object], handler_started: float) -> dict[s
     translation_backend = str(payload.get("translation_backend", "openai"))
     preload_translation = _optional_bool(payload.get("preload_translation"))
     preload_voice_conversion = _optional_bool(payload.get("preload_voice_conversion"))
+    preload_practice_asr = _optional_bool(payload.get("preload_practice_asr"))
     if preload_translation is None:
         preload_translation = True
     if preload_voice_conversion is None:
         preload_voice_conversion = False
+    if preload_practice_asr is None:
+        preload_practice_asr = False
+    if preload_voice_conversion and preload_practice_asr:
+        raise ValueError("preload_voice_conversion and preload_practice_asr cannot both be enabled")
 
     pipeline_load_ms: float | None = None
     voice_conversion_service_load_ms: float | None = None
+    funasr_provider_load_ms: float | None = None
     providers: dict[str, str] = {}
     if preload_translation:
         _, pipeline_load_ms = _translation_pipeline(translation_backend)
         providers["translation_backend"] = translation_backend
     if preload_voice_conversion:
+        _release_funasr_before_voice_conversion()
         _, voice_conversion_service_load_ms = _voice_conversion_service()
         providers["voice_conversion"] = "seed-vc"
+    if preload_practice_asr:
+        _release_voice_conversion_before_funasr()
+        provider, funasr_provider_load_ms = _funasr_practice_provider()
+        providers["practice_asr"] = provider.name
 
     response: dict[str, object] = {
         "warm": True,
@@ -163,10 +179,15 @@ def _handle_warmup(payload: dict[str, object], handler_started: float) -> dict[s
         "temp_audio_write": 0.0,
         "pipeline_load": pipeline_load_ms or 0.0,
         "voice_conversion_service_load": voice_conversion_service_load_ms or 0.0,
+        "funasr_provider_load": funasr_provider_load_ms or 0.0,
     }
     response["serverless"] = {
         "operation_mode": "warmup",
-        "worker_cold": pipeline_load_ms is not None or voice_conversion_service_load_ms is not None,
+        "worker_cold": (
+            pipeline_load_ms is not None
+            or voice_conversion_service_load_ms is not None
+            or funasr_provider_load_ms is not None
+        ),
     }
     return response
 
@@ -214,6 +235,7 @@ def _handle_voice_conversion(payload: dict[str, object], handler_started: float)
     reference_audio_bytes = base64.b64decode(reference_audio_base64)
     audio_decode_ms = _elapsed_ms(decode_started)
 
+    _release_funasr_before_voice_conversion()
     service, service_load_ms = _voice_conversion_service()
     temp_write_ms = 0.0
     with NamedTemporaryFile(suffix=_audio_suffix(payload.get("source_audio_mime_type"))) as source_audio:
@@ -271,6 +293,57 @@ def _handle_voice_conversion(payload: dict[str, object], handler_started: float)
     return response
 
 
+def _handle_practice_asr(payload: dict[str, object], handler_started: float) -> dict[str, object]:
+    audio_base64 = payload.get("audio_base64")
+    if not isinstance(audio_base64, str) or audio_base64 == "":
+        raise ValueError("audio_base64 is required")
+    source_language = str(payload.get("source_language", ""))
+    if source_language != "zh-CN":
+        raise ValueError("practice_asr only supports zh-CN")
+
+    decode_started = perf_counter()
+    audio_bytes = base64.b64decode(audio_base64)
+    audio_decode_ms = _elapsed_ms(decode_started)
+    _release_voice_conversion_before_funasr()
+    provider, provider_load_ms = _funasr_practice_provider()
+
+    temp_write_ms = 0.0
+    with NamedTemporaryFile(suffix=_audio_suffix(payload.get("audio_mime_type"))) as temp_audio:
+        temp_write_started = perf_counter()
+        temp_audio.write(audio_bytes)
+        temp_audio.flush()
+        temp_write_ms = _elapsed_ms(temp_write_started)
+        asr_started = perf_counter()
+        transcription = provider.transcribe_detail(
+            Path(temp_audio.name),
+            source_language,
+            include_timestamps=True,
+        )
+        asr_ms = _elapsed_ms(asr_started)
+
+    response: dict[str, object] = {
+        "text": transcription.text,
+        "model": transcription.model,
+        "timestamp_granularities": transcription.timestamp_granularities,
+        "words": transcription.words,
+        "segments": transcription.segments,
+        "timings_ms": {"asr": asr_ms, "total": asr_ms},
+        "providers": {"asr": provider.name},
+        "warnings": [],
+    }
+    _attach_serverless_metrics(
+        response,
+        operation_mode="practice_asr",
+        handler_started=handler_started,
+        worker_cold=provider_load_ms is not None,
+        audio_decode_ms=audio_decode_ms,
+        temp_write_ms=temp_write_ms,
+        load_metric_name="funasr_provider_load",
+        load_ms=provider_load_ms,
+    )
+    return response
+
+
 def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dict[str, object]:
     script = str(payload.get("script", ""))
     voices = payload.get("voices")
@@ -301,6 +374,7 @@ def _handle_vibevoice(payload: dict[str, object], handler_started: float) -> dic
         raise ValueError(f"voice {index} audio_base64 is required")
     audio_decode_ms = _elapsed_ms(decode_started)
 
+    _release_funasr_before_vibevoice()
     _release_voice_conversion_before_vibevoice()
     service, service_load_ms = _vibevoice_service()
     temp_write_ms = 0.0
@@ -367,6 +441,7 @@ def _handle_diagnostics(payload: dict[str, object], handler_started: float) -> d
         "runtime": {
             "python": sys.version.split()[0],
             "handler_file": __file__,
+            "funasr_practice_loaded": _FUNASR_PRACTICE_PROVIDER is not None,
         },
         "paths": {
             "comfyui_vibevoice_path": os.getenv("COMFYUI_VIBEVOICE_PATH", ""),
@@ -486,6 +561,17 @@ def _voice_conversion_service() -> tuple[VoiceConversionService, float | None]:
     return _VOICE_CONVERSION_SERVICE, None
 
 
+def _funasr_practice_provider() -> tuple[FunAsrPracticeProvider, float | None]:
+    global _FUNASR_PRACTICE_PROVIDER, _FUNASR_PRACTICE_PROVIDER_LOAD_MS
+    if _FUNASR_PRACTICE_PROVIDER is None:
+        started = perf_counter()
+        _FUNASR_PRACTICE_PROVIDER = FunAsrPracticeProvider()
+        _FUNASR_PRACTICE_PROVIDER.preload()
+        _FUNASR_PRACTICE_PROVIDER_LOAD_MS = _elapsed_ms(started)
+        return _FUNASR_PRACTICE_PROVIDER, _FUNASR_PRACTICE_PROVIDER_LOAD_MS
+    return _FUNASR_PRACTICE_PROVIDER, None
+
+
 def _vibevoice_service() -> tuple[VibeVoiceService, float | None]:
     global _VIBEVOICE_SERVICE, _VIBEVOICE_SERVICE_LOAD_MS
     if _VIBEVOICE_SERVICE is None:
@@ -507,6 +593,49 @@ def _release_voice_conversion_before_vibevoice() -> bool:
         release()
     _VOICE_CONVERSION_SERVICE = None
     _VOICE_CONVERSION_SERVICE_LOAD_MS = None
+    _release_accelerator_memory()
+    return True
+
+
+def _release_voice_conversion_before_funasr() -> bool:
+    global _VOICE_CONVERSION_SERVICE, _VOICE_CONVERSION_SERVICE_LOAD_MS
+    if os.getenv("MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR", "1") == "0":
+        return False
+    if _VOICE_CONVERSION_SERVICE is None:
+        return False
+    release = getattr(_VOICE_CONVERSION_SERVICE, "release", None)
+    if callable(release):
+        release()
+    _VOICE_CONVERSION_SERVICE = None
+    _VOICE_CONVERSION_SERVICE_LOAD_MS = None
+    _release_accelerator_memory()
+    return True
+
+
+def _release_funasr_before_voice_conversion() -> bool:
+    return _release_funasr("MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION")
+
+
+def _release_funasr_before_vibevoice() -> bool:
+    return _release_funasr("MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE")
+
+
+def _release_funasr(env_name: str) -> bool:
+    global _FUNASR_PRACTICE_PROVIDER, _FUNASR_PRACTICE_PROVIDER_LOAD_MS
+    if os.getenv(env_name, "1") == "0":
+        return False
+    if _FUNASR_PRACTICE_PROVIDER is None:
+        return False
+    release = getattr(_FUNASR_PRACTICE_PROVIDER, "release", None)
+    if callable(release):
+        release()
+    _FUNASR_PRACTICE_PROVIDER = None
+    _FUNASR_PRACTICE_PROVIDER_LOAD_MS = None
+    _release_accelerator_memory()
+    return True
+
+
+def _release_accelerator_memory() -> None:
     gc.collect()
     try:
         import torch
@@ -515,7 +644,6 @@ def _release_voice_conversion_before_vibevoice() -> bool:
             torch.cuda.empty_cache()
     except Exception:
         pass
-    return True
 
 
 def _attach_serverless_metrics(
@@ -1050,6 +1178,9 @@ def _preload_for_serverless() -> None:
         _translation_pipeline(os.getenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", "openai"))
     if os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
         _voice_conversion_service()
+    if os.getenv("MO_RUNPOD_PRELOAD_FUNASR_ON_START") == "1":
+        _release_voice_conversion_before_funasr()
+        _funasr_practice_provider()
 
 
 if __name__ == "__main__":
