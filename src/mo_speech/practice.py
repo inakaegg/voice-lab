@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+
+from opencc import OpenCC
 from difflib import SequenceMatcher
 
 
@@ -17,88 +19,11 @@ PRACTICE_GRADE_LABELS = {
     "almost": "まあまあ",
     "retry": "もう一回",
 }
-_ZH_TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
-    {
-        "後": "后",
-        "裏": "里",
-        "裡": "里",
-        "著": "着",
-        "麼": "么",
-        "麽": "么",
-        "樣": "样",
-        "嗎": "吗",
-        "呢": "呢",
-        "妳": "你",
-        "們": "们",
-        "個": "个",
-        "這": "这",
-        "那": "那",
-        "哪": "哪",
-        "會": "会",
-        "說": "说",
-        "話": "话",
-        "語": "语",
-        "學": "学",
-        "習": "习",
-        "聽": "听",
-        "問": "问",
-        "題": "题",
-        "現": "现",
-        "開": "开",
-        "關": "关",
-        "見": "见",
-        "歡": "欢",
-        "愛": "爱",
-        "買": "买",
-        "賣": "卖",
-        "車": "车",
-        "輛": "辆",
-        "價": "价",
-        "還": "还",
-        "貴": "贵",
-        "綠": "绿",
-        "啡": "啡",
-        "種": "种",
-        "點": "点",
-        "氣": "气",
-        "電": "电",
-        "腦": "脑",
-        "網": "网",
-        "寫": "写",
-        "讀": "读",
-        "書": "书",
-        "時": "时",
-        "間": "间",
-        "國": "国",
-        "東": "东",
-        "風": "风",
-        "來": "来",
-        "過": "过",
-        "長": "长",
-        "門": "门",
-        "無": "无",
-        "實": "实",
-        "體": "体",
-        "應": "应",
-        "讓": "让",
-        "給": "给",
-        "對": "对",
-        "從": "从",
-        "為": "为",
-        "發": "发",
-        "聲": "声",
-        "區": "区",
-        "別": "别",
-        "當": "当",
-        "幾": "几",
-        "難": "难",
-        "簡": "简",
-        "漢": "汉",
-        "雖": "虽",
-        "舊": "旧",
-        "新": "新",
-    }
-)
+_CHINESE_TRADITIONAL_TO_SIMPLIFIED = OpenCC("t2s")
+
+
+def simplify_chinese_text(text: str) -> str:
+    return _CHINESE_TRADITIONAL_TO_SIMPLIFIED.convert(str(text or ""))
 
 
 def supported_practice_target_language(value: str | None) -> str:
@@ -113,7 +38,7 @@ def normalize_practice_text(text: str, target_language: str) -> str:
     if target_language == "ja-JP":
         normalized = _katakana_to_hiragana(normalized)
     if target_language == "zh-CN":
-        normalized = normalized.translate(_ZH_TRADITIONAL_TO_SIMPLIFIED)
+        normalized = simplify_chinese_text(normalized)
     return "".join(
         char
         for char in normalized
@@ -341,63 +266,6 @@ def practice_comparison_alignment(
             for index, phrase in enumerate(phrases)
         ],
     }
-
-
-def classify_practice_recording(
-    *,
-    target_text: str,
-    target_language: str,
-    target_recognized_text: str,
-    auto_recognized_text: str,
-) -> dict[str, object]:
-    language = supported_practice_target_language(target_language)
-    if not target_text.strip():
-        return {
-            "kind": "prompt",
-            "attempt_source": "",
-            "target_similarity": 0.0,
-            "auto_similarity": 0.0,
-            "target_language_signal": 0.0,
-            "auto_language_signal": practice_language_signal(auto_recognized_text, language),
-        }
-
-    target_evaluation = evaluate_practice_attempt(target_text, target_recognized_text, language)
-    auto_evaluation = evaluate_practice_attempt(target_text, auto_recognized_text, language)
-    target_similarity = float(target_evaluation["similarity"])
-    auto_similarity = float(auto_evaluation["similarity"])
-    target_signal = practice_language_signal(target_recognized_text, language)
-    auto_signal = practice_language_signal(auto_recognized_text, language)
-    best_similarity = max(target_similarity, auto_similarity if auto_signal >= 0.35 else 0.0)
-    attempt_source = "target" if target_similarity >= auto_similarity else "auto"
-    is_attempt = (
-        best_similarity >= 0.35
-        or (target_similarity >= 0.25 and target_signal >= 0.3)
-        or (auto_similarity >= 0.25 and auto_signal >= 0.55)
-    )
-    return {
-        "kind": "attempt" if is_attempt else "prompt",
-        "attempt_source": attempt_source if is_attempt else "",
-        "target_similarity": round(target_similarity, 3),
-        "auto_similarity": round(auto_similarity, 3),
-        "target_language_signal": round(target_signal, 3),
-        "auto_language_signal": round(auto_signal, 3),
-    }
-
-
-def practice_language_signal(text: str, target_language: str) -> float:
-    language = supported_practice_target_language(target_language)
-    content = [char for char in str(text or "") if not unicodedata.category(char).startswith(("P", "Z", "S"))]
-    if not content:
-        return 0.0
-    if language == "zh-CN":
-        matching = sum(1 for char in content if _is_han_character(char))
-    elif language == "ja-JP":
-        matching = sum(1 for char in content if _is_han_character(char) or "\u3040" <= char <= "\u30ff")
-    elif language == "en-US":
-        matching = sum(1 for char in content if "a" <= char.lower() <= "z")
-    else:
-        matching = 0
-    return matching / len(content)
 
 
 def _best_practice_phrase_match(target_normalized: str, recognized_normalized: str, start_index: int) -> dict[str, float]:

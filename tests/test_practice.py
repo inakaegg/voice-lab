@@ -1,4 +1,4 @@
-from mo_speech.practice import classify_practice_recording, evaluate_practice_attempt, normalize_practice_text
+from mo_speech.practice import evaluate_practice_attempt, normalize_practice_text, simplify_chinese_text
 
 
 def test_practice_normalization_handles_supported_learning_languages() -> None:
@@ -13,6 +13,10 @@ def test_practice_normalization_treats_common_chinese_variants_as_equivalent() -
 
     assert target == "你好你最近怎么样"
     assert recognized == target
+
+
+def test_practice_opencc_conversion_changes_script_without_replacing_regional_vocabulary() -> None:
+    assert simplify_chinese_text("我想學習軟體開發，也喜歡龍馬精神。") == "我想学习软体开发，也喜欢龙马精神。"
 
 
 def test_practice_attempt_grades_similarity() -> None:
@@ -74,27 +78,3 @@ def test_practice_attempt_splits_colon_phrases_like_worker() -> None:
     ]
     assert result["phrase_matches"][1]["matched"] is True
     assert result["phrase_matches"][3]["matched"] is True
-
-
-def test_practice_recording_classifier_prefers_attempt_for_target_language_repeat() -> None:
-    result = classify_practice_recording(
-        target_text="我想要咖啡。",
-        target_language="zh-CN",
-        target_recognized_text="我想要咖啡",
-        auto_recognized_text="La pelan susinja se treak",
-    )
-
-    assert result["kind"] == "attempt"
-    assert result["attempt_source"] == "target"
-    assert result["target_similarity"] >= 0.8
-
-
-def test_practice_recording_classifier_detects_new_prompt_while_target_exists() -> None:
-    result = classify_practice_recording(
-        target_text="我想要咖啡。",
-        target_language="zh-CN",
-        target_recognized_text="请问明天天气怎么样",
-        auto_recognized_text="明日は天気がいいですか",
-    )
-
-    assert result["kind"] == "prompt"

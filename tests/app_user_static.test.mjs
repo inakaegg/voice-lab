@@ -58,12 +58,16 @@ test("admin page can start RunPod warmup manually", () => {
 
 test("SpeakLoop controller keeps pronunciation training separate from conversion demo", () => {
   assert.match(practiceSource, /\/api\/practice\/recordings/);
+  assert.match(practiceSource, /form\.append\("recording_intent", recordingIntent\)/);
   assert.match(practiceSource, /current_target_text/);
   assert.match(practiceSource, /localStorage\.getItem/);
   assert.match(practiceSource, /localStorage\.setItem/);
+  assert.match(practiceSource, /chinese_script/);
+  assert.match(practiceSource, /toTraditional/);
+  assert.doesNotMatch(practiceSource, /zhTraditionalToSimplified/);
   assert.match(practiceSource, /speed:/);
-  assert.match(practiceSource, /auto_play_comparison/);
-  assert.match(practiceSource, /autoPlayComparisonControl\?\.checked[\s\S]*playComparisonAudios\(\)/);
+  assert.doesNotMatch(practiceSource, /auto_play_comparison|autoPlayComparisonControl/);
+  assert.match(practiceSource, /renderAttemptResult\(payload\);[\s\S]*setBusy\(false, ""\);[\s\S]*playComparisonAudios\(\)\.catch/);
   assert.doesNotMatch(practiceSource, /asr_model:/);
   assert.match(practiceSource, /Math\.round\(parsed \/ 0\.1\) \* 0\.1/);
   assert.match(practiceSource, /Math\.max\(0\.5/);
@@ -91,6 +95,10 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(practiceSource, /loadedmetadata/);
   assert.match(practiceSource, /isComparisonPlaying/);
   assert.match(practiceSource, /stopComparisonPlayback/);
+  assert.match(practiceSource, /function cancelRecording/);
+  assert.match(practiceSource, /recordingCancelled/);
+  assert.match(practiceSource, /録音をキャンセルしました/);
+  assert.match(practiceSource, /function pausePlaybackForRecording[\s\S]*modelAudio\.pause\(\)[\s\S]*repeatAudio\.pause\(\)/);
   assert.match(practiceSource, /比較再生/);
   assert.match(practiceSource, /setActiveRecordSlot/);
   assert.match(practiceSource, /repeatRecordButton/);
@@ -123,7 +131,7 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(styles, /\.practice-record-orb\s*\{[^}]*width:\s*clamp\(64px,\s*8vw,\s*84px\)/s);
   assert.match(styles, /\.practice-quick-settings/);
   assert.match(styles, /\.practice-language-select/);
-  assert.match(styles, /\.practice-auto-play-control/);
+  assert.doesNotMatch(styles, /\.practice-auto-play-control/);
   assert.match(styles, /\.practice-grade-guide/);
   assert.doesNotMatch(styles, /\.practice-settings-overlay/);
   assert.doesNotMatch(styles, /\.practice-settings-dialog/);

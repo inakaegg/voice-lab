@@ -54,9 +54,9 @@ from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
 from .practice import (
     PRACTICE_TARGET_LANGUAGES,
-    classify_practice_recording,
     evaluate_practice_attempt,
     practice_comparison_alignment,
+    simplify_chinese_text,
     supported_practice_target_language,
 )
 from .public_sample_audio import PublicSampleAudioStore
@@ -180,7 +180,6 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "recognized_text": result.get("recognized_text") or "",
         "transcript": result.get("transcript") or "",
         "asr_model": result.get("asr_model") or "",
-        "classification": result.get("classification") or {},
         "phrase_matches": result.get("phrase_matches") or [],
         "comparison_alignment": result.get("comparison_alignment") or {},
         "asr_timestamps": _compact_asr_timestamps_for_metadata(asr_timestamps),
@@ -1321,6 +1320,8 @@ def create_app(
                     "auto",
                     practice_target_language,
                 )
+                if practice_target_language == "zh-CN":
+                    target_text = simplify_chinese_text(target_text)
                 timings_ms["translation"] = _elapsed_ms(started)
 
                 started = perf_counter()
@@ -1388,8 +1389,9 @@ def create_app(
         practice_asr_model: str,
         precomputed_asr_result: AsrTranscription | None = None,
         precomputed_asr_ms: float | None = None,
-        classification: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        if practice_target_language == "zh-CN":
+            target_text = simplify_chinese_text(target_text)
         total_started = perf_counter()
         used_precomputed_asr = precomputed_asr_result is not None
         asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
@@ -1405,6 +1407,8 @@ def create_app(
                     asr_result = precomputed_asr_result
                     asr_ms = float(precomputed_asr_ms or 0.0)
                 recognized_text = asr_result.text
+                if practice_target_language == "zh-CN":
+                    recognized_text = simplify_chinese_text(recognized_text)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
@@ -1435,13 +1439,12 @@ def create_app(
                 "asr": asr_provider.name,
             },
         }
-        if classification is not None:
-            result["classification"] = classification
         return result
 
     @app.post("/api/practice/recordings")
     async def create_practice_recording(
         audio: Annotated[UploadFile, File()],
+        recording_intent: Annotated[str, Form()],
         target_language: Annotated[str, Form()] = "ja-JP",
         current_target_text: Annotated[str, Form()] = "",
         include_pinyin: Annotated[bool, Form()] = False,
@@ -1452,6 +1455,10 @@ def create_app(
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if recording_intent not in {"prompt", "attempt"}:
+            raise HTTPException(status_code=400, detail="recording_intent must be prompt or attempt")
+        if recording_intent == "attempt" and not current_target_text.strip():
+            raise HTTPException(status_code=400, detail="current_target_text is required for attempt recordings")
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -1460,6 +1467,7 @@ def create_app(
             suffix=_upload_suffix(audio.filename),
             metadata={
                 "endpoint": "practice-recordings",
+                "recording_intent": recording_intent,
                 "target_language": practice_target_language,
                 "asr_model": practice_asr_model,
                 "current_target_text_preview": current_target_text[:80],
@@ -1468,56 +1476,13 @@ def create_app(
             },
         )
 
-        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
-        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_audio.flush()
-            try:
-                auto_started = perf_counter()
-                auto_asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), "auto")
-                auto_asr_ms = _elapsed_ms(auto_started)
-                target_asr_result: AsrTranscription | None = None
-                target_asr_ms = 0.0
-                classification = classify_practice_recording(
-                    target_text=current_target_text,
-                    target_language=practice_target_language,
-                    target_recognized_text="",
-                    auto_recognized_text=auto_asr_result.text,
-                )
-                if current_target_text.strip():
-                    target_started = perf_counter()
-                    target_asr_result = _transcribe_practice_audio(
-                        asr_provider,
-                        Path(temp_audio.name),
-                        practice_target_language,
-                    )
-                    target_asr_ms = _elapsed_ms(target_started)
-                    classification = classify_practice_recording(
-                        target_text=current_target_text,
-                        target_language=practice_target_language,
-                        target_recognized_text=target_asr_result.text,
-                        auto_recognized_text=auto_asr_result.text,
-                    )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        if classification["kind"] == "attempt" and target_asr_result is not None:
-            selected_asr_result = target_asr_result
-            selected_asr_ms = target_asr_ms
-            if classification.get("attempt_source") == "auto":
-                selected_asr_result = auto_asr_result
-                selected_asr_ms = auto_asr_ms
+        if recording_intent == "attempt":
             result = _create_practice_attempt_result(
                 audio_bytes=audio_bytes,
                 filename=audio.filename or "",
                 practice_target_language=practice_target_language,
                 target_text=current_target_text,
                 practice_asr_model=practice_asr_model,
-                precomputed_asr_result=selected_asr_result,
-                precomputed_asr_ms=selected_asr_ms,
-                classification=classification,
             )
             result["recording_kind"] = "attempt"
             active_audio_history_store.update_metadata(
@@ -1532,11 +1497,8 @@ def create_app(
             practice_target_language=practice_target_language,
             include_pinyin=include_pinyin,
             practice_asr_model=practice_asr_model,
-            precomputed_asr_result=auto_asr_result,
-            precomputed_asr_ms=auto_asr_ms,
         )
         result["recording_kind"] = "prompt"
-        result["classification"] = classification
         active_audio_history_store.update_metadata(
             recording_entry,
             _practice_history_diagnostics_metadata(result),
@@ -1588,6 +1550,8 @@ def create_app(
                     "auto",
                     practice_target_language,
                 )
+                if practice_target_language == "zh-CN":
+                    target_text = simplify_chinese_text(target_text)
                 timings_ms["translation"] = _elapsed_ms(started)
 
                 started = perf_counter()
@@ -1661,6 +1625,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not target_text.strip():
             raise HTTPException(status_code=400, detail="target_text is required")
+        if practice_target_language == "zh-CN":
+            target_text = simplify_chinese_text(target_text)
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -1685,6 +1651,8 @@ def create_app(
                 asr_started = perf_counter()
                 asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
                 recognized_text = asr_result.text
+                if practice_target_language == "zh-CN":
+                    recognized_text = simplify_chinese_text(recognized_text)
                 asr_ms = _elapsed_ms(asr_started)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
