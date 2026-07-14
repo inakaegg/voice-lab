@@ -12,7 +12,7 @@
 - quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ移行済みで、bindingなし環境向けのKV fallbackを維持している。ユーザー音声履歴はローカル版だけで保存する。
 - 公開ポータル、SpeakLoop、SkitVoiceはVite + React + TypeScript、共通UI生成基盤はTailwind CSS v4とrepo所有のshadcn/ui部品へ移行済み。管理・互換画面も共通Tailwind buildを使う。
 - Python/Nodeの通常CIとPlaywrightの3 viewportレイアウトE2Eを持ち、RunPod image buildとGPU smokeは手動workflowに分離している。
-- `/fun` はCloudflareで管理者認証済みの場合だけ利用できる実験画面とし、旧routeは削除済み。
+- `/fun` はCloudflareで許可メールのGoogle OAuth管理者だけが利用できる実験画面とし、旧routeは削除済み。
 - SkitVoiceの英語・中国語・日本語サンプルを公開環境へ登録し、GitHub repositoryをpublicへ切り替え済み。
 
 ## 完了条件として維持する検証
