@@ -24,11 +24,17 @@ const progress = document.querySelector("#practice-progress");
 const progressFill = document.querySelector("#practice-progress-fill");
 const statusText = document.querySelector("#practice-status");
 const errorText = document.querySelector("#practice-error");
+const jobStatus = document.querySelector("#practice-job-status");
+const jobStatusLabel = document.querySelector("#practice-job-status-label");
+const jobStatusModel = document.querySelector("#practice-job-status-model");
+const jobStatusDetail = document.querySelector("#practice-job-status-detail");
 const pinyinSetting = document.querySelector("#practice-pinyin-setting");
 const pinyinToggle = document.querySelector("#practice-pinyin-toggle");
 const chineseScriptSetting = document.querySelector("#practice-chinese-script-setting");
+const chineseScriptToggle = document.querySelector(".practice-script-toggle");
 const simplifiedScriptButton = document.querySelector("#practice-script-simplified");
 const traditionalScriptButton = document.querySelector("#practice-script-traditional");
+const ownVoiceToggle = document.querySelector("#practice-own-voice-toggle");
 const nativeTranscriptPanel = document.querySelector("#practice-native-transcript-panel");
 const nativeTranscriptLabel = document.querySelector("#practice-native-transcript-label");
 const nativeTranscript = document.querySelector("#practice-native-transcript");
@@ -77,6 +83,7 @@ let recordingChunks = [];
 let recordingCancelled = false;
 let isBusy = false;
 let modelAudioUrl = "";
+let currentModelAudioBlob = null;
 let repeatAudioUrl = "";
 let currentTargetText = "";
 let currentTargetDisplayText = "";
@@ -86,6 +93,7 @@ let currentTargetPinyinStatus = "disabled";
 let currentRecognizedText = "";
 let currentAttemptPayload = null;
 let currentAttemptComparisonAlignment = null;
+let currentModelComparisonAlignment = null;
 let currentAudioContext = null;
 let currentAnalyser = null;
 let currentLevelFrame = null;
@@ -122,8 +130,10 @@ promptPanel.addEventListener("focusin", () => setActiveRecordSlot("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
+ownVoiceToggle.addEventListener("change", savePracticeSettings);
 simplifiedScriptButton.addEventListener("click", () => selectChineseScript("simplified"));
 traditionalScriptButton.addEventListener("click", () => selectChineseScript("traditional"));
+chineseScriptToggle.addEventListener("keydown", handleChineseScriptKeydown);
 modelAudio.addEventListener("ended", syncPlayButton);
 modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
@@ -217,7 +227,12 @@ async function handleRecordingStopped() {
     showError("録音できませんでした。");
     return;
   }
-  await submitPracticeRecording(blob, kind);
+  try {
+    await submitPracticeRecording(blob, kind);
+  } catch (error) {
+    setBusy(false, "");
+    showError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function cancelRecording(slot) {
@@ -230,11 +245,21 @@ function cancelRecording(slot) {
 
 async function submitPracticeRecording(blob, kind) {
   const recordingIntent = kind === "repeat" ? "attempt" : "prompt";
-  setBusy(true, recordingIntent === "attempt" ? "聞き取っています。" : "お手本を作っています。", recordingIntent === "attempt" ? 88 : 72, kind);
+  setBusy(
+    true,
+    recordingIntent === "attempt"
+      ? (selectedTargetLanguage === "zh-CN" ? "RunPodへ解析を依頼しています。" : "Whisperで音声を解析しています。")
+      : "お手本を作っています。",
+    recordingIntent === "attempt" ? 88 : 72,
+    kind,
+  );
   if (recordingIntent === "prompt" && !currentTargetText) {
     promptPanel.hidden = true;
   }
   resultPanel.hidden = true;
+  if (recordingIntent === "prompt") {
+    clearPracticeJobStatus();
+  }
   const form = new FormData();
   if (selectedTargetLanguage === "zh-CN") {
     pinyinToggle.checked = true;
@@ -242,22 +267,181 @@ async function submitPracticeRecording(blob, kind) {
   form.append("recording_intent", recordingIntent);
   form.append("target_language", selectedTargetLanguage);
   form.append("current_target_text", currentTargetText);
+  form.append("target_text", currentTargetText);
   form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
+  form.append("use_own_voice", ownVoiceToggle.checked ? "true" : "false");
   form.append("asr_model", practiceAsrModel());
   form.append("audio", blob, `practice.${extensionForMimeType(blob.type)}`);
-  const payload = await postPracticeForm("/api/practice/recordings", form);
-  if (payload.recording_kind === "attempt") {
+  if (recordingIntent === "attempt") {
+    if (!currentModelAudioBlob) {
+      setBusy(false, "");
+      throw new Error("お手本音声が見つかりません。もう一度お手本を作ってください。");
+    }
+    form.append(
+      "model_audio",
+      currentModelAudioBlob,
+      `model.${extensionForMimeType(currentModelAudioBlob.type)}`,
+    );
+    const submitted = await postPracticeForm("/api/practice/attempt-jobs", form);
+    renderPracticeJobStatus(submitted);
+    progress.hidden = true;
+    setStatus("");
+    const completed = await waitForPracticeAttemptJob(submitted);
+    if (completed.status !== "succeeded" || !completed.result) {
+      throw new Error(completed.error || "発音比較を完了できませんでした。");
+    }
     setRepeatAudio(blob);
-    renderAttemptResult(payload);
+    renderAttemptResult(completed.result);
     setBusy(false, "");
     playComparisonAudios().catch((error) => showError(error.message));
     return;
   }
-  renderPromptResult(payload);
+  const payload = await postPracticeForm("/api/practice/recordings", form);
+  const voiceJob = payload.voice_conversion_job || null;
+  renderPromptResult(payload, { deferModelAudio: Boolean(voiceJob) });
+  if (voiceJob) {
+    renderPracticeJobStatus(voiceJob);
+    progressTarget = 92;
+    setStatus("");
+    const completed = await waitForPracticeVoiceJob(voiceJob);
+    if (completed.status !== "succeeded" || !completed.result?.audio_base64) {
+      throw new Error(completed.error || "お手本を自分の声に変換できませんでした。");
+    }
+    setModelAudio(completed.result.audio_base64, completed.result.audio_mime_type || "audio/wav");
+  }
   setBusy(false, "");
+  if (voiceJob) {
+    ensureAudioMetadata(modelAudio)
+      .then(() => playAudioWithCurrentSpeed(modelAudio))
+      .catch(() => {});
+  }
 }
 
-function renderPromptResult(payload) {
+async function waitForPracticeVoiceJob(initialSnapshot) {
+  let snapshot = initialSnapshot;
+  const deadline = Date.now() + 30 * 60 * 1000;
+  let consecutiveErrors = 0;
+  while (snapshot?.status === "queued" || snapshot?.status === "running") {
+    if (!snapshot.job_id) {
+      throw new Error("Seed-VC job IDが返りませんでした。");
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("自分の声への変換が30分以内に完了しませんでした。");
+    }
+    await sleep(snapshot.status === "queued" ? 1200 : 850);
+    try {
+      const response = await fetch(`/api/practice/voice-jobs/${encodeURIComponent(snapshot.job_id)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.error || `job status failed: ${response.status}`);
+      }
+      snapshot = payload;
+      consecutiveErrors = 0;
+      renderPracticeJobStatus(snapshot);
+    } catch (error) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= 3) {
+        throw error;
+      }
+      renderPracticeJobStatus({
+        ...snapshot,
+        current_stage: {
+          ...(snapshot.current_stage || {}),
+          label: "Seed-VCの状態を再確認しています",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+  renderPracticeJobStatus(snapshot);
+  return snapshot;
+}
+
+async function waitForPracticeAttemptJob(initialSnapshot) {
+  let snapshot = initialSnapshot;
+  const deadline = Date.now() + 30 * 60 * 1000;
+  let consecutiveErrors = 0;
+  while (snapshot?.status === "queued" || snapshot?.status === "running") {
+    if (!snapshot.job_id) {
+      throw new Error("RunPod job IDが返りませんでした。");
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("発音比較が30分以内に完了しませんでした。");
+    }
+    await sleep(snapshot.status === "queued" ? 1200 : 850);
+    try {
+      const response = await fetch(`/api/practice/attempt-jobs/${encodeURIComponent(snapshot.job_id)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.error || `job status failed: ${response.status}`);
+      }
+      snapshot = payload;
+      consecutiveErrors = 0;
+      renderPracticeJobStatus(snapshot);
+    } catch (error) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= 3) {
+        throw error;
+      }
+      renderPracticeJobStatus({
+        ...snapshot,
+        current_stage: {
+          ...(snapshot.current_stage || {}),
+          label: "RunPodの状態を再確認しています",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+  renderPracticeJobStatus(snapshot);
+  return snapshot;
+}
+
+function renderPracticeJobStatus(snapshot) {
+  if (!jobStatus || !snapshot) {
+    return;
+  }
+  const stage = snapshot.current_stage || {};
+  const state = String(snapshot.status || "running");
+  const model = String(stage.model || stage.provider || "");
+  const metrics = snapshot.metrics || {};
+  const details = state === "failed" ? [] : [String(stage.detail || "")];
+  if (Number.isFinite(Number(metrics.delay_time_ms))) {
+    details.push(`GPU待機 ${formatDurationMilliseconds(Number(metrics.delay_time_ms))}`);
+  }
+  if (Number.isFinite(Number(metrics.execution_time_ms))) {
+    details.push(`処理 ${formatDurationMilliseconds(Number(metrics.execution_time_ms))}`);
+  }
+  jobStatus.hidden = false;
+  jobStatus.dataset.state = state;
+  jobStatus.dataset.stage = String(stage.stage || "");
+  jobStatusLabel.textContent = String(stage.label || (state === "succeeded" ? "完了しました" : "処理しています"));
+  jobStatusModel.textContent = model;
+  jobStatusModel.hidden = !model;
+  jobStatusDetail.textContent = details.filter(Boolean).join(" / ");
+  jobStatusDetail.hidden = !jobStatusDetail.textContent;
+}
+
+function clearPracticeJobStatus() {
+  if (!jobStatus) {
+    return;
+  }
+  jobStatus.hidden = true;
+  jobStatus.dataset.state = "idle";
+  jobStatus.dataset.stage = "";
+  jobStatusLabel.textContent = "";
+  jobStatusModel.textContent = "";
+  jobStatusDetail.textContent = "";
+}
+
+function formatDurationMilliseconds(milliseconds) {
+  if (milliseconds < 1000) {
+    return `${Math.max(0, Math.round(milliseconds))}ms`;
+  }
+  return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)}秒`;
+}
+
+function renderPromptResult(payload, { deferModelAudio = false } = {}) {
   detectedNativeLanguage = normalizePracticeLanguage(payload.detected_source_language || "");
   renderNativeLabels();
   currentTargetText = payload.target_text || "";
@@ -269,7 +453,11 @@ function renderPromptResult(payload) {
   renderTargetDisplay();
   nativeTranscript.textContent = payload.transcript || "";
   nativeTranscriptPanel.hidden = !payload.transcript;
-  setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
+  if (deferModelAudio) {
+    stopModelAudio();
+  } else {
+    setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
+  }
   nativePanel.hidden = false;
   promptPanel.hidden = false;
   setActiveRecordSlot("repeat");
@@ -277,15 +465,18 @@ function renderPromptResult(payload) {
   currentRecognizedText = "";
   currentAttemptPayload = null;
   currentAttemptComparisonAlignment = null;
+  currentModelComparisonAlignment = null;
   recognizedText.textContent = "";
   syncPracticeRecordMode();
   syncModelAudioSpeed();
   syncPlayButton();
-  ensureAudioMetadata(modelAudio)
-    .then(() => {
-      return playAudioWithCurrentSpeed(modelAudio);
-    })
-    .catch(() => {});
+  if (!deferModelAudio) {
+    ensureAudioMetadata(modelAudio)
+      .then(() => {
+        return playAudioWithCurrentSpeed(modelAudio);
+      })
+      .catch(() => {});
+  }
 }
 
 async function postPracticeForm(url, form) {
@@ -314,6 +505,7 @@ function renderAttemptResult(payload) {
   currentRecognizedText = payload.recognized_text || "";
   currentAttemptPayload = payload;
   currentAttemptComparisonAlignment = payload.comparison_alignment || null;
+  currentModelComparisonAlignment = payload.model_comparison_alignment || null;
   renderRecognizedDiff(payload);
   nativePanel.hidden = false;
   resultPanel.hidden = false;
@@ -360,16 +552,19 @@ function resetPractice() {
   syncRecordSlotVisuals();
   syncPracticeRecordMode();
   setStatus("");
+  clearPracticeJobStatus();
   clearError();
 }
 
 function setModelAudio(audioBase64, mimeType) {
   stopModelAudio();
   const blob = base64ToBlob(audioBase64, mimeType);
+  currentModelAudioBlob = blob;
   modelAudioUrl = URL.createObjectURL(blob);
   modelAudio.src = modelAudioUrl;
   modelAudio.load();
   syncModelAudioSpeed();
+  playModelButton.disabled = isBusy;
 }
 
 function setRepeatAudio(blob) {
@@ -409,6 +604,8 @@ function stopModelAudio() {
   modelAudio.pause();
   modelAudio.removeAttribute("src");
   modelAudio.load();
+  currentModelAudioBlob = null;
+  playModelButton.disabled = true;
   syncPlayButton();
 }
 
@@ -442,7 +639,7 @@ function canUsePhraseComparisonPlayback() {
   return (
     shouldUseComparisonPlayback() &&
     recognizedTextMatchesLearningLanguage(currentRecognizedText, selectedTargetLanguage) &&
-    hasCompleteComparisonAlignment(currentAttemptComparisonAlignment)
+    hasPairedComparisonAlignment(currentAttemptComparisonAlignment, currentModelComparisonAlignment)
   );
 }
 
@@ -630,6 +827,7 @@ async function playComparisonAudios() {
     }
     const comparisonRanges = comparisonAlignmentPlaybackRanges(
       currentAttemptComparisonAlignment,
+      currentModelComparisonAlignment,
       modelAudio.duration,
       repeatAudio.duration,
     );
@@ -756,60 +954,55 @@ function playAudioSegmentToEnd(audio, start, end, token) {
   });
 }
 
-function sentenceAudioRanges(sentences, duration) {
-  const safeDuration = Math.max(0, Number(duration) || 0);
-  const weights = sentences.map((sentence) => Math.max(1, Array.from(sentence).filter((char) => !/\s/u.test(char)).length));
-  const totalWeight = weights.reduce((sum, value) => sum + value, 0) || 1;
-  let cursor = 0;
-  return weights.map((weight, index) => {
-    const start = cursor;
-    cursor = index === weights.length - 1 ? safeDuration : cursor + (safeDuration * weight) / totalWeight;
-    return { start, end: cursor };
-  });
-}
-
-function comparisonAlignmentPlaybackRanges(alignment, modelDuration, repeatDuration) {
-  if (!hasCompleteComparisonAlignment(alignment)) {
+function comparisonAlignmentPlaybackRanges(attemptAlignment, modelAlignment, modelDuration, repeatDuration) {
+  const attemptRanges = availableComparisonRanges(attemptAlignment);
+  const modelRanges = availableComparisonRanges(modelAlignment);
+  if (!attemptRanges.length || !modelRanges.length) {
     return null;
   }
-  const phraseRanges = alignment.ranges.filter((range) => range?.available === true);
   const safeModelDuration = Number(modelDuration);
   const safeRepeatDuration = Number(repeatDuration);
   if (!Number.isFinite(safeModelDuration) || safeModelDuration <= 0 || !Number.isFinite(safeRepeatDuration) || safeRepeatDuration <= 0) {
     return null;
   }
-
-  const modelRanges = sentenceAudioRanges(
-    phraseRanges.map((range) => String(range.target || range.normalized_target || "")),
-    safeModelDuration,
-  );
-  const paired = phraseRanges.map((range, index) => {
-    const repeatStart = Number(range.audio_start);
-    const repeatEnd = Number(range.audio_end);
-    if (!Number.isFinite(repeatStart) || !Number.isFinite(repeatEnd) || repeatEnd <= repeatStart) {
-      return null;
-    }
+  const modelByIndex = new Map(modelRanges.map((range) => [Number(range.index), range]));
+  const paired = attemptRanges.map((attemptRange) => {
+    const modelRange = modelByIndex.get(Number(attemptRange.index));
+    if (!modelRange) return null;
+    const modelStart = Number(modelRange.audio_start);
+    const modelEnd = Number(modelRange.audio_end);
+    const repeatStart = Number(attemptRange.audio_start);
+    const repeatEnd = Number(attemptRange.audio_end);
     return {
-      model: modelRanges[index],
+      model: {
+        start: Math.max(0, Math.min(modelStart, safeModelDuration)),
+        end: Math.max(0, Math.min(modelEnd, safeModelDuration)),
+      },
       repeat: {
         start: Math.max(0, Math.min(repeatStart, safeRepeatDuration)),
         end: Math.max(0, Math.min(repeatEnd, safeRepeatDuration)),
       },
     };
-  });
-  return paired.every((range) => range && range.repeat.end > range.repeat.start) ? paired : null;
+  }).filter((range) => (
+    range && range.model.end > range.model.start && range.repeat.end > range.repeat.start
+  ));
+  return paired.length ? paired : null;
 }
 
-function hasCompleteComparisonAlignment(alignment) {
-  if (!alignment?.complete || !Array.isArray(alignment.ranges)) {
-    return false;
+function availableComparisonRanges(alignment) {
+  if (!Array.isArray(alignment?.ranges)) {
+    return [];
   }
-  const ranges = alignment.ranges;
-  return ranges.length > 1 && ranges.every((range) => {
+  return alignment.ranges.filter((range) => {
     const start = Number(range?.audio_start);
     const end = Number(range?.audio_end);
     return range?.available === true && Number.isFinite(start) && Number.isFinite(end) && end > start;
   });
+}
+
+function hasPairedComparisonAlignment(attemptAlignment, modelAlignment) {
+  const modelIndexes = new Set(availableComparisonRanges(modelAlignment).map((range) => Number(range.index)));
+  return availableComparisonRanges(attemptAlignment).some((range) => modelIndexes.has(Number(range.index)));
 }
 
 function recognizedTextMatchesLearningLanguage(text, language) {
@@ -839,6 +1032,8 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
   isBusy = busy;
   nativeRecordButton.disabled = busy;
   repeatRecordButton.disabled = busy || !currentTargetText;
+  ownVoiceToggle.disabled = busy;
+  playModelButton.disabled = busy || !modelAudio.src;
   const processingButton = buttonForRecordSlot(kind || activeRecordSlot);
   progress.hidden = !busy;
   if (busy) {
@@ -1084,6 +1279,7 @@ function loadPracticeSettings() {
     : defaultPracticeTargetLanguage;
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   selectedChineseScript = settings.chinese_script === "traditional" ? "traditional" : "simplified";
+  ownVoiceToggle.checked = settings.own_voice === true;
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageSelect.value = selectedTargetLanguage;
   syncPinyinSettingVisibility();
@@ -1117,6 +1313,7 @@ function savePracticeSettings() {
       JSON.stringify({
         target_language: selectedTargetLanguage,
         chinese_script: selectedChineseScript,
+        own_voice: Boolean(ownVoiceToggle.checked),
         show_pinyin: Boolean(pinyinToggle.checked),
         speed: normalizedPlaybackSpeed(speedSlider.value),
       }),
@@ -1138,8 +1335,20 @@ function syncPinyinSettingVisibility() {
 
 function syncChineseScriptControls() {
   const traditional = selectedChineseScript === "traditional";
+  chineseScriptToggle.dataset.script = traditional ? "traditional" : "simplified";
   simplifiedScriptButton.setAttribute("aria-pressed", String(!traditional));
   traditionalScriptButton.setAttribute("aria-pressed", String(traditional));
+}
+
+function handleChineseScriptKeydown(event) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    return;
+  }
+  event.preventDefault();
+  const script = event.key === "ArrowLeft" ? "simplified" : "traditional";
+  selectChineseScript(script).then(() => {
+    (script === "traditional" ? traditionalScriptButton : simplifiedScriptButton).focus();
+  });
 }
 
 function syncCurrentLanguageLabel() {
@@ -1173,169 +1382,131 @@ function syncPracticeRecordMode() {
 }
 
 function renderRecognizedDiff(payload) {
-  const recognized = payload.recognized_text || "";
-  const diff = Array.isArray(payload.diff) ? payload.diff : [];
-  const language = payload.target_language || selectedTargetLanguage;
-  const map = normalizedOriginalMap(recognized, language);
-  const targetMap = normalizedOriginalMap(currentTargetText, language);
-  let mismatchDecorations = diff
-    .filter((entry) => entry.type !== "equal" && entry.type !== "delete" && Number.isInteger(entry.recognized_start))
-    .map((entry) => {
-      const range = originalRangeForNormalizedRange(map, entry.recognized_start, entry.recognized_end);
-      return {
-        start: range.start,
-        end: range.end,
-        correctText: originalTextForNormalizedRange(targetMap, entry.target_start, entry.target_end),
-      };
-    })
-    .filter((range) => range.end > range.start);
-  const missingMarkers = diff
-    .filter((entry) => entry.type === "delete" && Number.isInteger(entry.target_start))
-    .map((entry) => ({
-      start: insertionIndexForNormalizedIndex(map, entry.recognized_start),
-      text: originalTextForNormalizedRange(targetMap, entry.target_start, entry.target_end),
-    }))
-    .filter((marker) => marker.text);
-  recognizedText.innerHTML = "";
-  if (!recognized) {
-    if (missingMarkers.length) {
-      missingMarkers.forEach((marker) => recognizedText.append(renderMissingTargetDiff(marker.text)));
-    } else {
-      recognizedText.textContent = "（聞き取れませんでした）";
-    }
-    return;
-  }
-  if (!mismatchDecorations.length && !missingMarkers.length && (payload.grade || "retry") === "retry") {
-    mismatchDecorations = [{ start: 0, end: recognized.length, correctText: currentTargetText }];
-  }
-  let cursor = 0;
-  const decorations = [
-    ...mergeDiffDecorations(mismatchDecorations).map((range) => ({ kind: "mismatch", ...range })),
-    ...missingMarkers.map((marker) => ({ kind: "missing", start: marker.start, end: marker.start, text: marker.text })),
-  ].sort((left, right) => left.start - right.start || (left.kind === "missing" ? -1 : 1));
-  for (const decoration of decorations) {
-    if (cursor < decoration.start) {
-      recognizedText.append(document.createTextNode(displayChineseText(recognized.slice(cursor, decoration.start))));
-    }
-    if (decoration.kind === "missing") {
-      recognizedText.append(renderMissingTargetDiff(decoration.text));
-      continue;
-    }
-    recognizedText.append(renderRecognizedMismatchDiff(
-      recognized.slice(decoration.start, decoration.end),
-      decoration.correctText,
-    ));
-    cursor = decoration.end;
-  }
-  if (cursor < recognized.length) {
-    recognizedText.append(document.createTextNode(displayChineseText(recognized.slice(cursor))));
-  }
+  const target = practiceDisplayComparableText(payload.target_text || currentTargetText || "");
+  const recognized = practiceDisplayComparableText(payload.recognized_text || "");
+  const cells = compactPracticeDiffCells(buildPracticeDiffCells(target, recognized));
+  const grid = document.createElement("span");
+  grid.className = "practice-diff-grid";
+  const heardForAccessibility = cells.map((cell) => cell.heard).join("");
+  grid.setAttribute("aria-label", `聞こえた言葉: ${displayChineseText(heardForAccessibility || "聞き取れませんでした")}`);
+  cells.forEach((cell) => grid.append(renderPracticeDiffCell(cell)));
+  recognizedText.replaceChildren(grid);
 }
 
-function renderRecognizedMismatchDiff(text, correctText = "") {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "practice-diff-mismatch";
-  if (correctText) {
-    const correction = document.createElement("span");
-    correction.className = "practice-diff-correction";
-    correction.textContent = displayChineseText(correctText);
-    button.append(correction);
+function practiceDisplayComparableText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\p{P}\p{S}]+/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function renderPracticeDiffCell(cell) {
+  const element = document.createElement(cell.type === "equal" ? "span" : "button");
+  if (element instanceof HTMLButtonElement) {
+    element.type = "button";
+    element.title = cell.type === "delete" ? "抜けた部分を比較再生" : "この違いを比較再生";
+    element.addEventListener("click", playComparisonAudios);
   }
+  element.className = `practice-diff-cell is-${cell.type}`;
+  const correction = document.createElement("span");
+  correction.className = "practice-diff-correction";
+  correction.textContent = displayChineseText(cell.correction || "\u00a0");
   const heard = document.createElement("span");
   heard.className = "practice-diff-heard";
-  heard.textContent = displayChineseText(text);
-  button.append(heard);
-  button.title = "比較再生";
-  button.addEventListener("click", playComparisonAudios);
-  return button;
+  heard.textContent = displayChineseText(cell.heard || "_");
+  element.append(correction, heard);
+  return element;
 }
 
-function renderMissingTargetDiff(text) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "practice-diff-missing";
-  const heard = document.createElement("span");
-  heard.className = "practice-diff-heard";
-  heard.textContent = displayChineseText(text);
-  button.append(heard);
-  button.title = "抜けた部分を比較再生";
-  button.addEventListener("click", playComparisonAudios);
-  return button;
-}
-
-function normalizedOriginalMap(text, language) {
-  const chars = Array.from(text || "");
-  const normalizedChars = [];
-  const originalIndexes = [];
-  chars.forEach((char, originalIndex) => {
-    const normalized = normalizePracticeChar(char, language);
-    for (const normalizedChar of Array.from(normalized)) {
-      if (!/[\p{P}\p{Z}\p{S}]/u.test(normalizedChar)) {
-        normalizedChars.push(normalizedChar);
-        originalIndexes.push(originalIndex);
+function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
+  const targetChars = Array.from(targetTextValue || "");
+  const recognizedChars = Array.from(recognizedTextValue || "");
+  const rows = targetChars.length + 1;
+  const columns = recognizedChars.length + 1;
+  const distance = Array.from({ length: rows }, () => new Array(columns).fill(0));
+  for (let targetIndex = targetChars.length; targetIndex >= 0; targetIndex -= 1) {
+    distance[targetIndex][recognizedChars.length] = targetChars.length - targetIndex;
+  }
+  for (let recognizedIndex = recognizedChars.length; recognizedIndex >= 0; recognizedIndex -= 1) {
+    distance[targetChars.length][recognizedIndex] = recognizedChars.length - recognizedIndex;
+  }
+  for (let targetIndex = targetChars.length - 1; targetIndex >= 0; targetIndex -= 1) {
+    for (let recognizedIndex = recognizedChars.length - 1; recognizedIndex >= 0; recognizedIndex -= 1) {
+      if (practiceDisplayCharsEqual(targetChars[targetIndex], recognizedChars[recognizedIndex])) {
+        distance[targetIndex][recognizedIndex] = distance[targetIndex + 1][recognizedIndex + 1];
+      } else {
+        distance[targetIndex][recognizedIndex] = 1 + Math.min(
+          distance[targetIndex + 1][recognizedIndex + 1],
+          distance[targetIndex + 1][recognizedIndex],
+          distance[targetIndex][recognizedIndex + 1],
+        );
       }
     }
-  });
-  return { chars, normalizedChars, originalIndexes };
-}
+  }
 
-function normalizePracticeChar(char, language) {
-  let normalized = String(char || "").normalize("NFKC").toLowerCase();
-  if (language === "ja-JP") {
-    normalized = normalized.replace(/[\u30a1-\u30f6]/g, (value) =>
-      String.fromCharCode(value.charCodeAt(0) - 0x60)
-    );
-  }
-  return normalized;
-}
-
-function originalRangeForNormalizedRange(map, start, end) {
-  if (end <= start || map.originalIndexes.length === 0) {
-    return { start: 0, end: 0 };
-  }
-  const first = map.originalIndexes[Math.min(start, map.originalIndexes.length - 1)];
-  const last = map.originalIndexes[Math.min(Math.max(end - 1, start), map.originalIndexes.length - 1)];
-  if (!Number.isInteger(first) || !Number.isInteger(last)) {
-    return { start: 0, end: 0 };
-  }
-  return { start: first, end: last + 1 };
-}
-
-function originalTextForNormalizedRange(map, start, end) {
-  const range = originalRangeForNormalizedRange(map, start, end);
-  if (range.end <= range.start) {
-    return "";
-  }
-  return map.chars.slice(range.start, range.end).join("");
-}
-
-function insertionIndexForNormalizedIndex(map, index) {
-  if (!Number.isInteger(index) || map.originalIndexes.length === 0) {
-    return map.chars.length;
-  }
-  if (index <= 0) {
-    return 0;
-  }
-  if (index >= map.originalIndexes.length) {
-    return map.chars.length;
-  }
-  return map.originalIndexes[index];
-}
-
-function mergeDiffDecorations(ranges) {
-  const sorted = [...ranges].sort((left, right) => left.start - right.start);
-  const merged = [];
-  for (const range of sorted) {
-    const previous = merged[merged.length - 1];
-    if (previous && range.start <= previous.end) {
-      previous.end = Math.max(previous.end, range.end);
-      previous.correctText = [previous.correctText, range.correctText].filter(Boolean).join("");
-    } else {
-      merged.push({ ...range });
+  const cells = [];
+  let targetIndex = 0;
+  let recognizedIndex = 0;
+  while (targetIndex < targetChars.length || recognizedIndex < recognizedChars.length) {
+    const targetChar = targetChars[targetIndex];
+    const recognizedChar = recognizedChars[recognizedIndex];
+    if (
+      targetIndex < targetChars.length &&
+      recognizedIndex < recognizedChars.length &&
+      practiceDisplayCharsEqual(targetChar, recognizedChar)
+    ) {
+      cells.push({ type: "equal", correction: "", heard: recognizedChar });
+      targetIndex += 1;
+      recognizedIndex += 1;
+      continue;
     }
+    const currentDistance = distance[targetIndex][recognizedIndex];
+    if (
+      targetIndex < targetChars.length &&
+      recognizedIndex < recognizedChars.length &&
+      currentDistance === 1 + distance[targetIndex + 1][recognizedIndex + 1]
+    ) {
+      cells.push({ type: "substitute", correction: targetChar, heard: recognizedChar });
+      targetIndex += 1;
+      recognizedIndex += 1;
+      continue;
+    }
+    if (
+      targetIndex < targetChars.length &&
+      currentDistance === 1 + distance[targetIndex + 1][recognizedIndex]
+    ) {
+      cells.push({ type: "delete", correction: targetChar, heard: "_" });
+      targetIndex += 1;
+      continue;
+    }
+    cells.push({ type: "insert", correction: "", heard: recognizedChar || "_" });
+    recognizedIndex += 1;
   }
-  return merged;
+  return cells.length ? cells : [{ type: "insert", correction: "", heard: "（聞き取れませんでした）" }];
+}
+
+function compactPracticeDiffCells(cells) {
+  const compacted = [];
+  cells.forEach((cell) => {
+    const previous = compacted[compacted.length - 1];
+    if (previous && previous.type === "equal" && cell.type === "equal") {
+      previous.heard += cell.heard;
+      return;
+    }
+    compacted.push({ ...cell });
+  });
+  return compacted;
+}
+
+function practiceDisplayCharsEqual(left, right) {
+  const normalizedLeft = String(left || "").normalize("NFKC").toLocaleLowerCase();
+  const normalizedRight = String(right || "").normalize("NFKC").toLocaleLowerCase();
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+  const punctuationPairs = new Set(["?？", "？?", "!！", "！!", ",，", "，,", ".。", "。."]);
+  return punctuationPairs.has(`${left || ""}${right || ""}`);
 }
 
 loadPracticeSettings();

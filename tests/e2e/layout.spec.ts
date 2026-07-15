@@ -148,33 +148,52 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   let recordingRequests = 0;
   await page.route("**/api/practice/recordings", async (route) => {
     recordingRequests += 1;
-    const body = route.request().postData() || "";
-    const intent = body.match(/name="recording_intent"\r?\n\r?\n([^\r\n]+)/)?.[1] || "";
-    const payload = intent === "attempt"
-      ? {
+    const payload = {
+      recording_kind: "prompt",
+      transcript: "ソフトウェア開発者は人気があります",
+      target_text: "软件开发者很受欢迎。",
+      target_language: "zh-CN",
+      display_text: {
+        primary_text: "软件开发者很受欢迎。",
+        pinyin_text: "ruǎn jiàn kāi fā zhě hěn shòu huān yíng",
+        pinyin_status: "ready",
+      },
+      audio_base64: "UklGRg==",
+      audio_mime_type: "audio/wav",
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
+  });
+  await page.route("**/api/practice/attempt-jobs", async (route) => {
+    recordingRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "browser-practice-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "比較準備が完了しました", model: "funasr/paraformer-zh" },
+        result: {
           recording_kind: "attempt",
           target_language: "zh-CN",
           target_text: "软件开发者很受欢迎。",
-          recognized_text: "软件开发者受欢迎。",
+          recognized_text: "软开发者很受欢迎。",
+          model_recognized_text: "软件开发者很受欢迎。",
           similarity: 0.93,
           grade: "almost",
           diff: [],
-          comparison_alignment: null,
-        }
-      : {
-          recording_kind: "prompt",
-          transcript: "ソフトウェア開発者は人気があります",
-          target_text: "软件开发者很受欢迎。",
-          target_language: "zh-CN",
-          display_text: {
-            primary_text: "软件开发者很受欢迎。",
-            pinyin_text: "ruǎn jiàn kāi fā zhě hěn shòu huān yíng",
-            pinyin_status: "ready",
+          comparison_alignment: {
+            available: true,
+            complete: true,
+            ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.8 }],
           },
-          audio_base64: "UklGRg==",
-          audio_mime_type: "audio/wav",
-        };
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
+          model_comparison_alignment: {
+            available: true,
+            complete: true,
+            ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.9 }],
+          },
+        },
+      }),
+    });
   });
 
   await page.goto("/speakloop");
@@ -195,17 +214,33 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   const repeatRecord = page.locator("#practice-repeat-record-button");
   await repeatRecord.click();
   await repeatRecord.click();
-  await expect(page.locator("#practice-recognized-text")).toContainText("软件开发者受欢迎");
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
+    (elements) => elements.map((element) => element.textContent || "").join(""),
+  )).toBe("软_开发者很受欢迎");
+  await expect(page.locator("#practice-recognized-text .practice-diff-correction", { hasText: "件" })).toHaveCount(1);
+  await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
   expect(recordingRequests).toBe(2);
 
+  const scriptIndicator = page.locator(".practice-script-indicator");
+  const indicatorX = () => scriptIndicator.evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41);
+  await expect(scriptIndicator).toHaveCSS("transition-duration", "0.32s, 0.22s, 0.22s");
+  const startX = await indicatorX();
   await page.locator("#practice-script-traditional").click();
+  await page.waitForTimeout(10);
+  const middleX = await indicatorX();
+  await page.waitForTimeout(300);
+  const finalX = await indicatorX();
+  expect(middleX).toBeGreaterThan(startX + 1);
+  expect(middleX - startX).toBeLessThan((finalX - startX) * 0.65);
   await expect(page.locator("#practice-script-traditional")).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => page.locator("#practice-target-text").evaluate((element) =>
     Array.from(element.childNodes).map((node) =>
       node.nodeName === "RUBY" ? node.firstChild?.textContent || "" : node.textContent || ""
     ).join("")
   )).toContain("軟件開發者很受歡迎");
-  await expect(page.locator("#practice-recognized-text")).toContainText("軟件開發者受歡迎");
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
+    (elements) => elements.map((element) => element.textContent || "").join(""),
+  )).toBe("軟_開發者很受歡迎");
   expect(recordingRequests).toBe(2);
   await assertNoHorizontalOverflow(page);
 
@@ -222,6 +257,386 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   await page.reload();
   await expect(page.locator("#practice-target-language-select")).toHaveValue("zh-CN");
   await expect(page.locator("#practice-script-traditional")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("SpeakLoop does not mark omitted English punctuation as a pronunciation error", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  const targetText = "Hello. Can you hear me? The weather is cloudy today. Hokkaido is cool.";
+  await page.route("**/api/practice/recordings", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        recording_kind: "prompt",
+        transcript: "テスト",
+        target_text: targetText,
+        target_language: "en-US",
+        display_text: { primary_text: targetText },
+        audio_base64: "UklGRg==",
+        audio_mime_type: "audio/wav",
+      }),
+    });
+  });
+  await page.route("**/api/practice/attempt-jobs", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "english-punctuation-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "比較準備が完了しました", model: "whisper-1" },
+        result: {
+          recording_kind: "attempt",
+          target_language: "en-US",
+          target_text: targetText,
+          recognized_text: "hello can you hear me the weather is cloudy today Hokkaido is cool",
+          model_recognized_text: targetText,
+          similarity: 1,
+          grade: "perfect",
+          diff: [],
+          comparison_alignment: { available: true, complete: true, ranges: [] },
+          model_comparison_alignment: { available: true, complete: true, ranges: [] },
+        },
+      }),
+    });
+  });
+
+  await page.goto("/speakloop");
+  const nativeRecord = page.locator("#practice-native-record-button");
+  await nativeRecord.click();
+  await nativeRecord.click();
+  await expect(page.locator("#practice-target-text")).toContainText("Hello.");
+
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  await repeatRecord.click();
+  await repeatRecord.click();
+  await expect(page.locator("#practice-status")).toHaveText("Whisperで音声を解析しています。");
+  await expect(page.locator("#practice-result-panel")).toBeVisible();
+  await expect(page.locator("#practice-recognized-text .practice-diff-cell.is-delete")).toHaveCount(0);
+  await expect(page.locator("#practice-recognized-text")).not.toContainText("_");
+  await expect(page.locator("#practice-score")).toHaveText("100%");
+  const recognizedSize = await page.locator("#practice-recognized-text").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(recognizedSize.scrollWidth).toBeLessThanOrEqual(recognizedSize.clientWidth);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-english-punctuation.png`, fullPage: true });
+  }
+});
+
+test("SpeakLoop converts the generated model audio to the user's voice when opted in", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["my reference voice"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  let ownVoiceRequested = false;
+  await page.route("**/api/practice/recordings", async (route) => {
+    ownVoiceRequested = /name="use_own_voice"\r?\n\r?\ntrue/.test(route.request().postData() || "");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        recording_kind: "prompt",
+        transcript: "今日は何をしますか",
+        target_text: "What are you doing today?",
+        target_language: "en-US",
+        display_text: { primary_text: "What are you doing today?" },
+        audio_base64: "QkFTRQ==",
+        audio_mime_type: "audio/wav",
+        voice_conversion_job: {
+          job_id: "practice-own-voice-job",
+          status: "queued",
+          current_stage: { stage: "gpu_wait", label: "利用可能なGPUを待っています", model: "Seed-VC" },
+        },
+      }),
+    });
+  });
+  let polls = 0;
+  await page.route("**/api/practice/voice-jobs/practice-own-voice-job", async (route) => {
+    polls += 1;
+    if (polls === 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "practice-own-voice-job",
+          status: "running",
+          current_stage: { stage: "loading_seed_vc_model", label: "Seed-VCモデルを読み込んでいます", model: "Seed-VC" },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "practice-own-voice-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "完了しました", model: "Seed-VC" },
+        result: { audio_base64: "UklGRg==", audio_mime_type: "audio/wav" },
+      }),
+    });
+  });
+
+  await page.goto("/speakloop");
+  const ownVoice = page.locator("#practice-own-voice-toggle");
+  await ownVoice.check();
+  const record = page.locator("#practice-native-record-button");
+  await record.click();
+  await record.click();
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible();
+  await expect(page.locator("#practice-job-status-label")).toContainText("利用可能なGPUを待っています");
+  await expect(page.locator("#practice-play-model-button")).toBeDisabled();
+  await expect(page.locator("#practice-job-status-label")).toContainText("Seed-VCモデルを読み込んでいます", { timeout: 10_000 });
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-progress.png`, fullPage: true });
+  }
+  await expect(page.locator("#practice-play-model-button")).toBeEnabled({ timeout: 10_000 });
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-complete.png`, fullPage: true });
+  }
+  expect(ownVoiceRequested).toBe(true);
+  expect(polls).toBeGreaterThanOrEqual(2);
+  await assertNoHorizontalOverflow(page);
+  await page.reload();
+  await expect(page.locator("#practice-own-voice-toggle")).toBeChecked();
+});
+
+test("SkitVoice shows reference-audio feedback as a dismissible toast", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: undefined, getDisplayMedia: undefined },
+      configurable: true,
+    });
+  });
+  await page.goto("/skitvoice");
+  await page.locator('[data-tab-audio-slot="1"]').click();
+  const unsupportedToast = page.locator(".voice-lab-toast", { hasText: "このブラウザではタブ音声録音を使えません" });
+  await expect(unsupportedToast).toBeVisible();
+  await expect(unsupportedToast).toHaveAttribute("role", "alert");
+  await expect(page.locator("#vibevoice-message")).toBeEmpty();
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-skitvoice-error-toast.png`, fullPage: true });
+  }
+  await unsupportedToast.getByRole("button", { name: "通知を閉じる" }).click();
+  await expect(unsupportedToast).toHaveCount(0);
+
+  await page.locator('input[name="voice_file_1"]').setInputFiles({
+    name: "voice.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from("voice audio"),
+  });
+  const savedToast = page.locator(".voice-lab-toast", { hasText: "Speaker 1 の参照音声を保存しました" });
+  await expect(savedToast).toBeVisible();
+  await expect(savedToast).toHaveAttribute("role", "status");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-skitvoice-toast.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-skitvoice-toast.png`, fullPage: true });
+  }
+  await assertNoHorizontalOverflow(page);
+});
+
+test("SpeakLoop shows RunPod queue, model progress, and completion while polling", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.route("**/api/practice/recordings", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        recording_kind: "prompt",
+        transcript: "今日はどこへ行きますか",
+        target_text: "你好吗？你今天去哪里？",
+        target_language: "zh-CN",
+        display_text: { primary_text: "你好吗？你今天去哪里？", pinyin_text: "nǐ hǎo ma nǐ jīn tiān qù nǎ lǐ" },
+        audio_base64: "UklGRg==",
+        audio_mime_type: "audio/wav",
+      }),
+    });
+  });
+  let submissions = 0;
+  await page.route("**/api/practice/attempt-jobs", async (route) => {
+    submissions += 1;
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: submissions === 1 ? "poll-job" : "failed-job",
+        status: "queued",
+        current_stage: { stage: "gpu_wait", label: "利用可能なGPUを待っています", provider: "RunPod Serverless", model: "funasr/paraformer-zh" },
+      }),
+    });
+  });
+  let polls = 0;
+  await page.route("**/api/practice/attempt-jobs/poll-job", async (route) => {
+    polls += 1;
+    if (polls === 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "poll-job",
+          status: "running",
+          current_stage: { stage: "loading_model", label: "FunASRモデルを読み込んでいます", provider: "RunPod Serverless", model: "funasr/paraformer-zh" },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "poll-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "比較準備が完了しました", provider: "RunPod Serverless", model: "funasr/paraformer-zh" },
+        result: {
+          target_language: "zh-CN",
+          target_text: "你好吗？你今天去哪里？",
+          recognized_text: "你哈？你今天这里？",
+          model_recognized_text: "你好吗？你今天去哪里？",
+          similarity: 0.8,
+          grade: "retry",
+          comparison_alignment: { available: true, complete: false, ranges: [{ index: 0, available: false, audio_start: null, audio_end: null }, { index: 1, available: true, audio_start: 1, audio_end: 2 }] },
+          model_comparison_alignment: { available: true, complete: true, ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 0.9 }, { index: 1, available: true, audio_start: 1, audio_end: 2.1 }] },
+        },
+      }),
+    });
+  });
+  await page.route("**/api/practice/attempt-jobs/failed-job", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "failed-job",
+        status: "failed",
+        current_stage: {
+          stage: "failed",
+          label: "処理に失敗しました",
+          provider: "RunPod Serverless",
+          model: "funasr/paraformer-zh",
+          detail: "RunPodの残高不足でGPU処理を開始できません。RunPodのBillingを確認してください。",
+        },
+        result: null,
+        error: "RunPodの残高不足でGPU処理を開始できません。RunPodのBillingを確認してください。",
+      }),
+    });
+  });
+
+  await page.goto("/speakloop");
+  await page.locator("#practice-target-language-select").selectOption("zh-CN");
+  const native = page.locator("#practice-native-record-button");
+  await native.click();
+  await native.click();
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible();
+  const repeat = page.locator("#practice-repeat-record-button");
+  await repeat.click();
+  await repeat.click();
+  await expect(page.locator("#practice-job-status-label")).toContainText("利用可能なGPUを待っています");
+  await expect(page.locator("#practice-job-status-label")).toContainText("FunASRモデルを読み込んでいます");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-progress.png`, fullPage: true });
+  }
+  await expect(page.locator("#practice-result-panel")).toBeVisible({ timeout: 10_000 });
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
+    (elements) => elements.map((element) => element.textContent || "").join(""),
+  )).toBe("你哈_你今天这_里");
+  await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-result.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-runpod-result.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "light");
+      element.setAttribute("data-theme-preference", "light");
+    });
+  }
+  await repeat.click();
+  await repeat.click();
+  await expect(page.locator("#practice-job-status-label")).toContainText("処理に失敗しました");
+  await expect(page.locator("#practice-error")).toContainText("残高不足");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-error.png`, fullPage: true });
+  }
+  expect(polls).toBeGreaterThanOrEqual(2);
 });
 
 test("SpeakLoop cancels either recording without sending audio", async ({ page }, testInfo) => {
@@ -397,6 +812,124 @@ test("SkitVoice follows the documented three, two, and one-column task order", a
     expect(generateBox?.y || 0).toBeGreaterThan((scriptBox?.y || 0) + (scriptBox?.height || 0) - 2);
     expect(voicesBox?.y || 0).toBeGreaterThan((generateBox?.y || 0) + (generateBox?.height || 0) - 2);
   }
+});
+
+test("SkitVoice shows RunPod model loading and processing stages", async ({ page }) => {
+  let statusCall = 0;
+  await page.route("**/api/vibevoice/jobs**", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/vibevoice/jobs") {
+      return route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "vv-ui-job",
+          status: "queued",
+          current_stage: {
+            stage: "gpu_wait",
+            label: "利用可能なGPUを待っています",
+            provider: "RunPod Serverless",
+            model: "vibevoice-large-aoi-pinned",
+            detail: "RunPodのqueueでworkerの割り当てを待っています。",
+          },
+          progress_log: [],
+        }),
+      });
+    }
+    statusCall += 1;
+    if (statusCall === 1) {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "vv-ui-job",
+          status: "running",
+          current_stage: {
+            stage: "loading_vibevoice_model",
+            label: "VibeVoice Largeモデルを読み込んでいます",
+            provider: "RunPod Serverless",
+            model: "vibevoice-large-aoi-pinned",
+            detail: "初回起動時は数分かかる場合があります。",
+          },
+          progress_log: [],
+        }),
+      });
+    }
+    if (statusCall <= 4) {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "vv-ui-job",
+          status: "running",
+          current_stage: {
+            stage: "loading_seed_vc_model",
+            label: "Seed-VCモデルを読み込んでいます",
+            provider: "RunPod Serverless",
+            model: "Seed-VC",
+            detail: "",
+          },
+          progress_log: [{
+            stage: "loading_seed_vc_model",
+            label: "Seed-VCモデルを読み込んでいます",
+            model: "Seed-VC",
+          }],
+        }),
+      });
+    }
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "vv-ui-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "完了", provider: "" },
+        progress_log: [{ stage: "complete", label: "完了", provider: "" }],
+        result: {
+          audio_mime_type: "audio/wav",
+          audio_base64: "UklGRg==",
+          normalized_script: "Speaker 1: こんにちは。",
+          diagnostics: {},
+          providers: { vibevoice: "fake" },
+          artifacts: [],
+        },
+      }),
+    });
+  });
+
+  await page.goto("/skitvoice");
+  await page.locator("#vibevoice-script").fill("1 こんにちは。");
+  await page.locator("#vibevoice-directed-line-mode").evaluate((element) => {
+    const control = element as HTMLInputElement;
+    control.checked = false;
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.locator('input[name="voice_file_1"]').setInputFiles({
+    name: "voice.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from("RIFF voice"),
+  });
+  await page.locator("#vibevoice-generate-button").click();
+
+  await expect(page.locator("#vibevoice-message")).toContainText("VibeVoice Largeモデルを読み込んでいます");
+  await expect(page.locator("#vibevoice-message")).toContainText("VibeVoice Large");
+  await expect(page.locator("#vibevoice-message")).toContainText("Seed-VCモデルを読み込んでいます", { timeout: 5_000 });
+  await expect(page.locator("#vibevoice-progress-log")).toContainText("Seed-VCモデルを読み込んでいます");
+  await expect(page.locator("#vibevoice-progress-log")).not.toContainText("loading_seed_vc_model");
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({
+      path: `tmp/playwright/visual-review/${test.info().project.name}-skitvoice-runpod-progress.png`,
+      fullPage: true,
+    });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({
+      path: `tmp/playwright/visual-review/${test.info().project.name}-dark-skitvoice-runpod-progress.png`,
+      fullPage: true,
+    });
+  }
+  await expect(page.locator("#vibevoice-message")).toHaveText("生成しました。", { timeout: 5_000 });
 });
 
 test("SkitVoice uses Voice Lab audio controls for references and generated results", async ({ page }) => {

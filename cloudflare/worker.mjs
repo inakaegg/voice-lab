@@ -653,6 +653,21 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "POST" && url.pathname === "/api/practice/attempts") {
       return jsonResponse(await createPracticeAttempt(request, env));
     }
+    if (request.method === "POST" && url.pathname === "/api/practice/attempt-jobs") {
+      const snapshot = await createPracticeAttemptJob(request, env);
+      const status = snapshot.status === "queued" || snapshot.status === "running" ? 202 : 200;
+      return jsonResponse(snapshot, { status });
+    }
+    if (request.method === "GET" && /^\/api\/practice\/attempt-jobs\/[^/]+$/.test(url.pathname)) {
+      await requirePublicFeaturePollingAccess(request, env, "speakloop");
+      const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
+      return jsonResponse(await getPracticeAttemptJob(jobId, env));
+    }
+    if (request.method === "GET" && /^\/api\/practice\/voice-jobs\/[^/]+$/.test(url.pathname)) {
+      await requirePublicFeaturePollingAccess(request, env, "speakloop");
+      const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
+      return jsonResponse(await getRunpodJobSnapshot(jobId, env, "voice_conversion"));
+    }
     if (request.method === "GET" && url.pathname === "/api/vibevoice/status") {
       return jsonResponse(await vibeVoiceStatus(env));
     }
@@ -1271,6 +1286,23 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
   return { settings, consumed: true, authenticated: true, is_admin: false, email: session.email };
 }
 
+async function requirePublicFeaturePollingAccess(request, env, feature) {
+  const settings = await readPublicAccessSettings(env);
+  if (!settings.google_login_required) {
+    return;
+  }
+  if (!publicGoogleAuthConfigured(env)) {
+    throw httpError(503, "Google login is not configured");
+  }
+  const session = await readPublicSession(request, env);
+  if (!session) {
+    throw httpError(401, "Google login is required");
+  }
+  if (!settings.features[feature]) {
+    throw httpError(400, `unsupported public feature: ${feature}`);
+  }
+}
+
 function validatePublicInputLimits(featureSettings, limits) {
   const audioBytes = Number(limits.audioBytes || 0);
   const textChars = Number(limits.textChars || 0);
@@ -1815,7 +1847,8 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
     throw httpError(400, "job_id is required");
   }
   const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
-  const snapshot = jobSnapshotFromRunpod(body, kind);
+  const health = kind === "vibevoice" ? await runpodHealthForQueuedJob(body, env) : null;
+  const snapshot = jobSnapshotFromRunpod(body, kind, health);
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, kind)) {
     await saveRunpodVcReadyState(env, snapshot, kind);
   }
@@ -1936,15 +1969,18 @@ function completedJobSnapshot(jobId, kind, result) {
   };
 }
 
-function jobSnapshotFromRunpod(body, kind) {
+function jobSnapshotFromRunpod(body, kind, health = null, modelId = "") {
   const jobId = String(body.id || body.job_id || "");
   const status = String(body.status || "").toUpperCase();
+  const metrics = runpodPracticeMetrics(body);
   if (status === "COMPLETED") {
     return {
       job_id: jobId,
       status: "succeeded",
       current_stage: { stage: "complete", label: "完了", provider: "" },
       stages: completedStages(kind),
+      metrics,
+      progress_log: [{ stage: "complete", label: "完了", provider: "" }],
       result: body.output || null,
       error: null,
     };
@@ -1955,30 +1991,79 @@ function jobSnapshotFromRunpod(body, kind) {
       status: "failed",
       current_stage: { stage: "failed", label: "失敗", provider: "RunPod Serverless" },
       stages: plannedStages(kind),
+      metrics,
+      progress_log: [],
       result: null,
-      error: runpodErrorMessage(body),
+      error: runpodUserErrorMessage(body),
     };
   }
   const queued = status === "IN_QUEUE" || status === "QUEUED" || !status;
+  const currentStage = kind === "vibevoice"
+    ? vibeVoiceRunpodStage(body, health, modelId)
+    : kind === "voice_conversion"
+      ? voiceConversionRunpodStage(body, queued)
+      : currentStageForKind(kind, queued);
   return {
     job_id: jobId,
     status: queued ? "queued" : "running",
-    current_stage: currentStageForKind(kind, queued),
+    current_stage: currentStage,
     stages: plannedStages(kind),
+    metrics,
+    progress_log: [currentStage],
     result: null,
     error: null,
   };
 }
 
+function voiceConversionRunpodStage(body, queued) {
+  if (queued) {
+    return {
+      stage: "gpu_wait",
+      label: "利用可能なGPUを待っています",
+      provider: "RunPod Serverless",
+      model: "Seed-VC",
+      detail: "RunPodのqueueでworkerの割り当てを待っています。",
+    };
+  }
+  const progress = body?.output;
+  if (progress && typeof progress === "object" && typeof progress.stage === "string") {
+    return {
+      stage: String(progress.stage || "voice_conversion"),
+      label: String(progress.label || "自分の声に変換しています"),
+      provider: String(progress.provider || "RunPod Serverless"),
+      model: String(progress.model || "Seed-VC"),
+      detail: String(progress.detail || ""),
+    };
+  }
+  return {
+    stage: "voice_conversion",
+    label: "自分の声に変換しています",
+    provider: "RunPod Serverless",
+    model: "Seed-VC",
+    detail: "",
+  };
+}
+
 function plannedStages(kind) {
   if (kind === "voice_conversion") {
-    return [{ stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" }];
+    return [
+      { stage: "gpu_wait", label: "GPU待ち", provider: "RunPod Serverless" },
+      { stage: "initializing", label: "Worker初期化", provider: "RunPod Serverless" },
+      { stage: "loading_seed_vc_model", label: "Seed-VCモデル読込", provider: "RunPod Serverless" },
+      { stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" },
+    ];
   }
   if (kind === "vibevoice") {
     return [
-      { stage: "queued", label: "待機中", provider: "RunPod Serverless" },
-      { stage: "vibevoice", label: "VibeVoice生成", provider: "RunPod Serverless" },
-      { stage: "postprocess", label: "後処理", provider: "RunPod Serverless" },
+      { stage: "gpu_wait", label: "GPU待ち", provider: "RunPod Serverless" },
+      { stage: "initializing", label: "Worker初期化", provider: "RunPod Serverless" },
+      { stage: "loading_vibevoice_model", label: "VibeVoiceモデル読込", provider: "RunPod Serverless" },
+      { stage: "vibevoice_generation", label: "VibeVoice生成", provider: "RunPod Serverless" },
+      { stage: "directed_asr", label: "指定台詞ASR", provider: "RunPod Serverless" },
+      { stage: "loading_seed_vc_model", label: "Seed-VCモデル読込", provider: "RunPod Serverless" },
+      { stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" },
+      { stage: "reconstruct", label: "音声再配置", provider: "RunPod Serverless" },
+      { stage: "finalizing", label: "出力仕上げ", provider: "RunPod Serverless" },
     ];
   }
   if (kind === "warmup") {
@@ -1989,6 +2074,58 @@ function plannedStages(kind) {
     { stage: "translation", label: "翻訳", provider: "RunPod Serverless" },
     { stage: "tts", label: "音声生成", provider: "RunPod Serverless" },
   ];
+}
+
+function vibeVoiceRunpodStage(body, health = null, modelId = "") {
+  const status = String(body?.status || "").toUpperCase();
+  const progress = body?.output;
+  if ((status === "IN_PROGRESS" || status === "RUNNING") && progress && typeof progress === "object") {
+    return {
+      stage: String(progress.stage || "processing"),
+      label: String(progress.label || "RunPodでSkitVoiceを処理しています"),
+      provider: String(progress.provider || "RunPod Serverless"),
+      model: String(progress.model || modelId || "vibevoice-large-aoi-pinned"),
+      detail: String(progress.detail || ""),
+    };
+  }
+  if (status === "" || status === "IN_QUEUE" || status === "QUEUED") {
+    const counts = runpodWorkerCounts(health);
+    if ((counts.initializing || 0) > 0) {
+      return {
+        stage: "initializing",
+        label: "GPUワーカーを初期化しています",
+        provider: "RunPod Serverless",
+        model: modelId || "vibevoice-large-aoi-pinned",
+        detail: "worker起動後にVibeVoiceモデルを読み込みます。",
+      };
+    }
+    return {
+      stage: "gpu_wait",
+      label: "利用可能なGPUを待っています",
+      provider: "RunPod Serverless",
+      model: modelId || "vibevoice-large-aoi-pinned",
+      detail: "RunPodのqueueでworkerの割り当てを待っています。",
+    };
+  }
+  return {
+    stage: "processing",
+    label: "RunPodでSkitVoiceを処理しています",
+    provider: "RunPod Serverless",
+    model: modelId || "vibevoice-large-aoi-pinned",
+    detail: "",
+  };
+}
+
+async function runpodHealthForQueuedJob(body, env) {
+  const status = String(body?.status || "").toUpperCase();
+  if (status && status !== "IN_QUEUE" && status !== "QUEUED") {
+    return null;
+  }
+  try {
+    return await runpodRequest(env, "/health", { method: "GET", timeoutMs: 3000 });
+  } catch (_error) {
+    return null;
+  }
 }
 
 function completedStages(kind) {
@@ -2168,6 +2305,7 @@ async function createPracticeRecording(request, env) {
     throw httpError(400, "current_target_text is required for attempt recordings");
   }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
+  const useOwnVoice = recordingIntent === "prompt" && optionEnabled(stringFormValue(form, "use_own_voice", "false"));
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0),
     textChars: currentTargetText.trim().length,
@@ -2264,6 +2402,21 @@ async function createPracticeRecording(request, env) {
     },
     detected_source_language: translation.source_language,
   };
+  if (useOwnVoice) {
+    const body = await submitRunpodJob(env, {
+      operation_mode: "voice_conversion",
+      source_audio_base64: tts.audio_base64,
+      source_audio_mime_type: tts.audio_mime_type || "audio/wav",
+      reference_audio_base64: arrayBufferToBase64(audioBytes),
+      reference_audio_mime_type: audioMimeType || "audio/webm",
+      voice_backend: "seed-vc",
+      seed_vc_reference_max_seconds: 10,
+      seed_vc_reference_auto_select: true,
+      seed_vc_length_adjust: 1.0,
+      seed_vc_inference_cfg_rate: 0.7,
+    });
+    result.voice_conversion_job = jobSnapshotFromRunpod(body, "voice_conversion");
+  }
   return result;
 }
 
@@ -2319,6 +2472,338 @@ async function createPracticeAttempt(request, env) {
     },
   };
   return result;
+}
+
+async function createPracticeAttemptJob(request, env) {
+  const form = await request.formData();
+  const audio = requiredBlob(form, "audio");
+  const modelAudio = requiredBlob(form, "model_audio");
+  const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "en-US"));
+  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
+  const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
+  if (!targetText) {
+    throw httpError(400, "target_text is required");
+  }
+  await enforcePublicFeatureAccess(request, env, "speakloop", {
+    audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
+    textChars: targetText.length,
+  });
+  const [audioBytes, modelAudioBytes] = await Promise.all([audio.arrayBuffer(), modelAudio.arrayBuffer()]);
+  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
+  const modelAudioMimeType = normalizeMimeType(modelAudio.type || guessAudioMimeType(modelAudio.name));
+
+  if (targetLanguage === "zh-CN") {
+    const body = await submitRunpodJob(env, {
+      operation_mode: "practice_asr",
+      source_language: targetLanguage,
+      target_text: targetText,
+      audio_mime_type: audioMimeType || "audio/wav",
+      audio_base64: arrayBufferToBase64(audioBytes),
+      model_audio_mime_type: modelAudioMimeType || "audio/wav",
+      model_audio_base64: arrayBufferToBase64(modelAudioBytes),
+    });
+    let health = null;
+    if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
+      try {
+        health = await runpodRequest(env, "/health", { method: "GET", timeoutMs: 3000 });
+      } catch (_error) {
+        health = null;
+      }
+    }
+    return practiceAttemptJobSnapshot(body, health);
+  }
+
+  const started = Date.now();
+  const [modelTranscription, attemptTranscription] = await Promise.all([
+    openAiTranscribeDetail(env, {
+      audioBytes: modelAudioBytes,
+      audioMimeType: modelAudioMimeType,
+      sourceLanguage: targetLanguage,
+      filename: modelAudio.name || `model.${extensionForMimeType(modelAudioMimeType)}`,
+      model: asrModel,
+      includeTimestamps: true,
+    }),
+    openAiTranscribeDetail(env, {
+      audioBytes,
+      audioMimeType,
+      sourceLanguage: targetLanguage,
+      filename: audio.name || `attempt.${extensionForMimeType(audioMimeType)}`,
+      model: asrModel,
+      includeTimestamps: true,
+    }),
+  ]);
+  const totalMs = Date.now() - started;
+  const result = practiceAttemptComparisonResult({
+    targetLanguage,
+    targetText,
+    attemptTranscription: {
+      ...attemptTranscription,
+      provider: `openai-asr-${attemptTranscription.model}`,
+    },
+    modelTranscription: {
+      ...modelTranscription,
+      provider: `openai-asr-${modelTranscription.model}`,
+    },
+    timings: { asr: totalMs, model_asr: totalMs, total: totalMs },
+  });
+  return {
+    job_id: "",
+    status: "succeeded",
+    current_stage: {
+      stage: "complete",
+      label: "比較準備が完了しました",
+      provider: `OpenAI ${asrModel}`,
+      model: asrModel,
+    },
+    stages: [{ stage: "complete", label: "完了", provider: `OpenAI ${asrModel}`, model: asrModel }],
+    metrics: {},
+    result,
+    error: null,
+  };
+}
+
+async function getPracticeAttemptJob(jobId, env) {
+  if (!jobId) {
+    throw httpError(400, "job_id is required");
+  }
+  const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
+  let health = null;
+  if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
+    try {
+      health = await runpodRequest(env, "/health", { method: "GET", timeoutMs: 3000 });
+    } catch (_error) {
+      health = null;
+    }
+  }
+  return practiceAttemptJobSnapshot(body, health);
+}
+
+function practiceAttemptJobSnapshot(body, health = null) {
+  const jobId = String(body?.id || body?.job_id || "");
+  const status = String(body?.status || "").toUpperCase();
+  const metrics = runpodPracticeMetrics(body);
+  const stages = practiceAttemptJobStages();
+  if (status === "COMPLETED") {
+    const output = body?.output;
+    if (!output || typeof output !== "object") {
+      return failedPracticeAttemptJob(jobId, stages, metrics, "RunPod job completed without an output object");
+    }
+    const contractVersion = Number(output.practice_asr_contract_version || 0);
+    if (!Number.isFinite(contractVersion) || contractVersion < 2) {
+      return failedPracticeAttemptJob(
+        jobId,
+        stages,
+        metrics,
+        "RunPod imageがpractice ASR contract v2に対応していません。現在のRunPod imageを再デプロイしてください。",
+        "RunPod imageの更新が必要です",
+      );
+    }
+    if (!output.model_transcription || typeof output.model_transcription !== "object") {
+      return failedPracticeAttemptJob(jobId, stages, metrics, "RunPod practice job did not return model_transcription");
+    }
+    const attemptTranscription = runpodPracticeTranscription(output);
+    const modelTranscription = runpodPracticeTranscription(output.model_transcription);
+    const result = practiceAttemptComparisonResult({
+      targetLanguage: "zh-CN",
+      targetText: canonicalPracticeText(output.target_text || "", "zh-CN"),
+      attemptTranscription,
+      modelTranscription,
+      timings: output.timings_ms || {},
+    });
+    return {
+      job_id: jobId,
+      status: "succeeded",
+      current_stage: {
+        stage: "complete",
+        label: "比較準備が完了しました",
+        provider: "Voice Lab",
+        model: attemptTranscription.model,
+      },
+      stages: [...stages, { stage: "complete", label: "完了", provider: "Voice Lab", model: attemptTranscription.model }],
+      metrics,
+      result,
+      error: null,
+    };
+  }
+  if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
+    return failedPracticeAttemptJob(jobId, stages, metrics, runpodUserErrorMessage(body));
+  }
+  const queued = status === "" || status === "IN_QUEUE" || status === "QUEUED";
+  return {
+    job_id: jobId,
+    status: queued ? "queued" : "running",
+    current_stage: practiceRunpodStage(body, health),
+    stages,
+    metrics,
+    result: null,
+    error: null,
+  };
+}
+
+function practiceAttemptComparisonResult({
+  targetLanguage,
+  targetText,
+  attemptTranscription,
+  modelTranscription,
+  timings = {},
+}) {
+  const recognizedText = canonicalPracticeText(attemptTranscription.text || "", targetLanguage);
+  const modelRecognizedText = canonicalPracticeText(modelTranscription.text || "", targetLanguage);
+  const evaluation = evaluatePracticeAttempt(targetText, recognizedText, targetLanguage);
+  const asrTimestamps = serializeAsrTimestamps(attemptTranscription);
+  const modelAsrTimestamps = serializeAsrTimestamps(modelTranscription);
+  return {
+    recording_kind: "attempt",
+    target_language: targetLanguage,
+    target_text: targetText,
+    recognized_text: recognizedText,
+    model_recognized_text: modelRecognizedText,
+    asr_model: attemptTranscription.model,
+    asr_timestamps: asrTimestamps,
+    model_asr_timestamps: modelAsrTimestamps,
+    ...evaluation,
+    comparison_alignment: practiceComparisonAlignment({
+      targetText,
+      recognizedText,
+      targetLanguage,
+      asrTimestamps,
+    }),
+    model_comparison_alignment: practiceComparisonAlignment({
+      targetText,
+      recognizedText: modelRecognizedText,
+      targetLanguage,
+      asrTimestamps: modelAsrTimestamps,
+    }),
+    timings_ms: {
+      asr: Number(timings.asr || 0),
+      model_asr: Number(timings.model_asr || 0),
+      compare: Number(timings.compare || 0),
+      total: Number(timings.total || 0),
+    },
+    providers: {
+      asr: attemptTranscription.provider,
+      model_asr: modelTranscription.provider,
+    },
+  };
+}
+
+function runpodPracticeTranscription(output) {
+  const providers = output?.providers && typeof output.providers === "object" ? output.providers : {};
+  return {
+    text: String(output?.text || "").trim(),
+    model: String(output?.model || FUNASR_DEFAULT_PRACTICE_ASR_MODEL),
+    timestamp_granularities: Array.isArray(output?.timestamp_granularities)
+      ? output.timestamp_granularities.map(String)
+      : [],
+    words: normalizedAsrTimingRows(output?.words, "text"),
+    segments: normalizedAsrTimingRows(output?.segments, "text"),
+    provider: String(providers.asr || "funasr-paraformer-zh"),
+  };
+}
+
+function practiceAttemptJobStages() {
+  const model = FUNASR_DEFAULT_PRACTICE_ASR_MODEL;
+  return [
+    { stage: "gpu_wait", label: "GPU待機", provider: "RunPod Serverless", model },
+    { stage: "loading_model", label: "モデル読込", provider: "RunPod Serverless", model },
+    { stage: "transcribing_model", label: "お手本解析", provider: "RunPod Serverless", model },
+    { stage: "transcribing_attempt", label: "録音解析", provider: "RunPod Serverless", model },
+    { stage: "finalizing", label: "比較準備", provider: "Voice Lab", model },
+  ];
+}
+
+function failedPracticeAttemptJob(jobId, stages, metrics, error, label = "処理に失敗しました") {
+  return {
+    job_id: jobId,
+    status: "failed",
+    current_stage: {
+      stage: "failed",
+      label,
+      provider: "RunPod Serverless",
+      model: FUNASR_DEFAULT_PRACTICE_ASR_MODEL,
+      detail: error,
+    },
+    stages,
+    metrics,
+    result: null,
+    error,
+  };
+}
+
+function practiceRunpodStage(body, health) {
+  const status = String(body?.status || "").toUpperCase();
+  const progress = body?.output;
+  if ((status === "IN_PROGRESS" || status === "RUNNING") && progress && typeof progress === "object") {
+    return {
+      stage: String(progress.stage || "processing"),
+      label: String(progress.label || "RunPodで処理しています"),
+      provider: String(progress.provider || "RunPod Serverless"),
+      model: String(progress.model || FUNASR_DEFAULT_PRACTICE_ASR_MODEL),
+      detail: String(progress.detail || ""),
+    };
+  }
+  if (status === "" || status === "IN_QUEUE" || status === "QUEUED") {
+    const counts = runpodWorkerCounts(health);
+    if ((counts.initializing || 0) > 0) {
+      return {
+        stage: "initializing",
+        label: "GPUワーカーを初期化しています",
+        provider: "RunPod Serverless",
+        model: FUNASR_DEFAULT_PRACTICE_ASR_MODEL,
+        detail: "worker起動後にFunASRモデルを読み込みます。",
+      };
+    }
+    return {
+      stage: "gpu_wait",
+      label: "利用可能なGPUを待っています",
+      provider: "RunPod Serverless",
+      model: FUNASR_DEFAULT_PRACTICE_ASR_MODEL,
+      detail: "RunPodのqueueでworkerの割り当てを待っています。",
+    };
+  }
+  return {
+    stage: "processing",
+    label: "RunPodで処理しています",
+    provider: "RunPod Serverless",
+    model: FUNASR_DEFAULT_PRACTICE_ASR_MODEL,
+    detail: "",
+  };
+}
+
+function runpodWorkerCounts(health) {
+  const workers = health?.workers;
+  if (Array.isArray(workers)) {
+    return workers.reduce((counts, worker) => {
+      const state = String(worker?.state || "unknown").toLowerCase();
+      counts[state] = (counts[state] || 0) + 1;
+      return counts;
+    }, {});
+  }
+  if (workers && typeof workers === "object") {
+    return Object.fromEntries(
+      Object.entries(workers)
+        .map(([key, value]) => [String(key).toLowerCase(), Number(value)])
+        .filter(([, value]) => Number.isFinite(value)),
+    );
+  }
+  return {};
+}
+
+function runpodPracticeMetrics(body) {
+  const metrics = {};
+  const delayTime = Number(body?.delayTime);
+  const executionTime = Number(body?.executionTime);
+  if (Number.isFinite(delayTime)) metrics.delay_time_ms = delayTime;
+  if (Number.isFinite(executionTime)) metrics.execution_time_ms = executionTime;
+  return metrics;
+}
+
+function runpodUserErrorMessage(body) {
+  const detail = runpodErrorMessage(body);
+  if (/insufficient.*(?:balance|fund|credit)|(?:balance|fund|credit).*insufficient|payment required/iu.test(detail)) {
+    return `RunPodの残高不足でGPU処理を開始できません。RunPodのBillingを確認してください。詳細: ${detail}`;
+  }
+  return detail;
 }
 
 async function createPracticeDisplayText(text, targetLanguage, env, { includePinyin = false } = {}) {
@@ -2443,7 +2928,13 @@ async function createVibeVoiceJob(request, env) {
     generation: vibeVoiceGenerationPayloadFromForm(form),
     response_audio_format: stringFormValue(form, "response_audio_format", "mp3"),
   });
-  return jobSnapshotFromRunpod(body, "vibevoice");
+  const health = await runpodHealthForQueuedJob(body, env);
+  return jobSnapshotFromRunpod(
+    body,
+    "vibevoice",
+    health,
+    stringFormValue(form, "model_id", "vibevoice-large-aoi-pinned"),
+  );
 }
 
 async function readVibeVoiceScriptFromForm(form) {

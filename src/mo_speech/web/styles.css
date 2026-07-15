@@ -1735,9 +1735,30 @@ audio {
   align-items: center;
   background: rgba(82, 103, 127, 0.08);
   border-radius: 8px;
-  display: inline-flex;
-  gap: 2px;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(42px, 1fr));
   padding: 2px;
+  position: relative;
+  isolation: isolate;
+}
+
+.practice-script-indicator {
+  background: #fff;
+  border: 1px solid rgba(54, 91, 139, 0.09);
+  border-radius: 6px;
+  box-shadow: 0 2px 7px rgba(20, 33, 61, 0.15);
+  inset: 2px auto 2px 2px;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(0);
+  transition: transform 320ms cubic-bezier(0.4, 0, 0.2, 1), background-color 220ms ease, box-shadow 220ms ease;
+  will-change: transform;
+  width: calc(50% - 2px);
+  z-index: -1;
+}
+
+.practice-script-toggle[data-script="traditional"] .practice-script-indicator {
+  transform: translateX(100%);
 }
 
 .practice-script-toggle button {
@@ -1751,17 +1772,178 @@ audio {
   font-weight: 800;
   min-height: 28px;
   padding: 0 9px;
+  position: relative;
+  transition: color 220ms ease;
 }
 
 .practice-script-toggle button[aria-pressed="true"] {
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(20, 33, 61, 0.14);
+  background: transparent;
+  box-shadow: none;
   color: #0f4da2;
 }
 
 .practice-script-toggle button:focus-visible {
   outline: 2px solid #2f80ed;
   outline-offset: 2px;
+}
+
+.practice-own-voice-control {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe8f7;
+  border-radius: 12px;
+  color: #52677f;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 34px;
+  padding: 3px 10px 3px 7px;
+}
+
+.practice-own-voice-control input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.practice-own-voice-switch {
+  background: #c7d2e1;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(31, 66, 108, 0.08);
+  display: inline-block;
+  height: 20px;
+  pointer-events: none;
+  position: relative;
+  transition: background-color 170ms ease;
+  width: 34px;
+}
+
+.practice-own-voice-switch::after {
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(20, 33, 61, 0.22);
+  content: "";
+  height: 16px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transform: translateX(0);
+  transition: transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
+  width: 16px;
+}
+
+.practice-own-voice-control input:checked + .practice-own-voice-switch {
+  background: #2f80ed;
+}
+
+.practice-own-voice-control input:checked + .practice-own-voice-switch::after {
+  transform: translateX(14px);
+}
+
+.practice-own-voice-control:has(input:focus-visible) {
+  outline: 2px solid #2f80ed;
+  outline-offset: 2px;
+}
+
+.practice-own-voice-control:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.voice-lab-toast-viewport {
+  display: grid;
+  gap: 10px;
+  max-width: min(390px, calc(100vw - 32px));
+  pointer-events: none;
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  top: max(70px, calc(env(safe-area-inset-top) + 58px));
+  width: 100%;
+  z-index: 120;
+}
+
+.voice-lab-toast {
+  align-items: center;
+  animation: voice-lab-toast-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(44, 95, 158, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 16px 44px rgba(25, 46, 79, 0.18), 0 2px 8px rgba(25, 46, 79, 0.08);
+  color: #26364c;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr) 30px;
+  line-height: 1.45;
+  padding: 11px 10px 11px 13px;
+  pointer-events: auto;
+}
+
+.voice-lab-toast[data-state="error"] {
+  border-color: rgba(179, 53, 39, 0.26);
+}
+
+.voice-lab-toast-icon {
+  align-items: center;
+  background: #e8f3ff;
+  border-radius: 50%;
+  color: #1764bd;
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.voice-lab-toast[data-state="error"] .voice-lab-toast-icon {
+  background: #fff0ed;
+  color: #b33827;
+}
+
+.voice-lab-toast-icon svg {
+  fill: none;
+  height: 14px;
+  stroke: currentColor;
+  width: 14px;
+}
+
+.voice-lab-toast-message {
+  font-size: 13px;
+  font-weight: 800;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.voice-lab-toast-close {
+  align-items: center;
+  align-self: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #738196;
+  cursor: pointer;
+  display: flex;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.voice-lab-toast-close:hover { background: #eef3f8; color: #26364c; }
+.voice-lab-toast-close:focus-visible { outline: 2px solid #2f80ed; outline-offset: 1px; }
+.voice-lab-toast-close svg { fill: none; height: 16px; stroke: currentColor; width: 16px; }
+
+@keyframes voice-lab-toast-in {
+  from { opacity: 0; transform: translate3d(18px, -6px, 0) scale(0.98); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .practice-script-indicator,
+  .practice-own-voice-switch,
+  .practice-own-voice-switch::after { transition-duration: 0.01ms; }
+  .voice-lab-toast { animation: none; }
 }
 
 .practice-header-auth {
@@ -2431,23 +2613,46 @@ fieldset.public-samples-admin {
   padding: 9px;
 }
 
-.practice-diff-mismatch {
-  background: #ffe8e4;
+.practice-diff-grid {
+  align-items: end;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 1px 0;
+  max-width: 100%;
+}
+
+.practice-diff-cell {
+  align-items: end;
+  background: transparent;
   border: 0;
-  border-radius: 6px;
-  color: #c1121f;
-  cursor: pointer;
+  color: inherit;
   display: inline-grid;
   font: inherit;
-  gap: 1px;
+  grid-template-rows: minmax(0.72em, auto) auto;
   justify-items: center;
   line-height: 1.05;
-  margin: 0 1px;
-  padding: 1px 4px 2px;
-  text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 0.12em;
-  vertical-align: baseline;
+  margin: 0;
+  min-width: 0.7em;
+  padding: 1px 0;
+  vertical-align: bottom;
+}
+
+button.practice-diff-cell {
+  border-radius: 5px;
+  cursor: pointer;
+  padding-inline: 2px;
+}
+
+button.practice-diff-cell:hover,
+button.practice-diff-cell:focus-visible {
+  background: #fff0ed;
+  outline: 2px solid color-mix(in srgb, #c1121f 42%, transparent);
+  outline-offset: 1px;
+}
+
+.practice-diff-cell.is-equal {
+  justify-items: start;
+  max-width: 100%;
 }
 
 .practice-diff-correction {
@@ -2456,27 +2661,103 @@ fieldset.public-samples-admin {
   font-weight: 900;
   line-height: 1;
   min-height: 1em;
+  white-space: pre;
+}
+
+.practice-diff-cell.is-equal .practice-diff-correction {
+  visibility: hidden;
+}
+
+.practice-diff-cell.is-equal .practice-diff-heard {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .practice-diff-heard {
   display: inline-block;
-  line-height: 1.05;
+  line-height: 1.08;
+  white-space: pre;
 }
 
-.practice-diff-missing {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
+.practice-diff-cell.is-substitute .practice-diff-heard,
+.practice-diff-cell.is-delete .practice-diff-heard,
+.practice-diff-cell.is-insert .practice-diff-heard {
   color: #c1121f;
-  cursor: pointer;
-  display: inline-grid;
-  font: inherit;
-  margin: 0 2px;
-  padding: 0 2px;
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.12em;
-  text-decoration-style: solid;
+}
+
+.practice-diff-cell.is-delete .practice-diff-heard {
+  color: #9d2b20;
+  letter-spacing: 0.04em;
+}
+
+.practice-job-status {
+  align-items: center;
+  background: color-mix(in srgb, var(--user-accent, #2f80ed) 8%, #fff);
+  border: 1px solid color-mix(in srgb, var(--user-accent, #2f80ed) 26%, #dbe8f7);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.practice-job-status[hidden] {
+  display: none;
+}
+
+.practice-job-status-indicator {
+  animation: practice-job-pulse 1.2s ease-in-out infinite;
+  background: var(--user-accent, #2f80ed);
+  border: 4px solid color-mix(in srgb, var(--user-accent, #2f80ed) 16%, #fff);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--user-accent, #2f80ed) 36%, transparent);
+  height: 11px;
+  width: 11px;
+}
+
+.practice-job-status[data-state="succeeded"] .practice-job-status-indicator {
+  animation: none;
+  background: #1f9d68;
+}
+
+.practice-job-status[data-state="failed"] .practice-job-status-indicator {
+  animation: none;
+  background: #c1121f;
+}
+
+.practice-job-status-copy {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 9px;
+  min-width: 0;
+}
+
+.practice-job-status-copy strong {
+  color: #23364f;
+  font-size: 14px;
+}
+
+.practice-job-status-model {
+  color: #46617f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.practice-job-status-detail {
+  color: #667a92;
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@keyframes practice-job-pulse {
+  50% { opacity: 0.45; transform: scale(0.78); }
 }
 
 .practice-status,
@@ -4059,6 +4340,13 @@ fieldset.public-samples-admin {
 .react-public-body[data-layout="compact"] .practice-target-practice-row { gap: 14px; }
 .react-public-body[data-layout="compact"] .practice-target-text-box { border-color: var(--react-border); border-radius: 12px; }
 .react-public-body[data-layout="compact"] .practice-play-button { background: var(--react-accent-hover); }
+.react-public-body[data-layout="compact"] .practice-play-button:disabled {
+  background: #8f9aab;
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: saturate(0.35);
+  opacity: 0.58;
+}
 .react-public-body[data-layout="compact"] .practice-grade-guide { font-size: 11px; margin: 5px 0 0; }
 
 /* SkitVoice: two columns at intermediate widths, three only when spacious. */
@@ -4264,6 +4552,7 @@ fieldset.public-samples-admin {
   .react-public-body[data-layout="compact"] .practice-current-language { padding: 0 10px; }
   .react-public-body[data-layout="compact"] .practice-language-select select { font-size: 14px; min-width: 7.5em; }
   .react-public-body[data-layout="compact"] .practice-script-toggle button { min-height: 36px; padding-inline: 10px; }
+  .react-public-body[data-layout="compact"] .practice-own-voice-control { min-height: 42px; }
   .react-public-body[data-layout="compact"] .react-flow-card { padding: 12px; }
   .react-public-body[data-layout="compact"] .practice-step-number { height: 22px; width: 22px; }
   .react-public-body[data-layout="compact"] .practice-record-orb { height: 78px; width: 78px; }
@@ -4271,6 +4560,13 @@ fieldset.public-samples-admin {
   .react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script { font-size: 13px; }
   .react-public-body[data-layout="compact"] .vibevoice-upload-actions button,
   .react-public-body[data-layout="compact"] .vibevoice-upload-action { font-size: 10.5px; padding-inline: 4px; }
+  .voice-lab-toast-viewport {
+    left: 12px;
+    max-width: none;
+    right: 12px;
+    top: max(70px, calc(env(safe-area-inset-top) + 58px));
+    width: auto;
+  }
 }
 
 /* Theme settings */
@@ -4352,17 +4648,50 @@ html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-generat
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { background: transparent; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { color: #bdcaf0; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button[aria-pressed="true"] {
-  background: rgba(189, 202, 240, 0.16);
+  background: transparent;
   color: #dce5ff;
 }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle { background: rgba(255, 255, 255, 0.08); }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-indicator {
+  background: rgba(126, 156, 223, 0.2);
+  border-color: rgba(170, 195, 246, 0.14);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button { color: #aab4c5; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button[aria-pressed="true"] { color: #f2f5fa; }
+html[data-theme="dark"] .react-public-body .practice-own-voice-control {
+  background: var(--react-paper);
+  border-color: var(--react-border);
+  color: #c6d1e3;
+}
+html[data-theme="dark"] .react-public-body .practice-own-voice-switch { background: #526078; }
+html[data-theme="dark"] .react-public-body .practice-own-voice-control input:checked + .practice-own-voice-switch { background: #5e9ff0; }
+html[data-theme="dark"] .voice-lab-toast {
+  background: rgba(27, 34, 48, 0.98);
+  border-color: rgba(134, 169, 226, 0.26);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+  color: #edf2fb;
+}
+html[data-theme="dark"] .voice-lab-toast[data-state="error"] { border-color: rgba(238, 126, 110, 0.34); }
+html[data-theme="dark"] .voice-lab-toast-icon { background: rgba(94, 159, 240, 0.16); color: #9bc5ff; }
+html[data-theme="dark"] .voice-lab-toast[data-state="error"] .voice-lab-toast-icon { background: rgba(238, 126, 110, 0.14); color: #ff9f91; }
+html[data-theme="dark"] .voice-lab-toast-close { color: #aab6c9; }
+html[data-theme="dark"] .voice-lab-toast-close:hover { background: #2a3446; color: #f2f5fa; }
 html[data-theme="dark"] .react-public-body .practice-recognized-text {
   background: #111722;
   border-color: var(--react-border);
   color: #f2f5fa;
 }
+html[data-theme="dark"] .react-public-body .practice-job-status {
+  background: rgba(42, 54, 78, 0.9);
+  border-color: rgba(126, 156, 223, 0.28);
+}
+html[data-theme="dark"] .react-public-body .practice-job-status-copy strong { color: #edf3ff; }
+html[data-theme="dark"] .react-public-body .practice-job-status-model,
+html[data-theme="dark"] .react-public-body .practice-job-status-detail { color: #b9c7df; }
+html[data-theme="dark"] .react-public-body button.practice-diff-cell:hover,
+html[data-theme="dark"] .react-public-body button.practice-diff-cell:focus-visible { background: rgba(193, 18, 31, 0.16); }
+html[data-theme="dark"] .react-public-body .practice-diff-correction { color: #8eb7ff; }
 html[data-theme="dark"] .react-public-body .practice-native-transcript { color: #d9e1ef; }
 html[data-theme="dark"] .react-public-body .practice-mini-label { color: #d8b56f; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-current-language span,

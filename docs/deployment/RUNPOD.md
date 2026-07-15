@@ -1,6 +1,6 @@
 # RunPodデプロイ手順
 
-更新日: 2026-07-14
+更新日: 2026-07-15
 
 ## 現在の状態
 
@@ -14,7 +14,11 @@ RunPod向けDockerfile、CLI補助スクリプト、Serverless handler、Cloudfl
 4. Seed-VCのwarm実行が十分速いと実測できた場合だけ、ユーザー画面ではVCを既定動作にし、`にてるこえ` トグルを隠す検討に進む。
 5. 公開MVPではUI/gatewayをCloudflare側へ分け、RunPodは推論APIだけにする。
 
-Serverless handlerは、音声翻訳、テキスト読み上げ、Seed-VC、VibeVoiceに加え、SpeakLoopの中国語発音練習用 `practice_asr` を受ける。`practice_asr` はFunASR Paraformer Chineseを遅延ロードし、VAD・句読点モデルとtimestampを使う。SpeakLoopの英語発音練習はOpenAI `whisper-1`、母語で話す録音はOpenAIの自動言語判定を引き続き使う。
+Serverless handlerは、音声翻訳、テキスト読み上げ、Seed-VC、VibeVoiceに加え、SpeakLoopの中国語発音練習用 `practice_asr` を受ける。`practice_asr` はお手本と復唱の2音声をFunASR Paraformer Chineseでtimestamp付きASRし、VAD・句読点モデルを併用する。SpeakLoopの英語発音練習は両音声にOpenAI `whisper-1`、母語で話す録音はOpenAIの自動言語判定を引き続き使う。
+
+SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り `/status/<job-id>` をpollingする。handlerはprogress updateとして `initializing`、`loading_model`、`transcribing_model`、`transcribing_attempt`、`finalizing` を送る。queue中はjob statusと `/health` のworker数から、worker割り当て待ちとworker初期化中を区別する。RunPodが返す `delayTime` と `executionTime` もUIの補足情報に使う。
+
+SkitVoiceも同じ非同期job経路で進捗を返す。handlerは `loading_vibevoice_model`、`vibevoice_generation`、`directed_asr`、`loading_seed_vc_model`、`voice_conversion`、`reconstruct`、`finalizing` をモデル名付きで送る。SpeakLoopで `自分の声` を選んだ場合も、通常TTSを変換元、最初の録音をSeed-VC参照音声として同じvoice conversion jobへ送り、GPU待機、Seed-VCモデル読込、声質変換を表示する。Cloudflare WorkerとローカルFastAPIは途中結果を履歴保存せず、RunPod job statusをpollingして既存進捗欄へ表示する。失敗時はRunPodが返した原因を保持し、残高不足を文言から明確に判別できる場合だけBillingの確認を案内する。
 
 ## Podで確認する場合
 
@@ -406,8 +410,12 @@ RUNPOD_API_KEY=<api-key> \
 python scripts/runpod_smoke_serverless.py \
   --operation-mode practice_asr \
   --audio /path/to/chinese-attempt.webm \
-  --request-mode sync
+  --model-audio /path/to/chinese-model.wav \
+  --target-text '你好吗？你今天去哪里？' \
+  --request-mode async
 ```
+
+`--model-audio` と `--target-text` を省略すると復唱音声単体のFunASR確認になる。SpeakLoopの比較経路を確認する場合は省略しない。両音声を指定したsmokeは `practice_asr_contract_version=2` と `model_transcription` も検査し、旧imageまたは不完全なhandler応答では終了コード1にする。
 
 FunASRをwarmupする場合は `--operation-mode warmup --preload-practice-asr` を使う。Seed-VCとFunASRを同じwarmup requestで同時に先読みする指定は受け付けない。
 

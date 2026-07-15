@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,6 +10,21 @@ from mo_speech import runpod_handler
 from mo_speech.pipeline import PipelineProgress, PipelineResult, TtsOutput
 from mo_speech.providers.openai_api import AsrTranscription
 from mo_speech.providers.voice import VoiceConversionBackendInfo, VoiceConversionService
+
+
+def test_runpod_progress_failure_does_not_abort_processing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_progress_update(*_args: object) -> None:
+        raise RuntimeError("progress channel unavailable")
+
+    fake_runpod = SimpleNamespace(
+        serverless=SimpleNamespace(progress_update=fail_progress_update),
+    )
+    monkeypatch.setitem(sys.modules, "runpod", fake_runpod)
+
+    runpod_handler._report_runpod_progress(
+        {"id": "job-1"},
+        {"stage": "loading_model", "label": "FunASRモデルを読み込んでいます"},
+    )
 
 
 def test_runpod_handler_translates_base64_audio(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,6 +138,59 @@ def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: py
     assert payload["serverless"]["operation_mode"] == "practice_asr"
 
 
+def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[bytes, str]] = []
+    progress: list[dict[str, object]] = []
+
+    class FakeFunAsrProvider:
+        name = "funasr-paraformer-zh"
+        model = "funasr/paraformer-zh"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            assert source_language == "zh-CN"
+            assert include_timestamps is True
+            audio = audio_path.read_bytes()
+            text = "你好吗？" if audio == b"model audio" else "你哈吗？"
+            calls.append((audio, text))
+            return AsrTranscription(
+                text=text,
+                model=self.model,
+                words=[{"text": text.rstrip("？"), "start": 0.1, "end": 0.9}],
+                timestamp_granularities=["word"],
+            )
+
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
+    monkeypatch.setattr(runpod_handler, "_report_runpod_progress", lambda _event, value: progress.append(value))
+
+    payload = runpod_handler.handler(
+        {
+            "id": "job-1",
+            "input": {
+                "operation_mode": "practice_asr",
+                "audio_base64": base64.b64encode(b"attempt audio").decode("ascii"),
+                "model_audio_base64": base64.b64encode(b"model audio").decode("ascii"),
+                "audio_mime_type": "audio/webm",
+                "model_audio_mime_type": "audio/wav",
+                "source_language": "zh-CN",
+                "target_text": "你好吗？",
+            },
+        }
+    )
+
+    assert calls == [(b"model audio", "你好吗？"), (b"attempt audio", "你哈吗？")]
+    assert payload["text"] == "你哈吗？"
+    assert payload["target_text"] == "你好吗？"
+    assert payload["model_transcription"]["text"] == "你好吗？"
+    assert payload["practice_asr_contract_version"] == 2
+    assert [entry["stage"] for entry in progress] == [
+        "initializing",
+        "transcribing_model",
+        "transcribing_attempt",
+        "finalizing",
+    ]
+    assert all(entry["model"] == "funasr/paraformer-zh" for entry in progress)
+
+
 def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
@@ -202,6 +272,32 @@ def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPa
     assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
+def test_runpod_handler_reports_seed_vc_model_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = FakeVcProvider()
+    progress = []
+    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([provider]))
+    monkeypatch.setattr(runpod_handler, "_report_runpod_progress", lambda _event, item: progress.append(item))
+
+    runpod_handler.handler(
+        {
+            "id": "voice-job-1",
+            "input": {
+                "operation_mode": "voice_conversion",
+                "source_audio_base64": base64.b64encode(b"source audio").decode("ascii"),
+                "reference_audio_base64": base64.b64encode(b"reference audio").decode("ascii"),
+                "source_audio_mime_type": "audio/wav",
+                "reference_audio_mime_type": "audio/wav",
+                "voice_backend": "seed-vc",
+            },
+        }
+    )
+
+    assert progress[0]["stage"] == "initializing"
+    assert progress[1]["stage"] == "loading_seed_vc_model"
+    assert progress[-1]["stage"] == "voice_conversion"
+    assert all(item["model"] for item in progress)
+
+
 def test_runpod_handler_inserts_audio_effect_after_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = FakeVcProvider()
     captured = {}
@@ -273,14 +369,21 @@ def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatch) -> None:
+    progress: list[dict[str, object]] = []
+
     class FakeVibeVoiceService:
-        def generate(self, *, script_text, voice_paths, options):
+        def generate(self, *, script_text, voice_paths, options, progress_callback=None):
             assert script_text == "Speaker 1: 你好。"
             assert len(voice_paths) == 1
             assert voice_paths[0].slot == 1
             assert voice_paths[0].path.read_bytes() == b"voice"
             assert options.model_id == "vibevoice-large-aoi-pinned"
             assert options.inference_steps == 2
+            assert progress_callback is not None
+            progress_callback("generation", "VibeVoice生成中 4/10 (40%)")
+            progress_callback("asr", "指定台詞ASR")
+            progress_callback("loading_model", "Seed-VCモデルを読み込んでいます")
+            progress_callback("voice_conversion", "指定台詞 Line 1 VC 1/1")
             return type(
                 "FakeVibeVoiceResult",
                 (),
@@ -295,7 +398,9 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
             )()
 
     monkeypatch.setattr(runpod_handler, "_VIBEVOICE_SERVICE", FakeVibeVoiceService())
+    monkeypatch.setattr(runpod_handler, "_report_runpod_progress", lambda _event, value: progress.append(value))
     event = {
+        "id": "vv-job",
         "input": {
             "operation_mode": "vibevoice",
             "response_audio_format": "wav",
@@ -329,6 +434,18 @@ def test_runpod_handler_generates_vibevoice_audio(monkeypatch: pytest.MonkeyPatc
     assert payload["diagnostics"]["script_translation"]["translated_script"] == "Speaker 1: 你好。"
     assert payload["diagnostics"]["script_translation"]["model"] == "test-model"
     assert payload["serverless"]["operation_mode"] == "vibevoice"
+    assert [item["stage"] for item in progress] == [
+        "initializing",
+        "loading_vibevoice_model",
+        "vibevoice_generation",
+        "directed_asr",
+        "loading_seed_vc_model",
+        "voice_conversion",
+        "finalizing",
+    ]
+    assert progress[1]["model"] == "vibevoice-large-aoi-pinned"
+    assert progress[3]["model"] == "whisper-1"
+    assert progress[4]["model"] == "Seed-VC"
 
 
 def test_runpod_handler_rejects_vibevoice_url_voice() -> None:

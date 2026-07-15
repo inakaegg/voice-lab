@@ -166,9 +166,16 @@ def test_runpod_smoke_script_supports_chinese_practice_asr() -> None:
     script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
 
     assert '"practice_asr"' in script
+    assert 'parser.add_argument("--model-audio")' in script
+    assert 'parser.add_argument("--target-text"' in script
     assert '"operation_mode": "practice_asr"' in script
     assert '"source_language": "zh-CN"' in script
+    assert 'input_payload["model_audio_base64"]' in script
+    assert 'input_payload["target_text"] = args.target_text' in script
+    assert 'PRACTICE_ASR_CONTRACT_VERSION = 2' in script
+    assert 'practice_asr_contract_version' in script
     assert '"preload_practice_asr": args.preload_practice_asr' in script
+    assert 'key.endswith("audio_base64")' in script
 
 
 def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:

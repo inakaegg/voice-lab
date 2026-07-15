@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 
+PRACTICE_ASR_CONTRACT_VERSION = 2
+
+
 def _optional_float_env(name: str) -> float | None:
     value = os.getenv(name)
     if value is None or value == "":
@@ -37,8 +40,10 @@ def main() -> int:
     )
     parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
     parser.add_argument("--audio")
+    parser.add_argument("--model-audio")
     parser.add_argument("--reference-audio")
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
+    parser.add_argument("--target-text", default=os.getenv("RUNPOD_SMOKE_TARGET_TEXT"))
     parser.add_argument("--script", default=os.getenv("RUNPOD_SMOKE_SCRIPT"))
     parser.add_argument("--script-file")
     parser.add_argument("--voice-audio", action="append", default=[])
@@ -220,6 +225,14 @@ def main() -> int:
             "audio_mime_type": mime_type,
             "source_language": "zh-CN",
         }
+        if args.model_audio:
+            model_audio_path = Path(args.model_audio)
+            input_payload["model_audio_base64"] = base64.b64encode(model_audio_path.read_bytes()).decode("ascii")
+            input_payload["model_audio_mime_type"] = (
+                mimetypes.guess_type(model_audio_path.name)[0] or "audio/wav"
+            )
+        if args.target_text:
+            input_payload["target_text"] = args.target_text
     if args.seed_vc_diffusion_steps is not None:
         input_payload["seed_vc_diffusion_steps"] = args.seed_vc_diffusion_steps
     if args.seed_vc_reference_max_seconds is not None:
@@ -261,6 +274,22 @@ def main() -> int:
     print(json.dumps(printable_body, ensure_ascii=False, indent=2))
     if body.get("status") in {"FAILED", "TIMED_OUT", "CANCELLED"}:
         return 1
+    if args.operation_mode == "practice_asr" and args.model_audio:
+        output = body.get("output")
+        if not isinstance(output, dict) and isinstance(body.get("text"), str):
+            output = body
+        if not isinstance(output, dict):
+            sys.stderr.write("practice_asr smoke did not return an output object\n")
+            return 1
+        if output.get("practice_asr_contract_version") != PRACTICE_ASR_CONTRACT_VERSION:
+            sys.stderr.write(
+                f"practice_asr contract mismatch: expected v{PRACTICE_ASR_CONTRACT_VERSION}; "
+                "redeploy the current RunPod image\n"
+            )
+            return 1
+        if not isinstance(output.get("model_transcription"), dict):
+            sys.stderr.write("practice_asr smoke did not return model_transcription\n")
+            return 1
     return 0
 
 
@@ -345,8 +374,8 @@ def _redact_audio_base64(value: Any) -> Any:
     if isinstance(value, dict):
         output: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "audio_base64" and isinstance(item, str):
-                output[key] = f"<audio_base64 {len(item)} chars>"
+            if key.endswith("audio_base64") and isinstance(item, str):
+                output[key] = f"<{key} {len(item)} chars>"
             else:
                 output[key] = _redact_audio_base64(item)
         return output

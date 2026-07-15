@@ -164,6 +164,35 @@ def test_runpod_practice_asr_provider_uses_sync_job_and_maps_timestamps(tmp_path
     assert provider.name == "runpod-funasr-paraformer-zh"
 
 
+def test_runpod_practice_asr_provider_submits_dual_audio_async_job(tmp_path: Path) -> None:
+    client = FakeRunpodClient({"id": "practice-job", "status": "IN_QUEUE"})
+    attempt_path = tmp_path / "attempt.webm"
+    model_path = tmp_path / "model.wav"
+    attempt_path.write_bytes(b"attempt audio")
+    model_path.write_bytes(b"model audio")
+    provider = RunpodServerlessPracticeAsrProvider(client=client)
+
+    snapshot = provider.submit_comparison_job(
+        attempt_audio_path=attempt_path,
+        model_audio_path=model_path,
+        source_language="zh-CN",
+        target_text="你好吗？",
+    )
+
+    assert snapshot == {"id": "practice-job", "status": "IN_QUEUE"}
+    assert client.job_inputs == [
+        {
+            "operation_mode": "practice_asr",
+            "source_language": "zh-CN",
+            "target_text": "你好吗？",
+            "audio_mime_type": "audio/webm",
+            "audio_base64": base64.b64encode(b"attempt audio").decode("ascii"),
+                "model_audio_mime_type": "audio/x-wav",
+            "model_audio_base64": base64.b64encode(b"model audio").decode("ascii"),
+        }
+    ]
+
+
 def test_runpod_client_submit_sync_always_uses_runsync() -> None:
     client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
     calls: list[tuple[str, str, object | None]] = []
@@ -177,6 +206,24 @@ def test_runpod_client_submit_sync_always_uses_runsync() -> None:
     assert client.submit_sync({"operation_mode": "practice_asr"}) == {"text": "你好"}
     assert calls == [
         ("POST", "/runsync", {"input": {"operation_mode": "practice_asr"}}),
+    ]
+
+
+def test_runpod_client_exposes_async_submit_and_status_without_polling() -> None:
+    client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="sync")
+    calls: list[tuple[str, str, object | None]] = []
+
+    def fake_request_json(path: str, *, method: str = "GET", payload: object | None = None, timeout_seconds: float | None = None):
+        calls.append((method, path, payload))
+        return {"id": "job-1", "status": "IN_QUEUE" if path == "/run" else "IN_PROGRESS"}
+
+    client._request_json = fake_request_json  # type: ignore[method-assign]
+
+    assert client.submit_job({"operation_mode": "practice_asr"})["status"] == "IN_QUEUE"
+    assert client.job_status("job-1")["status"] == "IN_PROGRESS"
+    assert calls == [
+        ("POST", "/run", {"input": {"operation_mode": "practice_asr"}}),
+        ("GET", "/status/job-1", None),
     ]
 
 
@@ -213,25 +260,83 @@ def test_runpod_serverless_voice_conversion_provider_maps_request(tmp_path: Path
     assert result.timings_ms["runpod_handler_total"] == 12.0
 
 
+def test_runpod_serverless_voice_conversion_provider_maps_remote_progress(tmp_path: Path) -> None:
+    class ProgressRunpodClient:
+        configured = True
+
+        def submit(self, input_payload, *, progress_callback=None):
+            assert input_payload["operation_mode"] == "voice_conversion"
+            assert progress_callback is not None
+            progress_callback({"id": "job-1", "status": "IN_QUEUE"})
+            progress_callback({
+                "id": "job-1",
+                "status": "IN_PROGRESS",
+                "output": {
+                    "stage": "loading_seed_vc_model",
+                    "label": "Seed-VCモデルを読み込んでいます",
+                    "model": "Seed-VC",
+                },
+            })
+            return {
+                "audio_mime_type": "audio/wav",
+                "audio_base64": base64.b64encode(b"converted wav").decode("ascii"),
+            }
+
+    source_path = tmp_path / "source.wav"
+    reference_path = tmp_path / "reference.wav"
+    source_path.write_bytes(b"source wav")
+    reference_path.write_bytes(b"reference wav")
+    progress = []
+
+    RunpodServerlessVoiceConversionProvider(client=ProgressRunpodClient()).convert(
+        source_audio_path=source_path,
+        reference_audio_path=reference_path,
+        progress_callback=progress.append,
+    )
+
+    assert [(item.stage, item.label, item.provider) for item in progress] == [
+        ("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless"),
+        ("loading_seed_vc_model", "Seed-VCモデルを読み込んでいます", "Seed-VC"),
+    ]
+
+
 def test_runpod_client_polls_async_job_until_completed() -> None:
     client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
     calls: list[tuple[str, str, object | None]] = []
+    progress: list[dict[str, object]] = []
+    status_calls = 0
 
     def fake_request_json(path: str, *, method: str = "GET", payload: object | None = None, timeout_seconds: float | None = None):
+        nonlocal status_calls
         calls.append((method, path, payload))
         if path == "/run":
             return {"id": "job-1", "status": "IN_QUEUE"}
         if path == "/status/job-1":
+            status_calls += 1
+            if status_calls == 1:
+                return {
+                    "id": "job-1",
+                    "status": "IN_PROGRESS",
+                    "output": {
+                        "stage": "loading_vibevoice_model",
+                        "label": "VibeVoice Largeモデルを読み込んでいます",
+                        "model": "vibevoice-large-aoi-pinned",
+                    },
+                }
             return {"id": "job-1", "status": "COMPLETED", "output": {"ok": True}}
         raise AssertionError(path)
 
     client._request_json = fake_request_json  # type: ignore[method-assign]
+    client.poll_interval_seconds = 0
 
-    assert client.submit({"operation_mode": "warmup"}) == {"ok": True}
+    assert client.submit({"operation_mode": "warmup"}, progress_callback=progress.append) == {"ok": True}
     assert calls == [
         ("POST", "/run", {"input": {"operation_mode": "warmup"}}),
         ("GET", "/status/job-1", None),
+        ("GET", "/status/job-1", None),
     ]
+    assert [item["status"] for item in progress] == ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"]
+    assert progress[1]["output"]["stage"] == "loading_vibevoice_model"
 
 
 def test_runpod_client_explains_completed_job_without_output() -> None:
@@ -274,13 +379,18 @@ class FakeRunpodClient:
         self.output = output
         self.inputs = []
         self.sync_inputs = []
+        self.job_inputs = []
 
-    def submit(self, input_payload):
+    def submit(self, input_payload, *, progress_callback=None):
         self.inputs.append(input_payload)
         return self.output
 
     def submit_sync(self, input_payload):
         self.sync_inputs.append(input_payload)
+        return self.output
+
+    def submit_job(self, input_payload):
+        self.job_inputs.append(input_payload)
         return self.output
 
     def warmup(self, input_payload=None):

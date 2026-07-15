@@ -1056,6 +1056,171 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     assert response.json()["providers"]["asr"] == "runpod-funasr-paraformer-zh"
 
 
+def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment() -> None:
+    class FakeAsyncRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def submit_comparison_job(self, **kwargs):
+            assert kwargs["attempt_audio_path"].read_bytes() == b"attempt audio"
+            assert kwargs["model_audio_path"].read_bytes() == b"model audio"
+            assert kwargs["source_language"] == "zh-CN"
+            assert kwargs["target_text"] == "你好吗？你今天去哪里？"
+            return {"id": "practice-job-1", "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 0, "initializing": 1}}
+
+        def job_status(self, job_id):
+            assert job_id == "practice-job-1"
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "delayTime": 1200,
+                "executionTime": 450,
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "你好吗？你今天去哪里？",
+                    "text": "你哈吗？你今天到那里？",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [
+                        {"text": "你哈吗", "start": 0.1, "end": 0.8},
+                        {"text": "你今天", "start": 1.0, "end": 1.5},
+                        {"text": "到那里", "start": 1.5, "end": 2.3},
+                    ],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "你好吗？你今天去哪里？",
+                        "model": "funasr/paraformer-zh",
+                        "timestamp_granularities": ["word"],
+                        "words": [
+                            {"text": "你好吗", "start": 0.1, "end": 0.8},
+                            {"text": "你今天", "start": 1.0, "end": 1.5},
+                            {"text": "去哪里", "start": 1.5, "end": 2.4},
+                        ],
+                        "segments": [],
+                    },
+                    "providers": {"asr": "funasr-paraformer-zh"},
+                },
+            }
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=FakeAsyncRunpodAsr()))
+
+    submitted = client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "zh-CN", "target_text": "你好吗？你今天去哪里？"},
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert submitted.status_code == 202
+    queued = submitted.json()
+    assert queued["job_id"] == "practice-job-1"
+    assert queued["status"] == "queued"
+    assert queued["current_stage"]["stage"] == "initializing"
+    assert queued["current_stage"]["model"] == "funasr/paraformer-zh"
+
+    completed = client.get("/api/practice/attempt-jobs/practice-job-1")
+    assert completed.status_code == 200
+    snapshot = completed.json()
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
+    assert snapshot["result"]["recognized_text"] == "你哈吗？你今天到那里？"
+    assert snapshot["result"]["comparison_alignment"]["complete"] is True
+    assert snapshot["result"]["model_comparison_alignment"]["complete"] is True
+
+
+def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
+    class OutdatedRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def job_status(self, job_id):
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "target_text": "你好吗？",
+                    "text": "你好吗？",
+                    "model": "funasr/paraformer-zh",
+                },
+            }
+
+        def health(self):
+            return {}
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=OutdatedRunpodAsr()))
+
+    response = client.get("/api/practice/attempt-jobs/outdated-practice-job")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["current_stage"]["label"] == "RunPod imageの更新が必要です"
+    assert "practice ASR contract v2" in payload["error"]
+    assert "再デプロイ" in payload["error"]
+
+
+def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> None:
+    class SequencedAsr:
+        name = "fake-whisper"
+
+        def __init__(self):
+            self.calls = []
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            audio = audio_path.read_bytes()
+            self.calls.append((audio, source_language, include_timestamps))
+            if audio == b"model audio":
+                return AsrTranscription(
+                    text="Where are you going?",
+                    model="whisper-1",
+                    words=[{"text": "Where are you going", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(
+                text="Where you going?",
+                model="whisper-1",
+                words=[{"text": "Where you going", "start": 0.1, "end": 1.0}],
+                timestamp_granularities=["word"],
+            )
+
+    asr = SequencedAsr()
+    pipeline = SpeechTranslationPipeline(asr=asr, translator=FakeTranslationProvider({}), tts=FakeTtsProvider())
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "en-US", "target_text": "Where are you going?"},
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["result"]["recognized_text"] == "Where you going?"
+    assert snapshot["result"]["model_recognized_text"] == "Where are you going?"
+    assert snapshot["result"]["model_comparison_alignment"]["complete"] is True
+    assert asr.calls == [
+        (b"model audio", "en-US", True),
+        (b"attempt audio", "en-US", True),
+    ]
+
+
 def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
     class FakeRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
@@ -1116,6 +1281,70 @@ def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exi
     assert payload["target_text"] == "我想学习软体开发。"
     assert payload["audio_base64"] == base64.b64encode("FAKE-WAV:zh-CN:我想学习软体开发。".encode()).decode()
     assert "classification" not in payload
+
+
+def test_practice_recording_api_can_create_seed_vc_model_voice_job(monkeypatch) -> None:
+    class PracticeSeedVcProvider(FakeVoiceConversionProvider):
+        backend_id = "seed-vc"
+        label = "Seed-VC"
+        name = "fake-seed-vc"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.source_audio_bytes = b""
+            self.reference_audio_bytes = b""
+
+        def convert(self, *, source_audio_path, reference_audio_path, seed_vc_settings=None, progress_callback=None):
+            self.source_audio_bytes = source_audio_path.read_bytes()
+            self.reference_audio_bytes = reference_audio_path.read_bytes()
+            return super().convert(
+                source_audio_path=source_audio_path,
+                reference_audio_path=reference_audio_path,
+                seed_vc_settings=seed_vc_settings,
+                progress_callback=progress_callback,
+            )
+
+    provider = PracticeSeedVcProvider()
+    monkeypatch.setattr(
+        "mo_speech.api.RunpodServerlessVoiceConversionProvider",
+        lambda: provider,
+    )
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "今日は何をしますか"}),
+        translator=FakeTranslationProvider({("auto", "en-US", "今日は何をしますか"): "What are you doing today?"}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+        )
+    )
+
+    response = client.post(
+        "/api/practice/recordings",
+        data={"recording_intent": "prompt", "target_language": "en-US", "use_own_voice": "true"},
+        files={"audio": ("recording.webm", b"my reference voice", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    job = payload["voice_conversion_job"]
+    assert job["status"] in {"queued", "running", "succeeded"}
+    assert job["job_id"]
+
+    for _ in range(20):
+        snapshot = client.get(f"/api/practice/voice-jobs/{job['job_id']}").json()
+        if snapshot["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("practice voice conversion job did not finish")
+
+    assert snapshot["result"]["audio_base64"] == base64.b64encode(b"fake converted wav").decode("ascii")
+    assert provider.source_audio_bytes == b"FAKE-WAV:en-US:What are you doing today?"
+    assert provider.reference_audio_bytes == b"my reference voice"
+    assert provider.last_seed_vc_settings is not None
+    assert provider.last_seed_vc_settings.reference_auto_select is True
 
 
 def test_practice_recording_api_requires_explicit_recording_intent() -> None:

@@ -993,6 +993,7 @@ class VibeVoiceService:
                             vc_service,
                             source_audio_path=clip_input,
                             reference_audio_path=samples_by_slot[line.speaker].path,
+                            progress_callback=progress_callback,
                         )
                         voice_conversion_total_ms += _elapsed_ms(vc_started)
                         vc_key = f"line-{line.index}"
@@ -1466,28 +1467,66 @@ class RunpodServerlessVibeVoiceService:
         )
         started = perf_counter()
         _report_vibevoice_progress(progress_callback, "submit", "RunPod送信")
-        output = self.client.submit(
-            {
-                "operation_mode": "vibevoice",
-                "script": normalized_script,
-                "voices": [
-                    {
-                        "speaker": sample.slot,
-                        "filename": sample.path.name,
-                        "audio_mime_type": _audio_mime_type(sample.path),
-                        "audio_base64": base64.b64encode(sample.path.read_bytes()).decode("ascii"),
-                    }
-                    for sample in voice_samples
-                ],
-                "generation": _options_payload(generation_options),
-            }
-        )
+        payload = {
+            "operation_mode": "vibevoice",
+            "script": normalized_script,
+            "voices": [
+                {
+                    "speaker": sample.slot,
+                    "filename": sample.path.name,
+                    "audio_mime_type": _audio_mime_type(sample.path),
+                    "audio_base64": base64.b64encode(sample.path.read_bytes()).decode("ascii"),
+                }
+                for sample in voice_samples
+            ],
+            "generation": _options_payload(generation_options),
+        }
+        if progress_callback is None:
+            output = self.client.submit(payload)
+        else:
+            output = self.client.submit(
+                payload,
+                progress_callback=lambda body: _report_runpod_vibevoice_status(progress_callback, body),
+            )
         _report_vibevoice_progress(progress_callback, "receive", "RunPod結果受信")
         return _vibevoice_result_from_output(
             output,
             normalized_script=normalized_script,
             fallback_elapsed_ms=_elapsed_ms(started),
         )
+
+
+def _report_runpod_vibevoice_status(
+    progress_callback: Callable[[str, str], None],
+    body: dict[str, object],
+) -> None:
+    status = str(body.get("status") or "").upper()
+    progress = body.get("output")
+    if status in {"IN_PROGRESS", "RUNNING"} and isinstance(progress, dict):
+        stage = str(progress.get("stage") or "processing")
+        label = str(progress.get("label") or "RunPodでSkitVoiceを処理しています")
+        model = str(progress.get("model") or "").strip()
+        model_label = _vibevoice_progress_model_label(model)
+        detail = str(progress.get("detail") or "").strip()
+        suffix = " · ".join(value for value in (model_label, detail) if value and value not in label)
+        _report_vibevoice_progress(progress_callback, stage, f"{label} · {suffix}" if suffix else label)
+        return
+    if status in {"", "IN_QUEUE", "QUEUED"}:
+        _report_vibevoice_progress(progress_callback, "gpu_wait", "利用可能なGPUを待っています")
+        return
+    if status in {"IN_PROGRESS", "RUNNING"}:
+        _report_vibevoice_progress(progress_callback, "initializing", "RunPodワーカーを初期化しています")
+
+
+def _vibevoice_progress_model_label(model: str) -> str:
+    normalized = str(model or "").strip().lower()
+    if "vibevoice" in normalized and "large" in normalized:
+        return "VibeVoice Large"
+    if "vibevoice" in normalized and "1.5b" in normalized:
+        return "VibeVoice 1.5B"
+    if normalized == "seed-vc" or "plachta/seed-vc" in normalized:
+        return "Seed-VC"
+    return str(model or "").strip()
 
 
 def _format_number(value: float) -> str:
@@ -1646,8 +1685,23 @@ def _create_directed_voice_conversion_service():
     return create_voice_conversion_service_from_env()
 
 
-def _convert_directed_voice(voice_conversion_service, *, source_audio_path: Path, reference_audio_path: Path):
+def _convert_directed_voice(
+    voice_conversion_service,
+    *,
+    source_audio_path: Path,
+    reference_audio_path: Path,
+    progress_callback: Callable[[str, str], None] | None = None,
+):
+    from .pipeline import PipelineProgress
     from .providers.voice import SeedVcRuntimeSettings, VoiceConversionRequest
+
+    def report_voice_conversion(progress: PipelineProgress) -> None:
+        if progress_callback is None:
+            return
+        if progress.stage == "loading_model":
+            progress_callback("loading_model", "Seed-VCモデルを読み込んでいます")
+            return
+        progress_callback(progress.stage, progress.label)
 
     return voice_conversion_service.convert(
         VoiceConversionRequest(
@@ -1655,7 +1709,8 @@ def _convert_directed_voice(voice_conversion_service, *, source_audio_path: Path
             reference_audio_path=reference_audio_path,
             backend_id=_directed_voice_conversion_backend(),
             seed_vc_settings=SeedVcRuntimeSettings(),
-        )
+        ),
+        progress_callback=report_voice_conversion if progress_callback is not None else None,
     )
 
 

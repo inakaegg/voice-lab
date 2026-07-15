@@ -32,7 +32,7 @@
 
 - ローカルFastAPI版はローカル音声履歴と公開サンプルを保存できる。公開サンプルの既定保存先は `tmp/public-sample-audios.json` で、Cloudflare版と同じ管理・表示API契約を使う。Cloudflare公開版はユーザーの入力・生成音声を履歴保存せず、D1へquota・監査・公開サンプルmetadata、R2へ公開サンプルblobだけを置く。
 - D1/R2 bindingがないローカル・preview環境では、公開サンプル、quota、監査にWorkers KV fallbackを使う。
-- 短期job stateと一部の軽量設定はWorkers KVに残る。現在のquotaは公開デモの過剰利用防止であり、厳密な課金台帳や永続workflow engineではない。
+- 音声翻訳など一部の短期job stateと軽量設定はWorkers KVに残る。SpeakLoopの中国語復唱jobはWorkerがRunPod statusを都度中継し、音声・結果・job snapshotをCloudflare側の履歴に保存しない。現在のquotaは公開デモの過剰利用防止であり、厳密な課金台帳や永続workflow engineではない。
 - 公開デモへ機密情報、個人情報、第三者の権利が不明な音声を入力しない。公開サンプルには公開許諾を確認できる素材だけを登録する。
 
 ## 応答速度

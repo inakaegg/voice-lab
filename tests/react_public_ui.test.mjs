@@ -86,8 +86,25 @@ test("SpeakLoop provides a Chinese script segmented control backed by OpenCC", (
   assert.match(speakloop, /id="practice-chinese-script-setting"/);
   assert.match(speakloop, /id="practice-script-simplified"[\s\S]*简体/);
   assert.match(speakloop, /id="practice-script-traditional"[\s\S]*繁體/);
+  assert.match(speakloop, /className="practice-script-indicator"/);
+  assert.match(speakloop, /data-script="simplified"/);
   assert.match(pkg, /"opencc-js"/);
   assert.match(styles, /\.practice-script-toggle/);
+  assert.match(styles, /\.practice-script-indicator[\s\S]*transition:/);
+  assert.match(styles, /prefers-reduced-motion/);
+});
+
+test("SpeakLoop exposes an opt-in Seed-VC model voice control", () => {
+  assert.match(speakloop, /id="practice-own-voice-toggle"/);
+  assert.match(speakloop, /自分の声/);
+  assert.match(speakloop, /practice-own-voice-control/);
+});
+
+test("SkitVoice exposes a shared toast viewport outside the generation settings", () => {
+  assert.match(shared, /export function ToastViewport/);
+  assert.match(skitvoice, /<ToastViewport\s*\/>/);
+  assert.ok(skitvoice.indexOf("<ToastViewport") > skitvoice.indexOf("</form>"));
+  assert.match(styles, /\.voice-lab-toast-viewport/);
 });
 
 test("SpeakLoop keeps comparison playback simple without an auto-play preference control", () => {

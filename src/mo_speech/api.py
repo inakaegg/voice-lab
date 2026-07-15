@@ -11,7 +11,7 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from time import perf_counter
 from typing import Annotated
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -66,7 +66,10 @@ from .providers.openai_api import (
     create_openai_realtime_translation_client_secret,
     supported_openai_practice_asr_model,
 )
-from .providers.runpod_serverless import RunpodServerlessPracticeAsrProvider
+from .providers.runpod_serverless import (
+    RunpodServerlessPracticeAsrProvider,
+    RunpodServerlessVoiceConversionProvider,
+)
 from .providers.text_tts import create_text_tts_providers, text_tts_backend_statuses
 from .providers.voice import (
     VoiceConversionRequest,
@@ -154,6 +157,108 @@ def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
         "timestamp_granularities": result.timestamp_granularities,
         "words": result.words,
         "segments": result.segments,
+    }
+
+
+def _asr_transcription_from_runpod_output(
+    value: object,
+    *,
+    fallback_model: str = "funasr/paraformer-zh",
+) -> AsrTranscription:
+    payload = value if isinstance(value, dict) else {}
+    return AsrTranscription(
+        text=str(payload.get("text") or "").strip(),
+        model=str(payload.get("model") or fallback_model),
+        words=[dict(item) for item in payload.get("words", []) if isinstance(item, dict)],
+        segments=[dict(item) for item in payload.get("segments", []) if isinstance(item, dict)],
+        timestamp_granularities=[
+            str(item) for item in payload.get("timestamp_granularities", []) if str(item)
+        ],
+    )
+
+
+def _runpod_practice_metrics(body: dict[str, object]) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for source_key, target_key in (
+        ("delayTime", "delay_time_ms"),
+        ("executionTime", "execution_time_ms"),
+    ):
+        try:
+            value = float(body.get(source_key))
+        except (TypeError, ValueError):
+            continue
+        metrics[target_key] = value
+    return metrics
+
+
+def _runpod_worker_counts(health: object) -> dict[str, int]:
+    payload = health if isinstance(health, dict) else {}
+    workers = payload.get("workers")
+    if isinstance(workers, dict):
+        counts: dict[str, int] = {}
+        for key, value in workers.items():
+            try:
+                counts[str(key).lower()] = int(value)
+            except (TypeError, ValueError):
+                continue
+        return counts
+    if isinstance(workers, list):
+        counts = {}
+        for worker in workers:
+            if not isinstance(worker, dict):
+                continue
+            state = str(worker.get("state") or "unknown").lower()
+            counts[state] = counts.get(state, 0) + 1
+        return counts
+    return {}
+
+
+def _runpod_practice_error_message(body: object) -> str:
+    payload = body if isinstance(body, dict) else {}
+    detail = str(payload.get("error") or payload.get("message") or "RunPod practice ASR failed").strip()
+    if re.search(r"insufficient.*(?:balance|fund|credit)|(?:balance|fund|credit).*insufficient|payment required", detail, re.I):
+        return f"RunPodの残高不足でGPU処理を開始できません。RunPodのBillingを確認してください。詳細: {detail}"
+    return detail
+
+
+def _runpod_practice_stage(
+    body: dict[str, object],
+    health: object | None = None,
+) -> dict[str, object]:
+    model = "funasr/paraformer-zh"
+    status = str(body.get("status") or "").upper()
+    progress = body.get("output")
+    if status in {"IN_PROGRESS", "RUNNING"} and isinstance(progress, dict):
+        return {
+            "stage": str(progress.get("stage") or "processing"),
+            "label": str(progress.get("label") or "RunPodで処理しています"),
+            "provider": str(progress.get("provider") or "RunPod Serverless"),
+            "model": str(progress.get("model") or model),
+            "detail": str(progress.get("detail") or ""),
+        }
+    if status in {"IN_QUEUE", "QUEUED", ""}:
+        counts = _runpod_worker_counts(health)
+        if counts.get("initializing", 0) > 0:
+            return {
+                "stage": "initializing",
+                "label": "GPUワーカーを初期化しています",
+                "provider": "RunPod Serverless",
+                "model": model,
+                "detail": "worker起動後にFunASRモデルを読み込みます。",
+            }
+        return {
+            "stage": "gpu_wait",
+            "label": "利用可能なGPUを待っています",
+            "provider": "RunPod Serverless",
+            "model": model,
+            "detail": "RunPodのqueueでworkerの割り当てを待っています。",
+        }
+    return {
+        "stage": "processing",
+        "label": "RunPodで処理しています",
+        "provider": "RunPod Serverless",
+        "model": model,
+        "detail": "",
     }
 
 
@@ -769,6 +874,9 @@ def create_app(
     }
     active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
+    active_practice_voice_conversion_service = voice_conversion_service or VoiceConversionService(
+        providers=[RunpodServerlessVoiceConversionProvider()]
+    )
     active_vibevoice_service = vibevoice_service or VibeVoiceService.from_env()
     active_runpod_vibevoice_service = runpod_vibevoice_service or RunpodServerlessVibeVoiceService.from_env()
     active_reference_audio_extractor = reference_audio_extractor or MediaReferenceAudioExtractor()
@@ -778,6 +886,10 @@ def create_app(
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
+    practice_voice_conversion_job_store = VoiceConversionJobStore(
+        active_practice_voice_conversion_service,
+        active_audio_history_store,
+    )
     vibevoice_job_store = VibeVoiceJobStore()
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
@@ -1384,6 +1496,118 @@ def create_app(
         )
         return result
 
+    def _start_practice_voice_conversion_job(
+        *,
+        source_audio_bytes: bytes,
+        source_audio_mime_type: str,
+        reference_audio_bytes: bytes,
+        reference_audio_filename: str,
+    ) -> dict[str, object]:
+        audio_paths: list[Path] = []
+        try:
+            with NamedTemporaryFile(suffix=_mime_suffix(source_audio_mime_type), delete=False) as temp_source:
+                temp_source.write(source_audio_bytes)
+                temp_source.flush()
+                source_audio_path = Path(temp_source.name)
+            audio_paths.append(source_audio_path)
+            with NamedTemporaryFile(suffix=_upload_suffix(reference_audio_filename), delete=False) as temp_reference:
+                temp_reference.write(reference_audio_bytes)
+                temp_reference.flush()
+                reference_audio_path = Path(temp_reference.name)
+            audio_paths.append(reference_audio_path)
+            request = VoiceConversionRequest(
+                source_audio_path=source_audio_path,
+                reference_audio_path=reference_audio_path,
+                backend_id="seed-vc",
+                seed_vc_settings=_create_seed_vc_settings(
+                    diffusion_steps=None,
+                    length_adjust=1.0,
+                    inference_cfg_rate=0.7,
+                    reference_max_seconds=10.0,
+                    reference_auto_select=True,
+                ),
+            )
+            return practice_voice_conversion_job_store.start(request, audio_paths)
+        except Exception:
+            for audio_path in audio_paths:
+                audio_path.unlink(missing_ok=True)
+            raise
+
+    def _create_practice_attempt_result_from_transcriptions(
+        *,
+        practice_target_language: str,
+        target_text: str,
+        attempt_transcription: AsrTranscription,
+        attempt_provider_name: str,
+        attempt_asr_ms: float,
+        model_transcription: AsrTranscription | None = None,
+        model_provider_name: str = "",
+        model_asr_ms: float = 0.0,
+    ) -> dict[str, object]:
+        if practice_target_language == "zh-CN":
+            target_text = simplify_chinese_text(target_text)
+        recognized_text = attempt_transcription.text
+        model_recognized_text = model_transcription.text if model_transcription is not None else ""
+        if practice_target_language == "zh-CN":
+            recognized_text = simplify_chinese_text(recognized_text)
+            model_recognized_text = simplify_chinese_text(model_recognized_text)
+
+        compare_started = perf_counter()
+        evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
+        asr_timestamps = _serialize_asr_timestamps(attempt_transcription)
+        comparison_alignment = practice_comparison_alignment(
+            target_text=target_text,
+            recognized_text=recognized_text,
+            target_language=practice_target_language,
+            asr_timestamps=asr_timestamps,
+        )
+        model_asr_timestamps = (
+            _serialize_asr_timestamps(model_transcription)
+            if model_transcription is not None
+            else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
+        )
+        model_comparison_alignment = (
+            practice_comparison_alignment(
+                target_text=target_text,
+                recognized_text=model_recognized_text,
+                target_language=practice_target_language,
+                asr_timestamps=model_asr_timestamps,
+            )
+            if model_transcription is not None
+            else {
+                "available": False,
+                "complete": False,
+                "mode": "unavailable",
+                "reason": "model audio ASR was not requested",
+                "target_language": practice_target_language,
+                "ranges": [],
+            }
+        )
+        compare_ms = _elapsed_ms(compare_started)
+        return {
+            "recording_kind": "attempt",
+            "target_language": practice_target_language,
+            "target_text": target_text,
+            "recognized_text": recognized_text,
+            "model_recognized_text": model_recognized_text,
+            "asr_model": attempt_transcription.model,
+            "asr_timestamps": asr_timestamps,
+            "model_asr_timestamps": model_asr_timestamps,
+            **evaluation,
+            "comparison_alignment": comparison_alignment,
+            "model_comparison_alignment": model_comparison_alignment,
+            "timings_ms": {
+                "asr": attempt_asr_ms,
+                "model_asr": model_asr_ms,
+                "compare": compare_ms,
+                "total": attempt_asr_ms + model_asr_ms + compare_ms,
+            },
+            "providers": {
+                "asr": attempt_provider_name,
+                **({"model_asr": model_provider_name or attempt_provider_name} if model_transcription is not None else {}),
+            },
+        }
+
     def _create_practice_attempt_result(
         *,
         audio_bytes: bytes,
@@ -1396,8 +1620,6 @@ def create_app(
     ) -> dict[str, object]:
         if practice_target_language == "zh-CN":
             target_text = simplify_chinese_text(target_text)
-        total_started = perf_counter()
-        used_precomputed_asr = precomputed_asr_result is not None
         asr_provider = (
             active_runpod_practice_asr_provider
             if practice_target_language == "zh-CN"
@@ -1422,32 +1644,250 @@ def create_app(
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-        evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
-        asr_timestamps = _serialize_asr_timestamps(asr_result)
-        comparison_alignment = practice_comparison_alignment(
+        return _create_practice_attempt_result_from_transcriptions(
+            practice_target_language=practice_target_language,
             target_text=target_text,
-            recognized_text=recognized_text,
-            target_language=practice_target_language,
-            asr_timestamps=asr_timestamps,
+            attempt_transcription=AsrTranscription(
+                text=recognized_text,
+                model=asr_result.model,
+                words=asr_result.words,
+                segments=asr_result.segments,
+                timestamp_granularities=asr_result.timestamp_granularities,
+            ),
+            attempt_provider_name=asr_provider.name,
+            attempt_asr_ms=asr_ms,
         )
-        result = {
-            "target_language": practice_target_language,
-            "target_text": target_text,
-            "recognized_text": recognized_text,
-            "asr_model": asr_result.model,
-            "asr_timestamps": asr_timestamps,
-            **evaluation,
-            "comparison_alignment": comparison_alignment,
-            "timings_ms": {
-                "asr": asr_ms,
-                "compare": max(0.0, _elapsed_ms(total_started) - asr_ms),
-                "total": _elapsed_ms(total_started) + (asr_ms if used_precomputed_asr else 0.0),
-            },
-            "providers": {
-                "asr": asr_provider.name,
-            },
+
+    def _practice_attempt_job_snapshot(
+        body: dict[str, object],
+        *,
+        health: object | None = None,
+    ) -> dict[str, object]:
+        job_id = str(body.get("id") or body.get("job_id") or "")
+        status = str(body.get("status") or "").upper()
+        metrics = _runpod_practice_metrics(body)
+        stages = [
+            {"stage": "gpu_wait", "label": "GPU待機", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh"},
+            {"stage": "loading_model", "label": "モデル読込", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh"},
+            {"stage": "transcribing_model", "label": "お手本解析", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh"},
+            {"stage": "transcribing_attempt", "label": "録音解析", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh"},
+            {"stage": "finalizing", "label": "比較準備", "provider": "Voice Lab", "model": "funasr/paraformer-zh"},
+        ]
+        if status == "COMPLETED":
+            output = body.get("output")
+            if not isinstance(output, dict):
+                return {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "current_stage": {"stage": "failed", "label": "処理に失敗しました", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh"},
+                    "stages": stages,
+                    "metrics": metrics,
+                    "result": None,
+                    "error": "RunPod job completed without an output object",
+                }
+            try:
+                contract_version = int(output.get("practice_asr_contract_version") or 0)
+            except (TypeError, ValueError):
+                contract_version = 0
+            if contract_version < 2:
+                error = (
+                    "RunPod imageがpractice ASR contract v2に対応していません。"
+                    "現在のRunPod imageを再デプロイしてください。"
+                )
+                return {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "current_stage": {"stage": "failed", "label": "RunPod imageの更新が必要です", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh", "detail": error},
+                    "stages": stages,
+                    "metrics": metrics,
+                    "result": None,
+                    "error": error,
+                }
+            model_payload = output.get("model_transcription")
+            if not isinstance(model_payload, dict):
+                return {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "current_stage": {"stage": "failed", "label": "お手本音声の解析結果がありません", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh"},
+                    "stages": stages,
+                    "metrics": metrics,
+                    "result": None,
+                    "error": "RunPod practice job did not return model_transcription",
+                }
+            attempt_transcription = _asr_transcription_from_runpod_output(output)
+            model_transcription = _asr_transcription_from_runpod_output(model_payload)
+            providers = output.get("providers") if isinstance(output.get("providers"), dict) else {}
+            provider_name = str(providers.get("asr") or active_runpod_practice_asr_provider.name)
+            timings = output.get("timings_ms") if isinstance(output.get("timings_ms"), dict) else {}
+            result = _create_practice_attempt_result_from_transcriptions(
+                practice_target_language="zh-CN",
+                target_text=str(output.get("target_text") or ""),
+                attempt_transcription=attempt_transcription,
+                attempt_provider_name=provider_name,
+                attempt_asr_ms=float(timings.get("asr") or 0.0),
+                model_transcription=model_transcription,
+                model_provider_name=provider_name,
+                model_asr_ms=float(timings.get("model_asr") or 0.0),
+            )
+            return {
+                "job_id": job_id,
+                "status": "succeeded",
+                "current_stage": {"stage": "complete", "label": "比較準備が完了しました", "provider": "Voice Lab", "model": attempt_transcription.model},
+                "stages": [*stages, {"stage": "complete", "label": "完了", "provider": "Voice Lab", "model": attempt_transcription.model}],
+                "metrics": metrics,
+                "result": result,
+                "error": None,
+            }
+        if status in {"FAILED", "CANCELLED", "TIMED_OUT"}:
+            error = _runpod_practice_error_message(body)
+            return {
+                "job_id": job_id,
+                "status": "failed",
+                "current_stage": {"stage": "failed", "label": "処理に失敗しました", "provider": "RunPod Serverless", "model": "funasr/paraformer-zh", "detail": error},
+                "stages": stages,
+                "metrics": metrics,
+                "result": None,
+                "error": error,
+            }
+        queued = status in {"", "IN_QUEUE", "QUEUED"}
+        return {
+            "job_id": job_id,
+            "status": "queued" if queued else "running",
+            "current_stage": _runpod_practice_stage(body, health),
+            "stages": stages,
+            "metrics": metrics,
+            "result": None,
+            "error": None,
         }
-        return result
+
+    @app.post("/api/practice/attempt-jobs")
+    async def create_practice_attempt_job(
+        response: Response,
+        audio: Annotated[UploadFile, File()],
+        model_audio: Annotated[UploadFile, File()],
+        target_language: Annotated[str, Form()] = "en-US",
+        target_text: Annotated[str, Form()] = "",
+        asr_model: Annotated[str, Form()] = "whisper-1",
+    ) -> dict[str, object]:
+        try:
+            practice_target_language = supported_practice_target_language(target_language)
+            practice_asr_model = supported_openai_practice_asr_model(asr_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        normalized_target_text = str(target_text or "").strip()
+        if not normalized_target_text:
+            raise HTTPException(status_code=400, detail="target_text is required")
+
+        attempt_audio_bytes = await audio.read()
+        model_audio_bytes = await model_audio.read()
+        if not attempt_audio_bytes:
+            raise HTTPException(status_code=400, detail="audio is empty")
+        if not model_audio_bytes:
+            raise HTTPException(status_code=400, detail="model_audio is empty")
+        _save_audio_history_recording(
+            active_audio_history_store,
+            attempt_audio_bytes,
+            suffix=_upload_suffix(audio.filename),
+            metadata={
+                "endpoint": "practice-attempt-jobs",
+                "recording_intent": "attempt",
+                "target_language": practice_target_language,
+                "asr_model": practice_asr_model,
+                "current_target_text_preview": normalized_target_text[:80],
+                "filename": audio.filename or "",
+                "content_type": audio.content_type or "",
+            },
+        )
+
+        if practice_target_language == "zh-CN":
+            try:
+                with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as attempt_temp_audio, NamedTemporaryFile(
+                    suffix=_upload_suffix(model_audio.filename)
+                ) as model_temp_audio:
+                    attempt_temp_audio.write(attempt_audio_bytes)
+                    attempt_temp_audio.flush()
+                    model_temp_audio.write(model_audio_bytes)
+                    model_temp_audio.flush()
+                    body = active_runpod_practice_asr_provider.submit_comparison_job(
+                        attempt_audio_path=Path(attempt_temp_audio.name),
+                        model_audio_path=Path(model_temp_audio.name),
+                        source_language=practice_target_language,
+                        target_text=simplify_chinese_text(normalized_target_text),
+                    )
+                try:
+                    health = active_runpod_practice_asr_provider.health()
+                except RuntimeError:
+                    health = None
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
+            snapshot = _practice_attempt_job_snapshot(body, health=health)
+            if snapshot["status"] in {"queued", "running"}:
+                response.status_code = 202
+            return snapshot
+
+        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        try:
+            with NamedTemporaryFile(suffix=_upload_suffix(model_audio.filename)) as model_temp_audio, NamedTemporaryFile(
+                suffix=_upload_suffix(audio.filename)
+            ) as attempt_temp_audio:
+                model_temp_audio.write(model_audio_bytes)
+                model_temp_audio.flush()
+                attempt_temp_audio.write(attempt_audio_bytes)
+                attempt_temp_audio.flush()
+                model_started = perf_counter()
+                model_transcription = _transcribe_practice_audio(
+                    asr_provider,
+                    Path(model_temp_audio.name),
+                    practice_target_language,
+                )
+                model_asr_ms = _elapsed_ms(model_started)
+                attempt_started = perf_counter()
+                attempt_transcription = _transcribe_practice_audio(
+                    asr_provider,
+                    Path(attempt_temp_audio.name),
+                    practice_target_language,
+                )
+                attempt_asr_ms = _elapsed_ms(attempt_started)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        result = _create_practice_attempt_result_from_transcriptions(
+            practice_target_language=practice_target_language,
+            target_text=normalized_target_text,
+            attempt_transcription=attempt_transcription,
+            attempt_provider_name=asr_provider.name,
+            attempt_asr_ms=attempt_asr_ms,
+            model_transcription=model_transcription,
+            model_provider_name=asr_provider.name,
+            model_asr_ms=model_asr_ms,
+        )
+        return {
+            "job_id": "",
+            "status": "succeeded",
+            "current_stage": {"stage": "complete", "label": "比較準備が完了しました", "provider": asr_provider.name, "model": attempt_transcription.model},
+            "stages": [{"stage": "complete", "label": "完了", "provider": asr_provider.name, "model": attempt_transcription.model}],
+            "metrics": {},
+            "result": result,
+            "error": None,
+        }
+
+    @app.get("/api/practice/attempt-jobs/{job_id}")
+    def get_practice_attempt_job(job_id: str) -> dict[str, object]:
+        try:
+            body = active_runpod_practice_asr_provider.job_status(job_id)
+            health = (
+                active_runpod_practice_asr_provider.health()
+                if str(body.get("status") or "").upper() in {"", "IN_QUEUE", "QUEUED"}
+                else None
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
+        return _practice_attempt_job_snapshot(body, health=health)
 
     @app.post("/api/practice/recordings")
     async def create_practice_recording(
@@ -1456,6 +1896,7 @@ def create_app(
         target_language: Annotated[str, Form()] = "ja-JP",
         current_target_text: Annotated[str, Form()] = "",
         include_pinyin: Annotated[bool, Form()] = False,
+        use_own_voice: Annotated[bool, Form()] = False,
         asr_model: Annotated[str, Form()] = "whisper-1",
     ) -> dict[str, object]:
         try:
@@ -1507,11 +1948,25 @@ def create_app(
             practice_asr_model=practice_asr_model,
         )
         result["recording_kind"] = "prompt"
+        if use_own_voice:
+            result["voice_conversion_job"] = _start_practice_voice_conversion_job(
+                source_audio_bytes=base64.b64decode(str(result["audio_base64"])),
+                source_audio_mime_type=str(result["audio_mime_type"]),
+                reference_audio_bytes=audio_bytes,
+                reference_audio_filename=audio.filename or "practice-reference.webm",
+            )
         active_audio_history_store.update_metadata(
             recording_entry,
             _practice_history_diagnostics_metadata(result),
         )
         return result
+
+    @app.get("/api/practice/voice-jobs/{job_id}")
+    def get_practice_voice_job(job_id: str) -> dict[str, object]:
+        try:
+            return practice_voice_conversion_job_store.snapshot(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
 
     @app.post("/api/practice/prompts")
     async def create_practice_prompt(

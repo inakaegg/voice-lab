@@ -105,6 +105,74 @@ let lineByLineUserPreference = lineByLineControl?.checked === true;
 let generationBusy = false;
 let activeVoiceRecording = null;
 
+function showVibeVoiceToast(text, state = "ready", durationMs = 6500) {
+  const viewport = document.querySelector("#voice-lab-toast-viewport");
+  if (!viewport || !text) {
+    message.dataset.state = state;
+    message.textContent = text;
+    return;
+  }
+  while (viewport.children.length >= 3) {
+    viewport.firstElementChild?.remove();
+  }
+  const toast = document.createElement("article");
+  toast.className = "voice-lab-toast";
+  toast.dataset.state = state;
+  toast.setAttribute("role", state === "error" ? "alert" : "status");
+
+  const icon = document.createElement("span");
+  icon.className = "voice-lab-toast-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.append(createToastIcon(state));
+
+  const copy = document.createElement("p");
+  copy.className = "voice-lab-toast-message";
+  copy.textContent = text;
+
+  const close = document.createElement("button");
+  close.className = "voice-lab-toast-close";
+  close.type = "button";
+  close.setAttribute("aria-label", "通知を閉じる");
+  close.append(createCloseIcon());
+
+  let timer = 0;
+  const dismiss = () => {
+    if (timer) window.clearTimeout(timer);
+    toast.remove();
+  };
+  close.addEventListener("click", dismiss);
+  toast.append(icon, copy, close);
+  viewport.append(toast);
+  message.dataset.state = state;
+  message.textContent = "";
+  if (durationMs > 0) {
+    timer = window.setTimeout(dismiss, durationMs);
+  }
+}
+
+function createToastIcon(state) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", state === "error" ? "M12 8v5m0 3h.01M10.3 3.7 2.4 17.4A2 2 0 0 0 4.1 20h15.8a2 2 0 0 0 1.7-2.6L13.7 3.7a2 2 0 0 0-3.4 0Z" : "m5 12 4 4L19 6");
+  svg.append(path);
+  return svg;
+}
+
+function createCloseIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M6 6l12 12M18 6 6 18");
+  svg.append(path);
+  return svg;
+}
+
 form.addEventListener("submit", handleGenerate);
 cancelButton.addEventListener("click", cancelVibeVoiceJob);
 resetSettingsButton.addEventListener("click", resetVibeVoiceGenerationSettings);
@@ -791,11 +859,9 @@ async function handleVoiceFileChange(input) {
     savedVoiceFilesBySlot.set(slot, record);
     renderSavedVoiceFile(slot, record);
     saveVibeVoiceDraft();
-    message.dataset.state = "ready";
-    message.textContent = `Speaker ${slot} の参照音声を保存しました。`;
+    showVibeVoiceToast(`Speaker ${slot} の参照音声を保存しました。`);
   } catch (error) {
-    message.dataset.state = "error";
-    message.textContent = `参照音声を保存できませんでした: ${error.message || error}`;
+    showVibeVoiceToast(`参照音声を保存できませんでした: ${error.message || error}`, "error");
   }
 }
 
@@ -826,8 +892,7 @@ async function startVoiceRecording(slot, button) {
     return;
   }
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-    message.dataset.state = "error";
-    message.textContent = "このブラウザではマイク録音を使えません。音声ファイルを選択してください。";
+    showVibeVoiceToast("このブラウザではマイク録音を使えません。音声ファイルを選択してください。", "error");
     return;
   }
   let stream = null;
@@ -844,8 +909,7 @@ async function startVoiceRecording(slot, button) {
     });
     recorder.addEventListener("stop", () => {
       finishReferenceRecording(slot, recorder.mimeType || mimeType || "audio/webm", "microphone").catch((error) => {
-        message.dataset.state = "error";
-        message.textContent = `録音を保存できませんでした: ${error.message || error}`;
+        showVibeVoiceToast(`録音を保存できませんでした: ${error.message || error}`, "error");
       });
     });
     recorder.start();
@@ -888,8 +952,7 @@ async function startTabAudioRecording(slot, button) {
     return;
   }
   if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
-    message.dataset.state = "error";
-    message.textContent = "このブラウザではタブ音声録音を使えません。音声ファイルまたはマイク録音を使ってください。";
+    showVibeVoiceToast("このブラウザではタブ音声録音を使えません。音声ファイルまたはマイク録音を使ってください。", "error");
     return;
   }
   let stream = null;
@@ -919,8 +982,7 @@ async function startTabAudioRecording(slot, button) {
     });
     recorder.addEventListener("stop", () => {
       finishReferenceRecording(slot, recorder.mimeType || mimeType || "audio/webm", "tab").catch((error) => {
-        message.dataset.state = "error";
-        message.textContent = `タブ音声を保存できませんでした: ${error.message || error}`;
+        showVibeVoiceToast(`タブ音声を保存できませんでした: ${error.message || error}`, "error");
       });
     });
     for (const track of stream.getTracks()) {
@@ -934,10 +996,9 @@ async function startTabAudioRecording(slot, button) {
     stopStreamTracks(stream);
     activeVoiceRecording = null;
     renderVoiceRecordingButtons();
-    message.dataset.state = "error";
-    message.textContent = error?.name === "NotAllowedError"
+    showVibeVoiceToast(error?.name === "NotAllowedError"
       ? "タブ音声の共有がキャンセルされました。"
-      : `タブ音声録音を開始できませんでした: ${error.message || error}`;
+      : `タブ音声録音を開始できませんでした: ${error.message || error}`, "error");
   }
 }
 
@@ -974,8 +1035,7 @@ async function finishReferenceRecording(slot, mimeType, recordingType) {
   const filename = recordedVoiceFilename(slot, blob.type, recordingType);
   await saveVoiceBlob(slot, blob, filename);
   saveVibeVoiceDraft();
-  message.dataset.state = "ready";
-  message.textContent = `Speaker ${slot} の${recordingType === "tab" ? "タブ音声" : "録音"}を参照音声として保存しました。`;
+  showVibeVoiceToast(`Speaker ${slot} の${recordingType === "tab" ? "タブ音声" : "録音"}を参照音声として保存しました。`);
 }
 
 function renderVoiceRecordingButtons() {
@@ -1438,8 +1498,10 @@ async function cancelVibeVoiceJob() {
 function renderJobProgress(payload) {
   const stage = payload.current_stage || {};
   const label = stage.label || statusLabel(payload.status);
+  const model = friendlyProgressModel(stage.model);
+  const statusParts = [label, model && !String(label).includes(model) ? model : ""].filter(Boolean);
   message.dataset.state = payload.status === "failed" ? "error" : "busy";
-  message.textContent = label ? `${label}...` : "生成中です。";
+  message.textContent = statusParts.length ? `${statusParts.join(" · ")}…` : "生成中です。";
   renderProgressLog(payload.progress_log);
   renderProgressPercent(progressPercentFromPayload(payload));
   renderElapsed(payload.elapsed_ms);
@@ -1507,8 +1569,28 @@ function progressLogLine(item) {
   if (!label) {
     return "";
   }
-  const stage = String(item.stage || "").trim();
-  return stage ? `${stage}: ${label}` : label;
+  const model = friendlyProgressModel(item.model);
+  const detail = String(item.detail || "").trim();
+  const suffix = [model && !label.includes(model) ? model : "", detail && !label.includes(detail) ? detail : ""]
+    .filter(Boolean)
+    .join(" · ");
+  const content = suffix ? `${label} · ${suffix}` : label;
+  return content;
+}
+
+function friendlyProgressModel(model) {
+  const value = String(model || "").trim();
+  const normalized = value.toLowerCase();
+  if (normalized.includes("vibevoice") && normalized.includes("large")) {
+    return "VibeVoice Large";
+  }
+  if (normalized.includes("vibevoice") && normalized.includes("1.5b")) {
+    return "VibeVoice 1.5B";
+  }
+  if (normalized === "seed-vc" || normalized.includes("plachta/seed-vc")) {
+    return "Seed-VC";
+  }
+  return value;
 }
 
 function renderElapsed(elapsedMs = null) {
