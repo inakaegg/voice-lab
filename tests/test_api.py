@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mo_speech.api import create_app
+from mo_speech.audio_history import AudioHistoryStore
 from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
@@ -1056,7 +1057,7 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     assert response.json()["providers"]["asr"] == "runpod-funasr-paraformer-zh"
 
 
-def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment() -> None:
+def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(tmp_path, monkeypatch) -> None:
     class FakeAsyncRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
 
@@ -1109,7 +1110,18 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=FakeAsyncRunpodAsr()))
+    history_store = AudioHistoryStore(root=tmp_path / "practice-history", limit=10, enabled=True)
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
+            audio_history_store=history_store,
+        )
+    )
 
     submitted = client.post(
         "/api/practice/attempt-jobs",
@@ -1126,6 +1138,10 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert queued["status"] == "queued"
     assert queued["current_stage"]["stage"] == "initializing"
     assert queued["current_stage"]["model"] == "funasr/paraformer-zh"
+    submitted_history = history_store.list_entries("recordings")
+    assert len(submitted_history) == 1
+    assert submitted_history[0].metadata["practice_job_id"] == "practice-job-1"
+    assert submitted_history[0].metadata["practice_job_status"] == "queued"
 
     completed = client.get("/api/practice/attempt-jobs/practice-job-1")
     assert completed.status_code == 200
@@ -1135,6 +1151,18 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert snapshot["result"]["recognized_text"] == "你哈吗？你今天到那里？"
     assert snapshot["result"]["comparison_alignment"]["complete"] is True
     assert snapshot["result"]["model_comparison_alignment"]["complete"] is True
+    completed_history = history_store.list_entries("recordings")
+    assert len(completed_history) == 1
+    metadata = completed_history[0].metadata
+    assert metadata["practice_job_status"] == "succeeded"
+    assert metadata["practice_job_metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
+    diagnostics = metadata["practice_diagnostics"]
+    assert diagnostics["recognized_text"] == "你哈吗？你今天到那里？"
+    assert diagnostics["model_recognized_text"] == "你好吗？你今天去哪里？"
+    assert diagnostics["asr_timestamps"]["words"][0] == {"text": "你哈吗", "start": 0.1, "end": 0.8}
+    assert diagnostics["model_asr_timestamps"]["words"][0] == {"text": "你好吗", "start": 0.1, "end": 0.8}
+    assert diagnostics["comparison_alignment"]["ranges"][1]["audio_end"] == pytest.approx(2.3)
+    assert diagnostics["model_comparison_alignment"]["ranges"][1]["audio_end"] == pytest.approx(2.4)
 
 
 def test_practice_attempt_job_explains_outdated_runpod_image() -> None:

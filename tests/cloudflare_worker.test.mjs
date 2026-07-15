@@ -1587,6 +1587,8 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(snapshot.result.recognized_text, "你哈吗？你今天到那里？");
   assert.equal(snapshot.result.comparison_alignment.complete, true);
   assert.equal(snapshot.result.model_comparison_alignment.complete, true);
+  assert.equal(snapshot.result.comparison_alignment.ranges[1].audio_end, 2.3);
+  assert.equal(snapshot.result.model_comparison_alignment.ranges[1].audio_end, 2.4);
 });
 
 test("Cloudflare worker explains when the RunPod practice image predates the dual-audio contract", async () => {

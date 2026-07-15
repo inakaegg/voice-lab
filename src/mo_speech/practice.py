@@ -274,6 +274,7 @@ def _best_practice_phrase_match(target_normalized: str, recognized_normalized: s
         return {"recognized_start": start, "recognized_end": start, "similarity": 0.0}
     best = {"recognized_start": start_index, "recognized_end": start_index, "similarity": 0.0}
     expected_length = len(target_normalized)
+    best_length_delta = float("inf")
     min_length = max(1, int(expected_length * 0.45))
     max_length = max(min_length, int(expected_length * 1.8) + 3)
     for start in range(start_index, len(recognized_normalized)):
@@ -281,8 +282,14 @@ def _best_practice_phrase_match(target_normalized: str, recognized_normalized: s
         for end in range(start + min_length, last_end + 1):
             candidate = recognized_normalized[start:end]
             similarity = practice_similarity(target_normalized, candidate)
-            if similarity > best["similarity"]:
+            length_delta = abs(len(candidate) - expected_length)
+            is_better_similarity = similarity > best["similarity"] + 1e-9
+            is_equal_similarity_better_length = (
+                abs(similarity - best["similarity"]) <= 1e-9 and length_delta < best_length_delta
+            )
+            if is_better_similarity or is_equal_similarity_better_length:
                 best = {"recognized_start": start, "recognized_end": end, "similarity": similarity}
+                best_length_delta = length_delta
             if similarity >= 0.999:
                 return best
     return best

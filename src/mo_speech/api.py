@@ -42,7 +42,7 @@ from .api_runtime import (
 from .api_serializers import normalize_tts_provider_output as _normalize_tts_provider_output
 from .api_serializers import serialize_pipeline_result as _serialize_pipeline_result
 from .audio_effects import AudioEffectInsertSettings
-from .audio_history import AudioHistoryStore
+from .audio_history import AudioHistoryEntry, AudioHistoryStore
 from .factory import (
     create_openai_pipeline,
     create_pipeline_from_env,
@@ -279,17 +279,24 @@ def _compact_asr_timestamps_for_metadata(timestamps: dict[str, object]) -> dict[
 
 def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[str, object]:
     asr_timestamps = result.get("asr_timestamps") if isinstance(result.get("asr_timestamps"), dict) else {}
+    model_asr_timestamps = (
+        result.get("model_asr_timestamps") if isinstance(result.get("model_asr_timestamps"), dict) else {}
+    )
     diagnostics = {
         "recording_kind": result.get("recording_kind") or "",
         "target_language": result.get("target_language") or "",
         "target_text": result.get("target_text") or "",
         "recognized_text": result.get("recognized_text") or "",
+        "model_recognized_text": result.get("model_recognized_text") or "",
         "transcript": result.get("transcript") or "",
         "asr_model": result.get("asr_model") or "",
         "phrase_matches": result.get("phrase_matches") or [],
         "comparison_alignment": result.get("comparison_alignment") or {},
+        "model_comparison_alignment": result.get("model_comparison_alignment") or {},
         "asr_timestamps": _compact_asr_timestamps_for_metadata(asr_timestamps),
+        "model_asr_timestamps": _compact_asr_timestamps_for_metadata(model_asr_timestamps),
         "timings_ms": result.get("timings_ms") or {},
+        "providers": result.get("providers") or {},
     }
     return {
         "asr_model": result.get("asr_model") or "",
@@ -297,6 +304,46 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "recognized_text_preview": str(result.get("recognized_text") or result.get("transcript") or "")[:80],
         "practice_diagnostics": diagnostics,
     }
+
+
+def _practice_attempt_history_entry(store: AudioHistoryStore, job_id: str) -> AudioHistoryEntry | None:
+    normalized_job_id = str(job_id or "").strip()
+    if not normalized_job_id:
+        return None
+    for entry in store.list_entries("recordings"):
+        metadata = entry.metadata or {}
+        if metadata.get("endpoint") != "practice-attempt-jobs":
+            continue
+        if str(metadata.get("practice_job_id") or "") == normalized_job_id:
+            return entry
+    return None
+
+
+def _update_practice_attempt_history(
+    store: AudioHistoryStore,
+    entry: AudioHistoryEntry | None,
+    snapshot: dict[str, object],
+) -> None:
+    if entry is None:
+        return
+    result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else None
+    metadata = {
+        "practice_job_id": str(snapshot.get("job_id") or ""),
+        "practice_job_status": str(snapshot.get("status") or ""),
+        "practice_job_metrics": snapshot.get("metrics") or {},
+        "practice_job_error": str(snapshot.get("error") or ""),
+    }
+    if result is not None:
+        metadata.update(_practice_history_diagnostics_metadata(result))
+        diagnostics = metadata["practice_diagnostics"]
+        LOGGER.info(
+            "SpeakLoop comparison alignment job_id=%s target_language=%s attempt=%s model=%s",
+            metadata["practice_job_id"] or "sync",
+            diagnostics.get("target_language") or "",
+            json.dumps(diagnostics.get("comparison_alignment") or {}, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(diagnostics.get("model_comparison_alignment") or {}, ensure_ascii=False, separators=(",", ":")),
+        )
+    store.update_metadata(entry, metadata)
 
 
 async def _read_vibevoice_script(script: str, script_file: UploadFile | None) -> str:
@@ -1784,7 +1831,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="audio is empty")
         if not model_audio_bytes:
             raise HTTPException(status_code=400, detail="model_audio is empty")
-        _save_audio_history_recording(
+        recording_entry = _save_audio_history_recording(
             active_audio_history_store,
             attempt_audio_bytes,
             suffix=_upload_suffix(audio.filename),
@@ -1823,6 +1870,7 @@ def create_app(
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
             snapshot = _practice_attempt_job_snapshot(body, health=health)
+            _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
             if snapshot["status"] in {"queued", "running"}:
                 response.status_code = 202
             return snapshot
@@ -1864,7 +1912,7 @@ def create_app(
             model_provider_name=asr_provider.name,
             model_asr_ms=model_asr_ms,
         )
-        return {
+        snapshot = {
             "job_id": "",
             "status": "succeeded",
             "current_stage": {"stage": "complete", "label": "比較準備が完了しました", "provider": asr_provider.name, "model": attempt_transcription.model},
@@ -1873,6 +1921,8 @@ def create_app(
             "result": result,
             "error": None,
         }
+        _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+        return snapshot
 
     @app.get("/api/practice/attempt-jobs/{job_id}")
     def get_practice_attempt_job(job_id: str) -> dict[str, object]:
@@ -1887,7 +1937,10 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
-        return _practice_attempt_job_snapshot(body, health=health)
+        snapshot = _practice_attempt_job_snapshot(body, health=health)
+        recording_entry = _practice_attempt_history_entry(active_audio_history_store, job_id)
+        _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+        return snapshot
 
     @app.post("/api/practice/recordings")
     async def create_practice_recording(

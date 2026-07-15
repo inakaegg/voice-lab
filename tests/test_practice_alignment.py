@@ -58,3 +58,25 @@ def test_practice_comparison_alignment_excludes_filler_from_audio_range() -> Non
     assert result["complete"] is True
     assert result["ranges"][0]["audio_start"] == pytest.approx(0.6)
     assert result["ranges"][0]["matched_text"] == "I bought a bike"
+
+
+def test_practice_comparison_alignment_keeps_the_mistaken_end_of_a_phrase_on_a_similarity_tie() -> None:
+    result = practice_comparison_alignment(
+        target_text="你好吗？你今天去哪里？",
+        recognized_text="你哈吗？你今天到那里？",
+        target_language="zh-CN",
+        asr_timestamps={
+            "available": True,
+            "words": [
+                {"text": "你哈吗", "start": 0.1, "end": 0.8},
+                {"text": "你今天", "start": 1.0, "end": 1.5},
+                {"text": "到那里", "start": 1.5, "end": 2.3},
+            ],
+        },
+    )
+
+    second_phrase = result["ranges"][1]
+    assert second_phrase["normalized_recognized"] == "你今天到那里"
+    assert second_phrase["matched_text"] == "你今天到那里"
+    assert second_phrase["audio_start"] == pytest.approx(1.0)
+    assert second_phrase["audio_end"] == pytest.approx(2.3)

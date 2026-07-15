@@ -3970,12 +3970,17 @@ function bestPracticePhraseMatch(normalizedTarget, recognized, cursor) {
   let best = { recognized_start: cursor, recognized_end: cursor, similarity: 0 };
   const minLength = Math.max(1, Math.floor(normalizedTarget.length * 0.45));
   const maxLength = Math.max(minLength, Math.floor(normalizedTarget.length * 1.8) + 3);
+  let bestLengthDelta = Number.POSITIVE_INFINITY;
   for (let start = Math.max(0, cursor); start < recognized.length; start += 1) {
     const lastEnd = Math.min(recognized.length, start + maxLength);
     for (let end = start + minLength; end <= lastEnd; end += 1) {
       const similarity = practiceSimilarity(normalizedTarget, recognized.slice(start, end));
-      if (similarity > best.similarity) {
+      const lengthDelta = Math.abs((end - start) - normalizedTarget.length);
+      const isBetterSimilarity = similarity > best.similarity + 1e-9;
+      const isEqualSimilarityBetterLength = Math.abs(similarity - best.similarity) <= 1e-9 && lengthDelta < bestLengthDelta;
+      if (isBetterSimilarity || isEqualSimilarityBetterLength) {
         best = { recognized_start: start, recognized_end: end, similarity };
+        bestLengthDelta = lengthDelta;
       }
       if (similarity >= 0.999) {
         return best;
