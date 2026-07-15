@@ -1,0 +1,180 @@
+[
+  {
+    "name": "validation_zh_three_everyday_phrases_exact",
+    "target_language": "zh-CN",
+    "target_text": "早上好。地铁有点挤。请注意安全。",
+    "recognized_text": "早上好地铁有点挤请注意安全",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "words": [
+      {"text": "早上", "start": 0.2, "end": 0.5}, {"text": "好", "start": 0.5, "end": 0.68},
+      {"text": "地铁", "start": 1.0, "end": 1.32}, {"text": "有点", "start": 1.32, "end": 1.62}, {"text": "挤", "start": 1.62, "end": 1.82},
+      {"text": "请", "start": 2.15, "end": 2.3}, {"text": "注意", "start": 2.3, "end": 2.62}, {"text": "安全", "start": 2.62, "end": 2.98}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "早上好", "audio_start": 0.2, "audio_end": 0.68},
+      {"index": 1, "source": "words", "available": true, "matched_text": "地铁有点挤", "audio_start": 1.0, "audio_end": 1.82},
+      {"index": 2, "source": "words", "available": true, "matched_text": "请注意安全", "audio_start": 2.15, "audio_end": 2.98}
+    ]}
+  },
+  {
+    "name": "validation_zh_unique_middle_phrase_omitted",
+    "target_language": "zh-CN",
+    "target_text": "我先去买票。然后在门口等你。最后一起进去。",
+    "recognized_text": "我先去买票最后一起进去",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "words": [
+      {"text": "我先", "start": 0.18, "end": 0.42}, {"text": "去", "start": 0.42, "end": 0.58}, {"text": "买票", "start": 0.58, "end": 0.92},
+      {"text": "最后", "start": 1.3, "end": 1.6}, {"text": "一起", "start": 1.6, "end": 1.9}, {"text": "进去", "start": 1.9, "end": 2.25}
+    ]},
+    "expected": {"available": true, "complete": false, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "我先去买票", "audio_start": 0.18, "audio_end": 0.92},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 2, "source": "words", "available": true, "matched_text": "最后一起进去", "audio_start": 1.3, "audio_end": 2.25}
+    ]}
+  },
+  {
+    "name": "validation_zh_final_false_start_with_correction_marker",
+    "target_language": "zh-CN",
+    "target_text": "别担心。我们还有时间。",
+    "recognized_text": "别担心我们还有不对我们还有时间",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "words": [
+      {"text": "别", "start": 0.2, "end": 0.38}, {"text": "担心", "start": 0.38, "end": 0.72},
+      {"text": "我们", "start": 1.02, "end": 1.3}, {"text": "还有", "start": 1.3, "end": 1.58}, {"text": "不对", "start": 1.7, "end": 2.0},
+      {"text": "我们", "start": 2.12, "end": 2.4}, {"text": "还有", "start": 2.4, "end": 2.68}, {"text": "时间", "start": 2.68, "end": 3.02}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "别担心", "audio_start": 0.2, "audio_end": 0.72},
+      {"index": 1, "source": "words", "available": true, "matched_text": "我们还有不对我们还有时间", "audio_start": 1.02, "audio_end": 3.02}
+    ]}
+  },
+  {
+    "name": "validation_zh_reversed_order_trims_other_target",
+    "target_language": "zh-CN",
+    "target_text": "我住在东京。我正在学中文。",
+    "recognized_text": "我正在学中文我住在东京",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "words": [
+      {"text": "我", "start": 0.2, "end": 0.34}, {"text": "正在", "start": 0.34, "end": 0.62}, {"text": "学", "start": 0.62, "end": 0.8}, {"text": "中文", "start": 0.8, "end": 1.12},
+      {"text": "我", "start": 1.45, "end": 1.59}, {"text": "住在", "start": 1.59, "end": 1.88}, {"text": "东京", "start": 1.88, "end": 2.22}
+    ]},
+    "expected": {"available": true, "complete": false, "ranges": [
+      {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 1, "source": "words", "available": true, "matched_text": "我正在学中文", "audio_start": 0.2, "audio_end": 1.12}
+    ]}
+  },
+  {
+    "name": "validation_zh_middle_trailing_suffix_repeated",
+    "target_language": "zh-CN",
+    "target_text": "早上好。路上小心。晚上见。",
+    "recognized_text": "早上好路上小心小心晚上见",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "words": [
+      {"text": "早上好", "start": 0.2, "end": 0.68},
+      {"text": "路上", "start": 1.0, "end": 1.28}, {"text": "小心", "start": 1.28, "end": 1.58}, {"text": "小心", "start": 1.7, "end": 2.0},
+      {"text": "晚上", "start": 2.32, "end": 2.62}, {"text": "见", "start": 2.62, "end": 2.82}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "早上好", "audio_start": 0.2, "audio_end": 0.68},
+      {"index": 1, "source": "words", "available": true, "matched_text": "路上小心小心", "audio_start": 1.0, "audio_end": 2.0},
+      {"index": 2, "source": "words", "available": true, "matched_text": "晚上见", "audio_start": 2.32, "audio_end": 2.82}
+    ]}
+  },
+  {
+    "name": "validation_zh_unrelated_multiphase_is_unavailable",
+    "target_language": "zh-CN",
+    "target_text": "今天是星期一。我要去上班。",
+    "recognized_text": "猫正在沙发上睡觉",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "words": [
+      {"text": "猫", "start": 0.2, "end": 0.38}, {"text": "正在", "start": 0.38, "end": 0.66}, {"text": "沙发", "start": 0.66, "end": 0.98}, {"text": "上", "start": 0.98, "end": 1.14}, {"text": "睡觉", "start": 1.14, "end": 1.48}
+    ]},
+    "expected": {"available": false, "complete": false, "ranges": [
+      {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
+    ]}
+  },
+  {
+    "name": "validation_en_three_everyday_phrases_exact",
+    "target_language": "en-US",
+    "target_text": "Good morning. The train is crowded. Please be careful.",
+    "recognized_text": "Good morning the train is crowded please be careful",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "words": [
+      {"text": "Good", "start": 0.2, "end": 0.42}, {"text": "morning", "start": 0.42, "end": 0.72},
+      {"text": "the", "start": 1.02, "end": 1.16}, {"text": "train", "start": 1.16, "end": 1.43}, {"text": "is", "start": 1.43, "end": 1.57}, {"text": "crowded", "start": 1.57, "end": 1.95},
+      {"text": "please", "start": 2.3, "end": 2.57}, {"text": "be", "start": 2.57, "end": 2.7}, {"text": "careful", "start": 2.7, "end": 3.05}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning", "audio_start": 0.2, "audio_end": 0.72},
+      {"index": 1, "source": "words", "available": true, "matched_text": "the train is crowded", "audio_start": 1.02, "audio_end": 1.95},
+      {"index": 2, "source": "words", "available": true, "matched_text": "please be careful", "audio_start": 2.3, "audio_end": 3.05}
+    ]}
+  },
+  {
+    "name": "validation_en_unique_middle_phrase_omitted",
+    "target_language": "en-US",
+    "target_text": "I will buy the tickets. Then I will wait outside. We can go in together.",
+    "recognized_text": "I will buy the tickets we can go in together",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "words": [
+      {"text": "I", "start": 0.18, "end": 0.28}, {"text": "will", "start": 0.28, "end": 0.48}, {"text": "buy", "start": 0.48, "end": 0.68}, {"text": "the", "start": 0.68, "end": 0.82}, {"text": "tickets", "start": 0.82, "end": 1.16},
+      {"text": "we", "start": 1.55, "end": 1.7}, {"text": "can", "start": 1.7, "end": 1.88}, {"text": "go", "start": 1.88, "end": 2.08}, {"text": "in", "start": 2.08, "end": 2.22}, {"text": "together", "start": 2.22, "end": 2.6}
+    ]},
+    "expected": {"available": true, "complete": false, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "I will buy the tickets", "audio_start": 0.18, "audio_end": 1.16},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 2, "source": "words", "available": true, "matched_text": "we can go in together", "audio_start": 1.55, "audio_end": 2.6}
+    ]}
+  },
+  {
+    "name": "validation_en_final_false_start_with_correction_marker",
+    "target_language": "en-US",
+    "target_text": "Do not worry. We still have time.",
+    "recognized_text": "Do not worry we still no sorry we still have time",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "words": [
+      {"text": "Do", "start": 0.2, "end": 0.34}, {"text": "not", "start": 0.34, "end": 0.52}, {"text": "worry", "start": 0.52, "end": 0.8},
+      {"text": "we", "start": 1.12, "end": 1.27}, {"text": "still", "start": 1.27, "end": 1.52}, {"text": "no", "start": 1.64, "end": 1.82}, {"text": "sorry", "start": 1.82, "end": 2.12},
+      {"text": "we", "start": 2.25, "end": 2.4}, {"text": "still", "start": 2.4, "end": 2.65}, {"text": "have", "start": 2.65, "end": 2.86}, {"text": "time", "start": 2.86, "end": 3.16}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Do not worry", "audio_start": 0.2, "audio_end": 0.8},
+      {"index": 1, "source": "words", "available": true, "matched_text": "we still no sorry we still have time", "audio_start": 1.12, "audio_end": 3.16}
+    ]}
+  },
+  {
+    "name": "validation_en_reversed_order_trims_other_target",
+    "target_language": "en-US",
+    "target_text": "I live in Tokyo. I am learning Chinese.",
+    "recognized_text": "I am learning Chinese I live in Tokyo",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "words": [
+      {"text": "I", "start": 0.2, "end": 0.3}, {"text": "am", "start": 0.3, "end": 0.45}, {"text": "learning", "start": 0.45, "end": 0.8}, {"text": "Chinese", "start": 0.8, "end": 1.15},
+      {"text": "I", "start": 1.48, "end": 1.58}, {"text": "live", "start": 1.58, "end": 1.82}, {"text": "in", "start": 1.82, "end": 1.95}, {"text": "Tokyo", "start": 1.95, "end": 2.28}
+    ]},
+    "expected": {"available": true, "complete": false, "ranges": [
+      {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 1, "source": "words", "available": true, "matched_text": "I am learning Chinese", "audio_start": 0.2, "audio_end": 1.15}
+    ]}
+  },
+  {
+    "name": "validation_en_middle_trailing_suffix_repeated",
+    "target_language": "en-US",
+    "target_text": "Good morning. Travel safely. See you tonight.",
+    "recognized_text": "Good morning travel safely safely see you tonight",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "words": [
+      {"text": "Good", "start": 0.2, "end": 0.42}, {"text": "morning", "start": 0.42, "end": 0.72},
+      {"text": "travel", "start": 1.02, "end": 1.3}, {"text": "safely", "start": 1.3, "end": 1.62}, {"text": "safely", "start": 1.74, "end": 2.06},
+      {"text": "see", "start": 2.38, "end": 2.57}, {"text": "you", "start": 2.57, "end": 2.72}, {"text": "tonight", "start": 2.72, "end": 3.05}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning", "audio_start": 0.2, "audio_end": 0.72},
+      {"index": 1, "source": "words", "available": true, "matched_text": "travel safely safely", "audio_start": 1.02, "audio_end": 2.06},
+      {"index": 2, "source": "words", "available": true, "matched_text": "see you tonight", "audio_start": 2.38, "audio_end": 3.05}
+    ]}
+  },
+  {
+    "name": "validation_en_unrelated_multiphase_is_unavailable",
+    "target_language": "en-US",
+    "target_text": "Today is Monday. I have to go to work.",
+    "recognized_text": "The cat is sleeping on the sofa",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "words": [
+      {"text": "The", "start": 0.2, "end": 0.34}, {"text": "cat", "start": 0.34, "end": 0.54}, {"text": "is", "start": 0.54, "end": 0.68}, {"text": "sleeping", "start": 0.68, "end": 1.02}, {"text": "on", "start": 1.02, "end": 1.16}, {"text": "the", "start": 1.16, "end": 1.3}, {"text": "sofa", "start": 1.3, "end": 1.6}
+    ]},
+    "expected": {"available": false, "complete": false, "ranges": [
+      {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
+    ]}
+  }
+]

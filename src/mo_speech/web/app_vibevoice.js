@@ -51,6 +51,7 @@ const referenceUrlDisplays = Array.from(document.querySelectorAll("[data-referen
 const localReferenceUrlElements = Array.from(document.querySelectorAll("[data-local-reference-url]"));
 const recordVoiceButtons = Array.from(document.querySelectorAll("[data-record-voice-slot]"));
 const tabAudioButtons = Array.from(document.querySelectorAll("[data-tab-audio-slot]"));
+const referenceSourceHelp = document.querySelector("[data-reference-source-help]");
 const rangeInputs = Array.from(form.querySelectorAll("[data-vibevoice-range]"));
 const savedVoiceDbName = "mo-speech-vibevoice";
 const savedVoiceStoreName = "voice-files";
@@ -104,6 +105,7 @@ let copyDiagnosticsResetTimer = 0;
 let lineByLineUserPreference = lineByLineControl?.checked === true;
 let generationBusy = false;
 let activeVoiceRecording = null;
+let tabAudioCaptureAvailable = supportsTabAudioCapture();
 
 function showVibeVoiceToast(text, state = "ready", durationMs = 6500) {
   const viewport = document.querySelector("#voice-lab-toast-viewport");
@@ -247,6 +249,7 @@ savedVoicePreviews.forEach((preview) => {
   preview.addEventListener("pointerdown", stopPreviewEventPropagation);
 });
 configureReferenceUrlAvailability();
+setTabAudioCaptureAvailability(tabAudioCaptureAvailable);
 loadVibeVoiceDraft();
 applyDefaultSimpleScript();
 updateModelAvailability();
@@ -757,7 +760,12 @@ async function handleGenerate(event) {
     return;
   }
   clearResult();
-  setBusy(true, directedPreflight.summary || "生成中です。初回はモデルロードに時間がかかります。");
+  setBusy(
+    true,
+    vibevoicePageMode === "simple"
+      ? "生成を準備しています。"
+      : directedPreflight.summary || "生成中です。初回はモデルロードに時間がかかります。",
+  );
   try {
     const body = new FormData(form);
     const requiredSlots = requiredVoiceSlotsFromScript(scriptInput.value);
@@ -794,7 +802,11 @@ async function handleGenerate(event) {
   } catch (error) {
     stopJobProgress();
     setBusy(false, "");
-    message.textContent = String(error.message || error);
+    const errorText = String(error.message || error);
+    console.error("[SkitVoice job] generation failed", error);
+    message.textContent = vibevoicePageMode === "simple"
+      ? publicVibeVoiceErrorMessage(errorText)
+      : errorText;
     message.dataset.state = "error";
   }
 }
@@ -839,7 +851,10 @@ async function handleGenerateScript() {
     message.textContent = "2話者・5行の台本を生成しました。";
   } catch (error) {
     message.dataset.state = "error";
-    message.textContent = `台本を生成できませんでした: ${error.message || error}`;
+    console.error("[SkitVoice script] generation failed", error);
+    message.textContent = vibevoicePageMode === "simple"
+      ? "台本を生成できませんでした。しばらくしてからもう一度お試しください。"
+      : `台本を生成できませんでした: ${error.message || error}`;
   } finally {
     generateScriptButton.disabled = false;
   }
@@ -952,6 +967,7 @@ async function startTabAudioRecording(slot, button) {
     return;
   }
   if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === "undefined") {
+    setTabAudioCaptureAvailability(false);
     showVibeVoiceToast("このブラウザではタブ音声録音を使えません。音声ファイルまたはマイク録音を使ってください。", "error");
     return;
   }
@@ -995,10 +1011,42 @@ async function startTabAudioRecording(slot, button) {
   } catch (error) {
     stopStreamTracks(stream);
     activeVoiceRecording = null;
+    console.warn("[SkitVoice tab audio] capture failed", error);
+    if (isUnsupportedTabAudioError(error)) {
+      setTabAudioCaptureAvailability(false);
+      showVibeVoiceToast("このブラウザではタブ音声録音を使えません。音声ファイルまたはマイク録音を使ってください。", "error");
+      return;
+    }
     renderVoiceRecordingButtons();
     showVibeVoiceToast(error?.name === "NotAllowedError"
       ? "タブ音声の共有がキャンセルされました。"
       : `タブ音声録音を開始できませんでした: ${error.message || error}`, "error");
+  }
+}
+
+function supportsTabAudioCapture() {
+  return Boolean(navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== "undefined");
+}
+
+function isUnsupportedTabAudioError(error) {
+  return error?.name === "NotSupportedError" || error?.name === "TypeError";
+}
+
+function setTabAudioCaptureAvailability(available) {
+  tabAudioCaptureAvailable = Boolean(available);
+  document.documentElement.dataset.tabAudioAvailable = tabAudioCaptureAvailable ? "true" : "false";
+  for (const button of tabAudioButtons) {
+    button.hidden = !tabAudioCaptureAvailable;
+  }
+  if (referenceSourceHelp) {
+    const sources = ["ファイル", "録音"];
+    if (tabAudioCaptureAvailable) {
+      sources.push("タブ音声");
+    }
+    if (referenceUrlSourcesEnabled) {
+      sources.push("URL");
+    }
+    referenceSourceHelp.textContent = `${sources.join("・")}から選択`;
   }
 }
 
@@ -1054,7 +1102,8 @@ function renderVoiceRecordingButtons() {
     const isActive = Boolean(
       activeVoiceRecording && activeVoiceRecording.slot === slot && activeVoiceRecording.recordingType === "tab",
     );
-    button.disabled = generationBusy || Boolean(activeVoiceRecording && !isActive);
+    button.hidden = !tabAudioCaptureAvailable;
+    button.disabled = !tabAudioCaptureAvailable || generationBusy || Boolean(activeVoiceRecording && !isActive);
     button.dataset.recording = isActive ? "true" : "false";
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
     button.textContent = isActive ? "停止" : "タブ音声";
@@ -1462,9 +1511,14 @@ async function pollVibeVoiceJob(jobId) {
   }
   if (payload.status === "failed" || payload.status === "cancelled") {
     const errorText = payload.error || (payload.status === "cancelled" ? "キャンセルしました。" : "生成に失敗しました。");
+    if (payload.status === "failed") {
+      console.error("[SkitVoice job] remote job failed", payload);
+    }
     stopJobProgress({ keepTiming: true });
     setBusy(false, "");
-    message.textContent = errorText;
+    message.textContent = payload.status === "cancelled" || vibevoicePageMode !== "simple"
+      ? errorText
+      : publicVibeVoiceErrorMessage(errorText);
     message.dataset.state = payload.status === "cancelled" ? "ready" : "error";
     currentJobId = "";
     return;
@@ -1473,7 +1527,11 @@ async function pollVibeVoiceJob(jobId) {
     pollVibeVoiceJob(jobId).catch((error) => {
       stopJobProgress({ keepTiming: true });
       setBusy(false, "");
-      message.textContent = String(error.message || error);
+      const errorText = String(error.message || error);
+      console.error("[SkitVoice job] polling failed", error);
+      message.textContent = vibevoicePageMode === "simple"
+        ? publicVibeVoiceErrorMessage(errorText)
+        : errorText;
       message.dataset.state = "error";
       currentJobId = "";
     });
@@ -1491,20 +1549,60 @@ async function cancelVibeVoiceJob() {
     await fetch(`/api/vibevoice/jobs/${encodeURIComponent(currentJobId)}/cancel`, { method: "POST" });
   } catch (error) {
     message.dataset.state = "error";
-    message.textContent = `キャンセル要求に失敗しました: ${error.message || error}`;
+    console.error("[SkitVoice job] cancellation failed", error);
+    message.textContent = vibevoicePageMode === "simple"
+      ? "キャンセルできませんでした。もう一度お試しください。"
+      : `キャンセル要求に失敗しました: ${error.message || error}`;
   }
 }
 
 function renderJobProgress(payload) {
   const stage = payload.current_stage || {};
-  const label = stage.label || statusLabel(payload.status);
-  const model = friendlyProgressModel(stage.model);
+  const label = vibevoicePageMode === "simple"
+    ? publicVibeVoiceProgressLabel(stage, payload.status)
+    : stage.label || statusLabel(payload.status);
+  const model = vibevoicePageMode === "simple" ? "" : friendlyProgressModel(stage.model);
   const statusParts = [label, model && !String(label).includes(model) ? model : ""].filter(Boolean);
   message.dataset.state = payload.status === "failed" ? "error" : "busy";
   message.textContent = statusParts.length ? `${statusParts.join(" · ")}…` : "生成中です。";
+  if (vibevoicePageMode === "simple") {
+    console.debug("[SkitVoice job] progress", payload);
+  }
   renderProgressLog(payload.progress_log);
   renderProgressPercent(progressPercentFromPayload(payload));
   renderElapsed(payload.elapsed_ms);
+}
+
+function publicVibeVoiceProgressLabel(stage, status) {
+  switch (String(stage?.stage || "")) {
+    case "gpu_wait":
+    case "queued":
+      return "GPUサーバーの準備を待っています";
+    case "initializing":
+    case "loading_model":
+    case "loading_vibevoice_model":
+    case "loading_seed_vc_model":
+      return "音声生成を準備しています";
+    case "voice_conversion":
+    case "generating":
+    case "vibevoice_generation":
+      return "音声を生成しています";
+    case "finalizing":
+    case "reconstructing":
+      return "音声を仕上げています";
+    case "complete":
+      return "生成しました";
+    case "failed":
+      return "生成に失敗しました";
+    default:
+      return status === "queued" ? "GPUサーバーの準備を待っています" : "音声を生成しています";
+  }
+}
+
+function publicVibeVoiceErrorMessage(errorText) {
+  return errorText === "キャンセルしました。"
+    ? errorText
+    : "音声生成を完了できませんでした。しばらくしてからもう一度お試しください。";
 }
 
 function progressPercentFromPayload(payload) {
@@ -1997,7 +2095,9 @@ function renderArtifactsEmpty(runpodArtifactSummary = null) {
   const empty = document.createElement("p");
   empty.className = "vibevoice-artifacts-empty";
   if (Number(runpodArtifactSummary?.available || 0) > 0 && Number(runpodArtifactSummary?.omitted || 0) > 0) {
-    empty.textContent = `RunPodの返却サイズを抑えるため、中間音声 ${runpodArtifactSummary.omitted}/${runpodArtifactSummary.available} 件を省略しました。`;
+    empty.textContent = vibevoicePageMode === "simple"
+      ? `返却サイズを抑えるため、中間音声 ${runpodArtifactSummary.omitted}/${runpodArtifactSummary.available} 件を省略しました。`
+      : `RunPodの返却サイズを抑えるため、中間音声 ${runpodArtifactSummary.omitted}/${runpodArtifactSummary.available} 件を省略しました。`;
   } else {
     empty.textContent = "中間音声はありません。";
   }

@@ -4422,6 +4422,9 @@ button.practice-diff-cell:focus-visible {
   grid-row: auto;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+html[data-tab-audio-available="false"] .react-public-body[data-layout="compact"] .vibevoice-upload-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .react-public-body[data-layout="compact"] .vibevoice-upload-actions button,
 .react-public-body[data-layout="compact"] .vibevoice-upload-action {
   background: #f1f2f2;
@@ -4639,6 +4642,13 @@ html[data-theme="dark"] .react-public-body .practice-target-text-box,
 html[data-theme="dark"] .react-public-body .practice-native-transcript-panel,
 html[data-theme="dark"] .react-public-body .practice-result-inline,
 html[data-theme="dark"] .react-public-body select { background-color: #111722; border-color: var(--react-border); color: #f2f5fa; }
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-voice-slot,
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-voice-slot:hover,
+html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-voice-slot:focus-within {
+  background: #1b2230;
+  border-color: var(--react-border);
+  color: #f2f5fa;
+}
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-skit-form #vibevoice-script,
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-generate-card select {
   background: #111722;

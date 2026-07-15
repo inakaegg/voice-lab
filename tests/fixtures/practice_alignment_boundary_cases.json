@@ -1,0 +1,466 @@
+[
+  {
+    "name": "zh_later_phrase_multiword_restart_kept",
+    "category": "self_correction",
+    "description": "後続フレーズで複数語を言い直した区間をまとめて保持する。",
+    "target_language": "zh-CN",
+    "target_text": "你好。我想去北京。",
+    "recognized_text": "你好我想我想去北京",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "你", "start": 0.1, "end": 0.3},
+        {"text": "好", "start": 0.3, "end": 0.5},
+        {"text": "我", "start": 0.8, "end": 0.95},
+        {"text": "想", "start": 0.95, "end": 1.15},
+        {"text": "我", "start": 1.3, "end": 1.45},
+        {"text": "想", "start": 1.45, "end": 1.65},
+        {"text": "去", "start": 1.65, "end": 1.85},
+        {"text": "北京", "start": 1.85, "end": 2.2}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.1, "audio_end": 0.5},
+        {"index": 1, "source": "words", "available": true, "matched_text": "我想我想去北京", "audio_start": 0.8, "audio_end": 2.2}
+      ]
+    }
+  },
+  {
+    "name": "zh_middle_phrase_trailing_repetition_kept",
+    "category": "repetition",
+    "description": "中間フレーズ末尾の反復をそのフレーズの比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。再见。",
+    "recognized_text": "你好今天天气很好好再见",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "你", "start": 0.1, "end": 0.3},
+        {"text": "好", "start": 0.3, "end": 0.5},
+        {"text": "今", "start": 0.8, "end": 1.0},
+        {"text": "天", "start": 1.0, "end": 1.2},
+        {"text": "天", "start": 1.2, "end": 1.4},
+        {"text": "气", "start": 1.4, "end": 1.6},
+        {"text": "很", "start": 1.6, "end": 1.8},
+        {"text": "好", "start": 1.8, "end": 2.0},
+        {"text": "好", "start": 2.05, "end": 2.2},
+        {"text": "再见", "start": 2.5, "end": 2.9}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 3,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.1, "audio_end": 0.5},
+        {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好好", "audio_start": 0.8, "audio_end": 2.2},
+        {"index": 2, "source": "words", "available": true, "matched_text": "再见", "audio_start": 2.5, "audio_end": 2.9}
+      ]
+    }
+  },
+  {
+    "name": "zh_later_phrase_self_correction_kept",
+    "category": "self_correction",
+    "description": "後続フレーズ内部の誤語と自己訂正を比較区間から落とさない。",
+    "target_language": "zh-CN",
+    "target_text": "你好。我明天去北京。",
+    "recognized_text": "你好我明天去上海不北京",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "你好", "start": 0.1, "end": 0.5},
+        {"text": "我", "start": 0.8, "end": 0.95},
+        {"text": "明天", "start": 0.95, "end": 1.3},
+        {"text": "去", "start": 1.3, "end": 1.5},
+        {"text": "上海", "start": 1.5, "end": 1.85},
+        {"text": "不", "start": 1.9, "end": 2.05},
+        {"text": "北京", "start": 2.05, "end": 2.4}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.1, "audio_end": 0.5},
+        {"index": 1, "source": "words", "available": true, "matched_text": "我明天去上海不北京", "audio_start": 0.8, "audio_end": 2.4}
+      ]
+    }
+  },
+  {
+    "name": "zh_interphrase_filler_excluded",
+    "category": "filler",
+    "description": "フレーズ境界の明確なフィラーはどちらの比較区間にも含めない。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。",
+    "recognized_text": "你好嗯今天天气很好",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "你好", "start": 0.1, "end": 0.5},
+        {"text": "嗯", "start": 0.65, "end": 0.85},
+        {"text": "今天天气很好", "start": 1.0, "end": 2.1}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.1, "audio_end": 0.5},
+        {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 1.0, "audio_end": 2.1}
+      ]
+    }
+  },
+  {
+    "name": "zh_first_phrase_fully_omitted",
+    "category": "omission",
+    "description": "先頭フレーズを丸ごと省略しても後続フレーズを正しく割り当てる。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。",
+    "recognized_text": "今天天气很好",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [{"text": "今天天气很好", "start": 0.3, "end": 1.5}]
+    },
+    "expected": {
+      "available": true,
+      "complete": false,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+        {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 0.3, "audio_end": 1.5}
+      ]
+    }
+  },
+  {
+    "name": "zh_last_phrase_fully_omitted",
+    "category": "omission",
+    "description": "末尾フレーズを丸ごと省略した場合はその区間だけ利用不可にする。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。",
+    "recognized_text": "你好",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [{"text": "你好", "start": 0.2, "end": 0.6}]
+    },
+    "expected": {
+      "available": true,
+      "complete": false,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.6},
+        {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
+      ]
+    }
+  },
+  {
+    "name": "zh_partial_last_phrase_with_substitution",
+    "category": "combined_error",
+    "description": "末尾フレーズ途中の言い間違いがあっても取得済み区間を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "你好。我明天去北京。",
+    "recognized_text": "你好我明天到",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "你好", "start": 0.2, "end": 0.6},
+        {"text": "我", "start": 0.9, "end": 1.05},
+        {"text": "明天", "start": 1.05, "end": 1.35},
+        {"text": "到", "start": 1.35, "end": 1.55}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.6},
+        {"index": 1, "source": "words", "available": true, "matched_text": "我明天到", "audio_start": 0.9, "audio_end": 1.55}
+      ]
+    }
+  },
+  {
+    "name": "zh_trailing_filler_excluded",
+    "category": "filler",
+    "description": "全文末尾の明確なフィラーを最後の比較区間から除外する。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。",
+    "recognized_text": "你好今天天气很好嗯",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "你好", "start": 0.1, "end": 0.5},
+        {"text": "今天天气很好", "start": 0.8, "end": 1.9},
+        {"text": "嗯", "start": 2.0, "end": 2.2}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.1, "audio_end": 0.5},
+        {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 0.8, "audio_end": 1.9}
+      ]
+    }
+  },
+  {
+    "name": "en_later_phrase_multiword_restart_kept",
+    "category": "self_correction",
+    "description": "後続英語フレーズの複数語リスタートをまとめて保持する。",
+    "target_language": "en-US",
+    "target_text": "Good morning. I think it is useful.",
+    "recognized_text": "Good morning I think I think it is useful",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "Good", "start": 0.1, "end": 0.35},
+        {"text": "morning", "start": 0.35, "end": 0.7},
+        {"text": "I", "start": 1.0, "end": 1.1},
+        {"text": "think", "start": 1.1, "end": 1.35},
+        {"text": "I", "start": 1.5, "end": 1.6},
+        {"text": "think", "start": 1.6, "end": 1.85},
+        {"text": "it", "start": 1.85, "end": 2.0},
+        {"text": "is", "start": 2.0, "end": 2.15},
+        {"text": "useful", "start": 2.15, "end": 2.55}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Good morning", "audio_start": 0.1, "audio_end": 0.7},
+        {"index": 1, "source": "words", "available": true, "matched_text": "I think I think it is useful", "audio_start": 1.0, "audio_end": 2.55}
+      ]
+    }
+  },
+  {
+    "name": "en_middle_phrase_trailing_repetition_kept",
+    "category": "repetition",
+    "description": "中間英語フレーズ末尾の反復をその比較区間へ含める。",
+    "target_language": "en-US",
+    "target_text": "Hello. This is good. See you.",
+    "recognized_text": "Hello this is good good see you",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "Hello", "start": 0.1, "end": 0.4},
+        {"text": "this", "start": 0.7, "end": 0.9},
+        {"text": "is", "start": 0.9, "end": 1.05},
+        {"text": "good", "start": 1.05, "end": 1.35},
+        {"text": "good", "start": 1.45, "end": 1.75},
+        {"text": "see", "start": 2.0, "end": 2.2},
+        {"text": "you", "start": 2.2, "end": 2.4}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 3,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.1, "audio_end": 0.4},
+        {"index": 1, "source": "words", "available": true, "matched_text": "this is good good", "audio_start": 0.7, "audio_end": 1.75},
+        {"index": 2, "source": "words", "available": true, "matched_text": "see you", "audio_start": 2.0, "audio_end": 2.4}
+      ]
+    }
+  },
+  {
+    "name": "en_later_phrase_self_correction_kept",
+    "category": "self_correction",
+    "description": "後続英語フレーズ内部の誤語と自己訂正を落とさない。",
+    "target_language": "en-US",
+    "target_text": "Hello. I went to the station.",
+    "recognized_text": "Hello I went to the airport no the station",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "Hello", "start": 0.1, "end": 0.4},
+        {"text": "I", "start": 0.7, "end": 0.8},
+        {"text": "went", "start": 0.8, "end": 1.05},
+        {"text": "to", "start": 1.05, "end": 1.2},
+        {"text": "the", "start": 1.2, "end": 1.35},
+        {"text": "airport", "start": 1.35, "end": 1.7},
+        {"text": "no", "start": 1.75, "end": 1.95},
+        {"text": "the", "start": 1.95, "end": 2.1},
+        {"text": "station", "start": 2.1, "end": 2.5}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.1, "audio_end": 0.4},
+        {"index": 1, "source": "words", "available": true, "matched_text": "I went to the airport no the station", "audio_start": 0.7, "audio_end": 2.5}
+      ]
+    }
+  },
+  {
+    "name": "en_interphrase_filler_excluded",
+    "category": "filler",
+    "description": "英語フレーズ境界の明確なフィラーを比較区間へ含めない。",
+    "target_language": "en-US",
+    "target_text": "Hello. It is sunny today.",
+    "recognized_text": "Hello um it is sunny today",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "Hello", "start": 0.1, "end": 0.4},
+        {"text": "um", "start": 0.55, "end": 0.75},
+        {"text": "it", "start": 0.9, "end": 1.05},
+        {"text": "is", "start": 1.05, "end": 1.2},
+        {"text": "sunny", "start": 1.2, "end": 1.5},
+        {"text": "today", "start": 1.5, "end": 1.8}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.1, "audio_end": 0.4},
+        {"index": 1, "source": "words", "available": true, "matched_text": "it is sunny today", "audio_start": 0.9, "audio_end": 1.8}
+      ]
+    }
+  },
+  {
+    "name": "en_first_phrase_fully_omitted",
+    "category": "omission",
+    "description": "先頭英語フレーズを丸ごと省略しても後続を割り当てる。",
+    "target_language": "en-US",
+    "target_text": "Hello. It is sunny today.",
+    "recognized_text": "It is sunny today",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "It", "start": 0.3, "end": 0.45},
+        {"text": "is", "start": 0.45, "end": 0.6},
+        {"text": "sunny", "start": 0.6, "end": 0.9},
+        {"text": "today", "start": 0.9, "end": 1.2}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": false,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+        {"index": 1, "source": "words", "available": true, "matched_text": "It is sunny today", "audio_start": 0.3, "audio_end": 1.2}
+      ]
+    }
+  },
+  {
+    "name": "en_last_phrase_fully_omitted",
+    "category": "omission",
+    "description": "末尾英語フレーズを丸ごと省略した場合はその区間だけ利用不可にする。",
+    "target_language": "en-US",
+    "target_text": "Hello. It is sunny today.",
+    "recognized_text": "Hello",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [{"text": "Hello", "start": 0.2, "end": 0.5}]
+    },
+    "expected": {
+      "available": true,
+      "complete": false,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.2, "audio_end": 0.5},
+        {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
+      ]
+    }
+  },
+  {
+    "name": "en_partial_last_phrase_with_substitution",
+    "category": "combined_error",
+    "description": "末尾英語フレーズ途中の言い間違いがあっても取得区間を保持する。",
+    "target_language": "en-US",
+    "target_text": "Hello. I will go to the station tomorrow.",
+    "recognized_text": "Hello I will walk to",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "Hello", "start": 0.2, "end": 0.5},
+        {"text": "I", "start": 0.8, "end": 0.9},
+        {"text": "will", "start": 0.9, "end": 1.1},
+        {"text": "walk", "start": 1.1, "end": 1.35},
+        {"text": "to", "start": 1.35, "end": 1.5}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.2, "audio_end": 0.5},
+        {"index": 1, "source": "words", "available": true, "matched_text": "I will walk to", "audio_start": 0.8, "audio_end": 1.5}
+      ]
+    }
+  },
+  {
+    "name": "en_trailing_filler_excluded",
+    "category": "filler",
+    "description": "全文末尾の明確な英語フィラーを最後の比較区間から除外する。",
+    "target_language": "en-US",
+    "target_text": "Hello. It is sunny today.",
+    "recognized_text": "Hello it is sunny today um",
+    "asr_timestamps": {
+      "available": true,
+      "model": "whisper-1",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "Hello", "start": 0.1, "end": 0.4},
+        {"text": "it", "start": 0.7, "end": 0.85},
+        {"text": "is", "start": 0.85, "end": 1.0},
+        {"text": "sunny", "start": 1.0, "end": 1.3},
+        {"text": "today", "start": 1.3, "end": 1.6},
+        {"text": "um", "start": 1.75, "end": 1.95}
+      ]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 2,
+      "ranges": [
+        {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.1, "audio_end": 0.4},
+        {"index": 1, "source": "words", "available": true, "matched_text": "it is sunny today", "audio_start": 0.7, "audio_end": 1.6}
+      ]
+    }
+  }
+]

@@ -332,7 +332,7 @@ test("SpeakLoop does not mark omitted English punctuation as a pronunciation err
   const repeatRecord = page.locator("#practice-repeat-record-button");
   await repeatRecord.click();
   await repeatRecord.click();
-  await expect(page.locator("#practice-status")).toHaveText("Whisperで音声を解析しています。");
+  await expect(page.locator("#practice-status")).toHaveText("発音を確認しています。");
   await expect(page.locator("#practice-result-panel")).toBeVisible();
   await expect(page.locator("#practice-recognized-text .practice-diff-cell.is-delete")).toHaveCount(0);
   await expect(page.locator("#practice-recognized-text")).not.toContainText("_");
@@ -427,9 +427,27 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
   await record.click();
   await record.click();
   await expect(page.locator("#practice-prompt-panel")).toBeVisible();
-  await expect(page.locator("#practice-job-status-label")).toContainText("利用可能なGPUを待っています");
+  await expect(page.locator("#practice-job-status-label")).toContainText("GPUサーバーの準備を待っています");
   await expect(page.locator("#practice-play-model-button")).toBeDisabled();
-  await expect(page.locator("#practice-job-status-label")).toContainText("Seed-VCモデルを読み込んでいます", { timeout: 10_000 });
+  await expect(page.locator("#practice-job-status-label")).toContainText("お手本の声を調整する準備をしています", { timeout: 10_000 });
+  await expect(page.locator("#practice-job-status-label")).not.toContainText("Seed-VC");
+  await expect(page.locator("#practice-job-status-model")).toHaveText("Seed-VC");
+  await expect(page.locator("#practice-job-status-detail")).toContainText("Seed-VCモデルを読み込んでいます");
+  const ownVoiceStatusStyles = await page.locator("#practice-job-status").evaluate((status) => {
+    const label = status.querySelector<HTMLElement>("#practice-job-status-label");
+    const detail = status.querySelector<HTMLElement>("#practice-job-status-detail");
+    if (!label || !detail) throw new Error("practice job status copy is missing");
+    const labelStyle = getComputedStyle(label);
+    const detailStyle = getComputedStyle(detail);
+    return {
+      labelColor: labelStyle.color,
+      detailColor: detailStyle.color,
+      labelSize: Number.parseFloat(labelStyle.fontSize),
+      detailSize: Number.parseFloat(detailStyle.fontSize),
+    };
+  });
+  expect(ownVoiceStatusStyles.detailColor).not.toBe(ownVoiceStatusStyles.labelColor);
+  expect(ownVoiceStatusStyles.detailSize).toBeLessThan(ownVoiceStatusStyles.labelSize);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-progress.png`, fullPage: true });
@@ -449,7 +467,7 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
   await expect(page.locator("#practice-own-voice-toggle")).toBeChecked();
 });
 
-test("SkitVoice shows reference-audio feedback as a dismissible toast", async ({ page }, testInfo) => {
+test("SkitVoice hides tab-audio capture when the browser does not support it", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "mediaDevices", {
       value: { getUserMedia: undefined, getDisplayMedia: undefined },
@@ -457,18 +475,15 @@ test("SkitVoice shows reference-audio feedback as a dismissible toast", async ({
     });
   });
   await page.goto("/skitvoice");
-  await page.locator('[data-tab-audio-slot="1"]').click();
-  const unsupportedToast = page.locator(".voice-lab-toast", { hasText: "このブラウザではタブ音声録音を使えません" });
-  await expect(unsupportedToast).toBeVisible();
-  await expect(unsupportedToast).toHaveAttribute("role", "alert");
+  await expect(page.locator("[data-tab-audio-slot]:visible")).toHaveCount(0);
+  await expect(page.locator("[data-reference-source-help]")).toHaveText("ファイル・録音・URLから選択");
+  await expect(page.locator(".voice-lab-toast")).toHaveCount(0);
   await expect(page.locator("#vibevoice-message")).toBeEmpty();
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
     await page.waitForTimeout(250);
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-skitvoice-error-toast.png`, fullPage: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-skitvoice-tab-audio-hidden.png`, fullPage: true });
   }
-  await unsupportedToast.getByRole("button", { name: "通知を閉じる" }).click();
-  await expect(unsupportedToast).toHaveCount(0);
 
   await page.locator('input[name="voice_file_1"]').setInputFiles({
     name: "voice.wav",
@@ -491,8 +506,58 @@ test("SkitVoice shows reference-audio feedback as a dismissible toast", async ({
   await assertNoHorizontalOverflow(page);
 });
 
-test("SpeakLoop shows RunPod queue, model progress, and completion while polling", async ({ page }, testInfo) => {
+test("SkitVoice explains a runtime tab-audio incompatibility once and then hides the controls", async ({ page }) => {
   await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        getDisplayMedia: async () => {
+          throw new DOMException("capture is not supported", "NotSupportedError");
+        },
+      },
+      configurable: true,
+    });
+  });
+  await page.goto("/skitvoice");
+  await expect(page.locator('[data-tab-audio-slot="1"]')).toBeVisible();
+  await page.locator('[data-tab-audio-slot="1"]').click();
+  const unsupportedToast = page.locator(".voice-lab-toast", { hasText: "このブラウザではタブ音声録音を使えません" });
+  await expect(unsupportedToast).toBeVisible();
+  await expect(unsupportedToast).toHaveAttribute("role", "alert");
+  await expect(page.locator("[data-tab-audio-slot]:visible")).toHaveCount(0);
+  await expect(page.locator("[data-reference-source-help]")).toHaveText("ファイル・録音・URLから選択");
+});
+
+test("SkitVoice keeps reference slots readable in dark mode", async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem("mo-speech-theme", "dark"));
+  await page.goto("/skitvoice");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const colors = await page.locator(".react-voice-slot").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, foreground: style.color };
+  });
+  const backgroundChannels = colors.background.match(/[\d.]+/g)?.slice(0, 3).map(Number) || [];
+  const foregroundChannels = colors.foreground.match(/[\d.]+/g)?.slice(0, 3).map(Number) || [];
+  expect(Math.max(...backgroundChannels)).toBeLessThan(80);
+  expect(Math.min(...foregroundChannels)).toBeGreaterThan(180);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-skitvoice-reference-slots.png`, fullPage: true });
+  }
+});
+
+test("SpeakLoop keeps primary progress generic and shows subdued technical details", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    const technicalLogs: unknown[][] = [];
+    Object.defineProperty(window, "__voiceLabTechnicalLogs", { value: technicalLogs });
+    const originalDebug = console.debug.bind(console);
+    console.debug = (...args) => {
+      technicalLogs.push(args);
+      originalDebug(...args);
+    };
     class FakeMediaRecorder extends EventTarget {
       static isTypeSupported() { return true; }
       state = "inactive";
@@ -553,6 +618,7 @@ test("SpeakLoop shows RunPod queue, model progress, and completion while polling
           job_id: "poll-job",
           status: "running",
           current_stage: { stage: "loading_model", label: "FunASRモデルを読み込んでいます", provider: "RunPod Serverless", model: "funasr/paraformer-zh" },
+          metrics: { delay_time_ms: 105, execution_time_ms: 220 },
         }),
       });
       return;
@@ -606,13 +672,21 @@ test("SpeakLoop shows RunPod queue, model progress, and completion while polling
   const repeat = page.locator("#practice-repeat-record-button");
   await repeat.click();
   await repeat.click();
-  await expect(page.locator("#practice-job-status-label")).toContainText("利用可能なGPUを待っています");
-  await expect(page.locator("#practice-job-status-label")).toContainText("FunASRモデルを読み込んでいます");
+  await expect(page.locator("#practice-job-status-label")).toContainText("GPUサーバーの準備を待っています");
+  await expect(page.locator("#practice-job-status-label")).toContainText("音声認識を準備しています");
+  await expect(page.locator("#practice-job-status-label")).not.toContainText(/RunPod|FunASR|Whisper/);
+  await expect(page.locator("#practice-job-status-model")).toContainText("RunPod Serverless");
+  await expect(page.locator("#practice-job-status-model")).toContainText("funasr/paraformer-zh");
+  await expect(page.locator("#practice-job-status-detail")).toContainText("FunASRモデルを読み込んでいます");
+  await expect(page.locator("#practice-job-status-detail")).toContainText("待機 105ms / 処理 220ms");
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-progress.png`, fullPage: true });
   }
   await expect(page.locator("#practice-result-panel")).toBeVisible({ timeout: 10_000 });
+  const technicalLog = await page.evaluate(() => JSON.stringify((window as Window & { __voiceLabTechnicalLogs?: unknown[][] }).__voiceLabTechnicalLogs || []));
+  expect(technicalLog).toContain("RunPod Serverless");
+  expect(technicalLog).toContain("funasr/paraformer-zh");
   await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
     (elements) => elements.map((element) => element.textContent || "").join(""),
   )).toBe("你哈_你今天这_里");
@@ -632,9 +706,17 @@ test("SpeakLoop shows RunPod queue, model progress, and completion while polling
   await repeat.click();
   await repeat.click();
   await expect(page.locator("#practice-job-status-label")).toContainText("処理に失敗しました");
-  await expect(page.locator("#practice-error")).toContainText("残高不足");
+  await expect(page.locator("#practice-job-status-detail")).toContainText("RunPodの残高不足");
+  await expect(page.locator("#practice-job-status-detail")).toContainText("Billing");
+  await expect(page.locator("#practice-error")).toContainText("音声処理を完了できませんでした");
+  await expect(page.locator("#practice-error")).not.toContainText(/RunPod|Billing|FunASR/);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-error.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-runpod-error.png`, fullPage: true });
   }
   expect(polls).toBeGreaterThanOrEqual(2);
 });
@@ -814,7 +896,7 @@ test("SkitVoice follows the documented three, two, and one-column task order", a
   }
 });
 
-test("SkitVoice shows RunPod model loading and processing stages", async ({ page }) => {
+test("SkitVoice keeps public progress generic while retaining technical progress logs", async ({ page }) => {
   let statusCall = 0;
   await page.route("**/api/vibevoice/jobs**", async (route) => {
     const request = route.request();
@@ -908,9 +990,8 @@ test("SkitVoice shows RunPod model loading and processing stages", async ({ page
   });
   await page.locator("#vibevoice-generate-button").click();
 
-  await expect(page.locator("#vibevoice-message")).toContainText("VibeVoice Largeモデルを読み込んでいます");
-  await expect(page.locator("#vibevoice-message")).toContainText("VibeVoice Large");
-  await expect(page.locator("#vibevoice-message")).toContainText("Seed-VCモデルを読み込んでいます", { timeout: 5_000 });
+  await expect(page.locator("#vibevoice-message")).toContainText("音声生成を準備しています");
+  await expect(page.locator("#vibevoice-message")).not.toContainText(/RunPod|VibeVoice|Seed-VC/);
   await expect(page.locator("#vibevoice-progress-log")).toContainText("Seed-VCモデルを読み込んでいます");
   await expect(page.locator("#vibevoice-progress-log")).not.toContainText("loading_seed_vc_model");
   await assertNoHorizontalOverflow(page);

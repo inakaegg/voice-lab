@@ -20,6 +20,11 @@ PRACTICE_GRADE_LABELS = {
     "retry": "もう一回",
 }
 _CHINESE_TRADITIONAL_TO_SIMPLIFIED = OpenCC("t2s")
+_EDGE_FILLERS = {
+    "en-US": {"ah", "er", "erm", "hmm", "mm", "uh", "um", "well"},
+    "ja-JP": {"あの", "ええと", "えっと", "えー", "うーん"},
+    "zh-CN": {"呃", "额", "嗯", "唔"},
+}
 
 
 def simplify_chinese_text(text: str) -> str:
@@ -183,7 +188,11 @@ def practice_comparison_alignment(
     word_spans, recognized_normalized = _asr_word_spans(timestamp_data.get("words"), language)
 
     if word_spans and recognized_normalized:
-        ranges = _align_phrases_to_word_spans(phrases, recognized_normalized, word_spans, language)
+        ranges = (
+            [_align_single_phrase_to_word_spans(phrases[0], recognized_normalized, word_spans, language)]
+            if len(phrases) == 1
+            else _align_phrases_to_word_spans(phrases, recognized_normalized, word_spans, language)
+        )
         complete = bool(ranges) and all(bool(entry["available"]) for entry in ranges)
         return {
             "available": any(bool(entry["available"]) for entry in ranges),
@@ -295,6 +304,15 @@ def _best_practice_phrase_match(target_normalized: str, recognized_normalized: s
     return best
 
 
+def _target_character_coverage(target_normalized: str, candidate: str) -> float:
+    if not target_normalized or not candidate:
+        return 0.0
+    matching_characters = sum(
+        block.size for block in SequenceMatcher(None, target_normalized, candidate).get_matching_blocks()
+    )
+    return max(0.0, min(1.0, matching_characters / len(target_normalized)))
+
+
 def _comparison_target_phrases(target_text: str, target_language: str) -> list[dict[str, object]]:
     phrases: list[dict[str, object]] = []
     for source_index, phrase in enumerate(split_practice_phrases(target_text)):
@@ -379,52 +397,463 @@ def _align_phrases_to_word_spans(
     word_spans: list[dict[str, object]],
     target_language: str,
 ) -> list[dict[str, object]]:
-    cursor = 0
+    memo: dict[tuple[int, int], tuple[float, int, tuple[dict[str, object] | None, ...]]] = {}
+
+    def solve(
+        phrase_index: int,
+        minimum_word_index: int,
+    ) -> tuple[float, int, tuple[dict[str, object] | None, ...]]:
+        key = (phrase_index, minimum_word_index)
+        if key in memo:
+            return memo[key]
+        if phrase_index >= len(phrases):
+            return 0.0, 0, ()
+
+        skipped_score, skipped_count, skipped_ranges = solve(phrase_index + 1, minimum_word_index)
+        best = (skipped_score, skipped_count, (None, *skipped_ranges))
+        normalized_target = str(phrases[phrase_index]["normalized_target"])
+        target_length = len(normalized_target)
+        is_last_phrase = phrase_index == len(phrases) - 1
+        minimum_length = max(1, int(target_length * (0.25 if is_last_phrase else 0.35)))
+        maximum_length = max(minimum_length, int(target_length * 2.2) + 3)
+
+        for start_word in range(minimum_word_index, len(word_spans)):
+            start = int(word_spans[start_word]["normalized_start"])
+            for end_word in range(start_word + 1, len(word_spans) + 1):
+                end = int(word_spans[end_word - 1]["normalized_end"])
+                candidate = recognized_normalized[start:end]
+                candidate_length = len(candidate)
+                if candidate_length < minimum_length:
+                    continue
+                if candidate_length > maximum_length:
+                    break
+                similarity = practice_similarity(normalized_target, candidate)
+                coverage = _target_character_coverage(normalized_target, candidate)
+                is_trailing_partial = is_last_phrase and end_word == len(word_spans)
+                common_prefix_length = _common_prefix_length(normalized_target, candidate)
+                is_reliable_match = similarity >= 0.40 and coverage >= 0.45
+                is_tolerable_trailing_partial = (
+                    is_trailing_partial
+                    and similarity >= 0.30
+                    and coverage >= 0.20
+                    and common_prefix_length >= 2
+                    and common_prefix_length / candidate_length >= 0.20
+                )
+                if not is_reliable_match and not is_tolerable_trailing_partial:
+                    continue
+                length_delta_ratio = abs(candidate_length - target_length) / max(1, target_length)
+                candidate_score = coverage + similarity - 0.30 * length_delta_ratio
+                next_score, next_count, next_ranges = solve(phrase_index + 1, end_word)
+                candidate_range: dict[str, object] = {
+                    "start_word": start_word,
+                    "end_word": end_word,
+                    "recognized_start": start,
+                    "recognized_end": end,
+                    "similarity": similarity,
+                    "coverage": coverage,
+                }
+                option = (candidate_score + next_score, next_count + 1, (candidate_range, *next_ranges))
+                if option[0] > best[0] + 1e-9 or (
+                    abs(option[0] - best[0]) <= 1e-9 and option[1] > best[1]
+                ):
+                    best = option
+
+        memo[key] = best
+        return best
+
+    _, _, selected = solve(0, 0)
+    selected = _expand_initial_repetition_ranges(
+        phrases,
+        selected,
+        word_spans,
+        recognized_normalized,
+    )
+    selected = _expand_trailing_attempt_ranges(
+        phrases,
+        selected,
+        word_spans,
+        recognized_normalized,
+        target_language,
+    )
     ranges: list[dict[str, object]] = []
-    for index, phrase in enumerate(phrases):
+    for index, (phrase, selection) in enumerate(zip(phrases, selected, strict=True)):
         normalized_target = str(phrase["normalized_target"])
-        match = _best_practice_phrase_match(normalized_target, recognized_normalized, cursor)
-        start = int(match["recognized_start"])
-        end = int(match["recognized_end"])
-        similarity = float(match["similarity"])
-        coverage = (end - start) / len(normalized_target) if normalized_target else 0.0
-        matched = bool(normalized_target) and similarity >= 0.45 and coverage >= 0.50
-        overlapping = _overlapping_word_spans(word_spans, start, end) if matched else []
-        available = bool(overlapping)
-        if available:
-            cursor = max(cursor, int(overlapping[-1]["normalized_end"]))
+        if selection is None:
+            ranges.append(_unavailable_alignment_range(index, phrase, normalized_target))
+            continue
+        selected_spans = word_spans[int(selection["start_word"]) : int(selection["end_word"])]
+        start = int(selection["recognized_start"])
+        end = int(selection["recognized_end"])
         ranges.append(
             {
                 "index": index,
                 "source_index": phrase["source_index"],
                 "target": phrase["target"],
                 "normalized_target": normalized_target,
-                "available": available,
-                "matched": matched,
-                "source": "words" if available else "none",
-                "similarity": round(similarity, 3),
-                "coverage": round(coverage, 3),
-                "recognized_start": start if available else None,
-                "recognized_end": end if available else None,
-                "normalized_recognized": recognized_normalized[start:end] if available else "",
-                "matched_text": _join_matched_words(overlapping, target_language) if available else "",
-                "audio_start": overlapping[0]["audio_start"] if available else None,
-                "audio_end": overlapping[-1]["audio_end"] if available else None,
+                "available": True,
+                "matched": True,
+                "source": "words",
+                "similarity": round(float(selection["similarity"]), 3),
+                "coverage": round(float(selection["coverage"]), 3),
+                "recognized_start": start,
+                "recognized_end": end,
+                "normalized_recognized": recognized_normalized[start:end],
+                "matched_text": _join_matched_words(selected_spans, target_language),
+                "audio_start": selected_spans[0]["audio_start"],
+                "audio_end": selected_spans[-1]["audio_end"],
             }
         )
     return ranges
 
 
-def _overlapping_word_spans(
+def _expand_initial_repetition_ranges(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
     word_spans: list[dict[str, object]],
-    normalized_start: int,
-    normalized_end: int,
-) -> list[dict[str, object]]:
-    return [
-        span
-        for span in word_spans
-        if int(span["normalized_end"]) > normalized_start and int(span["normalized_start"]) < normalized_end
+    recognized_normalized: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Keep adjacent restart attempts that repeat a selected phrase's prefix.
+
+    The global alignment intentionally prefers the cleanest matching span. For
+    comparison playback, however, an immediately preceding stutter or false
+    start is part of the learner's attempt and must be audible. Expansion is
+    bounded by the preceding selected phrase, so it cannot consume another
+    phrase or a boundary filler.
+    """
+
+    expanded: list[dict[str, object] | None] = []
+    previous_end_word = 0
+    for phrase, selection in zip(phrases, selected, strict=True):
+        if selection is None:
+            expanded.append(None)
+            continue
+
+        item = dict(selection)
+        start_word = int(item["start_word"])
+        end_word = int(item["end_word"])
+        original_start_word = start_word
+        for candidate_start in range(start_word - 1, previous_end_word - 1, -1):
+            if _is_target_prefix_attempt_sequence(
+                word_spans[candidate_start:original_start_word],
+                str(phrase["normalized_target"]),
+            ):
+                start_word = candidate_start
+        substantial_prefix_start = _earliest_substantial_prefix_attempt_start(
+            word_spans,
+            previous_end_word,
+            original_start_word,
+            str(phrase["normalized_target"]),
+        )
+        if substantial_prefix_start is not None:
+            start_word = min(start_word, substantial_prefix_start)
+
+        if start_word != original_start_word:
+            start = int(word_spans[start_word]["normalized_start"])
+            end = int(word_spans[end_word - 1]["normalized_end"])
+            candidate = recognized_normalized[start:end]
+            normalized_target = str(phrase["normalized_target"])
+            item.update(
+                {
+                    "start_word": start_word,
+                    "recognized_start": start,
+                    "recognized_end": end,
+                    "similarity": practice_similarity(normalized_target, candidate),
+                    "coverage": _target_character_coverage(normalized_target, candidate),
+                }
+            )
+
+        expanded.append(item)
+        previous_end_word = end_word
+
+    return tuple(expanded)
+
+
+def _is_target_prefix_attempt_sequence(
+    word_spans: list[dict[str, object]],
+    normalized_target: str,
+) -> bool:
+    """Return whether every word can form one or more target-prefix attempts."""
+
+    if not word_spans or not normalized_target:
+        return False
+    pieces = [str(span["normalized"]) for span in word_spans]
+    memo: dict[int, bool] = {}
+
+    def can_partition(start: int) -> bool:
+        if start == len(pieces):
+            return True
+        if start in memo:
+            return memo[start]
+        attempt = ""
+        for end in range(start, len(pieces)):
+            attempt += pieces[end]
+            if not normalized_target.startswith(attempt):
+                break
+            if can_partition(end + 1):
+                memo[start] = True
+                return True
+        memo[start] = False
+        return False
+
+    return can_partition(0)
+
+
+def _earliest_substantial_prefix_attempt_start(
+    word_spans: list[dict[str, object]],
+    minimum_word: int,
+    selected_start_word: int,
+    normalized_target: str,
+) -> int | None:
+    """Find a meaningful false start before the clean selected phrase span."""
+
+    if minimum_word >= selected_start_word or not normalized_target:
+        return None
+    minimum_attempt_length = min(len(normalized_target), max(2, int(len(normalized_target) * 0.25)))
+    for candidate_start in range(minimum_word, selected_start_word):
+        attempt = ""
+        for candidate_end in range(candidate_start, selected_start_word):
+            attempt += str(word_spans[candidate_end]["normalized"])
+            if not normalized_target.startswith(attempt):
+                break
+            if len(attempt) >= minimum_attempt_length:
+                return candidate_start
+    return None
+
+
+def _expand_trailing_attempt_ranges(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+    target_language: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Keep trailing repetitions and non-filler remainder of the last phrase."""
+
+    expanded: list[dict[str, object] | None] = []
+    for index, (phrase, selection) in enumerate(zip(phrases, selected, strict=True)):
+        if selection is None:
+            expanded.append(None)
+            continue
+
+        item = dict(selection)
+        start_word = int(item["start_word"])
+        end_word = int(item["end_word"])
+        next_start_word = next(
+            (
+                int(next_selection["start_word"])
+                for next_selection in selected[index + 1 :]
+                if next_selection is not None
+            ),
+            len(word_spans),
+        )
+        expanded_end_word = end_word
+        normalized_target = str(phrase["normalized_target"])
+
+        if index == len(phrases) - 1:
+            expanded_end_word = next_start_word
+            fillers = _EDGE_FILLERS.get(target_language, set())
+            while expanded_end_word > end_word:
+                token = str(word_spans[expanded_end_word - 1]["normalized"])
+                if token not in fillers or normalized_target.endswith(token):
+                    break
+                expanded_end_word -= 1
+            out_of_order_start = _find_out_of_order_target_start(
+                phrases,
+                index,
+                word_spans,
+                end_word,
+                expanded_end_word,
+            )
+            if out_of_order_start is not None:
+                expanded_end_word = out_of_order_start
+        else:
+            for candidate_end in range(end_word + 1, next_start_word + 1):
+                if _is_target_suffix_attempt_sequence(
+                    word_spans[end_word:candidate_end],
+                    normalized_target,
+                ):
+                    expanded_end_word = candidate_end
+
+        if expanded_end_word != end_word:
+            start = int(word_spans[start_word]["normalized_start"])
+            end = int(word_spans[expanded_end_word - 1]["normalized_end"])
+            candidate = recognized_normalized[start:end]
+            item.update(
+                {
+                    "end_word": expanded_end_word,
+                    "recognized_start": start,
+                    "recognized_end": end,
+                    "similarity": practice_similarity(normalized_target, candidate),
+                    "coverage": _target_character_coverage(normalized_target, candidate),
+                }
+            )
+
+        expanded.append(item)
+
+    return tuple(expanded)
+
+
+def _find_out_of_order_target_start(
+    phrases: list[dict[str, object]],
+    current_phrase_index: int,
+    word_spans: list[dict[str, object]],
+    trailing_start_word: int,
+    trailing_end_word: int,
+) -> int | None:
+    """Find trailing speech that strongly matches another target phrase."""
+
+    other_targets = [
+        str(phrase["normalized_target"])
+        for index, phrase in enumerate(phrases)
+        if index != current_phrase_index
     ]
+    for candidate_start in range(trailing_start_word, trailing_end_word):
+        candidate = ""
+        for candidate_end in range(candidate_start, trailing_end_word):
+            candidate += str(word_spans[candidate_end]["normalized"])
+            for target in other_targets:
+                if (
+                    practice_similarity(target, candidate) >= 0.75
+                    and _target_character_coverage(target, candidate) >= 0.70
+                ):
+                    return candidate_start
+    return None
+
+
+def _is_target_suffix_attempt_sequence(
+    word_spans: list[dict[str, object]],
+    normalized_target: str,
+) -> bool:
+    """Return whether every word can form one or more target-suffix attempts."""
+
+    if not word_spans or not normalized_target:
+        return False
+    pieces = [str(span["normalized"]) for span in word_spans]
+    memo: dict[int, bool] = {}
+
+    def can_partition(start: int) -> bool:
+        if start == len(pieces):
+            return True
+        if start in memo:
+            return memo[start]
+        attempt = ""
+        for end in range(start, len(pieces)):
+            attempt += pieces[end]
+            if (
+                len(attempt) < len(normalized_target)
+                and normalized_target.endswith(attempt)
+                and can_partition(end + 1)
+            ):
+                memo[start] = True
+                return True
+        memo[start] = False
+        return False
+
+    return can_partition(0)
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    for left_character, right_character in zip(left, right):
+        if left_character != right_character:
+            break
+        length += 1
+    return length
+
+
+def _unavailable_alignment_range(
+    index: int,
+    phrase: dict[str, object],
+    normalized_target: str,
+) -> dict[str, object]:
+    return {
+        "index": index,
+        "source_index": phrase["source_index"],
+        "target": phrase["target"],
+        "normalized_target": normalized_target,
+        "available": False,
+        "matched": False,
+        "source": "none",
+        "similarity": 0.0,
+        "coverage": 0.0,
+        "recognized_start": None,
+        "recognized_end": None,
+        "normalized_recognized": "",
+        "matched_text": "",
+        "audio_start": None,
+        "audio_end": None,
+    }
+
+
+def _align_single_phrase_to_word_spans(
+    phrase: dict[str, object],
+    recognized_normalized: str,
+    word_spans: list[dict[str, object]],
+    target_language: str,
+) -> dict[str, object]:
+    normalized_target = str(phrase["normalized_target"])
+    selected_spans = _trim_edge_filler_spans(word_spans, normalized_target, target_language)
+    if not selected_spans:
+        return {
+            "index": 0,
+            "source_index": phrase["source_index"],
+            "target": phrase["target"],
+            "normalized_target": normalized_target,
+            "available": False,
+            "matched": False,
+            "source": "none",
+            "similarity": 0.0,
+            "coverage": 0.0,
+            "recognized_start": None,
+            "recognized_end": None,
+            "normalized_recognized": "",
+            "matched_text": "",
+            "audio_start": None,
+            "audio_end": None,
+        }
+
+    start = int(selected_spans[0]["normalized_start"])
+    end = int(selected_spans[-1]["normalized_end"])
+    selected_normalized = recognized_normalized[start:end]
+    similarity = practice_similarity(normalized_target, selected_normalized)
+    coverage = _target_character_coverage(normalized_target, selected_normalized)
+    return {
+        "index": 0,
+        "source_index": phrase["source_index"],
+        "target": phrase["target"],
+        "normalized_target": normalized_target,
+        "available": True,
+        "matched": True,
+        "source": "words",
+        "similarity": round(similarity, 3),
+        "coverage": round(coverage, 3),
+        "recognized_start": start,
+        "recognized_end": end,
+        "normalized_recognized": selected_normalized,
+        "matched_text": _join_matched_words(selected_spans, target_language),
+        "audio_start": selected_spans[0]["audio_start"],
+        "audio_end": selected_spans[-1]["audio_end"],
+    }
+
+
+def _trim_edge_filler_spans(
+    word_spans: list[dict[str, object]],
+    normalized_target: str,
+    target_language: str,
+) -> list[dict[str, object]]:
+    selected = list(word_spans)
+    fillers = _EDGE_FILLERS.get(target_language, set())
+    while selected:
+        token = str(selected[0]["normalized"])
+        if token not in fillers or normalized_target.startswith(token):
+            break
+        selected.pop(0)
+    while selected:
+        token = str(selected[-1]["normalized"])
+        if token not in fillers or normalized_target.endswith(token):
+            break
+        selected.pop()
+    return selected
 
 
 def _join_matched_words(word_spans: list[dict[str, object]], target_language: str) -> str:

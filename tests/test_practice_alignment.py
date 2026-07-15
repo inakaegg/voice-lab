@@ -7,6 +7,16 @@ from mo_speech.practice import practice_comparison_alignment
 
 
 CASES = json.loads((Path(__file__).parent / "fixtures" / "practice_alignment_cases.json").read_text())
+GOLDEN_CASES = [
+    *json.loads((Path(__file__).parent / "fixtures" / "practice_alignment_golden_cases.json").read_text()),
+    *json.loads((Path(__file__).parent / "fixtures" / "practice_alignment_boundary_cases.json").read_text()),
+]
+HOLDOUT_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "practice_alignment_holdout_cases.json").read_text()
+)
+VALIDATION_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "practice_alignment_validation_cases.json").read_text()
+)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
@@ -80,3 +90,45 @@ def test_practice_comparison_alignment_keeps_the_mistaken_end_of_a_phrase_on_a_s
     assert second_phrase["matched_text"] == "你今天到那里"
     assert second_phrase["audio_start"] == pytest.approx(1.0)
     assert second_phrase["audio_end"] == pytest.approx(2.3)
+
+
+@pytest.mark.parametrize("case", GOLDEN_CASES, ids=[case["name"] for case in GOLDEN_CASES])
+def test_practice_comparison_alignment_golden_cases(case: dict[str, object]) -> None:
+    _assert_practice_comparison_alignment_case(case)
+
+
+@pytest.mark.parametrize("case", HOLDOUT_CASES, ids=[case["name"] for case in HOLDOUT_CASES])
+def test_practice_comparison_alignment_holdout_cases(case: dict[str, object]) -> None:
+    _assert_practice_comparison_alignment_case(case)
+
+
+@pytest.mark.parametrize("case", VALIDATION_CASES, ids=[case["name"] for case in VALIDATION_CASES])
+def test_practice_comparison_alignment_validation_cases(case: dict[str, object]) -> None:
+    _assert_practice_comparison_alignment_case(case)
+
+
+def _assert_practice_comparison_alignment_case(case: dict[str, object]) -> None:
+    result = practice_comparison_alignment(
+        target_text=str(case["target_text"]),
+        recognized_text=str(case["recognized_text"]),
+        target_language=str(case["target_language"]),
+        asr_timestamps=case["asr_timestamps"],
+    )
+    expected = case["expected"]
+
+    assert result["available"] is expected["available"]
+    assert result["complete"] is expected["complete"]
+    assert len(result["ranges"]) == len(expected["ranges"])
+    for actual_range, expected_range in zip(result["ranges"], expected["ranges"], strict=True):
+        assert actual_range["index"] == expected_range["index"]
+        assert actual_range["source"] == expected_range["source"]
+        assert actual_range["available"] is expected_range["available"]
+        assert actual_range["matched_text"] == expected_range["matched_text"]
+        if expected_range["audio_start"] is None:
+            assert actual_range["audio_start"] is None
+        else:
+            assert actual_range["audio_start"] == pytest.approx(expected_range["audio_start"])
+        if expected_range["audio_end"] is None:
+            assert actual_range["audio_end"] is None
+        else:
+            assert actual_range["audio_end"] == pytest.approx(expected_range["audio_end"])

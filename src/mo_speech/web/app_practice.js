@@ -231,7 +231,7 @@ async function handleRecordingStopped() {
     await submitPracticeRecording(blob, kind);
   } catch (error) {
     setBusy(false, "");
-    showError(error instanceof Error ? error.message : String(error));
+    showError(publicPracticeErrorMessage(error));
   }
 }
 
@@ -248,7 +248,7 @@ async function submitPracticeRecording(blob, kind) {
   setBusy(
     true,
     recordingIntent === "attempt"
-      ? (selectedTargetLanguage === "zh-CN" ? "RunPodへ解析を依頼しています。" : "Whisperで音声を解析しています。")
+      ? "発音を確認しています。"
       : "お手本を作っています。",
     recordingIntent === "attempt" ? 88 : 72,
     kind,
@@ -288,7 +288,8 @@ async function submitPracticeRecording(blob, kind) {
     setStatus("");
     const completed = await waitForPracticeAttemptJob(submitted);
     if (completed.status !== "succeeded" || !completed.result) {
-      throw new Error(completed.error || "発音比較を完了できませんでした。");
+      console.error("[SpeakLoop job] attempt failed", completed);
+      throw new Error("音声処理を完了できませんでした。しばらくしてからもう一度お試しください。");
     }
     setRepeatAudio(blob);
     renderAttemptResult(completed.result);
@@ -305,7 +306,8 @@ async function submitPracticeRecording(blob, kind) {
     setStatus("");
     const completed = await waitForPracticeVoiceJob(voiceJob);
     if (completed.status !== "succeeded" || !completed.result?.audio_base64) {
-      throw new Error(completed.error || "お手本を自分の声に変換できませんでした。");
+      console.error("[SpeakLoop job] voice conversion failed", completed);
+      throw new Error("お手本の音声処理を完了できませんでした。しばらくしてからもう一度お試しください。");
     }
     setModelAudio(completed.result.audio_base64, completed.result.audio_mime_type || "audio/wav");
   }
@@ -323,7 +325,7 @@ async function waitForPracticeVoiceJob(initialSnapshot) {
   let consecutiveErrors = 0;
   while (snapshot?.status === "queued" || snapshot?.status === "running") {
     if (!snapshot.job_id) {
-      throw new Error("Seed-VC job IDが返りませんでした。");
+      throw new Error("お手本の音声処理を開始できませんでした。");
     }
     if (Date.now() >= deadline) {
       throw new Error("自分の声への変換が30分以内に完了しませんでした。");
@@ -347,7 +349,7 @@ async function waitForPracticeVoiceJob(initialSnapshot) {
         ...snapshot,
         current_stage: {
           ...(snapshot.current_stage || {}),
-          label: "Seed-VCの状態を再確認しています",
+          label: "処理状況を再確認しています",
           detail: error instanceof Error ? error.message : String(error),
         },
       });
@@ -363,7 +365,7 @@ async function waitForPracticeAttemptJob(initialSnapshot) {
   let consecutiveErrors = 0;
   while (snapshot?.status === "queued" || snapshot?.status === "running") {
     if (!snapshot.job_id) {
-      throw new Error("RunPod job IDが返りませんでした。");
+      throw new Error("発音比較を開始できませんでした。");
     }
     if (Date.now() >= deadline) {
       throw new Error("発音比較が30分以内に完了しませんでした。");
@@ -387,7 +389,7 @@ async function waitForPracticeAttemptJob(initialSnapshot) {
         ...snapshot,
         current_stage: {
           ...(snapshot.current_stage || {}),
-          label: "RunPodの状態を再確認しています",
+          label: "処理状況を再確認しています",
           detail: error instanceof Error ? error.message : String(error),
         },
       });
@@ -403,11 +405,24 @@ function renderPracticeJobStatus(snapshot) {
   }
   const stage = snapshot.current_stage || {};
   const state = String(snapshot.status || "running");
-  const model = String(stage.model || stage.provider || "");
   const metrics = snapshot.metrics || {};
-  const details = state === "failed" ? [] : [String(stage.detail || "")];
+  const publicLabel = publicPracticeStageLabel(stage, state);
+  const technicalIdentity = [...new Set(
+    [stage.provider, stage.model]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  )].join(" / ");
+  const rawStageLabel = String(stage.label || "").trim();
+  const rawStageDetail = String(stage.detail || "").trim();
+  const details = [];
+  if (rawStageLabel && rawStageLabel !== publicLabel) {
+    details.push(rawStageLabel);
+  }
+  if (rawStageDetail && rawStageDetail !== rawStageLabel) {
+    details.push(rawStageDetail);
+  }
   if (Number.isFinite(Number(metrics.delay_time_ms))) {
-    details.push(`GPU待機 ${formatDurationMilliseconds(Number(metrics.delay_time_ms))}`);
+    details.push(`待機 ${formatDurationMilliseconds(Number(metrics.delay_time_ms))}`);
   }
   if (Number.isFinite(Number(metrics.execution_time_ms))) {
     details.push(`処理 ${formatDurationMilliseconds(Number(metrics.execution_time_ms))}`);
@@ -415,11 +430,42 @@ function renderPracticeJobStatus(snapshot) {
   jobStatus.hidden = false;
   jobStatus.dataset.state = state;
   jobStatus.dataset.stage = String(stage.stage || "");
-  jobStatusLabel.textContent = String(stage.label || (state === "succeeded" ? "完了しました" : "処理しています"));
-  jobStatusModel.textContent = model;
-  jobStatusModel.hidden = !model;
+  jobStatusLabel.textContent = publicLabel;
+  jobStatusModel.textContent = technicalIdentity;
+  jobStatusModel.hidden = !technicalIdentity;
   jobStatusDetail.textContent = details.filter(Boolean).join(" / ");
   jobStatusDetail.hidden = !jobStatusDetail.textContent;
+  console.debug("[SpeakLoop job] progress", snapshot);
+}
+
+function publicPracticeStageLabel(stage, state) {
+  switch (String(stage?.stage || "")) {
+    case "gpu_wait":
+      return "GPUサーバーの準備を待っています";
+    case "initializing":
+      return "GPUサーバーを準備しています";
+    case "loading_model":
+      return "音声認識を準備しています";
+    case "transcribing_model":
+      return "お手本音声を確認しています";
+    case "transcribing_attempt":
+      return "録音を確認しています";
+    case "loading_seed_vc_model":
+      return "お手本の声を調整する準備をしています";
+    case "voice_conversion":
+      return "お手本の声を調整しています";
+    case "finalizing":
+      return "比較結果を準備しています";
+    case "complete":
+      return "完了しました";
+    case "failed":
+      return "処理に失敗しました";
+    default:
+      if (state === "failed") return "処理に失敗しました";
+      if (state === "succeeded") return "完了しました";
+      if (state === "queued") return "GPUサーバーの準備を待っています";
+      return "音声を処理しています";
+  }
 }
 
 function clearPracticeJobStatus() {
@@ -489,7 +535,6 @@ async function postPracticeForm(url, form) {
     return payload;
   } catch (error) {
     setBusy(false, "");
-    showError(error instanceof Error ? error.message : String(error));
     throw error;
   }
 }
@@ -1265,6 +1310,15 @@ function setStatus(message) {
 function showError(message) {
   errorText.hidden = false;
   errorText.textContent = message;
+}
+
+function publicPracticeErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/runpod|whisper|funasr|seed-vc|openai|billing|残高|job(?:_|\s)?id|job status|model_transcription|provider|backend/i.test(message)) {
+    console.error("[SpeakLoop job] technical error", error);
+    return "音声処理を完了できませんでした。しばらくしてからもう一度お試しください。";
+  }
+  return message || "音声処理を完了できませんでした。";
 }
 
 function clearError() {
