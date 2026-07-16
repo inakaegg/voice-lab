@@ -50,6 +50,9 @@ function compareCase(sourceCase, overlayCase) {
   }
   const expected = overlayCase.expected;
   const mismatches = [];
+  if (actual.outcome !== expected.outcome) {
+    mismatches.push({ field: "outcome", expected: expected.outcome, actual: actual.outcome });
+  }
   const topLevel = {
     target_phrase_count: actual.target_phrase_count,
     playable_phrase_count: actual.playable_phrase_count,
@@ -90,6 +93,36 @@ function compareCase(sourceCase, overlayCase) {
       if (!sameTimestamp(actualPhrase[key], expectedPhrase[key])) {
         mismatches.push({ field: `phrases[${index}].${key}`, expected: expectedPhrase[key], actual: actualPhrase[key] });
       }
+    }
+  }
+  const actualZeroDurationOwners = actual.diagnostics.zero_duration_tokens
+    .filter((token) => token.source === "words")
+    .map((token) => ({
+      word_index: token.source_index,
+      phrase_index: token.owner_phrase_index,
+    }));
+  if (JSON.stringify(actualZeroDurationOwners) !== JSON.stringify(expected.zero_duration_owners)) {
+    mismatches.push({
+      field: "zero_duration_owners",
+      expected: expected.zero_duration_owners,
+      actual: actualZeroDurationOwners,
+    });
+  }
+  if (expected.unassigned_tokens) {
+    const actualUnassignedTokens = actual.diagnostics.unassigned_tokens.map((token) => ({
+      source: token.source,
+      source_index: token.source_index,
+      text: token.text,
+      start: token.start,
+      end: token.end,
+      reason: token.reason,
+    }));
+    if (JSON.stringify(actualUnassignedTokens) !== JSON.stringify(expected.unassigned_tokens)) {
+      mismatches.push({
+        field: "unassigned_tokens",
+        expected: expected.unassigned_tokens,
+        actual: actualUnassignedTokens,
+      });
     }
   }
   return { name: overlayCase.name, passed: mismatches.length === 0, mismatches };

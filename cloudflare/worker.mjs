@@ -64,6 +64,24 @@ const PRACTICE_BOUNDARY_FILLER_SEQUENCES = {
   "ja-JP": new Set(["あの", "ええと", "えっと", "ちょっとまって"]),
   "zh-CN": new Set(["那个", "我想一下", "那个我想一下"]),
 };
+const PRACTICE_NON_SPECIFIC_ALIGNMENT_PIECES = {
+  "en-US": new Set(["a", "an", "finally", "next", "please", "the", "then"]),
+  "ja-JP": new Set(["そして", "それから", "つぎ", "次", "最後"]),
+  "zh-CN": new Set(["然后", "最后", "接着", "再", "先", "请", "把"]),
+};
+const PRACTICE_DIAGNOSTIC_STOP_PIECES = {
+  "en-US": new Set([
+    "a", "an", "and", "are", "at", "finally", "for", "from", "i", "in", "is", "it", "my",
+    "next", "of", "on", "or", "please", "the", "then", "to", "was", "were", "with", "your",
+  ]),
+  "ja-JP": new Set(["そして", "それから", "つぎ", "次", "最後", "私", "を", "が", "に", "で", "は"]),
+  "zh-CN": new Set([
+    "然后", "最后", "接着", "再", "先", "请", "把", "我", "你", "的", "到", "在", "上", "下", "要", "还要",
+  ]),
+};
+const PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD = 0.75;
+const PRACTICE_PAUSE_PARTITION_GAP_SECONDS = 0.18;
+const PRACTICE_DETACHED_SPEECH_GAP_SECONDS = 0.65;
 const MAX_ALIGNMENT_CANDIDATES_PER_PHRASE = 4096;
 const MAX_CANONICAL_TARGET_PHRASES = 16;
 const MAX_CANONICAL_TIMESTAMP_UNITS = 256;
@@ -4187,7 +4205,7 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
           metrics: { candidate_count: 1, score_computation_count: 2 },
         }
       : alignPhrasesToWordSpans(phrases, recognized, wordSpans, language);
-    const diagnostics = alignmentDiagnostics(aligned.ranges, wordSpans, language, {
+    const diagnostics = alignmentDiagnostics(aligned.ranges, phrases, wordSpans, language, {
       ...aligned.metrics,
       alignment_elapsed_ms: performance.now() - alignmentStarted,
       source: wordSource,
@@ -4291,7 +4309,7 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
       token_start_index: null,
       token_end_index: null,
     })),
-    diagnostics: alignmentDiagnostics([], wordSpans, language, {
+    diagnostics: alignmentDiagnostics([], phrases, wordSpans, language, {
       candidate_count: 0,
       score_computation_count: 0,
       alignment_elapsed_ms: performance.now() - alignmentStarted,
@@ -4508,7 +4526,7 @@ function canonicalUnassignedToken(token) {
     unexplained_internal_token: "ambiguous_assignment",
     no_structural_anchor: "ambiguous_assignment",
   };
-  const originalReason = String(token?.reason || "ambiguous_assignment");
+  const originalReason = String(token?.canonical_reason || token?.reason || "ambiguous_assignment");
   return {
     source: String(token?.source || "words"),
     source_index: Number(token?.source_index ?? token?.index ?? 0),
@@ -4813,6 +4831,11 @@ function alignPhrasesToSegments(phrases, source, recognizedText, targetLanguage,
     .map((unit) => {
       const segmentPosition = source.segments.findIndex((segment) => segment.segment_index === unit.index);
       const matching = segmentPosition >= 0 ? matchesBySegment[segmentPosition] : [];
+      const segmentText = normalizePracticeText(unit.text, targetLanguage);
+      const hasPartialTargetEvidence = phrases.some((phrase) => (
+        targetCharacterCoverage(String(phrase.normalized_target || ""), segmentText) >= 0.25 ||
+        practiceSimilarity(String(phrase.normalized_target || ""), segmentText) >= 0.35
+      ));
       return {
         source: "segments",
         source_index: unit.index,
@@ -4820,7 +4843,9 @@ function alignPhrasesToSegments(phrases, source, recognizedText, targetLanguage,
         text: unit.text,
         start: unit.start,
         end: unit.end,
-        reason: matching.length || !source.source_valid ? "ambiguous_assignment" : "unrelated_speech",
+        reason: matching.length || hasPartialTargetEvidence || !source.source_valid
+          ? "ambiguous_assignment"
+          : "unrelated_speech",
       };
     });
   const zeroDurationTokens = [];
@@ -5084,6 +5109,11 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
         });
       }
     }
+    if (phraseCandidates.some((candidate) => candidate.similarity >= 0.95 && candidate.coverage >= 0.95)) {
+      phraseCandidates = phraseCandidates.filter(
+        (candidate) => candidate.similarity >= 0.95 && candidate.coverage >= 0.95,
+      );
+    }
     if (phraseCandidates.length > MAX_ALIGNMENT_CANDIDATES_PER_PHRASE) {
       phraseCandidates = phraseCandidates
         .sort((left, right) =>
@@ -5118,7 +5148,18 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
       };
       if (
         option.score > best.score + 1e-9 ||
-        (Math.abs(option.score - best.score) <= 1e-9 && option.count > best.count)
+        (
+          Math.abs(option.score - best.score) <= 1e-9 &&
+          (
+            option.count > best.count ||
+            (
+              option.count === best.count &&
+              best.ranges[0] === null &&
+              candidateRange.similarity >= 0.95 &&
+              candidateRange.coverage >= 0.95
+            )
+          )
+        )
       ) {
         best = option;
       }
@@ -5129,12 +5170,42 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
   }
 
   let selected = solve(0, 0).ranges;
+  const lexicalAnchors = selected.map((item) => (item ? { ...item } : null));
   selected = expandInitialRepetitionRanges(phrases, selected, wordSpans, recognized);
   selected = expandTrailingAttemptRanges(phrases, selected, wordSpans, recognized, targetLanguage);
   selected = addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, targetLanguage);
   selected = applyPausePartitionRanges(phrases, selected, wordSpans, recognized, targetLanguage);
   selected = assignUnassignedWordGaps(phrases, selected, wordSpans, recognized, targetLanguage);
-  selected = rejectWeakOneSidedAssignments(phrases, selected, wordSpans);
+  selected = movePrefixBeforeExactRightAnchor(
+    phrases,
+    selected,
+    wordSpans,
+    recognized,
+    targetLanguage,
+  );
+  selected = resolveOutOfOrderGapSuffixes(
+    phrases,
+    lexicalAnchors,
+    selected,
+    wordSpans,
+    recognized,
+    targetLanguage,
+  );
+  selected = trimDetachedSpeechExpansions(
+    phrases,
+    lexicalAnchors,
+    selected,
+    wordSpans,
+    recognized,
+  );
+  selected = trimBoundaryFillersFromRanges(
+    phrases,
+    selected,
+    wordSpans,
+    recognized,
+    targetLanguage,
+  );
+  selected = rejectWeakOneSidedAssignments(phrases, selected, wordSpans, targetLanguage);
 
   const ranges = phrases.map((phrase, index) => {
     const normalizedTarget = String(phrase.normalized_target || "");
@@ -5209,7 +5280,10 @@ function targetCharacterCoverage(normalizedTarget, candidate) {
 }
 
 function alignmentConfidence(similarity, coverage) {
-  if (similarity >= 0.75 && coverage >= 0.75) {
+  if (
+    similarity >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
+    coverage >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+  ) {
     return "high";
   }
   if (similarity >= 0.45 && coverage >= 0.45) {
@@ -5218,7 +5292,7 @@ function alignmentConfidence(similarity, coverage) {
   return "low";
 }
 
-function rejectWeakOneSidedAssignments(phrases, selected, wordSpans) {
+function rejectWeakOneSidedAssignments(phrases, selected, wordSpans, targetLanguage) {
   const resolved = selected.map((item) => (item ? { ...item } : null));
   const exactIndexes = resolved
     .map((item, index) => ({ item, index }))
@@ -5233,7 +5307,11 @@ function rejectWeakOneSidedAssignments(phrases, selected, wordSpans) {
   if (weakIndex === undefined || Math.abs(weakIndex - exactIndex) !== 1) return resolved;
   const weak = resolved[weakIndex];
   const target = String(phrases[weakIndex].normalized_target || "");
-  if (matchingTargetPieceCount(target, wordSpans.slice(weak.start_word, weak.end_word)) < 2) {
+  if (!hasOneSidedTargetEvidence(
+    target,
+    wordSpans.slice(weak.start_word, weak.end_word),
+    targetLanguage,
+  )) {
     resolved[weakIndex] = null;
   }
   return resolved;
@@ -5255,6 +5333,49 @@ function matchingTargetPieceCount(target, spans) {
   return matchingPieces.size;
 }
 
+function isAscii(value) {
+  return /^[\x00-\x7f]*$/u.test(value);
+}
+
+function hasOneSidedTargetEvidence(target, spans, targetLanguage) {
+  const candidate = spans.map((span) => String(span.normalized || "")).join("");
+  if (!candidate || !target) return false;
+  const nonSpecific = PRACTICE_NON_SPECIFIC_ALIGNMENT_PIECES[targetLanguage] || new Set();
+  const specificPieces = spans.filter((span) => {
+    const piece = String(span.normalized || "");
+    return !nonSpecific.has(piece) && !(isAscii(piece) && piece.length < 2);
+  });
+  if (matchingTargetPieceCount(target, specificPieces) >= 2) return true;
+  if (
+    spans.length &&
+    nonSpecific.has(String(spans[0].normalized || "")) &&
+    matchingTargetPieceCount(target, specificPieces) >= 1 &&
+    targetCharacterCoverage(target, candidate) >= 0.35
+  ) {
+    return true;
+  }
+  const prefixLength = commonPrefixLength(target, candidate);
+  return (
+    prefixLength >= 2 &&
+    prefixLength / Math.max(1, target.length) >= 0.35 &&
+    prefixLength / Math.max(1, candidate.length) > 0.5
+  );
+}
+
+function hasSpecificDiagnosticOverlap(phrases, spans, targetLanguage) {
+  const stops = PRACTICE_DIAGNOSTIC_STOP_PIECES[targetLanguage] || new Set();
+  for (const span of spans) {
+    const piece = String(span.normalized || "");
+    if (!piece || stops.has(piece) || (isAscii(piece) && piece.length < 2)) continue;
+    for (const phrase of phrases) {
+      const target = String(phrase.normalized_target || "");
+      if (target.includes(piece)) return true;
+      if (!isAscii(piece) && longestCommonSubsequenceLength(target, piece) >= 2) return true;
+    }
+  }
+  return false;
+}
+
 function isExplicitBoundaryFiller(wordSpans, targetLanguage) {
   if (!wordSpans.length) {
     return false;
@@ -5264,7 +5385,13 @@ function isExplicitBoundaryFiller(wordSpans, targetLanguage) {
   if (pieces.every((piece) => fillers.has(piece))) {
     return true;
   }
-  return (PRACTICE_BOUNDARY_FILLER_SEQUENCES[targetLanguage] || new Set()).has(pieces.join(""));
+  const sequences = PRACTICE_BOUNDARY_FILLER_SEQUENCES[targetLanguage] || new Set();
+  if (sequences.has(pieces.join(""))) return true;
+  let coreStart = 0;
+  let coreEnd = pieces.length;
+  while (coreStart < coreEnd && fillers.has(pieces[coreStart])) coreStart += 1;
+  while (coreEnd > coreStart && fillers.has(pieces[coreEnd - 1])) coreEnd -= 1;
+  return coreStart < coreEnd && sequences.has(pieces.slice(coreStart, coreEnd).join(""));
 }
 
 function stronglyMatchesOtherTarget(phrases, excludedIndexes, wordSpans, nearlyExact = false) {
@@ -5330,7 +5457,7 @@ function addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, t
       oneSidedAnchor &&
       Number(oneSidedAnchor.similarity || 0) >= 0.95 &&
       Number(oneSidedAnchor.coverage || 0) >= 0.95 &&
-      matchingTargetPieceCount(normalizedTarget, candidateSpans) < 2
+      !hasOneSidedTargetEvidence(normalizedTarget, candidateSpans, targetLanguage)
     ) {
       continue;
     }
@@ -5339,14 +5466,23 @@ function addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, t
     const coverage = targetCharacterCoverage(normalizedTarget, candidate);
     const prefixLength = commonPrefixLength(normalizedTarget, candidate);
     const lengthRatio = candidate.length / Math.max(1, normalizedTarget.length);
-    const pauseBefore = lower === 0 || wordSpans[lower].audio_start - wordSpans[lower - 1].audio_end >= 0.18;
+    const pauseBefore = lower === 0 ||
+      wordSpans[lower].audio_start - wordSpans[lower - 1].audio_end >=
+        PRACTICE_PAUSE_PARTITION_GAP_SECONDS;
     const pauseAfter =
-      upper === wordSpans.length || wordSpans[upper].audio_start - wordSpans[upper - 1].audio_end >= 0.18;
-    const constrainedByNeighbors = Boolean(previous && following);
+      upper === wordSpans.length ||
+      wordSpans[upper].audio_start - wordSpans[upper - 1].audio_end >=
+        PRACTICE_PAUSE_PARTITION_GAP_SECONDS;
+    const constrainedByNeighbors = Boolean(
+      previous &&
+      following &&
+      Number(previous.similarity || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
+      Number(previous.coverage || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
+      Number(following.similarity || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
+      Number(following.coverage || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+    );
     const structuralBoundary = constrainedByNeighbors || pauseBefore || pauseAfter || prefixLength >= 2;
-    const lexicalEvidence = constrainedByNeighbors
-      ? coverage >= 0.2 && (similarity >= 0.2 || prefixLength >= 2)
-      : coverage >= 0.3 && similarity >= 0.3;
+    const lexicalEvidence = constrainedByNeighbors || (coverage >= 0.3 && similarity >= 0.3);
     if (!structuralBoundary || !lexicalEvidence || lengthRatio < 0.35) {
       continue;
     }
@@ -5373,7 +5509,7 @@ function applyPausePartitionRanges(phrases, selected, wordSpans, recognized, tar
   const boundaries = [0];
   for (let index = 1; index < wordSpans.length; index += 1) {
     const gap = wordSpans[index].audio_start - wordSpans[index - 1].audio_end;
-    if (gap >= 0.18) {
+    if (gap >= PRACTICE_PAUSE_PARTITION_GAP_SECONDS) {
       boundaries.push(index);
     }
   }
@@ -5543,6 +5679,200 @@ function assignUnassignedWordGaps(phrases, selected, wordSpans, recognized, targ
   return resolved;
 }
 
+function movePrefixBeforeExactRightAnchor(phrases, selected, wordSpans, recognized, targetLanguage) {
+  const resolved = selected.map((item) => (item ? { ...item } : null));
+  for (let leftIndex = 0; leftIndex < resolved.length - 1; leftIndex += 1) {
+    const left = resolved[leftIndex];
+    const right = resolved[leftIndex + 1];
+    if (!left || !right) continue;
+    const rightStart = right.start_word;
+    const rightEnd = right.end_word;
+    if (rightEnd - rightStart < 2) continue;
+    const rightTarget = String(phrases[leftIndex + 1].normalized_target || "");
+    let split = null;
+    for (let candidateSplit = rightStart + 1; candidateSplit < rightEnd; candidateSplit += 1) {
+      const suffix = wordSpans
+        .slice(candidateSplit, rightEnd)
+        .map((span) => String(span.normalized || ""))
+        .join("");
+      if (
+        practiceSimilarity(rightTarget, suffix) >= 0.95 &&
+        targetCharacterCoverage(rightTarget, suffix) >= 0.95
+      ) {
+        split = candidateSplit;
+        break;
+      }
+    }
+    if (split === null) continue;
+    const leftTarget = String(phrases[leftIndex].normalized_target || "");
+    const leftStart = left.start_word;
+    const leftEnd = left.end_word;
+    const leftText = wordSpans.slice(leftStart, leftEnd).map((span) => String(span.normalized || "")).join("");
+    const expandedLeftText = wordSpans.slice(leftStart, split).map((span) => String(span.normalized || "")).join("");
+    const similarityGain = practiceSimilarity(leftTarget, expandedLeftText) - practiceSimilarity(leftTarget, leftText);
+    const coverageGain = targetCharacterCoverage(leftTarget, expandedLeftText) - targetCharacterCoverage(leftTarget, leftText);
+    const prefixStart = right.start_word;
+    const temporallyAttachedLeft = (
+      prefixStart === leftEnd &&
+      wordSpans[prefixStart].audio_start <= wordSpans[leftEnd - 1].audio_end + 1e-9 &&
+      wordSpans[split].audio_start > wordSpans[split - 1].audio_end
+    );
+    const expandedContentMatches = practiceContentMatches(
+      String(phrases[leftIndex].target || ""),
+      joinMatchedWords(wordSpans.slice(leftStart, split), targetLanguage),
+      targetLanguage,
+    );
+    if (
+      similarityGain <= 0.01 &&
+      coverageGain <= 0.01 &&
+      !temporallyAttachedLeft &&
+      !expandedContentMatches
+    ) {
+      continue;
+    }
+    updateSelectedWordRange(
+      left,
+      phrases[leftIndex],
+      leftStart,
+      split,
+      wordSpans,
+      recognized,
+      "exact_right_anchor",
+    );
+    updateSelectedWordRange(
+      right,
+      phrases[leftIndex + 1],
+      split,
+      rightEnd,
+      wordSpans,
+      recognized,
+      "exact_right_anchor",
+    );
+  }
+  return resolved;
+}
+
+function resolveOutOfOrderGapSuffixes(
+  phrases,
+  lexicalAnchors,
+  selected,
+  wordSpans,
+  recognized,
+  targetLanguage,
+) {
+  const resolved = selected.map((item) => (item ? { ...item } : null));
+  for (let rightIndex = 0; rightIndex < resolved.length; rightIndex += 1) {
+    const anchor = lexicalAnchors[rightIndex];
+    const right = resolved[rightIndex];
+    if (!anchor || !right || rightIndex === 0) continue;
+    const anchorStart = anchor.start_word;
+    const previousAnchor = lexicalAnchors.slice(0, rightIndex).reverse().find(Boolean);
+    const gapStart = previousAnchor ? previousAnchor.end_word : 0;
+    if (gapStart >= anchorStart) continue;
+    let outOfOrderEnd = null;
+    for (let split = gapStart + 1; split <= anchorStart; split += 1) {
+      if (stronglyMatchesOtherTarget(phrases, new Set([rightIndex]), wordSpans.slice(gapStart, split), true)) {
+        outOfOrderEnd = split;
+        break;
+      }
+    }
+    if (outOfOrderEnd === null) continue;
+    const suffix = wordSpans.slice(outOfOrderEnd, anchorStart);
+    let newStart;
+    if (!suffix.length || isExplicitBoundaryFiller(suffix, targetLanguage)) {
+      newStart = anchorStart;
+    } else {
+      const separatedFromConflict = suffix[0].audio_start > wordSpans[outOfOrderEnd - 1].audio_end;
+      const adjacentToAnchor = wordSpans[anchorStart].audio_start <= suffix[suffix.length - 1].audio_end + 1e-9;
+      newStart = separatedFromConflict && adjacentToAnchor ? outOfOrderEnd : anchorStart;
+    }
+    if (newStart === right.start_word) continue;
+    updateSelectedWordRange(
+      right,
+      phrases[rightIndex],
+      newStart,
+      right.end_word,
+      wordSpans,
+      recognized,
+      "out_of_order_gap_guard",
+    );
+  }
+  return resolved;
+}
+
+function trimDetachedSpeechExpansions(phrases, lexicalAnchors, selected, wordSpans, recognized) {
+  const resolved = selected.map((item) => (item ? { ...item } : null));
+  for (let index = 0; index < resolved.length; index += 1) {
+    const anchor = lexicalAnchors[index];
+    const item = resolved[index];
+    if (!anchor || !item) continue;
+    let startWord = item.start_word;
+    let endWord = item.end_word;
+    const anchorStart = anchor.start_word;
+    const anchorEnd = anchor.end_word;
+    if (startWord < anchorStart) {
+      const leadingGap = wordSpans[anchorStart].audio_start - wordSpans[anchorStart - 1].audio_end;
+      if (leadingGap >= PRACTICE_DETACHED_SPEECH_GAP_SECONDS) startWord = anchorStart;
+    }
+    if (endWord > anchorEnd && anchorEnd < wordSpans.length) {
+      const trailingGap = wordSpans[anchorEnd].audio_start - wordSpans[anchorEnd - 1].audio_end;
+      if (trailingGap >= PRACTICE_DETACHED_SPEECH_GAP_SECONDS) endWord = anchorEnd;
+    }
+    if (startWord !== item.start_word || endWord !== item.end_word) {
+      updateSelectedWordRange(
+        item,
+        phrases[index],
+        startWord,
+        endWord,
+        wordSpans,
+        recognized,
+        "detached_speech_guard",
+      );
+    }
+  }
+  return resolved;
+}
+
+function trimBoundaryFillersFromRanges(phrases, selected, wordSpans, recognized, targetLanguage) {
+  const resolved = selected.map((item) => (item ? { ...item } : null));
+  for (let index = 0; index < resolved.length; index += 1) {
+    const item = resolved[index];
+    if (!item) continue;
+    const startWord = item.start_word;
+    const endWord = item.end_word;
+    const target = String(phrases[index].normalized_target || "");
+    let trimmedStart = startWord;
+    for (let cut = startWord + 1; cut < endWord; cut += 1) {
+      const prefix = wordSpans.slice(startWord, cut);
+      const prefixText = prefix.map((span) => String(span.normalized || "")).join("");
+      if (isExplicitBoundaryFiller(prefix, targetLanguage) && !target.startsWith(prefixText)) {
+        trimmedStart = cut;
+      }
+    }
+    let trimmedEnd = endWord;
+    for (let cut = trimmedStart + 1; cut < endWord; cut += 1) {
+      const suffix = wordSpans.slice(cut, endWord);
+      const suffixText = suffix.map((span) => String(span.normalized || "")).join("");
+      if (isExplicitBoundaryFiller(suffix, targetLanguage) && !target.endsWith(suffixText)) {
+        trimmedEnd = cut;
+        break;
+      }
+    }
+    if (trimmedStart !== startWord || trimmedEnd !== endWord) {
+      updateSelectedWordRange(
+        item,
+        phrases[index],
+        trimmedStart,
+        trimmedEnd,
+        wordSpans,
+        recognized,
+        "boundary_filler_guard",
+      );
+    }
+  }
+  return resolved;
+}
+
 function safeAlignmentAudioBounds(selectedSpans) {
   const timed = selectedSpans.filter((span) => span.audio_end > span.audio_start);
   if (!timed.length) {
@@ -5598,7 +5928,7 @@ function textOnlyAlignmentRange(
   };
 }
 
-function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
+function alignmentDiagnostics(ranges, phrases, wordSpans, targetLanguage, metrics) {
   const source = metrics.source || {
     raw_count: wordSpans.length,
     flags: [],
@@ -5628,6 +5958,7 @@ function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
   const ownedMax = ownedIndexes.length ? Math.max(...ownedIndexes) : null;
   const unassignedIndexes = wordSpans.map((_, index) => index).filter((index) => !owned.has(index));
   const fillerIndexes = new Set();
+  const canonicalReasons = new Map();
   let runStart = 0;
   while (runStart < unassignedIndexes.length) {
     let runEnd = runStart + 1;
@@ -5637,9 +5968,95 @@ function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
     ) {
       runEnd += 1;
     }
-    const run = unassignedIndexes.slice(runStart, runEnd);
-    if (isExplicitBoundaryFiller(run.map((index) => wordSpans[index]), targetLanguage)) {
-      run.forEach((index) => fillerIndexes.add(index));
+    const runIndexes = unassignedIndexes.slice(runStart, runEnd);
+    const runSpans = runIndexes.map((index) => wordSpans[index]);
+    if (isExplicitBoundaryFiller(runSpans, targetLanguage)) {
+      runIndexes.forEach((index) => fillerIndexes.add(index));
+    }
+    for (const [position, span] of runSpans.entries()) {
+      if (span.zero_duration) canonicalReasons.set(runIndexes[position], "no_positive_duration");
+    }
+
+    let coreStart = 0;
+    let coreEnd = runSpans.length;
+    for (let cut = 1; cut <= runSpans.length; cut += 1) {
+      if (isExplicitBoundaryFiller(runSpans.slice(0, cut), targetLanguage)) coreStart = cut;
+    }
+    for (let cut = coreStart; cut < runSpans.length; cut += 1) {
+      if (isExplicitBoundaryFiller(runSpans.slice(cut), targetLanguage)) {
+        coreEnd = cut;
+        break;
+      }
+    }
+    for (const position of [
+      ...Array.from({ length: coreStart }, (_, index) => index),
+      ...Array.from({ length: runSpans.length - coreEnd }, (_, index) => coreEnd + index),
+    ]) {
+      const index = runIndexes[position];
+      if (!canonicalReasons.has(index)) canonicalReasons.set(index, "boundary_filler");
+    }
+
+    let corePairs = runIndexes
+      .slice(coreStart, coreEnd)
+      .map((index, position) => [index, runSpans[coreStart + position]])
+      .filter(([index]) => !canonicalReasons.has(index));
+    if (corePairs.length) {
+      const [markerIndex, markerSpan] = corePairs[0];
+      const marker = String(markerSpan.normalized || "");
+      if (
+        (PRACTICE_NON_SPECIFIC_ALIGNMENT_PIECES[targetLanguage] || new Set()).has(marker) &&
+        phrases.some((phrase) => String(phrase.normalized_target || "").startsWith(marker)) &&
+        !stronglyMatchesOtherTarget(phrases, new Set(), corePairs.map(([, span]) => span))
+      ) {
+        canonicalReasons.set(markerIndex, "ambiguous_assignment");
+        corePairs = corePairs.slice(1);
+      }
+    }
+    if (corePairs.length) {
+      const coreIndexes = corePairs.map(([index]) => index);
+      const coreSpans = corePairs.map(([, span]) => span);
+      let coreReason;
+      if (stronglyMatchesOtherTarget(phrases, new Set(), coreSpans)) {
+        coreReason = "out_of_order_speech";
+      } else {
+        const candidate = coreSpans.map((span) => String(span.normalized || "")).join("");
+        const isTargetPrefix = phrases.some((phrase) => {
+          const target = String(phrase.normalized_target || "");
+          return target.startsWith(candidate) && candidate.length < target.length;
+        });
+        const strongestSimilarity = Math.max(
+          0,
+          ...phrases.map((phrase) => practiceSimilarity(String(phrase.normalized_target || ""), candidate)),
+        );
+        const strongestCoverage = Math.max(
+          0,
+          ...phrases.map((phrase) => targetCharacterCoverage(String(phrase.normalized_target || ""), candidate)),
+        );
+        const firstIndex = coreIndexes[0];
+        const lastIndex = coreIndexes[coreIndexes.length - 1];
+        const detachedBefore = (
+          firstIndex > 0 &&
+          wordSpans[firstIndex].audio_start - wordSpans[firstIndex - 1].audio_end >=
+            PRACTICE_DETACHED_SPEECH_GAP_SECONDS
+        );
+        const detachedAfter = (
+          lastIndex + 1 < wordSpans.length &&
+          wordSpans[lastIndex + 1].audio_start - wordSpans[lastIndex].audio_end >=
+            PRACTICE_DETACHED_SPEECH_GAP_SECONDS
+        );
+        if (isTargetPrefix) {
+          coreReason = "ambiguous_assignment";
+        } else if (!hasSpecificDiagnosticOverlap(phrases, coreSpans, targetLanguage)) {
+          coreReason = "unrelated_speech";
+        } else {
+          coreReason = (
+            detachedBefore ||
+            detachedAfter ||
+            (strongestSimilarity < 0.35 && strongestCoverage < 0.25)
+          ) ? "unrelated_speech" : "ambiguous_assignment";
+        }
+      }
+      coreIndexes.forEach((index) => canonicalReasons.set(index, coreReason));
     }
     runStart = runEnd;
   }
@@ -5660,6 +6077,7 @@ function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
       start: span.audio_start,
       end: span.audio_end,
       reason,
+      canonical_reason: canonicalReasons.get(index) || "ambiguous_assignment",
     };
   });
   return {

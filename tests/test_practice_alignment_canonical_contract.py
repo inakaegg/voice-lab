@@ -277,7 +277,7 @@ def test_canonical_schema_keeps_partial_phrase_and_unassigned_diagnostics_separa
             "text": "unrelated",
             "start": 1.0,
             "end": 1.5,
-            "reason": "ambiguous_assignment",
+            "reason": "unrelated_speech",
         }
     ]
 

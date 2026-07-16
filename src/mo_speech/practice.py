@@ -32,6 +32,23 @@ _BOUNDARY_FILLER_SEQUENCES = {
     "ja-JP": {"あの", "ええと", "えっと", "ちょっとまって"},
     "zh-CN": {"那个", "我想一下", "那个我想一下"},
 }
+_NON_SPECIFIC_ALIGNMENT_PIECES = {
+    "en-US": {"a", "an", "finally", "next", "please", "the", "then"},
+    "ja-JP": {"そして", "それから", "つぎ", "次", "最後"},
+    "zh-CN": {"然后", "最后", "接着", "再", "先", "请", "把"},
+}
+_DIAGNOSTIC_STOP_PIECES = {
+    "en-US": {
+        "a", "an", "and", "are", "at", "finally", "for", "from", "i", "in",
+        "is", "it", "my", "next", "of", "on", "or", "please", "the", "then",
+        "to", "was", "were", "with", "your",
+    },
+    "ja-JP": {"そして", "それから", "つぎ", "次", "最後", "私", "を", "が", "に", "で", "は"},
+    "zh-CN": {"然后", "最后", "接着", "再", "先", "请", "把", "我", "你", "的", "到", "在", "上", "下", "要", "还要"},
+}
+_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD = 0.75
+_PAUSE_PARTITION_GAP_SECONDS = 0.18
+_DETACHED_SPEECH_GAP_SECONDS = 0.65
 _MAX_ALIGNMENT_CANDIDATES_PER_PHRASE = 4096
 _MAX_CANONICAL_TARGET_PHRASES = 16
 _MAX_CANONICAL_TIMESTAMP_UNITS = 256
@@ -463,6 +480,7 @@ def practice_comparison_alignment(
             )
         diagnostics = _alignment_diagnostics(
             ranges,
+            phrases,
             word_spans,
             language,
             candidate_count=int(candidate_metrics["candidate_count"]),
@@ -583,6 +601,7 @@ def practice_comparison_alignment(
         ],
         "diagnostics": _alignment_diagnostics(
             [],
+            phrases,
             word_spans,
             language,
             candidate_count=0,
@@ -855,7 +874,10 @@ def _canonical_unassigned_token(token: dict[str, object]) -> dict[str, object]:
         "text": str(token.get("text") or ""),
         "start": token.get("start"),
         "end": token.get("end"),
-        "reason": reason_map.get(str(token.get("reason") or ""), str(token.get("reason") or "ambiguous_assignment")),
+        "reason": str(token.get("canonical_reason") or reason_map.get(
+            str(token.get("reason") or ""),
+            str(token.get("reason") or "ambiguous_assignment"),
+        )),
     }
 
 
@@ -1235,7 +1257,17 @@ def _align_phrases_to_segments(
             ),
             [],
         )
-        reason = "ambiguous_assignment" if matching or not bool(source["source_valid"]) else "unrelated_speech"
+        segment_text = normalize_practice_text(str(unit["text"]), target_language)
+        has_partial_target_evidence = any(
+            _target_character_coverage(str(phrase["normalized_target"]), segment_text) >= 0.25
+            or practice_similarity(str(phrase["normalized_target"]), segment_text) >= 0.35
+            for phrase in phrases
+        )
+        reason = (
+            "ambiguous_assignment"
+            if matching or has_partial_target_evidence or not bool(source["source_valid"])
+            else "unrelated_speech"
+        )
         unassigned_tokens.append(
             {
                 "source": "segments",
@@ -1542,6 +1574,17 @@ def _align_phrases_to_word_spans(
                         "alignment_confidence": _alignment_confidence(similarity, coverage),
                     }
                 )
+        if any(
+            float(candidate["similarity"]) >= 0.95
+            and float(candidate["coverage"]) >= 0.95
+            for candidate in phrase_candidates
+        ):
+            phrase_candidates = [
+                candidate
+                for candidate in phrase_candidates
+                if float(candidate["similarity"]) >= 0.95
+                and float(candidate["coverage"]) >= 0.95
+            ]
         if len(phrase_candidates) > _MAX_ALIGNMENT_CANDIDATES_PER_PHRASE:
             phrase_candidates = sorted(
                 phrase_candidates,
@@ -1569,7 +1612,16 @@ def _align_phrases_to_word_spans(
             candidate_score = float(candidate_range.pop("score"))
             option = (candidate_score + next_score, next_count + 1, (candidate_range, *next_ranges))
             if option[0] > best[0] + 1e-9 or (
-                abs(option[0] - best[0]) <= 1e-9 and option[1] > best[1]
+                abs(option[0] - best[0]) <= 1e-9
+                and (
+                    option[1] > best[1]
+                    or (
+                        option[1] == best[1]
+                        and best[2][0] is None
+                        and float(candidate_range["similarity"]) >= 0.95
+                        and float(candidate_range["coverage"]) >= 0.95
+                    )
+                )
             ):
                 best = option
 
@@ -1577,6 +1629,7 @@ def _align_phrases_to_word_spans(
         return best
 
     _, _, selected = solve(0, 0)
+    lexical_anchors = tuple(dict(item) if item is not None else None for item in selected)
     selected = _expand_initial_repetition_ranges(
         phrases,
         selected,
@@ -1611,7 +1664,41 @@ def _align_phrases_to_word_spans(
         recognized_normalized,
         target_language,
     )
-    selected = _reject_weak_one_sided_assignments(phrases, selected, word_spans)
+    selected = _move_prefix_before_exact_right_anchor(
+        phrases,
+        selected,
+        word_spans,
+        recognized_normalized,
+        target_language,
+    )
+    selected = _resolve_out_of_order_gap_suffixes(
+        phrases,
+        lexical_anchors,
+        selected,
+        word_spans,
+        recognized_normalized,
+        target_language,
+    )
+    selected = _trim_detached_speech_expansions(
+        phrases,
+        lexical_anchors,
+        selected,
+        word_spans,
+        recognized_normalized,
+    )
+    selected = _trim_boundary_fillers_from_ranges(
+        phrases,
+        selected,
+        word_spans,
+        recognized_normalized,
+        target_language,
+    )
+    selected = _reject_weak_one_sided_assignments(
+        phrases,
+        selected,
+        word_spans,
+        target_language,
+    )
     ranges: list[dict[str, object]] = []
     for index, (phrase, selection) in enumerate(zip(phrases, selected, strict=True)):
         normalized_target = str(phrase["normalized_target"])
@@ -1685,6 +1772,7 @@ def _reject_weak_one_sided_assignments(
     phrases: list[dict[str, object]],
     selected: tuple[dict[str, object] | None, ...],
     word_spans: list[dict[str, object]],
+    target_language: str,
 ) -> tuple[dict[str, object] | None, ...]:
     resolved = [dict(item) if item is not None else None for item in selected]
     exact_indexes = [
@@ -1704,10 +1792,11 @@ def _reject_weak_one_sided_assignments(
     weak = resolved[weak_index]
     assert weak is not None
     target = str(phrases[weak_index]["normalized_target"])
-    if _matching_target_piece_count(
+    if not _has_one_sided_target_evidence(
         target,
         word_spans[int(weak["start_word"]) : int(weak["end_word"])],
-    ) < 2:
+        target_language,
+    ):
         resolved[weak_index] = None
     return tuple(resolved)
 
@@ -1731,8 +1820,76 @@ def _matching_target_piece_count(target: str, spans: list[dict[str, object]]) ->
     return len(matching_pieces)
 
 
+def _has_one_sided_target_evidence(
+    target: str,
+    spans: list[dict[str, object]],
+    target_language: str,
+) -> bool:
+    candidate = "".join(str(span["normalized"]) for span in spans)
+    if not candidate or not target:
+        return False
+    specific_pieces = [
+        span
+        for span in spans
+        if str(span["normalized"]) not in _NON_SPECIFIC_ALIGNMENT_PIECES.get(target_language, set())
+        and not (
+            str(span["normalized"]).isascii()
+            and len(str(span["normalized"])) < 2
+        )
+    ]
+    if _matching_target_piece_count(target, specific_pieces) >= 2:
+        return True
+    if (
+        spans
+        and str(spans[0]["normalized"])
+        in _NON_SPECIFIC_ALIGNMENT_PIECES.get(target_language, set())
+        and _matching_target_piece_count(target, specific_pieces) >= 1
+        and _target_character_coverage(target, candidate) >= 0.35
+    ):
+        return True
+    common_prefix = _common_prefix_length(target, candidate)
+    return (
+        common_prefix >= 2
+        and common_prefix / max(1, len(target)) >= 0.35
+        and common_prefix / max(1, len(candidate)) > 0.50
+    )
+
+
+def _has_specific_diagnostic_overlap(
+    phrases: list[dict[str, object]],
+    spans: list[dict[str, object]],
+    target_language: str,
+) -> bool:
+    stops = _DIAGNOSTIC_STOP_PIECES.get(target_language, set())
+    for span in spans:
+        piece = str(span["normalized"])
+        if not piece or piece in stops or (piece.isascii() and len(piece) < 2):
+            continue
+        for phrase in phrases:
+            target = str(phrase["normalized_target"])
+            if piece in target:
+                return True
+            if not piece.isascii() and max(
+                (
+                    block.size
+                    for block in SequenceMatcher(
+                        None,
+                        target,
+                        piece,
+                        autojunk=False,
+                    ).get_matching_blocks()
+                ),
+                default=0,
+            ) >= 2:
+                return True
+    return False
+
+
 def _alignment_confidence(similarity: float, coverage: float) -> str:
-    if similarity >= 0.75 and coverage >= 0.75:
+    if (
+        similarity >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+        and coverage >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+    ):
         return "high"
     if similarity >= 0.45 and coverage >= 0.45:
         return "medium"
@@ -1779,7 +1936,16 @@ def _is_explicit_boundary_filler(
     fillers = _EDGE_FILLERS.get(target_language, set())
     if all(piece in fillers for piece in pieces):
         return True
-    return "".join(pieces) in _BOUNDARY_FILLER_SEQUENCES.get(target_language, set())
+    sequences = _BOUNDARY_FILLER_SEQUENCES.get(target_language, set())
+    if "".join(pieces) in sequences:
+        return True
+    core_start = 0
+    core_end = len(pieces)
+    while core_start < core_end and pieces[core_start] in fillers:
+        core_start += 1
+    while core_end > core_start and pieces[core_end - 1] in fillers:
+        core_end -= 1
+    return core_start < core_end and "".join(pieces[core_start:core_end]) in sequences
 
 
 def _strongly_matches_other_target(
@@ -1859,7 +2025,11 @@ def _add_structural_fallback_ranges(
             one_sided_anchor is not None
             and float(one_sided_anchor.get("similarity") or 0.0) >= 0.95
             and float(one_sided_anchor.get("coverage") or 0.0) >= 0.95
-            and _matching_target_piece_count(normalized_target, candidate_spans) < 2
+            and not _has_one_sided_target_evidence(
+                normalized_target,
+                candidate_spans,
+                target_language,
+            )
         ):
             continue
         candidate = "".join(str(span["normalized"]) for span in candidate_spans)
@@ -1869,16 +2039,29 @@ def _add_structural_fallback_ranges(
         length_ratio = len(candidate) / max(1, len(normalized_target))
         pause_before = (
             lower == 0
-            or float(word_spans[lower]["audio_start"]) - float(word_spans[lower - 1]["audio_end"]) >= 0.18
+            or float(word_spans[lower]["audio_start"]) - float(word_spans[lower - 1]["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
         )
         pause_after = (
             upper == len(word_spans)
-            or float(word_spans[upper]["audio_start"]) - float(word_spans[upper - 1]["audio_end"]) >= 0.18
+            or float(word_spans[upper]["audio_start"]) - float(word_spans[upper - 1]["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
         )
-        constrained_by_neighbors = previous is not None and following is not None
+        constrained_by_neighbors = (
+            previous is not None
+            and following is not None
+            and float(previous.get("similarity") or 0.0)
+            >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+            and float(previous.get("coverage") or 0.0)
+            >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+            and float(following.get("similarity") or 0.0)
+            >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+            and float(following.get("coverage") or 0.0)
+            >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
+        )
         structural_boundary = constrained_by_neighbors or pause_before or pause_after or common_prefix >= 2
         if constrained_by_neighbors:
-            lexical_evidence = coverage >= 0.20 and (similarity >= 0.20 or common_prefix >= 2)
+            lexical_evidence = True
         else:
             lexical_evidence = coverage >= 0.30 and similarity >= 0.30
         if not structural_boundary or not lexical_evidence or length_ratio < 0.35:
@@ -1919,7 +2102,7 @@ def _apply_pause_partition_ranges(
     boundaries = [0]
     for index in range(1, len(word_spans)):
         gap = float(word_spans[index]["audio_start"]) - float(word_spans[index - 1]["audio_end"])
-        if gap >= 0.18:
+        if gap >= _PAUSE_PARTITION_GAP_SECONDS:
             boundaries.append(index)
     boundaries.append(len(word_spans))
     if len(boundaries) - 1 != len(phrases):
@@ -2088,6 +2271,268 @@ def _assign_unassigned_word_gaps(
     return tuple(resolved)
 
 
+def _move_prefix_before_exact_right_anchor(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+    target_language: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Return a misplaced prefix token to the preceding phrase.
+
+    This only moves a boundary when the remainder is an exact right-hand text
+    anchor and the moved prefix measurably improves the left phrase.
+    """
+
+    resolved = [dict(item) if item is not None else None for item in selected]
+    for left_index in range(len(resolved) - 1):
+        left = resolved[left_index]
+        right = resolved[left_index + 1]
+        if left is None or right is None:
+            continue
+        right_start = int(right["start_word"])
+        right_end = int(right["end_word"])
+        if right_end - right_start < 2:
+            continue
+        right_target = str(phrases[left_index + 1]["normalized_target"])
+        split = next(
+            (
+                candidate_split
+                for candidate_split in range(right_start + 1, right_end)
+                if practice_similarity(
+                    right_target,
+                    "".join(
+                        str(span["normalized"])
+                        for span in word_spans[candidate_split:right_end]
+                    ),
+                )
+                >= 0.95
+                and _target_character_coverage(
+                    right_target,
+                    "".join(
+                        str(span["normalized"])
+                        for span in word_spans[candidate_split:right_end]
+                    ),
+                )
+                >= 0.95
+            ),
+            None,
+        )
+        if split is None:
+            continue
+        left_target = str(phrases[left_index]["normalized_target"])
+        left_start = int(left["start_word"])
+        left_end = int(left["end_word"])
+        left_text = "".join(str(span["normalized"]) for span in word_spans[left_start:left_end])
+        expanded_left_text = "".join(
+            str(span["normalized"]) for span in word_spans[left_start:split]
+        )
+        similarity_gain = (
+            practice_similarity(left_target, expanded_left_text)
+            - practice_similarity(left_target, left_text)
+        )
+        coverage_gain = (
+            _target_character_coverage(left_target, expanded_left_text)
+            - _target_character_coverage(left_target, left_text)
+        )
+        prefix_start = int(right["start_word"])
+        temporally_attached_left = (
+            prefix_start == left_end
+            and float(word_spans[prefix_start]["audio_start"])
+            <= float(word_spans[left_end - 1]["audio_end"]) + 1e-9
+            and float(word_spans[split]["audio_start"])
+            > float(word_spans[split - 1]["audio_end"])
+        )
+        expanded_content_matches = practice_content_matches(
+            str(phrases[left_index]["target"]),
+            _join_matched_words(word_spans[left_start:split], target_language),
+            target_language,
+        )
+        if (
+            similarity_gain <= 0.01
+            and coverage_gain <= 0.01
+            and not temporally_attached_left
+            and not expanded_content_matches
+        ):
+            continue
+        _update_selected_word_range(
+            left,
+            phrases[left_index],
+            left_start,
+            split,
+            word_spans,
+            recognized_normalized,
+            boundary_source="exact_right_anchor",
+        )
+        _update_selected_word_range(
+            right,
+            phrases[left_index + 1],
+            split,
+            right_end,
+            word_spans,
+            recognized_normalized,
+            boundary_source="exact_right_anchor",
+        )
+    return tuple(resolved)
+
+
+def _resolve_out_of_order_gap_suffixes(
+    phrases: list[dict[str, object]],
+    lexical_anchors: tuple[dict[str, object] | None, ...],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+    target_language: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Keep a correction marker with its anchor, not an out-of-order phrase."""
+
+    resolved = [dict(item) if item is not None else None for item in selected]
+    for right_index, (anchor, right) in enumerate(
+        zip(lexical_anchors, resolved, strict=True)
+    ):
+        if anchor is None or right is None or right_index == 0:
+            continue
+        anchor_start = int(anchor["start_word"])
+        previous_anchor = next(
+            (
+                item
+                for item in reversed(lexical_anchors[:right_index])
+                if item is not None
+            ),
+            None,
+        )
+        gap_start = int(previous_anchor["end_word"]) if previous_anchor is not None else 0
+        if gap_start >= anchor_start:
+            continue
+        out_of_order_end = None
+        for split in range(gap_start + 1, anchor_start + 1):
+            if _nearly_exactly_matches_other_target(
+                phrases,
+                {right_index},
+                word_spans[gap_start:split],
+            ):
+                out_of_order_end = split
+                break
+        if out_of_order_end is None:
+            continue
+        suffix = word_spans[out_of_order_end:anchor_start]
+        if not suffix or _is_explicit_boundary_filler(suffix, target_language):
+            new_start = anchor_start
+        else:
+            separated_from_conflict = (
+                float(suffix[0]["audio_start"])
+                > float(word_spans[out_of_order_end - 1]["audio_end"])
+            )
+            adjacent_to_anchor = (
+                float(word_spans[anchor_start]["audio_start"])
+                <= float(suffix[-1]["audio_end"]) + 1e-9
+            )
+            if not separated_from_conflict or not adjacent_to_anchor:
+                new_start = anchor_start
+            else:
+                new_start = out_of_order_end
+        if new_start == int(right["start_word"]):
+            continue
+        _update_selected_word_range(
+            right,
+            phrases[right_index],
+            new_start,
+            int(right["end_word"]),
+            word_spans,
+            recognized_normalized,
+            boundary_source="out_of_order_gap_guard",
+        )
+    return tuple(resolved)
+
+
+def _trim_detached_speech_expansions(
+    phrases: list[dict[str, object]],
+    lexical_anchors: tuple[dict[str, object] | None, ...],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Do not absorb a separately timed utterance into a lexical anchor.
+
+    The gap is a rejection guard only: it can trim an expansion, but it never
+    creates ownership or chooses a target slot.
+    """
+
+    resolved = [dict(item) if item is not None else None for item in selected]
+    for index, (anchor, item) in enumerate(zip(lexical_anchors, resolved, strict=True)):
+        if anchor is None or item is None:
+            continue
+        start_word = int(item["start_word"])
+        end_word = int(item["end_word"])
+        anchor_start = int(anchor["start_word"])
+        anchor_end = int(anchor["end_word"])
+        if start_word < anchor_start:
+            leading_gap = (
+                float(word_spans[anchor_start]["audio_start"])
+                - float(word_spans[anchor_start - 1]["audio_end"])
+            )
+            if leading_gap >= _DETACHED_SPEECH_GAP_SECONDS:
+                start_word = anchor_start
+        if end_word > anchor_end and anchor_end < len(word_spans):
+            trailing_gap = (
+                float(word_spans[anchor_end]["audio_start"])
+                - float(word_spans[anchor_end - 1]["audio_end"])
+            )
+            if trailing_gap >= _DETACHED_SPEECH_GAP_SECONDS:
+                end_word = anchor_end
+        if start_word != int(item["start_word"]) or end_word != int(item["end_word"]):
+            _update_selected_word_range(
+                item,
+                phrases[index],
+                start_word,
+                end_word,
+                word_spans,
+                recognized_normalized,
+                boundary_source="detached_speech_guard",
+            )
+    return tuple(resolved)
+
+
+def _trim_boundary_fillers_from_ranges(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+    target_language: str,
+) -> tuple[dict[str, object] | None, ...]:
+    resolved = [dict(item) if item is not None else None for item in selected]
+    for index, item in enumerate(resolved):
+        if item is None:
+            continue
+        start_word = int(item["start_word"])
+        end_word = int(item["end_word"])
+        target = str(phrases[index]["normalized_target"])
+        trimmed_start = start_word
+        for cut in range(start_word + 1, end_word):
+            prefix = word_spans[start_word:cut]
+            prefix_text = "".join(str(span["normalized"]) for span in prefix)
+            if _is_explicit_boundary_filler(prefix, target_language) and not target.startswith(prefix_text):
+                trimmed_start = cut
+        trimmed_end = end_word
+        for cut in range(trimmed_start + 1, end_word):
+            suffix = word_spans[cut:end_word]
+            suffix_text = "".join(str(span["normalized"]) for span in suffix)
+            if _is_explicit_boundary_filler(suffix, target_language) and not target.endswith(suffix_text):
+                trimmed_end = cut
+                break
+        if trimmed_start != start_word or trimmed_end != end_word:
+            _update_selected_word_range(
+                item,
+                phrases[index],
+                trimmed_start,
+                trimmed_end,
+                word_spans,
+                recognized_normalized,
+                boundary_source="boundary_filler_guard",
+            )
+    return tuple(resolved)
+
+
 def _safe_alignment_audio_bounds(
     selected_spans: list[dict[str, object]],
 ) -> tuple[float | None, float | None]:
@@ -2147,6 +2592,7 @@ def _text_only_alignment_range(
 
 def _alignment_diagnostics(
     ranges: list[dict[str, object]],
+    phrases: list[dict[str, object]],
     word_spans: list[dict[str, object]],
     target_language: str,
     *,
@@ -2182,6 +2628,7 @@ def _alignment_diagnostics(
     owned_max = max(owned) if owned else None
     unassigned_indexes = [index for index in range(len(word_spans)) if index not in owned]
     filler_indexes: set[int] = set()
+    canonical_reasons: dict[int, str] = {}
     run_start = 0
     while run_start < len(unassigned_indexes):
         run_end = run_start + 1
@@ -2191,8 +2638,111 @@ def _alignment_diagnostics(
         ):
             run_end += 1
         run_indexes = unassigned_indexes[run_start:run_end]
-        if _is_explicit_boundary_filler([word_spans[index] for index in run_indexes], target_language):
+        run_spans = [word_spans[index] for index in run_indexes]
+        if _is_explicit_boundary_filler(run_spans, target_language):
             filler_indexes.update(run_indexes)
+        for index, span in zip(run_indexes, run_spans, strict=True):
+            if bool(span.get("zero_duration")):
+                canonical_reasons[index] = "no_positive_duration"
+
+        core_start = 0
+        core_end = len(run_spans)
+        for cut in range(1, len(run_spans) + 1):
+            if _is_explicit_boundary_filler(run_spans[:cut], target_language):
+                core_start = cut
+        for cut in range(core_start, len(run_spans)):
+            if _is_explicit_boundary_filler(run_spans[cut:], target_language):
+                core_end = cut
+                break
+        for position in [*range(0, core_start), *range(core_end, len(run_spans))]:
+            index = run_indexes[position]
+            if index not in canonical_reasons:
+                canonical_reasons[index] = "boundary_filler"
+
+        core_pairs = [
+            (index, span)
+            for index, span in zip(
+                run_indexes[core_start:core_end],
+                run_spans[core_start:core_end],
+                strict=True,
+            )
+            if index not in canonical_reasons
+        ]
+        if core_pairs:
+            marker_index, marker_span = core_pairs[0]
+            marker = str(marker_span["normalized"])
+            if (
+                marker in _NON_SPECIFIC_ALIGNMENT_PIECES.get(target_language, set())
+                and any(
+                    str(phrase["normalized_target"]).startswith(marker)
+                    for phrase in phrases
+                )
+                and not _strongly_matches_other_target(
+                    phrases,
+                    set(),
+                    [span for _, span in core_pairs],
+                )
+            ):
+                canonical_reasons[marker_index] = "ambiguous_assignment"
+                core_pairs = core_pairs[1:]
+        if core_pairs:
+            core_indexes = [index for index, _ in core_pairs]
+            core_spans = [span for _, span in core_pairs]
+            if _strongly_matches_other_target(phrases, set(), core_spans):
+                core_reason = "out_of_order_speech"
+            else:
+                candidate = "".join(str(span["normalized"]) for span in core_spans)
+                is_target_prefix = any(
+                    str(phrase["normalized_target"]).startswith(candidate)
+                    and len(candidate) < len(str(phrase["normalized_target"]))
+                    for phrase in phrases
+                )
+                strongest_similarity = max(
+                    (
+                        practice_similarity(str(phrase["normalized_target"]), candidate)
+                        for phrase in phrases
+                    ),
+                    default=0.0,
+                )
+                strongest_coverage = max(
+                    (
+                        _target_character_coverage(str(phrase["normalized_target"]), candidate)
+                        for phrase in phrases
+                    ),
+                    default=0.0,
+                )
+                first_index = core_indexes[0]
+                last_index = core_indexes[-1]
+                detached_before = (
+                    first_index > 0
+                    and float(word_spans[first_index]["audio_start"])
+                    - float(word_spans[first_index - 1]["audio_end"])
+                    >= _DETACHED_SPEECH_GAP_SECONDS
+                )
+                detached_after = (
+                    last_index + 1 < len(word_spans)
+                    and float(word_spans[last_index + 1]["audio_start"])
+                    - float(word_spans[last_index]["audio_end"])
+                    >= _DETACHED_SPEECH_GAP_SECONDS
+                )
+                if is_target_prefix:
+                    core_reason = "ambiguous_assignment"
+                elif not _has_specific_diagnostic_overlap(
+                    phrases,
+                    core_spans,
+                    target_language,
+                ):
+                    core_reason = "unrelated_speech"
+                else:
+                    core_reason = (
+                        "unrelated_speech"
+                        if detached_before
+                        or detached_after
+                        or (strongest_similarity < 0.35 and strongest_coverage < 0.25)
+                        else "ambiguous_assignment"
+                    )
+            for index in core_indexes:
+                canonical_reasons[index] = core_reason
         run_start = run_end
 
     unassigned = []
@@ -2216,6 +2766,7 @@ def _alignment_diagnostics(
                 "start": span["audio_start"],
                 "end": span["audio_end"],
                 "reason": reason,
+                "canonical_reason": canonical_reasons.get(index, "ambiguous_assignment"),
             }
         )
     return {

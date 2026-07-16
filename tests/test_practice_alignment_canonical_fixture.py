@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from scripts.evaluate_practice_alignment_canonical import _compare_case
+
 
 FIXTURE_PATH = (
     Path(__file__).parent
@@ -26,6 +28,18 @@ ROUND2_CHALLENGE_FIXTURE_PATH = (
     / "fixtures"
     / "practice_alignment_canonical"
     / "round2_challenge_expectations.json"
+)
+MANUAL_EVALUATION_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "practice_alignment_canonical"
+    / "manual_evaluation_expectations.json"
+)
+ASSIGNMENT_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "practice_alignment_canonical"
+    / "assignment_expectations.json"
 )
 ATTEMPT_INTENT_FIXTURE_PATH = (
     Path(__file__).parent
@@ -125,9 +139,14 @@ def _validate_phrase(
         assert phrase["audio_end"] == pytest.approx(max(word["end"] for word in positive_words))
 
 
-def _validate_fixed_case(case: dict[str, Any], source_case: dict[str, Any]) -> None:
+def _validate_fixed_case(
+    case: dict[str, Any],
+    source_case: dict[str, Any],
+    *,
+    fixture_contract_version: int,
+) -> None:
     expected = case["expected"]
-    assert set(expected) == {
+    expected_fields = {
         "outcome",
         "target_phrase_count",
         "playable_phrase_count",
@@ -137,7 +156,24 @@ def _validate_fixed_case(case: dict[str, Any], source_case: dict[str, Any]) -> N
         "phrases",
         "zero_duration_owners",
     }
+    if fixture_contract_version >= 2:
+        expected_fields.add("unassigned_tokens")
+    assert set(expected) == expected_fields
     assert expected["outcome"] in {"evaluated", "no_speech"}
+    if expected["outcome"] == "no_speech":
+        assert expected["target_phrase_count"] == len(
+            re.findall(r"[^。！？.!?；;\n]+[。！？.!?；;]?", source_case["target_text"])
+        )
+        assert expected["phrases"] == []
+        assert expected["playable_phrase_count"] == 0
+        assert expected["all_phrases_playable"] is False
+        assert expected["unassigned_non_filler_count"] == 0
+        assert expected["complete"] is False
+        assert expected["zero_duration_owners"] == []
+        if fixture_contract_version >= 2:
+            assert expected["unassigned_tokens"] == []
+        return
+
     assert expected["target_phrase_count"] == len(expected["phrases"])
     assert [phrase["index"] for phrase in expected["phrases"]] == list(
         range(expected["target_phrase_count"])
@@ -176,7 +212,7 @@ def _validate_fixed_case(case: dict[str, Any], source_case: dict[str, Any]) -> N
         index for index, word in enumerate(words) if word["start"] == word["end"]
     }
     expected_zero_indexes = {owner["word_index"] for owner in expected["zero_duration_owners"]}
-    assert expected_zero_indexes == actual_zero_indexes
+    assert expected_zero_indexes <= actual_zero_indexes
     for owner in expected["zero_duration_owners"]:
         phrase = expected["phrases"][owner["phrase_index"]]
         assert phrase["word_start_index"] <= owner["word_index"] < phrase["word_end_index"]
@@ -187,6 +223,52 @@ def _validate_fixed_case(case: dict[str, Any], source_case: dict[str, Any]) -> N
         return
     words = timestamp_payload.get("words") or []
     segments = timestamp_payload.get("segments") or []
+    if fixture_contract_version >= 2:
+        unassigned_tokens = expected["unassigned_tokens"]
+        assert [
+            (token["source"], token["source_index"]) for token in unassigned_tokens
+        ] == sorted(
+            (token["source"], token["source_index"]) for token in unassigned_tokens
+        )
+        assert all(
+            set(token)
+            == {"source", "source_index", "text", "start", "end", "reason"}
+            for token in unassigned_tokens
+        )
+        assert all(
+            token["reason"]
+            in {
+                "boundary_filler",
+                "unrelated_speech",
+                "ambiguous_assignment",
+                "out_of_order_speech",
+                "no_positive_duration",
+            }
+            for token in unassigned_tokens
+        )
+        assert expected["unassigned_non_filler_count"] == sum(
+            token["reason"] != "boundary_filler" for token in unassigned_tokens
+        )
+        ownerless_zero_indexes = actual_zero_indexes - expected_zero_indexes
+        assert ownerless_zero_indexes == {
+            token["source_index"]
+            for token in unassigned_tokens
+            if token["source"] == "words" and token["reason"] == "no_positive_duration"
+        }
+        if words:
+            assigned_units = {
+                word_index
+                for phrase in expected["phrases"]
+                if phrase["word_start_index"] is not None
+                for word_index in range(phrase["word_start_index"], phrase["word_end_index"])
+            }
+            expected_unassigned_indexes = {
+                token["source_index"] for token in unassigned_tokens if token["source"] == "words"
+            }
+            assert assigned_units.isdisjoint(expected_unassigned_indexes)
+            assert assigned_units | expected_unassigned_indexes == set(range(len(words)))
+        return
+
     if words:
         assigned_units = {
             word_index
@@ -236,8 +318,16 @@ def _validate_fixed_error(case: dict[str, Any], source_case: dict[str, Any]) -> 
         (FIXTURE_PATH, 20, "pilot"),
         (SEGMENT_POLICY_FIXTURE_PATH, 12, "pilot"),
         (ROUND2_CHALLENGE_FIXTURE_PATH, 80, "challenge"),
+        (MANUAL_EVALUATION_FIXTURE_PATH, 200, "challenge"),
+        (ASSIGNMENT_FIXTURE_PATH, 200, "challenge"),
     ],
-    ids=("ownership-pilot", "segment-policy-pilot", "round2-challenge"),
+    ids=(
+        "ownership-pilot",
+        "segment-policy-pilot",
+        "round2-challenge",
+        "manual-evaluation-challenge",
+        "assignment-challenge",
+    ),
 )
 def test_canonical_overlay_schema_and_source_are_fixed(
     fixture_path: Path,
@@ -245,7 +335,7 @@ def test_canonical_overlay_schema_and_source_are_fixed(
     expected_role: str,
 ) -> None:
     overlay, source_cases = _load_fixture(fixture_path)
-    assert overlay["fixture_contract_version"] == 1
+    assert overlay["fixture_contract_version"] in {1, 2}
     assert overlay["alignment_contract_version"] == 1
     assert overlay["evaluation_role"] == expected_role
     assert overlay["ownership_profile"] == "ownership.conservative"
@@ -268,7 +358,11 @@ def test_canonical_overlay_schema_and_source_are_fixed(
             assert case["excluded_from_score"] is False
             assert ("expected" in case) is not ("expected_error" in case)
             if "expected" in case:
-                _validate_fixed_case(case, source_by_name[case["name"]])
+                _validate_fixed_case(
+                    case,
+                    source_by_name[case["name"]],
+                    fixture_contract_version=overlay["fixture_contract_version"],
+                )
             else:
                 _validate_fixed_error(case, source_by_name[case["name"]])
         else:
@@ -319,3 +413,35 @@ def test_partial_overlap_attempt_intent_adjudication_is_complete_and_independent
             assert case["missing_evidence"]
         else:
             assert case["missing_evidence"] == []
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    [
+        FIXTURE_PATH,
+        SEGMENT_POLICY_FIXTURE_PATH,
+        ROUND2_CHALLENGE_FIXTURE_PATH,
+        MANUAL_EVALUATION_FIXTURE_PATH,
+        ASSIGNMENT_FIXTURE_PATH,
+    ],
+    ids=(
+        "ownership-pilot-runtime",
+        "segment-policy-runtime",
+        "round2-challenge-runtime",
+        "manual-evaluation-runtime",
+        "assignment-runtime",
+    ),
+)
+def test_python_runtime_matches_every_fixed_canonical_expectation(
+    fixture_path: Path,
+) -> None:
+    overlay, source_cases = _load_fixture(fixture_path)
+    source_by_name = {case["name"]: case for case in source_cases}
+    fixed_cases = [
+        case for case in overlay["cases"] if case["expectation_status"] == "fixed"
+    ]
+    results = [
+        _compare_case(source_by_name[case["name"]], case) for case in fixed_cases
+    ]
+    failures = [result for result in results if not result["passed"]]
+    assert not failures, json.dumps(failures, ensure_ascii=False, indent=2)

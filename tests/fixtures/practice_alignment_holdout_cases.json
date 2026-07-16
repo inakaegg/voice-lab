@@ -225,7 +225,7 @@
   {
     "name": "manual_zh_swapped_phrase_order_is_not_invented",
     "evaluation_source": "hand-authored-holdout",
-    "description": "語順が逆なら両方を捏造せず、順序上対応できる後半目標だけを保持する。",
+    "description": "語順が逆なら両方を捏造せず、同点時はcanonical規則により小さいtarget indexだけを保持する。",
     "target_language": "zh-CN",
     "target_text": "我喜欢咖啡。今天天气很好。",
     "recognized_text": "今天天气很好我喜欢咖啡",
@@ -245,8 +245,8 @@
       "available": true,
       "complete": false,
       "ranges": [
-        {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
-        {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 0.2, "audio_end": 1.18}
+        {"index": 0, "source": "words", "available": true, "matched_text": "我喜欢咖啡", "audio_start": 1.55, "audio_end": 2.4},
+        {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
       ]
     }
   },
@@ -418,7 +418,7 @@
   {
     "name": "manual_en_swapped_phrase_order_is_not_invented",
     "evaluation_source": "hand-authored-holdout",
-    "description": "英語フレーズ順序が逆なら、順序を無視した二重割当をしない。",
+    "description": "英語フレーズ順序が逆なら二重割当せず、同点時は小さいtarget indexだけを保持する。",
     "target_language": "en-US",
     "target_text": "I like coffee. The weather is nice today.",
     "recognized_text": "The weather is nice today I like coffee",
@@ -441,8 +441,8 @@
       "available": true,
       "complete": false,
       "ranges": [
-        {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
-        {"index": 1, "source": "words", "available": true, "matched_text": "The weather is nice today", "audio_start": 0.2, "audio_end": 1.38}
+        {"index": 0, "source": "words", "available": true, "matched_text": "I like coffee", "audio_start": 1.72, "audio_end": 2.4},
+        {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
       ]
     }
   },

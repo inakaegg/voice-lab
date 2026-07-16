@@ -55,8 +55,8 @@
       {"text": "我", "start": 1.45, "end": 1.59}, {"text": "住在", "start": 1.59, "end": 1.88}, {"text": "东京", "start": 1.88, "end": 2.22}
     ]},
     "expected": {"available": true, "complete": false, "ranges": [
-      {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
-      {"index": 1, "source": "words", "available": true, "matched_text": "我正在学中文", "audio_start": 0.2, "audio_end": 1.12}
+      {"index": 0, "source": "words", "available": true, "matched_text": "我住在东京", "audio_start": 1.45, "audio_end": 2.22},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
     ]}
   },
   {
@@ -144,8 +144,8 @@
       {"text": "I", "start": 1.48, "end": 1.58}, {"text": "live", "start": 1.58, "end": 1.82}, {"text": "in", "start": 1.82, "end": 1.95}, {"text": "Tokyo", "start": 1.95, "end": 2.28}
     ]},
     "expected": {"available": true, "complete": false, "ranges": [
-      {"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
-      {"index": 1, "source": "words", "available": true, "matched_text": "I am learning Chinese", "audio_start": 0.2, "audio_end": 1.15}
+      {"index": 0, "source": "words", "available": true, "matched_text": "I live in Tokyo", "audio_start": 1.48, "audio_end": 2.28},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}
     ]}
   },
   {

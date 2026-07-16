@@ -65,6 +65,11 @@ def _compare_case(source_case: dict[str, Any], overlay_case: dict[str, Any]) -> 
     expected = overlay_case["expected"]
     mismatches: list[dict[str, object]] = []
 
+    if actual["outcome"] != expected["outcome"]:
+        mismatches.append(
+            {"field": "outcome", "expected": expected["outcome"], "actual": actual["outcome"]}
+        )
+
     top_level = {
         "target_phrase_count": actual["target_phrase_count"],
         "playable_phrase_count": actual["playable_phrase_count"],
@@ -117,6 +122,44 @@ def _compare_case(source_case: dict[str, Any], overlay_case: dict[str, Any]) -> 
                         "actual": actual_phrase[key],
                     }
                 )
+
+    actual_zero_duration_owners = [
+        {
+            "word_index": token["source_index"],
+            "phrase_index": token["owner_phrase_index"],
+        }
+        for token in actual["diagnostics"]["zero_duration_tokens"]
+        if token["source"] == "words"
+    ]
+    if actual_zero_duration_owners != expected["zero_duration_owners"]:
+        mismatches.append(
+            {
+                "field": "zero_duration_owners",
+                "expected": expected["zero_duration_owners"],
+                "actual": actual_zero_duration_owners,
+            }
+        )
+
+    if "unassigned_tokens" in expected:
+        actual_unassigned_tokens = [
+            {
+                "source": token["source"],
+                "source_index": token["source_index"],
+                "text": token["text"],
+                "start": token["start"],
+                "end": token["end"],
+                "reason": token["reason"],
+            }
+            for token in actual["diagnostics"]["unassigned_tokens"]
+        ]
+        if actual_unassigned_tokens != expected["unassigned_tokens"]:
+            mismatches.append(
+                {
+                    "field": "unassigned_tokens",
+                    "expected": expected["unassigned_tokens"],
+                    "actual": actual_unassigned_tokens,
+                }
+            )
 
     return {
         "name": overlay_case["name"],

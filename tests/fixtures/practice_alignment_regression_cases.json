@@ -209,7 +209,7 @@
       {"text": "coffee", "start": 0.48, "end": 0.77},
       {"text": "with", "start": 0.77, "end": 0.94},
       {"text": "milk", "start": 0.94, "end": 1.18},
-      {"text": "please", "start": 1.56, "end": 1.78},
+      {"text": "please", "start": 1.36, "end": 1.78},
       {"text": "leave", "start": 1.78, "end": 1.99},
       {"text": "it", "start": 1.99, "end": 2.08},
       {"text": "at", "start": 2.08, "end": 2.2},
@@ -218,7 +218,31 @@
     ]},
     "expected": {"available": true, "complete": true, "ranges": [
       {"index": 0, "source": "words", "available": true, "matched_text": "I ordered coffee with milk", "audio_start": 0.11, "audio_end": 1.18},
-      {"index": 1, "source": "words", "available": true, "matched_text": "please leave it at the counter", "audio_start": 1.56, "audio_end": 2.62}
+      {"index": 1, "source": "words", "available": true, "matched_text": "please leave it at the counter", "audio_start": 1.36, "audio_end": 2.62}
+    ]}
+  },
+  {
+    "name": "pause_below_partition_threshold_does_not_create_boundary",
+    "category": "playable_low_similarity",
+    "target_language": "en-US",
+    "target_text": "I ordered tea without sugar. Please bring it to my table.",
+    "recognized_text": "I ordered coffee with milk please leave it at the counter",
+    "asr_timestamps": {"available": true, "words": [
+      {"text": "I", "start": 0.11, "end": 0.2},
+      {"text": "ordered", "start": 0.2, "end": 0.48},
+      {"text": "coffee", "start": 0.48, "end": 0.77},
+      {"text": "with", "start": 0.77, "end": 0.94},
+      {"text": "milk", "start": 0.94, "end": 1.18},
+      {"text": "please", "start": 1.359, "end": 1.78},
+      {"text": "leave", "start": 1.78, "end": 1.99},
+      {"text": "it", "start": 1.99, "end": 2.08},
+      {"text": "at", "start": 2.08, "end": 2.2},
+      {"text": "the", "start": 2.2, "end": 2.3},
+      {"text": "counter", "start": 2.3, "end": 2.62}
+    ]},
+    "expected": {"available": true, "complete": true, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "I ordered coffee with", "audio_start": 0.11, "audio_end": 0.94},
+      {"index": 1, "source": "words", "available": true, "matched_text": "milk please leave it at the counter", "audio_start": 0.94, "audio_end": 2.62}
     ]}
   },
   {
