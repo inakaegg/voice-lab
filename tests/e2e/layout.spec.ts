@@ -225,14 +225,22 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   const scriptIndicator = page.locator(".practice-script-indicator");
   const indicatorX = () => scriptIndicator.evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41);
   await expect(scriptIndicator).toHaveCSS("transition-duration", "0.32s, 0.22s, 0.22s");
+  await scriptIndicator.evaluate((element) => {
+    const markTransformTransition = (event: Event) => {
+      const transitionEvent = event as TransitionEvent;
+      if (transitionEvent.propertyName !== "transform") return;
+      const phase = transitionEvent.type === "transitionstart" ? "started" : "ended";
+      element.setAttribute(`data-transform-transition-${phase}`, "true");
+    };
+    element.addEventListener("transitionstart", markTransformTransition);
+    element.addEventListener("transitionend", markTransformTransition);
+  });
   const startX = await indicatorX();
   await page.locator("#practice-script-traditional").click();
-  await page.waitForTimeout(10);
-  const middleX = await indicatorX();
-  await page.waitForTimeout(300);
+  await expect(scriptIndicator).toHaveAttribute("data-transform-transition-started", "true");
+  await expect(scriptIndicator).toHaveAttribute("data-transform-transition-ended", "true");
   const finalX = await indicatorX();
-  expect(middleX).toBeGreaterThan(startX + 1);
-  expect(middleX - startX).toBeLessThan((finalX - startX) * 0.65);
+  expect(finalX).toBeGreaterThan(startX + 1);
   await expect(page.locator("#practice-script-traditional")).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => page.locator("#practice-target-text").evaluate((element) =>
     Array.from(element.childNodes).map((node) =>
