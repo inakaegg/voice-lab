@@ -1457,6 +1457,59 @@ test("Cloudflare worker rejects a boundary-only practice target before ASR", asy
   });
 });
 
+test("Cloudflare worker rejects oversized practice targets before external ASR", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("external ASR must not run for an oversized target");
+  }, { kv: fakeKv() });
+  const cases = [
+    {
+      path: "/api/practice/attempts",
+      language: "en-US",
+      target: Array.from({ length: 17 }, (_, index) => `Phrase ${index}.`).join(" "),
+      includeModelAudio: false,
+    },
+    {
+      path: "/api/practice/attempt-jobs",
+      language: "en-US",
+      target: Array.from({ length: 17 }, (_, index) => `Phrase ${index}.`).join(" "),
+      includeModelAudio: true,
+    },
+    {
+      path: "/api/practice/attempt-jobs",
+      language: "zh-CN",
+      target: Array.from({ length: 17 }, (_, index) => `第${index}句。`).join(""),
+      includeModelAudio: true,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const form = new FormData();
+    form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+    if (testCase.includeModelAudio) {
+      form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+    }
+    form.append("target_language", testCase.language);
+    form.append("target_text", testCase.target);
+
+    const response = await handleRequest(
+      new Request(`https://example.com${testCase.path}`, { method: "POST", body: form }),
+      env,
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "practice_alignment_invalid_input",
+        reason: "alignment_input_too_large",
+        stage: "input",
+        retryable: false,
+        message: "入力内容を確認して、もう一度お試しください。",
+        diagnostic_flags: ["alignment_input_too_large"],
+      },
+    });
+  }
+});
+
 test("Cloudflare worker returns no_speech for a silent practice attempt without scoring", async () => {
   const env = adminAuthEnv(async (url, init) => {
     if (url === "https://api.openai.com/v1/audio/transcriptions") {

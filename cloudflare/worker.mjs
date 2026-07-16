@@ -2488,15 +2488,23 @@ async function createPracticeRecording(request, env) {
   return result;
 }
 
+function validatePracticeTargetForAlignment(targetText) {
+  const phrases = splitPracticePhrases(targetText);
+  if (!phrases.length) {
+    throw new PracticeAlignmentInputError("empty_target");
+  }
+  if (phrases.length > MAX_CANONICAL_TARGET_PHRASES) {
+    throw new PracticeAlignmentInputError("alignment_input_too_large");
+  }
+}
+
 async function createPracticeAttempt(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
-  if (!splitPracticePhrases(targetText).length) {
-    throw new PracticeAlignmentInputError("empty_target");
-  }
+  validatePracticeTargetForAlignment(targetText);
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0),
     textChars: targetText.length,
@@ -2549,9 +2557,7 @@ async function createPracticeAttemptJob(request, env) {
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "en-US"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
-  if (!splitPracticePhrases(targetText).length) {
-    throw new PracticeAlignmentInputError("empty_target");
-  }
+  validatePracticeTargetForAlignment(targetText);
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
     textChars: targetText.length,
