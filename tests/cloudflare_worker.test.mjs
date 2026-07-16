@@ -1480,6 +1480,14 @@ test("Cloudflare worker rejects oversized practice targets before external ASR",
       target: Array.from({ length: 17 }, (_, index) => `第${index}句。`).join(""),
       includeModelAudio: true,
     },
+    {
+      path: "/api/practice/recordings",
+      language: "en-US",
+      target: Array.from({ length: 17 }, (_, index) => `Phrase ${index}.`).join(" "),
+      recordingIntent: "attempt",
+      targetField: "current_target_text",
+      includeModelAudio: false,
+    },
   ];
 
   for (const testCase of cases) {
@@ -1489,7 +1497,10 @@ test("Cloudflare worker rejects oversized practice targets before external ASR",
       form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
     }
     form.append("target_language", testCase.language);
-    form.append("target_text", testCase.target);
+    form.append(testCase.targetField || "target_text", testCase.target);
+    if (testCase.recordingIntent) {
+      form.append("recording_intent", testCase.recordingIntent);
+    }
 
     const response = await handleRequest(
       new Request(`https://example.com${testCase.path}`, { method: "POST", body: form }),

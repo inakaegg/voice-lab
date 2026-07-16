@@ -60,8 +60,8 @@ from .practice import (
     normalize_practice_text,
     practice_comparison_alignment_canonical,
     simplify_chinese_text,
-    split_practice_phrases,
     supported_practice_target_language,
+    validate_practice_alignment_target,
 )
 from .public_sample_audio import PublicSampleAudioStore
 from .providers.openai_api import (
@@ -1943,8 +1943,7 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         normalized_target_text = str(target_text or "").strip()
-        if not split_practice_phrases(normalized_target_text):
-            raise PracticeAlignmentInputError("empty_target")
+        validate_practice_alignment_target(normalized_target_text, practice_target_language)
 
         attempt_audio_bytes = await audio.read()
         model_audio_bytes = await model_audio.read()
@@ -2083,8 +2082,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if recording_intent not in {"prompt", "attempt"}:
             raise HTTPException(status_code=400, detail="recording_intent must be prompt or attempt")
-        if recording_intent == "attempt" and not split_practice_phrases(current_target_text):
-            raise PracticeAlignmentInputError("empty_target")
+        if recording_intent == "attempt":
+            validate_practice_alignment_target(current_target_text, practice_target_language)
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -2269,8 +2268,7 @@ def create_app(
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not split_practice_phrases(target_text):
-            raise PracticeAlignmentInputError("empty_target")
+        validate_practice_alignment_target(target_text, practice_target_language)
         if practice_target_language == "zh-CN":
             target_text = simplify_chinese_text(target_text)
 

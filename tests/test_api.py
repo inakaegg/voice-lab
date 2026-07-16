@@ -1128,6 +1128,61 @@ def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> Non
     }
 
 
+def test_practice_attempt_routes_reject_oversized_targets_before_asr() -> None:
+    class MustNotRunAsr:
+        name = "must-not-run"
+
+        def transcribe_detail(self, *args, **kwargs):
+            raise AssertionError("ASR must not run for an oversized target")
+
+    pipeline = SpeechTranslationPipeline(
+        asr=MustNotRunAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+    target_text = " ".join(f"Phrase {index}." for index in range(17))
+    cases = [
+        (
+            "/api/practice/attempts",
+            {"target_language": "en-US", "target_text": target_text},
+            {"audio": ("attempt.webm", b"attempt audio", "audio/webm")},
+        ),
+        (
+            "/api/practice/attempt-jobs",
+            {"target_language": "en-US", "target_text": target_text},
+            {
+                "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+                "model_audio": ("model.wav", b"model audio", "audio/wav"),
+            },
+        ),
+        (
+            "/api/practice/recordings",
+            {
+                "recording_intent": "attempt",
+                "target_language": "en-US",
+                "current_target_text": target_text,
+            },
+            {"audio": ("attempt.webm", b"attempt audio", "audio/webm")},
+        ),
+    ]
+
+    for path, data, files in cases:
+        response = client.post(path, data=data, files=files)
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "error": {
+                "code": "practice_alignment_invalid_input",
+                "reason": "alignment_input_too_large",
+                "stage": "input",
+                "retryable": False,
+                "message": "入力内容を確認して、もう一度お試しください。",
+                "diagnostic_flags": ["alignment_input_too_large"],
+            }
+        }
+
+
 def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(tmp_path, monkeypatch) -> None:
     class FakeAsyncRunpodAsr:
         name = "runpod-funasr-paraformer-zh"

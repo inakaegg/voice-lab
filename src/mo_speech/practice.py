@@ -618,13 +618,12 @@ def practice_comparison_alignment_canonical(
     target_language: str,
     asr_timestamps: object | None,
 ) -> dict[str, object]:
+    validate_practice_alignment_target(target_text, target_language)
     try:
         language = supported_practice_target_language(target_language)
     except ValueError as error:
         raise PracticeAlignmentInputError("unsupported_target_language") from error
     phrases = _comparison_target_phrases(target_text, language)
-    if not phrases:
-        raise PracticeAlignmentInputError("empty_target")
     timestamp_data = asr_timestamps if isinstance(asr_timestamps, dict) else {}
     raw_word_count = _raw_timestamp_count(
         timestamp_data.get("raw_timestamp_word_count"),
@@ -652,6 +651,18 @@ def practice_comparison_alignment_canonical(
         raw_word_count=raw_word_count,
         raw_segment_count=raw_segment_count,
     )
+
+
+def validate_practice_alignment_target(target_text: str, target_language: str) -> None:
+    try:
+        language = supported_practice_target_language(target_language)
+    except ValueError as error:
+        raise PracticeAlignmentInputError("unsupported_target_language") from error
+    phrases = _comparison_target_phrases(target_text, language)
+    if not phrases:
+        raise PracticeAlignmentInputError("empty_target")
+    if len(phrases) > _MAX_CANONICAL_TARGET_PHRASES:
+        raise PracticeAlignmentInputError("alignment_input_too_large")
 
 
 def practice_alignment_legacy_adapter(canonical: dict[str, object]) -> dict[str, object]:

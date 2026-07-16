@@ -2369,8 +2369,11 @@ async function createPracticeRecording(request, env) {
   if (recordingIntent !== "prompt" && recordingIntent !== "attempt") {
     throw httpError(400, "recording_intent must be prompt or attempt");
   }
-  if (recordingIntent === "attempt" && !splitPracticePhrases(currentTargetText).length) {
-    throw new PracticeAlignmentInputError("empty_target");
+  const attemptTargetText = recordingIntent === "attempt"
+    ? canonicalPracticeText(currentTargetText, targetLanguage)
+    : "";
+  if (recordingIntent === "attempt") {
+    validatePracticeTargetForAlignment(attemptTargetText);
   }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const useOwnVoice = recordingIntent === "prompt" && optionEnabled(stringFormValue(form, "use_own_voice", "false"));
@@ -2382,7 +2385,7 @@ async function createPracticeRecording(request, env) {
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
   if (recordingIntent === "attempt") {
-    const targetText = canonicalPracticeText(currentTargetText, targetLanguage);
+    const targetText = attemptTargetText;
     const targetStarted = Date.now();
     const targetTranscription = await practiceAttemptTranscription(env, {
       audioBytes,
