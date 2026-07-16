@@ -65,7 +65,40 @@ const PRACTICE_BOUNDARY_FILLER_SEQUENCES = {
   "zh-CN": new Set(["那个", "我想一下", "那个我想一下"]),
 };
 const MAX_ALIGNMENT_CANDIDATES_PER_PHRASE = 4096;
+const MAX_CANONICAL_TARGET_PHRASES = 16;
+const MAX_CANONICAL_TIMESTAMP_UNITS = 256;
+const MAX_CANONICAL_ALIGNMENT_COMPLEXITY = 1024;
+const PRACTICE_HARD_BOUNDARIES = new Set(["。", "！", "？", "!", "?", "；", ";", "\n"]);
+const PRACTICE_CLOSING_PUNCTUATION = new Set([..."\"'”’」』】）》）)]}"]);
+const PRACTICE_PROTECTED_ABBREVIATIONS = new Set(["dr", "jr", "mr", "mrs", "ms", "prof", "sr", "st"]);
+const ENGLISH_SMALL_NUMBERS = [
+  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+  "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+];
+const ENGLISH_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 const traditionalChineseToSimplified = Converter({ from: "t", to: "cn" });
+
+export class PracticeAlignmentError extends Error {
+  constructor(reason, { stage = "attempt_asr", retryable = true } = {}) {
+    super(reason);
+    this.name = "PracticeAlignmentError";
+    this.error_code = "practice_alignment_provider_contract_error";
+    this.reason = reason;
+    this.stage = stage;
+    this.retryable = retryable;
+  }
+}
+
+export class PracticeAlignmentInputError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.name = "PracticeAlignmentInputError";
+    this.error_code = "practice_alignment_invalid_input";
+    this.reason = reason;
+    this.stage = "input";
+    this.retryable = false;
+  }
+}
 
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
@@ -723,6 +756,12 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     return jsonResponse({ detail: "not found" }, { status: 404 });
   } catch (error) {
+    if (error instanceof PracticeAlignmentInputError) {
+      return jsonResponse(practiceAlignmentErrorEnvelope(error), { status: 400 });
+    }
+    if (error instanceof PracticeAlignmentError) {
+      return jsonResponse(practiceAlignmentErrorEnvelope(error), { status: 502 });
+    }
     return jsonResponse({ detail: errorMessage(error) }, { status: error.status || 500 });
   }
 }
@@ -2312,8 +2351,8 @@ async function createPracticeRecording(request, env) {
   if (recordingIntent !== "prompt" && recordingIntent !== "attempt") {
     throw httpError(400, "recording_intent must be prompt or attempt");
   }
-  if (recordingIntent === "attempt" && !currentTargetText.trim()) {
-    throw httpError(400, "current_target_text is required for attempt recordings");
+  if (recordingIntent === "attempt" && !splitPracticePhrases(currentTargetText).length) {
+    throw new PracticeAlignmentInputError("empty_target");
   }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const useOwnVoice = recordingIntent === "prompt" && optionEnabled(stringFormValue(form, "use_own_voice", "false"));
@@ -2346,7 +2385,7 @@ async function createPracticeRecording(request, env) {
       asr_model: targetTranscription.model,
       asr_timestamps: asrTimestamps,
       ...evaluation,
-      comparison_alignment: practiceComparisonAlignment({
+      comparison_alignment: practiceComparisonAlignmentCanonical({
         targetText,
         recognizedText,
         targetLanguage,
@@ -2437,8 +2476,8 @@ async function createPracticeAttempt(request, env) {
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
-  if (!targetText) {
-    throw httpError(400, "target_text is required");
+  if (!splitPracticePhrases(targetText).length) {
+    throw new PracticeAlignmentInputError("empty_target");
   }
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0),
@@ -2467,7 +2506,7 @@ async function createPracticeAttempt(request, env) {
     asr_model: transcription.model,
     asr_timestamps: asrTimestamps,
     ...evaluation,
-    comparison_alignment: practiceComparisonAlignment({
+    comparison_alignment: practiceComparisonAlignmentCanonical({
       targetText,
       recognizedText,
       targetLanguage,
@@ -2492,8 +2531,8 @@ async function createPracticeAttemptJob(request, env) {
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "en-US"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
-  if (!targetText) {
-    throw httpError(400, "target_text is required");
+  if (!splitPracticePhrases(targetText).length) {
+    throw new PracticeAlignmentInputError("empty_target");
   }
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
@@ -2614,13 +2653,25 @@ function practiceAttemptJobSnapshot(body, health = null) {
     }
     const attemptTranscription = runpodPracticeTranscription(output);
     const modelTranscription = runpodPracticeTranscription(output.model_transcription);
-    const result = practiceAttemptComparisonResult({
-      targetLanguage: "zh-CN",
-      targetText: canonicalPracticeText(output.target_text || "", "zh-CN"),
-      attemptTranscription,
-      modelTranscription,
-      timings: output.timings_ms || {},
-    });
+    let result;
+    try {
+      result = practiceAttemptComparisonResult({
+        targetLanguage: "zh-CN",
+        targetText: canonicalPracticeText(output.target_text || "", "zh-CN"),
+        attemptTranscription,
+        modelTranscription,
+        timings: output.timings_ms || {},
+      });
+    } catch (error) {
+      if (!(error instanceof PracticeAlignmentError)) throw error;
+      return failedPracticeAttemptJob(
+        jobId,
+        stages,
+        metrics,
+        practiceAlignmentErrorEnvelope(error).error,
+        "音声の解析結果を確認できませんでした",
+      );
+    }
     return {
       job_id: jobId,
       status: "succeeded",
@@ -2663,6 +2714,24 @@ function practiceAttemptComparisonResult({
   const asrTimestamps = serializeAsrTimestamps(attemptTranscription);
   const modelAsrTimestamps = serializeAsrTimestamps(modelTranscription);
   const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
+  let modelComparisonAlignment;
+  try {
+    modelComparisonAlignment = practiceComparisonAlignmentCanonical({
+      targetText,
+      recognizedText: modelRecognizedText,
+      targetLanguage,
+      asrTimestamps: modelAsrTimestamps,
+    });
+  } catch (error) {
+    if (!(error instanceof PracticeAlignmentError)) throw error;
+    throw new PracticeAlignmentError(error.reason, {
+      stage: "reference_asr",
+      retryable: error.retryable,
+    });
+  }
+  if (modelComparisonAlignment.outcome === "no_speech") {
+    throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
+  }
   return {
     recording_kind: "attempt",
     target_language: targetLanguage,
@@ -2673,18 +2742,13 @@ function practiceAttemptComparisonResult({
     asr_timestamps: asrTimestamps,
     model_asr_timestamps: modelAsrTimestamps,
     ...evaluation,
-    comparison_alignment: practiceComparisonAlignment({
+    comparison_alignment: practiceComparisonAlignmentCanonical({
       targetText,
       recognizedText,
       targetLanguage,
       asrTimestamps,
     }),
-    model_comparison_alignment: practiceComparisonAlignment({
-      targetText,
-      recognizedText: modelRecognizedText,
-      targetLanguage,
-      asrTimestamps: modelAsrTimestamps,
-    }),
+    model_comparison_alignment: modelComparisonAlignment,
     timings_ms: {
       asr: Number(timings.asr || 0),
       model_asr: Number(timings.model_asr || 0),
@@ -2708,6 +2772,8 @@ function runpodPracticeTranscription(output) {
       : [],
     words: normalizedAsrTimingRows(output?.words, "text"),
     segments: normalizedAsrTimingRows(output?.segments, "text"),
+    raw_timestamp_word_count: Array.isArray(output?.words) ? output.words.length : 0,
+    raw_timestamp_segment_count: Array.isArray(output?.segments) ? output.segments.length : 0,
     provider: String(providers.asr || "funasr-paraformer-zh"),
   };
 }
@@ -2724,6 +2790,7 @@ function practiceAttemptJobStages() {
 }
 
 function failedPracticeAttemptJob(jobId, stages, metrics, error, label = "処理に失敗しました") {
+  const detail = typeof error === "object" && error !== null ? String(error.message || "") : String(error || "");
   return {
     job_id: jobId,
     status: "failed",
@@ -2732,12 +2799,28 @@ function failedPracticeAttemptJob(jobId, stages, metrics, error, label = "処理
       label,
       provider: "RunPod Serverless",
       model: FUNASR_DEFAULT_PRACTICE_ASR_MODEL,
-      detail: error,
+      detail,
     },
     stages,
     metrics,
     result: null,
     error,
+  };
+}
+
+function practiceAlignmentErrorEnvelope(error) {
+  const message = error instanceof PracticeAlignmentInputError
+    ? "入力内容を確認して、もう一度お試しください。"
+    : "音声の解析結果を確認できませんでした。もう一度お試しください。";
+  return {
+    error: {
+      code: error.error_code,
+      reason: error.reason,
+      stage: error.stage,
+      retryable: error.retryable,
+      message,
+      diagnostic_flags: [error.reason],
+    },
   };
 }
 
@@ -3227,6 +3310,8 @@ async function runpodPracticeAsr(env, { audioBytes, audioMimeType, sourceLanguag
       : [],
     words: normalizedAsrTimingRows(output.words, "text"),
     segments: normalizedAsrTimingRows(output.segments, "text"),
+    raw_timestamp_word_count: Array.isArray(output.words) ? output.words.length : 0,
+    raw_timestamp_segment_count: Array.isArray(output.segments) ? output.segments.length : 0,
     provider: String(providers.asr || "funasr-paraformer-zh"),
   };
 }
@@ -3306,6 +3391,8 @@ function transcriptionFromOpenAiJson(text, model, timestampGranularities) {
     timestamp_granularities: timestampGranularities,
     words: normalizedAsrTimingRows(payload.words, "word"),
     segments: normalizedAsrTimingRows(payload.segments, "text"),
+    raw_timestamp_word_count: Array.isArray(payload.words) ? payload.words.length : 0,
+    raw_timestamp_segment_count: Array.isArray(payload.segments) ? payload.segments.length : 0,
   };
 }
 
@@ -3327,12 +3414,16 @@ function normalizedAsrTimingRows(rows, textKey) {
 function serializeAsrTimestamps(transcription) {
   const words = transcription?.words || [];
   const segments = transcription?.segments || [];
+  const rawWordCount = Number(transcription?.raw_timestamp_word_count ?? words.length);
+  const rawSegmentCount = Number(transcription?.raw_timestamp_segment_count ?? segments.length);
   return {
-    available: Boolean(words.length || segments.length),
+    available: Boolean(rawWordCount || rawSegmentCount),
     model: transcription?.model || "",
     timestamp_granularities: transcription?.timestamp_granularities || [],
     words,
     segments,
+    raw_timestamp_word_count: rawWordCount,
+    raw_timestamp_segment_count: rawSegmentCount,
   };
 }
 
@@ -3800,7 +3891,7 @@ function supportedValue(value, supported, fallback) {
 function supportedPracticeTargetLanguage(value) {
   const language = String(value || "ja-JP");
   if (!Object.prototype.hasOwnProperty.call(PRACTICE_TARGET_LANGUAGES, language)) {
-    throw httpError(400, `unsupported practice target language: ${language}`);
+    throw new PracticeAlignmentInputError("unsupported_target_language");
   }
   return language;
 }
@@ -3861,13 +3952,158 @@ function practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguag
   };
 }
 
-function splitPracticePhrases(text) {
-  const normalized = String(text || "").replace(/\r/g, "\n").trim();
+export function splitPracticePhrases(text) {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
   if (!normalized) {
     return [];
   }
-  const matches = normalized.match(/[^。！？!?.,，、；;：:\n]+[。！？!?.,，、；;：:]?/g) || [];
-  return matches.map((value) => value.trim()).filter(Boolean);
+  const phrases = [];
+  let buffer = "";
+  let index = 0;
+  while (index < normalized.length) {
+    const character = normalized[index];
+    if (character === "\n") {
+      appendSplitPhrase(phrases, buffer);
+      buffer = "";
+      index += 1;
+      continue;
+    }
+
+    buffer += character;
+    let isBoundary = PRACTICE_HARD_BOUNDARIES.has(character);
+    if (character === ".") {
+      isBoundary = !isProtectedPhrasePeriod(normalized, index);
+    }
+    if (!isBoundary) {
+      index += 1;
+      continue;
+    }
+
+    index += 1;
+    while (index < normalized.length) {
+      const suffix = normalized[index];
+      if (PRACTICE_HARD_BOUNDARIES.has(suffix) || suffix === "." || PRACTICE_CLOSING_PUNCTUATION.has(suffix)) {
+        buffer += suffix;
+        index += 1;
+        continue;
+      }
+      break;
+    }
+    appendSplitPhrase(phrases, buffer);
+    buffer = "";
+  }
+  appendSplitPhrase(phrases, buffer);
+  return phrases;
+}
+
+function appendSplitPhrase(phrases, value) {
+  const phrase = String(value || "").trim();
+  if (phrase && /[\p{L}\p{M}\p{N}]/u.test(phrase)) {
+    phrases.push(phrase);
+  }
+}
+
+function isProtectedPhrasePeriod(text, index) {
+  const previous = index > 0 ? text[index - 1] : "";
+  const following = index + 1 < text.length ? text[index + 1] : "";
+  if (previous === "." || following === ".") return true;
+  if (/\d/u.test(previous) && /\d/u.test(following)) return true;
+
+  let tokenStart = index;
+  while (tokenStart > 0 && !/\s/u.test(text[tokenStart - 1])) tokenStart -= 1;
+  let tokenEnd = index + 1;
+  while (tokenEnd < text.length && !/\s/u.test(text[tokenEnd])) tokenEnd += 1;
+  const token = text.slice(tokenStart, tokenEnd);
+  const position = index - tokenStart;
+  if (token.includes("@") && position + 1 < token.length && /[\p{L}\p{N}]/u.test(token[position + 1])) {
+    return true;
+  }
+  if (/^(https?:\/\/|www\.)/iu.test(token) && position + 1 < token.length) {
+    return !PRACTICE_HARD_BOUNDARIES.has(token[position + 1]);
+  }
+
+  let wordStart = index;
+  while (wordStart > 0 && /[a-z]/iu.test(text[wordStart - 1])) wordStart -= 1;
+  const abbreviation = text.slice(wordStart, index).toLowerCase();
+  const hasFollowingWord = [...text.slice(index + 1)].some((character) => !/\s/u.test(character));
+  return PRACTICE_PROTECTED_ABBREVIATIONS.has(abbreviation) && hasFollowingWord;
+}
+
+export function practiceContentMatches(targetText, matchedText, targetLanguage) {
+  const language = supportedPracticeTargetLanguage(targetLanguage);
+  let targetForComparison = String(targetText || "");
+  let matchedForComparison = String(matchedText || "");
+  if (language === "en-US") {
+    targetForComparison = replaceStandaloneEnglishNumbers(targetForComparison);
+    matchedForComparison = replaceStandaloneEnglishNumbers(matchedForComparison);
+  }
+  const matchedNormalized = normalizePracticeContentText(matchedForComparison, language);
+  if (normalizePracticeContentText(targetForComparison, language) === matchedNormalized) {
+    return true;
+  }
+  if (language !== "en-US") return false;
+  return compactIdentifierVariants(targetForComparison)
+    .some((candidate) => normalizePracticeContentText(candidate, language) === matchedNormalized);
+}
+
+function rawTimestampCount(value, rows) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.trunc(parsed)
+    : (Array.isArray(rows) ? rows.length : 0);
+}
+
+function normalizePracticeContentText(text, targetLanguage) {
+  let normalized = String(text || "").normalize("NFKC").trim().toLowerCase();
+  if (targetLanguage === "zh-CN") {
+    normalized = traditionalChineseToSimplified(normalized);
+  }
+  return [...normalized]
+    .filter((character) => !/^[\p{P}\p{Z}\p{S}]$/u.test(character))
+    .join("");
+}
+
+function replaceStandaloneEnglishNumbers(text) {
+  return String(text || "").normalize("NFKC").replace(
+    /(?<![\w./:+-])\d{1,6}(?![\w./:+-])/gu,
+    (value) => englishIntegerWords(Number(value)) ?? value,
+  );
+}
+
+function compactIdentifierVariants(text) {
+  const source = String(text || "");
+  const matches = [...source.matchAll(/\b([a-z]+)(\d{1,6})\b/giu)];
+  if (!matches.length) return [source];
+  let variants = [""];
+  let cursor = 0;
+  for (const match of matches) {
+    const prefix = source.slice(cursor, match.index);
+    const cardinal = englishIntegerWords(Number(match[2]));
+    const digitWords = [...match[2]].map((digit) => ENGLISH_SMALL_NUMBERS[Number(digit)]).join(" ");
+    const replacements = [`${match[1]} ${digitWords}`];
+    if (cardinal !== null) replacements.push(`${match[1]} ${cardinal}`);
+    variants = variants.flatMap((variant) => replacements.map((replacement) => variant + prefix + replacement));
+    cursor = match.index + match[0].length;
+  }
+  return [source, ...variants.map((variant) => variant + source.slice(cursor))];
+}
+
+function englishIntegerWords(value) {
+  if (!Number.isInteger(value) || value < 0 || value > 999999) return null;
+  if (value < 20) return ENGLISH_SMALL_NUMBERS[value];
+  if (value < 100) {
+    const tens = Math.floor(value / 10);
+    const remainder = value % 10;
+    return ENGLISH_TENS[tens] + (remainder ? ` ${ENGLISH_SMALL_NUMBERS[remainder]}` : "");
+  }
+  if (value < 1000) {
+    const hundreds = Math.floor(value / 100);
+    const remainder = value % 100;
+    return `${ENGLISH_SMALL_NUMBERS[hundreds]} hundred` + (remainder ? ` ${englishIntegerWords(remainder)}` : "");
+  }
+  const thousands = Math.floor(value / 1000);
+  const remainder = value % 1000;
+  return `${englishIntegerWords(thousands)} thousand` + (remainder ? ` ${englishIntegerWords(remainder)}` : "");
 }
 
 function practicePhraseMatches(targetText, recognizedText, targetLanguage) {
@@ -3916,8 +4152,33 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
   const language = supportedPracticeTargetLanguage(targetLanguage);
   const phrases = comparisonTargetPhrases(targetText, language);
   const rawTimestampData = asrTimestamps && typeof asrTimestamps === "object" ? asrTimestamps : {};
-  const timestampData = rawTimestampData.available === false ? {} : rawTimestampData;
-  const { spans: wordSpans, recognized } = asrWordSpans(timestampData.words, language);
+  if (rawTimestampData.available === false) {
+    const rawWordCount = rawTimestampCount(rawTimestampData.raw_timestamp_word_count, rawTimestampData.words);
+    const rawSegmentCount = rawTimestampCount(
+      rawTimestampData.raw_timestamp_segment_count,
+      rawTimestampData.segments,
+    );
+    if ((rawWordCount || rawSegmentCount) && !normalizePracticeText(recognizedText, language)) {
+      throw new PracticeAlignmentError("contradictory_timestamp_payload");
+    }
+    return transcriptionOnlyAlignmentResult(phrases, recognizedText, language, {
+      rawWordCount,
+      rawSegmentCount,
+      contradictory: Boolean(rawWordCount || rawSegmentCount),
+      alignmentElapsedMs: performance.now() - alignmentStarted,
+    });
+  }
+  const timestampData = rawTimestampData;
+  const wordSource = asrWordSpans(timestampData.words, language);
+  wordSource.raw_count = rawTimestampCount(timestampData.raw_timestamp_word_count, timestampData.words);
+  const wordSpans = wordSource.source_valid ? wordSource.spans : [];
+  const recognized = wordSource.source_valid ? wordSource.recognized : "";
+  const segmentSource = asrSegments(timestampData.segments);
+  segmentSource.raw_count = rawTimestampCount(
+    timestampData.raw_timestamp_segment_count,
+    timestampData.segments,
+  );
+  excludeDisjointSegmentSource(wordSpans, wordSource.source_valid, segmentSource);
 
   if (wordSpans.length && recognized) {
     const aligned = phrases.length === 1
@@ -3929,6 +4190,8 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
     const diagnostics = alignmentDiagnostics(aligned.ranges, wordSpans, language, {
       ...aligned.metrics,
       alignment_elapsed_ms: performance.now() - alignmentStarted,
+      source: wordSource,
+      segmentSource,
     });
     let complete = aligned.ranges.length > 0 && aligned.ranges.every((entry) => entry.available);
     if (diagnostics.unassigned_tokens.some((token) => token.reason === "unexplained_internal_token")) {
@@ -3947,57 +4210,54 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
     };
   }
 
-  const segments = asrSegments(timestampData.segments);
-  if (phrases.length && segments.length === phrases.length) {
-    const ranges = phrases.map((phrase, index) => {
-      const segment = segments[index];
-      const segmentText = String(segment.text || "");
-      const similarity = practiceSimilarity(
-        String(phrase.normalized_target || ""),
-        normalizePracticeText(segmentText, language),
-      );
-      const contentMatched = similarity >= 0.45;
-      const available = Boolean(segmentText.trim());
-      return {
-        index,
-        source_index: phrase.source_index,
-        target: phrase.target,
-        normalized_target: phrase.normalized_target,
-        available,
-        matched: contentMatched,
-        content_matched: contentMatched,
-        source: "segments",
-        similarity: roundScore(similarity),
-        content_similarity: roundScore(similarity),
-        coverage: available ? 1 : 0,
-        recognized_start: null,
-        recognized_end: null,
-        normalized_recognized: normalizePracticeText(segmentText, language),
-        matched_text: segmentText,
-        audio_start: available ? segment.start : null,
-        audio_end: available ? segment.end : null,
-        alignment_confidence: contentMatched ? "medium" : "low",
-        boundary_source: "segment",
-        token_start_index: null,
-        token_end_index: null,
-      };
+  if (segmentSource.raw_count) {
+    if (
+      (!segmentSource.segments.length || !segmentSource.source_valid)
+      && !normalizePracticeText(recognizedText, language)
+    ) {
+      throw new PracticeAlignmentError("invalid_timestamp_payload");
+    }
+    if (!segmentSource.segments.length || !segmentSource.source_valid) {
+      return transcriptionOnlyAlignmentResult(phrases, recognizedText, language, {
+        rawWordCount: wordSource.raw_count,
+        rawSegmentCount: segmentSource.raw_count,
+        diagnosticFlags: [
+          ...wordSource.flags,
+          ...segmentSource.flags,
+          "invalid_timestamp_payload",
+        ],
+        invalidTimestampUnits: [
+          ...wordSource.invalid_units,
+          ...segmentSource.invalid_units,
+        ],
+        unassignedTimestampUnits: phrases.length > 1
+          ? primaryInvalidTimestampUnits(wordSource, segmentSource)
+          : [],
+        alignmentElapsedMs: performance.now() - alignmentStarted,
+      });
+    }
+    return alignPhrasesToSegments(phrases, segmentSource, recognizedText, language, {
+      alignmentElapsedMs: performance.now() - alignmentStarted,
+      discardedWordSource: wordSource,
     });
-    const complete = ranges.every((entry) => entry.available);
-    return {
-      available: ranges.some((entry) => entry.available),
-      complete,
-      mode: "target_phrase_segment_fallback",
-      reason: "word timestamps were unavailable; segment count matched target phrase count",
-      target_language: language,
-      recognized_normalized: normalizePracticeText(recognizedText, language),
-      target_phrase_count: phrases.length,
-      ranges,
-      diagnostics: alignmentDiagnostics(ranges, [], language, {
-        candidate_count: ranges.length,
-        score_computation_count: ranges.length,
-        alignment_elapsed_ms: performance.now() - alignmentStarted,
-      }),
-    };
+  }
+
+  const rawWordCount = wordSource.raw_count;
+  if (rawWordCount && !normalizePracticeText(recognizedText, language)) {
+    throw new PracticeAlignmentError("invalid_timestamp_payload");
+  }
+  if (normalizePracticeText(recognizedText, language)) {
+    return transcriptionOnlyAlignmentResult(phrases, recognizedText, language, {
+      rawWordCount,
+      rawSegmentCount: 0,
+      diagnosticFlags: [
+        ...wordSource.flags,
+        ...(rawWordCount ? ["invalid_timestamp_payload"] : []),
+      ],
+      invalidTimestampUnits: wordSource.invalid_units,
+      unassignedTimestampUnits: phrases.length > 1 ? [...wordSource.invalid_units] : [],
+      alignmentElapsedMs: performance.now() - alignmentStarted,
+    });
   }
 
   return {
@@ -4015,7 +4275,7 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
       normalized_target: phrase.normalized_target,
       available: false,
       matched: false,
-      content_matched: false,
+      content_matched: null,
       source: "none",
       similarity: 0,
       content_similarity: 0,
@@ -4036,6 +4296,237 @@ export function practiceComparisonAlignment({ targetText, recognizedText, target
       score_computation_count: 0,
       alignment_elapsed_ms: performance.now() - alignmentStarted,
     }),
+  };
+}
+
+export function practiceComparisonAlignmentCanonical(options) {
+  let language;
+  try {
+    language = supportedPracticeTargetLanguage(options.targetLanguage);
+  } catch (error) {
+    throw new PracticeAlignmentInputError("unsupported_target_language");
+  }
+  const phrases = comparisonTargetPhrases(options.targetText, language);
+  if (!phrases.length) throw new PracticeAlignmentInputError("empty_target");
+  const timestampData = options.asrTimestamps && typeof options.asrTimestamps === "object"
+    ? options.asrTimestamps
+    : {};
+  const rawWordCount = rawTimestampCount(timestampData.raw_timestamp_word_count, timestampData.words);
+  const rawSegmentCount = rawTimestampCount(
+    timestampData.raw_timestamp_segment_count,
+    timestampData.segments,
+  );
+  const timestampUnitCount = rawWordCount + rawSegmentCount;
+  if (
+    phrases.length > MAX_CANONICAL_TARGET_PHRASES
+    || timestampUnitCount > MAX_CANONICAL_TIMESTAMP_UNITS
+    || phrases.length * timestampUnitCount > MAX_CANONICAL_ALIGNMENT_COMPLEXITY
+  ) {
+    throw new PracticeAlignmentInputError("alignment_input_too_large");
+  }
+  const legacy = practiceComparisonAlignment(options);
+  return canonicalAlignmentResult(legacy, {
+    rawWordCount,
+    rawSegmentCount,
+  });
+}
+
+export function practiceAlignmentLegacyAdapter(canonical) {
+  const phrases = Array.isArray(canonical?.phrases) ? canonical.phrases : [];
+  return {
+    available: Boolean(canonical?.available),
+    complete: Boolean(canonical?.complete),
+    mode: "canonical_v1_adapter",
+    reason: "",
+    target_language: canonical?.target_language,
+    target_phrase_count: canonical?.target_phrase_count,
+    ranges: phrases.map((phrase) => ({
+      index: phrase.index,
+      source_index: phrase.source_index,
+      target: phrase.target_text,
+      available: phrase.available,
+      matched: phrase.content_matched === true,
+      content_matched: phrase.content_matched,
+      source:
+        phrase.text_source === phrase.timestamp_source || phrase.timestamp_source === "none"
+          ? phrase.text_source
+          : "none",
+      matched_text: phrase.matched_text,
+      audio_start: phrase.audio_start,
+      audio_end: phrase.audio_end,
+      token_start_index: phrase.word_start_index,
+      token_end_index: phrase.word_end_index,
+    })),
+    diagnostics: canonical?.diagnostics || {},
+  };
+}
+
+function canonicalAlignmentResult(legacy, options) {
+  const legacyRanges = Array.isArray(legacy?.ranges) ? legacy.ranges : [];
+  const legacyDiagnostics = legacy?.diagnostics && typeof legacy.diagnostics === "object"
+    ? legacy.diagnostics
+    : {};
+  const unassignedTokens = (Array.isArray(legacyDiagnostics.unassigned_tokens)
+    ? legacyDiagnostics.unassigned_tokens
+    : []).map(canonicalUnassignedToken);
+  let unassignedNonFillerCount = unassignedTokens.filter((token) => token.reason !== "boundary_filler").length;
+  let outcome = String(legacy?.outcome || "evaluated");
+  if (outcome !== "no_speech" && !legacy?.recognized_normalized && !legacyRanges.length) {
+    outcome = "no_speech";
+  }
+  const phrases = outcome === "no_speech" ? [] : legacyRanges.map(canonicalPhraseResult);
+  const playablePhraseCount = phrases.filter((phrase) => phrase.available).length;
+  const targetPhraseCount = Number(legacy?.target_phrase_count || legacyRanges.length);
+  const allPhrasesPlayable = targetPhraseCount > 0 && playablePhraseCount === targetPhraseCount;
+  let complete = allPhrasesPlayable && unassignedNonFillerCount === 0;
+  const rawZeroTokens = Array.isArray(legacyDiagnostics.zero_duration_tokens)
+    ? legacyDiagnostics.zero_duration_tokens
+    : [];
+  const invalidTimestampUnits = Array.isArray(legacyDiagnostics.invalid_timestamp_units)
+    ? legacyDiagnostics.invalid_timestamp_units
+    : [];
+  const zeroDurationTokens = [];
+  for (const token of rawZeroTokens) {
+    const sourceIndex = Number(token.source_index ?? token.index ?? 0);
+    const owner = phrases.find((phrase) =>
+      phrase.word_start_index !== null &&
+      phrase.word_start_index <= sourceIndex &&
+      sourceIndex < phrase.word_end_index
+    )?.index ?? token.owner_phrase_index;
+    if (owner === null || owner === undefined) continue;
+    zeroDurationTokens.push({
+      source: String(token.source || "words"),
+      source_index: sourceIndex,
+      text: String(token.text || ""),
+      start: token.start ?? null,
+      end: token.end ?? null,
+      owner_phrase_index: Number(owner),
+    });
+  }
+  const assignedWordCount = phrases.reduce((total, phrase) => (
+    phrase.word_start_index === null
+      ? total
+      : total + phrase.word_end_index - phrase.word_start_index
+  ), 0);
+  const assignedSegmentCount = phrases.filter((phrase) => phrase.text_source === "segments").length;
+  const diagnostics = {
+    valid_word_count: Number(
+      legacyDiagnostics.valid_word_count ?? legacyDiagnostics.total_timestamp_token_count ?? 0
+    ),
+    valid_segment_count: Number(legacyDiagnostics.valid_segment_count || 0),
+    assigned_word_count: assignedWordCount,
+    assigned_segment_count: Number(legacyDiagnostics.assigned_segment_count ?? assignedSegmentCount),
+    playable_word_count: Number(
+      legacyDiagnostics.playable_word_count ?? legacyDiagnostics.playable_token_count ?? 0
+    ),
+    unassigned_non_filler_count: unassignedNonFillerCount,
+    unassigned_tokens: unassignedTokens,
+    zero_duration_tokens: zeroDurationTokens,
+    diagnostic_flags: [...new Set(legacyDiagnostics.diagnostic_flags || [])].map(String).sort(),
+    invalid_timestamp_units: invalidTimestampUnits
+      .filter((unit) => unit && typeof unit === "object")
+      .map(canonicalInvalidTimestampUnit),
+    raw_timestamp_word_count: Number(legacyDiagnostics.raw_timestamp_word_count ?? options.rawWordCount),
+    raw_timestamp_segment_count: Number(legacyDiagnostics.raw_timestamp_segment_count ?? options.rawSegmentCount),
+    candidate_count: Number(legacyDiagnostics.candidate_count || 0),
+    score_computation_count: Number(legacyDiagnostics.score_computation_count || 0),
+    alignment_elapsed_ms: Number(legacyDiagnostics.alignment_elapsed_ms || 0),
+  };
+  if (outcome === "no_speech") {
+    unassignedNonFillerCount = 0;
+    diagnostics.unassigned_non_filler_count = 0;
+    diagnostics.unassigned_tokens = [];
+    diagnostics.zero_duration_tokens = [];
+    complete = false;
+  }
+  return {
+    alignment_contract_version: 1,
+    outcome,
+    target_language: legacy?.target_language,
+    available: playablePhraseCount > 0,
+    target_phrase_count: targetPhraseCount,
+    playable_phrase_count: playablePhraseCount,
+    all_phrases_playable: outcome === "no_speech" ? false : allPhrasesPlayable,
+    unassigned_non_filler_count: unassignedNonFillerCount,
+    complete,
+    phrases,
+    diagnostics,
+  };
+}
+
+function canonicalPhraseResult(legacy) {
+  const matchedText = String(legacy?.matched_text || "");
+  const available = Boolean(legacy?.available);
+  const assignmentStatus = available ? "assigned" : matchedText ? "text_only" : "unassigned";
+  const source = String(legacy?.source || "none");
+  const wordStart = legacy?.token_start_index ?? null;
+  const wordEnd = legacy?.token_end_index ?? null;
+  const textSource = matchedText && ["words", "segments", "transcription"].includes(source)
+    ? source
+    : matchedText && wordStart !== null
+      ? "words"
+      : "none";
+  const timestampSource = available && ["words", "segments"].includes(source) ? source : "none";
+  let confidence = legacy?.alignment_confidence;
+  if (!["high", "medium", "low"].includes(confidence)) {
+    confidence = assignmentStatus === "text_only" ? "medium" : null;
+  }
+  return {
+    index: Number(legacy?.index || 0),
+    source_index: Number(legacy?.source_index || 0),
+    target_text: String(legacy?.target || ""),
+    assignment_status: assignmentStatus,
+    available,
+    matched_text: matchedText,
+    content_matched: assignmentStatus === "unassigned" ? null : legacy?.content_matched ?? false,
+    alignment_confidence: confidence,
+    boundary_sources: canonicalBoundarySources(String(legacy?.boundary_source || ""), source),
+    text_source: textSource,
+    timestamp_source: timestampSource,
+    word_start_index: wordStart === null ? null : Number(wordStart),
+    word_end_index: wordEnd === null ? null : Number(wordEnd),
+    audio_start: available ? legacy?.audio_start ?? null : null,
+    audio_end: available ? legacy?.audio_end ?? null : null,
+  };
+}
+
+function canonicalBoundarySources(boundarySource, source) {
+  const values = new Set();
+  if (boundarySource.includes("lexical") || source === "words") values.add("text_anchor");
+  if (boundarySource.includes("neighbor")) values.add("neighbor_anchors");
+  if (boundarySource.includes("pause")) values.add("pause");
+  if (boundarySource.includes("segment") || source === "segments") values.add("asr_segment");
+  if (boundarySource.includes("single")) values.add("single_phrase");
+  if (boundarySource.includes("leading") || boundarySource.includes("trailing")) values.add("utterance_edge");
+  return ["text_anchor", "neighbor_anchors", "pause", "asr_segment", "single_phrase", "utterance_edge"]
+    .filter((value) => values.has(value));
+}
+
+function canonicalUnassignedToken(token) {
+  const reasons = {
+    edge_or_boundary_filler: "boundary_filler",
+    unexplained_internal_token: "ambiguous_assignment",
+    no_structural_anchor: "ambiguous_assignment",
+  };
+  const originalReason = String(token?.reason || "ambiguous_assignment");
+  return {
+    source: String(token?.source || "words"),
+    source_index: Number(token?.source_index ?? token?.index ?? 0),
+    text: String(token?.text || ""),
+    start: token?.start ?? null,
+    end: token?.end ?? null,
+    reason: reasons[originalReason] || originalReason,
+  };
+}
+
+function canonicalInvalidTimestampUnit(token) {
+  return {
+    source: String(token?.source || "words"),
+    source_index: Number(token?.source_index ?? token?.index ?? 0),
+    text: String(token?.text || ""),
+    start: token?.start ?? null,
+    end: token?.end ?? null,
+    reason: String(token?.reason || "non_numeric"),
   };
 }
 
@@ -4068,11 +4559,16 @@ function bestPracticePhraseMatch(normalizedTarget, recognized, cursor) {
 
 function comparisonTargetPhrases(targetText, targetLanguage) {
   return splitPracticePhrases(targetText)
-    .map((phrase, sourceIndex) => ({
-      source_index: sourceIndex,
-      target: phrase,
-      normalized_target: normalizePracticeText(phrase, targetLanguage),
-    }))
+    .map((phrase, sourceIndex) => {
+      const target = String(phrase || "")
+        .replace(/^(speaker\s*\d+|[a-z]\d*|\d+)\s*[：:]\s*/iu, "")
+        .trim();
+      return {
+        source_index: sourceIndex,
+        target,
+        normalized_target: normalizePracticeText(target, targetLanguage),
+      };
+    })
     .filter((phrase) => phrase.normalized_target && !isComparisonLabelPhrase(phrase.target, phrase.normalized_target));
 }
 
@@ -4089,20 +4585,33 @@ function isComparisonLabelPhrase(phrase, normalized) {
 
 function asrWordSpans(words, targetLanguage) {
   if (!Array.isArray(words)) {
-    return { spans: [], recognized: "" };
+    return {
+      spans: [],
+      recognized: "",
+      raw_count: 0,
+      source_valid: true,
+      flags: [],
+      invalid_units: [],
+    };
   }
   const spans = [];
   const pieces = [];
+  const invalidUnits = [];
+  const flags = new Set();
   let cursor = 0;
   for (const [rawIndex, item] of words.entries()) {
     if (!item || typeof item !== "object") {
+      invalidUnits.push(invalidTimestampUnit("words", rawIndex, "", null, null, "non_numeric"));
       continue;
     }
     const text = String(item.text || item.word || "").trim();
-    const start = safeNumber(item.start);
-    const end = safeNumber(item.end);
+    const { start, end, reason } = timestampUnitValues(item.start, item.end);
+    if (reason) {
+      invalidUnits.push(invalidTimestampUnit("words", rawIndex, text, start, end, reason));
+      continue;
+    }
     const normalized = normalizePracticeText(text, targetLanguage);
-    if (!normalized || start === null || end === null || end < start) {
+    if (!normalized) {
       continue;
     }
     pieces.push(normalized);
@@ -4119,23 +4628,354 @@ function asrWordSpans(words, targetLanguage) {
     });
     cursor = spanEnd;
   }
-  return { spans, recognized: pieces.join("") };
+  for (let index = 1; index < spans.length; index += 1) {
+    const previous = spans[index - 1];
+    const current = spans[index];
+    if (current.audio_start < previous.audio_start) flags.add("non_monotonic_timestamp_source");
+    if (
+      current.text === previous.text
+      && current.audio_start === previous.audio_start
+      && current.audio_end === previous.audio_end
+    ) {
+      flags.add("duplicate_timestamp_unit");
+    }
+    if (
+      previous.audio_end > previous.audio_start
+      && current.audio_end > current.audio_start
+      && current.audio_start < previous.audio_end
+    ) {
+      flags.add("overlapping_timestamp_units");
+    }
+  }
+  if (invalidUnits.length) flags.add("invalid_timestamp_unit");
+  const sourceFlags = [
+    "non_monotonic_timestamp_source",
+    "duplicate_timestamp_unit",
+    "overlapping_timestamp_units",
+  ];
+  const sourceValid = !sourceFlags.some((flag) => flags.has(flag));
+  if (!sourceValid) {
+    const sourceReason = sourceFlags.find((flag) => flags.has(flag));
+    invalidUnits.push(...spans.map((span) => invalidTimestampUnit(
+      "words",
+      span.token_index,
+      span.text,
+      span.audio_start,
+      span.audio_end,
+      sourceReason,
+    )));
+  }
+  return {
+    spans,
+    recognized: pieces.join(""),
+    raw_count: words.length,
+    source_valid: sourceValid,
+    flags: [...flags].sort(),
+    invalid_units: invalidUnits,
+  };
+}
+
+function transcriptionOnlyAlignmentResult(phrases, recognizedText, targetLanguage, options) {
+  const ranges = phrases.map((phrase, index) => unavailableAlignmentRange(index, phrase, phrase.normalized_target));
+  const recognized = normalizePracticeText(recognizedText, targetLanguage);
+  if (phrases.length === 1 && recognized) {
+    const phrase = phrases[0];
+    const similarity = practiceSimilarity(String(phrase.normalized_target || ""), recognized);
+    const contentMatched = practiceContentMatches(phrase.target, recognizedText, targetLanguage);
+    ranges[0] = {
+      index: 0,
+      source_index: phrase.source_index,
+      target: phrase.target,
+      normalized_target: phrase.normalized_target,
+      available: false,
+      matched: contentMatched,
+      content_matched: contentMatched,
+      source: "transcription",
+      similarity: roundScore(similarity),
+      content_similarity: roundScore(similarity),
+      coverage: roundScore(targetCharacterCoverage(String(phrase.normalized_target || ""), recognized)),
+      recognized_start: 0,
+      recognized_end: recognized.length,
+      normalized_recognized: recognized,
+      matched_text: String(recognizedText || ""),
+      audio_start: null,
+      audio_end: null,
+      alignment_confidence: "high",
+      boundary_source: "single_phrase",
+      token_start_index: null,
+      token_end_index: null,
+    };
+  }
+  const flags = [...new Set(options.diagnosticFlags || [])];
+  if (options.contradictory) flags.push("contradictory_timestamp_payload");
+  flags.sort();
+  const unassignedTokens = (options.unassignedTimestampUnits || []).map((unit) => ({
+    source: String(unit?.source || "words"),
+    source_index: Number(unit?.source_index || 0),
+    index: Number(unit?.source_index || 0),
+    text: String(unit?.text || ""),
+    start: unit?.start ?? null,
+    end: unit?.end ?? null,
+    reason: "ambiguous_assignment",
+  }));
+  return {
+    outcome: recognized ? "evaluated" : "no_speech",
+    available: false,
+    complete: false,
+    mode: recognized ? "transcription_only" : "unavailable",
+    reason: "timestamp payload was unavailable; only formal transcription was retained",
+    target_language: targetLanguage,
+    recognized_normalized: recognized,
+    target_phrase_count: phrases.length,
+    ranges,
+    diagnostics: {
+      total_timestamp_token_count: 0,
+      playable_token_count: 0,
+      unassigned_tokens: unassignedTokens,
+      zero_duration_tokens: [],
+      candidate_count: 0,
+      score_computation_count: 0,
+      alignment_elapsed_ms: roundScore(Math.max(0, options.alignmentElapsedMs)),
+      valid_word_count: 0,
+      valid_segment_count: 0,
+      assigned_word_count: 0,
+      assigned_segment_count: 0,
+      playable_word_count: 0,
+      unassigned_non_filler_count: unassignedTokens.length,
+      diagnostic_flags: flags,
+      invalid_timestamp_units: [...(options.invalidTimestampUnits || [])],
+      raw_timestamp_word_count: options.rawWordCount,
+      raw_timestamp_segment_count: options.rawSegmentCount,
+    },
+  };
+}
+
+function primaryInvalidTimestampUnits(wordSource, segmentSource) {
+  if (Number(wordSource?.raw_count || 0) && wordSource?.invalid_units?.length) {
+    return [...wordSource.invalid_units];
+  }
+  return [...(segmentSource?.invalid_units || [])];
+}
+
+function alignPhrasesToSegments(phrases, source, recognizedText, targetLanguage, options) {
+  const ranges = phrases.map((phrase, index) => unavailableAlignmentRange(index, phrase, phrase.normalized_target));
+  const matchesBySegment = source.segments.map((segment) => phrases
+    .map((phrase, phraseIndex) => (
+      practiceContentMatches(phrase.target, segment.text, targetLanguage) ? phraseIndex : null
+    ))
+    .filter((value) => value !== null));
+  const uniqueSequence = matchesBySegment.filter((matches) => matches.length === 1).map((matches) => matches[0]);
+  const sequenceConflict = uniqueSequence.some((value, index) => index > 0 && value < uniqueSequence[index - 1]);
+  const assignedSegmentIndexes = new Set();
+  const assignedPhraseIndexes = new Set();
+  if (source.source_valid && !sequenceConflict) {
+    for (const [segmentPosition, segment] of source.segments.entries()) {
+      const matches = matchesBySegment[segmentPosition];
+      if (matches.length !== 1 || assignedPhraseIndexes.has(matches[0])) continue;
+      const phraseIndex = matches[0];
+      const phrase = phrases[phraseIndex];
+      const available = segment.end > segment.start;
+      ranges[phraseIndex] = {
+        index: phraseIndex,
+        source_index: phrase.source_index,
+        target: phrase.target,
+        normalized_target: phrase.normalized_target,
+        available,
+        matched: true,
+        content_matched: true,
+        source: "segments",
+        similarity: 1,
+        content_similarity: 1,
+        coverage: 1,
+        recognized_start: null,
+        recognized_end: null,
+        normalized_recognized: normalizePracticeText(segment.text, targetLanguage),
+        matched_text: segment.text,
+        audio_start: available ? segment.start : null,
+        audio_end: available ? segment.end : null,
+        alignment_confidence: "high",
+        boundary_source: "segment",
+        token_start_index: null,
+        token_end_index: null,
+      };
+      assignedPhraseIndexes.add(phraseIndex);
+      assignedSegmentIndexes.add(segment.segment_index);
+    }
+  }
+
+  const unassignedTokens = source.raw_units
+    .filter((unit) => (
+      !assignedSegmentIndexes.has(unit.index)
+      && !source.invalid_units.some((invalid) => (
+        invalid.source === "segments" && invalid.source_index === unit.index
+      ))
+    ))
+    .map((unit) => {
+      const segmentPosition = source.segments.findIndex((segment) => segment.segment_index === unit.index);
+      const matching = segmentPosition >= 0 ? matchesBySegment[segmentPosition] : [];
+      return {
+        source: "segments",
+        source_index: unit.index,
+        index: unit.index,
+        text: unit.text,
+        start: unit.start,
+        end: unit.end,
+        reason: matching.length || !source.source_valid ? "ambiguous_assignment" : "unrelated_speech",
+      };
+    });
+  const zeroDurationTokens = [];
+  for (const [phraseIndex, range] of ranges.entries()) {
+    if (range.source !== "segments") continue;
+    for (const segment of source.segments) {
+      if (
+        assignedSegmentIndexes.has(segment.segment_index) &&
+        segment.text === range.matched_text &&
+        segment.start === segment.end
+      ) {
+        zeroDurationTokens.push({
+          source: "segments",
+          source_index: segment.segment_index,
+          index: segment.segment_index,
+          text: segment.text,
+          start: segment.start,
+          end: segment.end,
+          owner_phrase_index: phraseIndex,
+        });
+      }
+    }
+  }
+  const playableCount = ranges.filter((range) => range.available).length;
+  const complete = ranges.length > 0 && playableCount === ranges.length && unassignedTokens.length === 0;
+  return {
+    outcome: "evaluated",
+    available: playableCount > 0,
+    complete,
+    mode: "target_phrase_segment_alignment",
+    reason: complete ? "" : "some segments could not be mapped safely",
+    target_language: targetLanguage,
+    recognized_normalized: normalizePracticeText(recognizedText, targetLanguage),
+    target_phrase_count: phrases.length,
+    ranges,
+    diagnostics: {
+      total_timestamp_token_count: source.raw_count,
+      playable_token_count: playableCount,
+      unassigned_tokens: unassignedTokens,
+      zero_duration_tokens: zeroDurationTokens,
+      candidate_count: matchesBySegment.filter((matches) => matches.length > 0).length,
+      score_computation_count: source.segments.length * phrases.length,
+      alignment_elapsed_ms: roundScore(Math.max(0, options.alignmentElapsedMs)),
+      valid_word_count: 0,
+      valid_segment_count: source.segments.length,
+      assigned_word_count: 0,
+      assigned_segment_count: assignedSegmentIndexes.size,
+      playable_word_count: 0,
+      unassigned_non_filler_count: unassignedTokens.length,
+      diagnostic_flags: [...new Set([
+        ...source.flags,
+        ...(options.discardedWordSource?.flags || []),
+      ])].sort(),
+      invalid_timestamp_units: [
+        ...(options.discardedWordSource?.invalid_units || []),
+        ...source.invalid_units,
+      ],
+      raw_timestamp_word_count: Number(options.discardedWordSource?.raw_count || 0),
+      raw_timestamp_segment_count: source.raw_count,
+    },
+  };
 }
 
 function asrSegments(segments) {
   if (!Array.isArray(segments)) {
-    return [];
+    return {
+      segments: [],
+      raw_count: 0,
+      source_valid: true,
+      flags: [],
+      raw_units: [],
+      invalid_units: [],
+    };
   }
-  return segments
-    .map((item) => {
-      const start = safeNumber(item?.start);
-      const end = safeNumber(item?.end);
-      if (start === null || end === null || end <= start) {
-        return null;
-      }
-      return { text: String(item?.text || ""), start, end };
-    })
-    .filter(Boolean);
+  const normalized = [];
+  const rawUnits = [];
+  const invalidUnits = [];
+  const flags = new Set();
+  for (const [rawIndex, item] of segments.entries()) {
+    const text = String(item?.text || "");
+    const { start, end, reason } = timestampUnitValues(item?.start, item?.end);
+    rawUnits.push({ index: rawIndex, text, start, end });
+    if (reason) {
+      invalidUnits.push(invalidTimestampUnit("segments", rawIndex, text, start, end, reason));
+      continue;
+    }
+    normalized.push({ text, start, end, segment_index: rawIndex });
+  }
+  let sourceValid = true;
+  for (let index = 1; index < normalized.length; index += 1) {
+    const previous = normalized[index - 1];
+    const current = normalized[index];
+    if (current.start < previous.start) {
+      flags.add("non_monotonic_timestamp_source");
+      sourceValid = false;
+    }
+    if (current.text === previous.text && current.start === previous.start && current.end === previous.end) {
+      flags.add("duplicate_timestamp_unit");
+      sourceValid = false;
+    }
+    if (previous.end > previous.start && current.end > current.start && current.start < previous.end) {
+      flags.add("overlapping_timestamp_units");
+      sourceValid = false;
+    }
+  }
+  if (invalidUnits.length) flags.add("invalid_timestamp_unit");
+  if (!sourceValid) {
+    const sourceReason = [
+      "non_monotonic_timestamp_source",
+      "duplicate_timestamp_unit",
+      "overlapping_timestamp_units",
+    ].find((flag) => flags.has(flag));
+    invalidUnits.push(...normalized.map((segment) => invalidTimestampUnit(
+      "segments",
+      segment.segment_index,
+      segment.text,
+      segment.start,
+      segment.end,
+      sourceReason,
+    )));
+  }
+  return {
+    segments: normalized,
+    raw_count: segments.length,
+    source_valid: sourceValid,
+    flags: [...flags].sort(),
+    raw_units: rawUnits,
+    invalid_units: invalidUnits,
+  };
+}
+
+function excludeDisjointSegmentSource(wordSpans, wordSourceValid, segmentSource) {
+  if (!wordSourceValid || !segmentSource.source_valid) return;
+  const positiveWords = wordSpans.filter((span) => span.audio_end > span.audio_start);
+  const positiveSegments = segmentSource.segments.filter((segment) => segment.end > segment.start);
+  if (!positiveWords.length || !positiveSegments.length) return;
+  const wordStart = Math.min(...positiveWords.map((span) => span.audio_start));
+  const wordEnd = Math.max(...positiveWords.map((span) => span.audio_end));
+  const segmentStart = Math.min(...positiveSegments.map((segment) => segment.start));
+  const segmentEnd = Math.max(...positiveSegments.map((segment) => segment.end));
+  if (wordStart < segmentEnd && segmentStart < wordEnd) return;
+  segmentSource.source_valid = false;
+  segmentSource.flags = [...new Set([
+    ...segmentSource.flags,
+    "word_segment_boundary_conflict",
+  ])].sort();
+  segmentSource.invalid_units.push(...segmentSource.segments.map((segment) => invalidTimestampUnit(
+    "segments",
+    segment.segment_index,
+    segment.text,
+    segment.start,
+    segment.end,
+    "word_segment_boundary_conflict",
+  )));
+  segmentSource.segments = [];
 }
 
 function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage) {
@@ -4294,6 +5134,7 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
   selected = addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, targetLanguage);
   selected = applyPausePartitionRanges(phrases, selected, wordSpans, recognized, targetLanguage);
   selected = assignUnassignedWordGaps(phrases, selected, wordSpans, recognized, targetLanguage);
+  selected = rejectWeakOneSidedAssignments(phrases, selected, wordSpans);
 
   const ranges = phrases.map((phrase, index) => {
     const normalizedTarget = String(phrase.normalized_target || "");
@@ -4319,7 +5160,11 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
         selection.coverage,
       );
     }
-    const contentMatched = selection.similarity >= 0.45 && selection.coverage >= 0.45;
+    const contentMatched = practiceContentMatches(
+      phrase.target,
+      joinMatchedWords(selectedSpans, targetLanguage),
+      targetLanguage,
+    );
     return {
       index,
       source_index: phrase.source_index,
@@ -4371,6 +5216,43 @@ function alignmentConfidence(similarity, coverage) {
     return "medium";
   }
   return "low";
+}
+
+function rejectWeakOneSidedAssignments(phrases, selected, wordSpans) {
+  const resolved = selected.map((item) => (item ? { ...item } : null));
+  const exactIndexes = resolved
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item && Number(item.similarity || 0) >= 0.95 && Number(item.coverage || 0) >= 0.95)
+    .map(({ index }) => index);
+  const assignedIndexes = resolved
+    .map((item, index) => (item ? index : null))
+    .filter((index) => index !== null);
+  if (exactIndexes.length !== 1 || assignedIndexes.length !== 2) return resolved;
+  const exactIndex = exactIndexes[0];
+  const weakIndex = assignedIndexes.find((index) => index !== exactIndex);
+  if (weakIndex === undefined || Math.abs(weakIndex - exactIndex) !== 1) return resolved;
+  const weak = resolved[weakIndex];
+  const target = String(phrases[weakIndex].normalized_target || "");
+  if (matchingTargetPieceCount(target, wordSpans.slice(weak.start_word, weak.end_word)) < 2) {
+    resolved[weakIndex] = null;
+  }
+  return resolved;
+}
+
+function matchingTargetPieceCount(target, spans) {
+  const matchingPieces = new Set();
+  for (const span of spans) {
+    const piece = String(span.normalized || "");
+    if (!piece) continue;
+    if (target.includes(piece)) {
+      matchingPieces.add(piece);
+      continue;
+    }
+    if (!/^[\x00-\x7f]*$/u.test(piece) && longestCommonSubsequenceLength(target, piece) >= 2) {
+      matchingPieces.add(piece);
+    }
+  }
+  return matchingPieces.size;
 }
 
 function isExplicitBoundaryFiller(wordSpans, targetLanguage) {
@@ -4425,6 +5307,7 @@ function addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, t
     if (!previous && !following) {
       continue;
     }
+    const oneSidedAnchor = !following ? previous : !previous ? following : null;
     let lower = previous ? previous.end_word : 0;
     let upper = following ? following.start_word : wordSpans.length;
     const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
@@ -4443,6 +5326,14 @@ function addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, t
     }
     const phrase = phrases[runStart];
     const normalizedTarget = String(phrase.normalized_target || "");
+    if (
+      oneSidedAnchor &&
+      Number(oneSidedAnchor.similarity || 0) >= 0.95 &&
+      Number(oneSidedAnchor.coverage || 0) >= 0.95 &&
+      matchingTargetPieceCount(normalizedTarget, candidateSpans) < 2
+    ) {
+      continue;
+    }
     const candidate = candidateSpans.map((span) => String(span.normalized || "")).join("");
     const similarity = practiceSimilarity(normalizedTarget, candidate);
     const coverage = targetCharacterCoverage(normalizedTarget, candidate);
@@ -4529,6 +5420,12 @@ function applyPausePartitionRanges(phrases, selected, wordSpans, recognized, tar
   const selectedCount = selected.filter(Boolean).length;
   if (selectedCount > 0 && phrases.length !== 2) {
     return selected;
+  }
+  if (selectedCount === 1) {
+    const anchor = selected.find(Boolean);
+    if (Number(anchor.similarity || 0) >= 0.95 && Number(anchor.coverage || 0) >= 0.95) {
+      return selected;
+    }
   }
   if (
     selectedCount === 1 &&
@@ -4671,7 +5568,11 @@ function textOnlyAlignmentRange(
   similarity,
   coverage,
 ) {
-  const contentMatched = similarity >= 0.45 && coverage >= 0.45;
+  const contentMatched = practiceContentMatches(
+    phrase.target,
+    joinMatchedWords(selectedSpans, targetLanguage),
+    targetLanguage,
+  );
   return {
     index,
     source_index: phrase.source_index,
@@ -4698,6 +5599,17 @@ function textOnlyAlignmentRange(
 }
 
 function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
+  const source = metrics.source || {
+    raw_count: wordSpans.length,
+    flags: [],
+    invalid_units: [],
+  };
+  const segmentSource = metrics.segmentSource || {
+    raw_count: 0,
+    segments: [],
+    flags: [],
+    invalid_units: [],
+  };
   const owned = new Set();
   const playable = new Set();
   for (const entry of ranges) {
@@ -4740,7 +5652,15 @@ function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
     } else if (ownedMin !== null && ownedMin < index && index < ownedMax) {
       reason = "unexplained_internal_token";
     }
-    return { index, text: span.text, start: span.audio_start, end: span.audio_end, reason };
+    return {
+      source: "words",
+      source_index: span.token_index,
+      index,
+      text: span.text,
+      start: span.audio_start,
+      end: span.audio_end,
+      reason,
+    };
   });
   return {
     total_timestamp_token_count: wordSpans.length,
@@ -4749,10 +5669,29 @@ function alignmentDiagnostics(ranges, wordSpans, targetLanguage, metrics) {
     zero_duration_tokens: wordSpans
       .map((span, index) => ({ span, index }))
       .filter(({ span }) => span.zero_duration)
-      .map(({ span, index }) => ({ index, text: span.text, start: span.audio_start, end: span.audio_end })),
+      .map(({ span, index }) => ({
+        source: "words",
+        source_index: span.token_index,
+        index,
+        text: span.text,
+        start: span.audio_start,
+        end: span.audio_end,
+      })),
     candidate_count: metrics.candidate_count,
     score_computation_count: metrics.score_computation_count,
     alignment_elapsed_ms: roundScore(Math.max(0, metrics.alignment_elapsed_ms)),
+    valid_word_count: wordSpans.length,
+    valid_segment_count: segmentSource.segments.length,
+    assigned_word_count: owned.size,
+    assigned_segment_count: 0,
+    playable_word_count: playable.size,
+    unassigned_non_filler_count: unassignedTokens.filter(
+      (token) => token.reason !== "edge_or_boundary_filler"
+    ).length,
+    diagnostic_flags: [...new Set([...source.flags, ...segmentSource.flags])].sort(),
+    invalid_timestamp_units: [...source.invalid_units, ...segmentSource.invalid_units],
+    raw_timestamp_word_count: source.raw_count,
+    raw_timestamp_segment_count: segmentSource.raw_count,
   };
 }
 
@@ -4997,7 +5936,7 @@ function unavailableAlignmentRange(index, phrase, normalizedTarget) {
     normalized_target: normalizedTarget,
     available: false,
     matched: false,
-    content_matched: false,
+    content_matched: null,
     source: "none",
     similarity: 0,
     content_similarity: 0,
@@ -5045,7 +5984,11 @@ function alignSinglePhraseToWordSpans(phrase, recognized, wordSpans, targetLangu
       coverage,
     );
   }
-  const contentMatched = similarity >= 0.45 && coverage >= 0.45;
+  const contentMatched = practiceContentMatches(
+    phrase.target,
+    joinMatchedWords(selectedSpans, targetLanguage),
+    targetLanguage,
+  );
   return {
     index: 0,
     source_index: phrase.source_index,
@@ -5102,6 +6045,48 @@ function joinMatchedWords(wordSpans, targetLanguage) {
 function safeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function timestampValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return { value: null, reason: "non_numeric" };
+  }
+  const number = Number(value);
+  if (Number.isNaN(number)) return { value: null, reason: "non_numeric" };
+  if (!Number.isFinite(number)) return { value: null, reason: "non_finite" };
+  return { value: number, reason: null };
+}
+
+function timestampUnitValues(startValue, endValue) {
+  const startResult = timestampValue(startValue);
+  const endResult = timestampValue(endValue);
+  if (startResult.reason || endResult.reason) {
+    return {
+      start: startResult.value,
+      end: endResult.value,
+      reason: [startResult.reason, endResult.reason].includes("non_numeric")
+        ? "non_numeric"
+        : "non_finite",
+    };
+  }
+  if (startResult.value < 0) {
+    return { start: startResult.value, end: endResult.value, reason: "negative_start" };
+  }
+  if (endResult.value < startResult.value) {
+    return { start: startResult.value, end: endResult.value, reason: "end_before_start" };
+  }
+  return { start: startResult.value, end: endResult.value, reason: null };
+}
+
+function invalidTimestampUnit(source, sourceIndex, text, start, end, reason) {
+  return {
+    source,
+    source_index: sourceIndex,
+    text,
+    start,
+    end,
+    reason,
+  };
 }
 
 function roundScore(value) {

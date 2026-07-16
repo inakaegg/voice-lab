@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from math import floor
+from math import floor, isfinite
 from time import perf_counter
 
 from opencc import OpenCC
@@ -33,10 +33,74 @@ _BOUNDARY_FILLER_SEQUENCES = {
     "zh-CN": {"那个", "我想一下", "那个我想一下"},
 }
 _MAX_ALIGNMENT_CANDIDATES_PER_PHRASE = 4096
+_MAX_CANONICAL_TARGET_PHRASES = 16
+_MAX_CANONICAL_TIMESTAMP_UNITS = 256
+_MAX_CANONICAL_ALIGNMENT_COMPLEXITY = 1024
+_PRACTICE_HARD_BOUNDARIES = frozenset("。！？!?；;\n")
+_PRACTICE_CLOSING_PUNCTUATION = frozenset("\"'”’」』】）》）)]}")
+_PRACTICE_PROTECTED_ABBREVIATIONS = frozenset(
+    {"dr", "jr", "mr", "mrs", "ms", "prof", "sr", "st"}
+)
+_ENGLISH_SMALL_NUMBERS = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+)
+_ENGLISH_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+
+
+class PracticeAlignmentError(ValueError):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        stage: str = "attempt_asr",
+        retryable: bool = True,
+    ) -> None:
+        self.error_code = "practice_alignment_provider_contract_error"
+        self.reason = reason
+        self.stage = stage
+        self.retryable = retryable
+        super().__init__(reason)
+
+
+class PracticeAlignmentInputError(ValueError):
+    def __init__(self, reason: str) -> None:
+        self.error_code = "practice_alignment_invalid_input"
+        self.reason = reason
+        self.stage = "input"
+        self.retryable = False
+        super().__init__(reason)
 
 
 def _round_score(value: float) -> float:
     return floor(max(0.0, value) * 1000 + 0.5) / 1000
+
+
+def _raw_timestamp_count(value: object, rows: object) -> int:
+    fallback = len(rows) if isinstance(rows, list) else 0
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return parsed if parsed > 0 else fallback
 
 
 def simplify_chinese_text(text: str) -> str:
@@ -130,11 +194,155 @@ def practice_diff(normalized_target: str, normalized_recognized: str) -> list[di
 
 
 def split_practice_phrases(text: str) -> list[str]:
-    normalized = str(text or "").replace("\r", "\n").strip()
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
         return []
-    phrases = [match.group(0).strip() for match in re.finditer(r"[^。！？!?.,，、；;：:\n]+[。！？!?.,，、；;：:]?", normalized)]
-    return [phrase for phrase in phrases if phrase]
+
+    phrases: list[str] = []
+    buffer: list[str] = []
+    index = 0
+    while index < len(normalized):
+        char = normalized[index]
+        if char == "\n":
+            _append_split_phrase(phrases, buffer)
+            buffer = []
+            index += 1
+            continue
+
+        buffer.append(char)
+        is_boundary = char in _PRACTICE_HARD_BOUNDARIES
+        if char == ".":
+            is_boundary = not _is_protected_phrase_period(normalized, index)
+        if not is_boundary:
+            index += 1
+            continue
+
+        index += 1
+        while index < len(normalized):
+            suffix = normalized[index]
+            if suffix in _PRACTICE_HARD_BOUNDARIES or suffix == "." or suffix in _PRACTICE_CLOSING_PUNCTUATION:
+                buffer.append(suffix)
+                index += 1
+                continue
+            break
+        _append_split_phrase(phrases, buffer)
+        buffer = []
+
+    _append_split_phrase(phrases, buffer)
+    return phrases
+
+
+def _append_split_phrase(phrases: list[str], buffer: list[str]) -> None:
+    phrase = "".join(buffer).strip()
+    if phrase and any(unicodedata.category(char)[0] in {"L", "M", "N"} for char in phrase):
+        phrases.append(phrase)
+
+
+def _is_protected_phrase_period(text: str, index: int) -> bool:
+    previous = text[index - 1] if index > 0 else ""
+    following = text[index + 1] if index + 1 < len(text) else ""
+    if previous == "." or following == ".":
+        return True
+    if previous.isdigit() and following.isdigit():
+        return True
+
+    token_start = index
+    while token_start > 0 and not text[token_start - 1].isspace():
+        token_start -= 1
+    token_end = index + 1
+    while token_end < len(text) and not text[token_end].isspace():
+        token_end += 1
+    token = text[token_start:token_end]
+    position = index - token_start
+    if "@" in token and position + 1 < len(token) and token[position + 1].isalnum():
+        return True
+    if token.lower().startswith(("http://", "https://", "www.")) and position + 1 < len(token):
+        return token[position + 1] not in _PRACTICE_HARD_BOUNDARIES
+
+    word_start = index
+    while word_start > 0 and text[word_start - 1].isalpha():
+        word_start -= 1
+    abbreviation = text[word_start:index].lower()
+    has_following_word = any(not char.isspace() for char in text[index + 1 :])
+    return abbreviation in _PRACTICE_PROTECTED_ABBREVIATIONS and has_following_word
+
+
+def practice_content_matches(target_text: str, matched_text: str, target_language: str) -> bool:
+    language = supported_practice_target_language(target_language)
+    target_for_comparison = str(target_text or "")
+    matched_for_comparison = str(matched_text or "")
+    if language == "en-US":
+        target_for_comparison = _replace_standalone_english_numbers(target_for_comparison)
+        matched_for_comparison = _replace_standalone_english_numbers(matched_for_comparison)
+    matched_normalized = _normalize_practice_content_text(matched_for_comparison, language)
+    if _normalize_practice_content_text(target_for_comparison, language) == matched_normalized:
+        return True
+    if language != "en-US":
+        return False
+    return any(
+        _normalize_practice_content_text(candidate, language) == matched_normalized
+        for candidate in _compact_identifier_variants(target_for_comparison)
+    )
+
+
+def _normalize_practice_content_text(text: str, target_language: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(text or "")).strip().lower()
+    if target_language == "zh-CN":
+        normalized = simplify_chinese_text(normalized)
+    return "".join(
+        char
+        for char in normalized
+        if not unicodedata.category(char).startswith(("P", "Z", "S"))
+    )
+
+
+def _replace_standalone_english_numbers(text: str) -> str:
+    pattern = re.compile(r"(?<![\w./:+-])\d{1,6}(?![\w./:+-])")
+
+    def replacement(match: re.Match[str]) -> str:
+        words = _english_integer_words(int(match.group(0)))
+        return words if words is not None else match.group(0)
+
+    return pattern.sub(replacement, unicodedata.normalize("NFKC", str(text or "")))
+
+
+def _compact_identifier_variants(text: str) -> set[str]:
+    source = str(text or "")
+    pattern = re.compile(r"(?i)(?<![\w])([a-z]+)(\d{1,6})(?![\w])")
+    matches = list(pattern.finditer(source))
+    if not matches:
+        return {source}
+    variants = [""]
+    cursor = 0
+    for match in matches:
+        prefix = source[cursor : match.start()]
+        number = int(match.group(2))
+        cardinal = _english_integer_words(number)
+        digit_words = " ".join(_ENGLISH_SMALL_NUMBERS[int(digit)] for digit in match.group(2))
+        replacements = [f"{match.group(1)} {digit_words}"]
+        if cardinal is not None:
+            replacements.append(f"{match.group(1)} {cardinal}")
+        variants = [candidate + prefix + replacement for candidate in variants for replacement in replacements]
+        cursor = match.end()
+    return {source, *(candidate + source[cursor:] for candidate in variants)}
+
+
+def _english_integer_words(value: int) -> str | None:
+    if value < 0 or value > 999_999:
+        return None
+    if value < 20:
+        return _ENGLISH_SMALL_NUMBERS[value]
+    if value < 100:
+        tens, remainder = divmod(value, 10)
+        return _ENGLISH_TENS[tens] + (f" {_ENGLISH_SMALL_NUMBERS[remainder]}" if remainder else "")
+    if value < 1_000:
+        hundreds, remainder = divmod(value, 100)
+        suffix = _english_integer_words(remainder) if remainder else ""
+        return f"{_ENGLISH_SMALL_NUMBERS[hundreds]} hundred" + (f" {suffix}" if suffix else "")
+    thousands, remainder = divmod(value, 1_000)
+    prefix = _english_integer_words(thousands)
+    suffix = _english_integer_words(remainder) if remainder else ""
+    return f"{prefix} thousand" + (f" {suffix}" if suffix else "")
 
 
 def practice_phrase_matches(target_text: str, recognized_text: str, target_language: str) -> list[dict[str, object]]:
@@ -199,8 +407,48 @@ def practice_comparison_alignment(
     phrases = _comparison_target_phrases(target_text, language)
     timestamp_data = asr_timestamps if isinstance(asr_timestamps, dict) else {}
     if timestamp_data.get("available") is False:
-        timestamp_data = {}
-    word_spans, recognized_normalized = _asr_word_spans(timestamp_data.get("words"), language)
+        raw_word_count = _raw_timestamp_count(
+            timestamp_data.get("raw_timestamp_word_count"),
+            timestamp_data.get("words"),
+        )
+        raw_segment_count = _raw_timestamp_count(
+            timestamp_data.get("raw_timestamp_segment_count"),
+            timestamp_data.get("segments"),
+        )
+        if (raw_word_count or raw_segment_count) and not normalize_practice_text(recognized_text, language):
+            raise PracticeAlignmentError("contradictory_timestamp_payload")
+        return _transcription_only_alignment_result(
+            phrases,
+            recognized_text,
+            language,
+            raw_word_count=raw_word_count,
+            raw_segment_count=raw_segment_count,
+            contradictory=bool(raw_word_count or raw_segment_count),
+            elapsed_ms=(perf_counter() - alignment_started) * 1000,
+        )
+    word_spans, recognized_normalized, word_source = _asr_word_spans(
+        timestamp_data.get("words"),
+        language,
+    )
+    word_source["raw_count"] = _raw_timestamp_count(
+        timestamp_data.get("raw_timestamp_word_count"),
+        timestamp_data.get("words"),
+    )
+    if not word_source["source_valid"]:
+        word_spans = []
+        recognized_normalized = ""
+    segments, segment_source = _asr_segments(timestamp_data.get("segments"))
+    segment_source["raw_count"] = _raw_timestamp_count(
+        timestamp_data.get("raw_timestamp_segment_count"),
+        timestamp_data.get("segments"),
+    )
+    segments = _exclude_disjoint_segment_source(
+        word_spans,
+        bool(word_source["source_valid"]),
+        segments,
+        segment_source,
+    )
+    segment_source["segments"] = segments
 
     if word_spans and recognized_normalized:
         if len(phrases) == 1:
@@ -220,6 +468,8 @@ def practice_comparison_alignment(
             candidate_count=int(candidate_metrics["candidate_count"]),
             score_computation_count=int(candidate_metrics["score_computation_count"]),
             elapsed_ms=(perf_counter() - alignment_started) * 1000,
+            source=word_source,
+            segment_source=segment_source,
         )
         complete = bool(ranges) and all(bool(entry["available"]) for entry in ranges)
         if any(token["reason"] == "unexplained_internal_token" for token in diagnostics["unassigned_tokens"]):
@@ -236,61 +486,66 @@ def practice_comparison_alignment(
             "diagnostics": diagnostics,
         }
 
-    segments = _asr_segments(timestamp_data.get("segments"))
-    if phrases and len(segments) == len(phrases):
-        ranges = []
-        for index, (phrase, segment) in enumerate(zip(phrases, segments)):
-            segment_text = str(segment.get("text") or "")
-            similarity = practice_similarity(
-                str(phrase["normalized_target"]),
-                normalize_practice_text(segment_text, language),
-            )
-            content_matched = similarity >= 0.45
-            available = bool(segment_text.strip())
-            ranges.append(
-                {
-                    "index": index,
-                    "source_index": phrase["source_index"],
-                    "target": phrase["target"],
-                    "normalized_target": phrase["normalized_target"],
-                    "available": available,
-                    "matched": content_matched,
-                    "content_matched": content_matched,
-                    "source": "segments",
-                    "similarity": _round_score(similarity),
-                    "content_similarity": _round_score(similarity),
-                    "coverage": 1.0 if available else 0.0,
-                    "recognized_start": None,
-                    "recognized_end": None,
-                    "normalized_recognized": normalize_practice_text(segment_text, language),
-                    "matched_text": segment_text,
-                    "audio_start": segment["start"] if available else None,
-                    "audio_end": segment["end"] if available else None,
-                    "alignment_confidence": "medium" if content_matched else "low",
-                    "boundary_source": "segment",
-                    "token_start_index": None,
-                    "token_end_index": None,
-                }
-            )
-        complete = all(bool(entry["available"]) for entry in ranges)
-        return {
-            "available": any(bool(entry["available"]) for entry in ranges),
-            "complete": complete,
-            "mode": "target_phrase_segment_fallback",
-            "reason": "word timestamps were unavailable; segment count matched target phrase count",
-            "target_language": language,
-            "recognized_normalized": normalize_practice_text(recognized_text, language),
-            "target_phrase_count": len(phrases),
-            "ranges": ranges,
-            "diagnostics": _alignment_diagnostics(
-                ranges,
-                [],
+    if segment_source["raw_count"]:
+        if (
+            not segments or not segment_source["source_valid"]
+        ) and not normalize_practice_text(recognized_text, language):
+            raise PracticeAlignmentError("invalid_timestamp_payload")
+        if not segments or not segment_source["source_valid"]:
+            return _transcription_only_alignment_result(
+                phrases,
+                recognized_text,
                 language,
-                candidate_count=len(ranges),
-                score_computation_count=len(ranges),
+                raw_word_count=int(word_source["raw_count"]),
+                raw_segment_count=int(segment_source["raw_count"]),
+                diagnostic_flags=[
+                    *word_source["flags"],
+                    *segment_source["flags"],
+                    "invalid_timestamp_payload",
+                ],
+                invalid_timestamp_units=[
+                    *word_source["invalid_units"],
+                    *segment_source["invalid_units"],
+                ],
+                unassigned_timestamp_units=(
+                    _primary_invalid_timestamp_units(word_source, segment_source)
+                    if len(phrases) > 1
+                    else []
+                ),
                 elapsed_ms=(perf_counter() - alignment_started) * 1000,
+            )
+        return _align_phrases_to_segments(
+            phrases,
+            segments,
+            segment_source,
+            recognized_text,
+            language,
+            elapsed_ms=(perf_counter() - alignment_started) * 1000,
+            discarded_word_source=word_source,
+        )
+
+    raw_word_count = int(word_source["raw_count"])
+    if raw_word_count and not normalize_practice_text(recognized_text, language):
+        raise PracticeAlignmentError("invalid_timestamp_payload")
+    if normalize_practice_text(recognized_text, language):
+        return _transcription_only_alignment_result(
+            phrases,
+            recognized_text,
+            language,
+            raw_word_count=raw_word_count,
+            raw_segment_count=0,
+            diagnostic_flags=[
+                *word_source["flags"],
+                *(["invalid_timestamp_payload"] if raw_word_count else []),
+            ],
+            invalid_timestamp_units=list(word_source["invalid_units"]),
+            unassigned_timestamp_units=(
+                list(word_source["invalid_units"])
+                if len(phrases) > 1
+                else []
             ),
-        }
+            elapsed_ms=(perf_counter() - alignment_started) * 1000,
+        )
 
     return {
         "available": False,
@@ -308,7 +563,7 @@ def practice_comparison_alignment(
                 "normalized_target": phrase["normalized_target"],
                 "available": False,
                 "matched": False,
-                "content_matched": False,
+                "content_matched": None,
                 "source": "none",
                 "similarity": 0.0,
                 "content_similarity": 0.0,
@@ -334,6 +589,284 @@ def practice_comparison_alignment(
             score_computation_count=0,
             elapsed_ms=(perf_counter() - alignment_started) * 1000,
         ),
+    }
+
+
+def practice_comparison_alignment_canonical(
+    *,
+    target_text: str,
+    recognized_text: str,
+    target_language: str,
+    asr_timestamps: object | None,
+) -> dict[str, object]:
+    try:
+        language = supported_practice_target_language(target_language)
+    except ValueError as error:
+        raise PracticeAlignmentInputError("unsupported_target_language") from error
+    phrases = _comparison_target_phrases(target_text, language)
+    if not phrases:
+        raise PracticeAlignmentInputError("empty_target")
+    timestamp_data = asr_timestamps if isinstance(asr_timestamps, dict) else {}
+    raw_word_count = _raw_timestamp_count(
+        timestamp_data.get("raw_timestamp_word_count"),
+        timestamp_data.get("words"),
+    )
+    raw_segment_count = _raw_timestamp_count(
+        timestamp_data.get("raw_timestamp_segment_count"),
+        timestamp_data.get("segments"),
+    )
+    timestamp_unit_count = raw_word_count + raw_segment_count
+    if (
+        len(phrases) > _MAX_CANONICAL_TARGET_PHRASES
+        or timestamp_unit_count > _MAX_CANONICAL_TIMESTAMP_UNITS
+        or len(phrases) * timestamp_unit_count > _MAX_CANONICAL_ALIGNMENT_COMPLEXITY
+    ):
+        raise PracticeAlignmentInputError("alignment_input_too_large")
+    legacy = practice_comparison_alignment(
+        target_text=target_text,
+        recognized_text=recognized_text,
+        target_language=target_language,
+        asr_timestamps=asr_timestamps,
+    )
+    return _canonical_alignment_result(
+        legacy,
+        raw_word_count=raw_word_count,
+        raw_segment_count=raw_segment_count,
+    )
+
+
+def practice_alignment_legacy_adapter(canonical: dict[str, object]) -> dict[str, object]:
+    phrases = canonical.get("phrases") if isinstance(canonical.get("phrases"), list) else []
+    return {
+        "available": bool(canonical.get("available")),
+        "complete": bool(canonical.get("complete")),
+        "mode": "canonical_v1_adapter",
+        "reason": "",
+        "target_language": canonical.get("target_language"),
+        "target_phrase_count": canonical.get("target_phrase_count"),
+        "ranges": [
+            {
+                "index": phrase["index"],
+                "source_index": phrase["source_index"],
+                "target": phrase["target_text"],
+                "available": phrase["available"],
+                "matched": phrase["content_matched"] is True,
+                "content_matched": phrase["content_matched"],
+                "source": (
+                    phrase["text_source"]
+                    if phrase["text_source"] == phrase["timestamp_source"]
+                    or phrase["timestamp_source"] == "none"
+                    else "none"
+                ),
+                "matched_text": phrase["matched_text"],
+                "audio_start": phrase["audio_start"],
+                "audio_end": phrase["audio_end"],
+                "token_start_index": phrase["word_start_index"],
+                "token_end_index": phrase["word_end_index"],
+            }
+            for phrase in phrases
+        ],
+        "diagnostics": canonical.get("diagnostics") or {},
+    }
+
+
+def _canonical_alignment_result(
+    legacy: dict[str, object],
+    *,
+    raw_word_count: int,
+    raw_segment_count: int,
+) -> dict[str, object]:
+    legacy_ranges = legacy.get("ranges") if isinstance(legacy.get("ranges"), list) else []
+    legacy_diagnostics = legacy.get("diagnostics") if isinstance(legacy.get("diagnostics"), dict) else {}
+    raw_unassigned = (
+        legacy_diagnostics.get("unassigned_tokens")
+        if isinstance(legacy_diagnostics.get("unassigned_tokens"), list)
+        else []
+    )
+    unassigned_tokens = [_canonical_unassigned_token(token) for token in raw_unassigned]
+    unassigned_non_filler_count = sum(
+        token["reason"] != "boundary_filler" for token in unassigned_tokens
+    )
+    outcome = str(legacy.get("outcome") or "evaluated")
+    if outcome != "no_speech" and not legacy.get("recognized_normalized") and not legacy_ranges:
+        outcome = "no_speech"
+    phrases = [] if outcome == "no_speech" else [
+        _canonical_phrase_result(phrase) for phrase in legacy_ranges
+    ]
+    playable_phrase_count = sum(bool(phrase["available"]) for phrase in phrases)
+    target_phrase_count = int(legacy.get("target_phrase_count") or len(legacy_ranges))
+    all_phrases_playable = target_phrase_count > 0 and playable_phrase_count == target_phrase_count
+    complete = all_phrases_playable and unassigned_non_filler_count == 0
+    zero_duration_tokens = []
+    raw_zero_tokens = (
+        legacy_diagnostics.get("zero_duration_tokens")
+        if isinstance(legacy_diagnostics.get("zero_duration_tokens"), list)
+        else []
+    )
+    for token in raw_zero_tokens:
+        source_index = int(token.get("source_index", token.get("index", 0)))
+        owner = next(
+            (
+                phrase["index"]
+                for phrase in phrases
+                if phrase["word_start_index"] is not None
+                and int(phrase["word_start_index"]) <= source_index < int(phrase["word_end_index"])
+            ),
+            token.get("owner_phrase_index"),
+        )
+        if owner is None:
+            continue
+        zero_duration_tokens.append(
+            {
+                "source": str(token.get("source") or "words"),
+                "source_index": source_index,
+                "text": str(token.get("text") or ""),
+                "start": token.get("start"),
+                "end": token.get("end"),
+                "owner_phrase_index": int(owner),
+            }
+        )
+    assigned_word_count = sum(
+        int(phrase["word_end_index"]) - int(phrase["word_start_index"])
+        for phrase in phrases
+        if phrase["word_start_index"] is not None
+    )
+    assigned_segment_count = sum(phrase["text_source"] == "segments" for phrase in phrases)
+    diagnostic_flags = legacy_diagnostics.get("diagnostic_flags") or []
+    invalid_timestamp_units = (
+        legacy_diagnostics.get("invalid_timestamp_units")
+        if isinstance(legacy_diagnostics.get("invalid_timestamp_units"), list)
+        else []
+    )
+    diagnostics = {
+        "valid_word_count": int(
+            legacy_diagnostics.get("valid_word_count", legacy_diagnostics.get("total_timestamp_token_count", 0))
+            or 0
+        ),
+        "valid_segment_count": int(legacy_diagnostics.get("valid_segment_count", 0) or 0),
+        "assigned_word_count": assigned_word_count,
+        "assigned_segment_count": int(
+            legacy_diagnostics.get("assigned_segment_count", assigned_segment_count) or 0
+        ),
+        "playable_word_count": int(
+            legacy_diagnostics.get("playable_word_count", legacy_diagnostics.get("playable_token_count", 0))
+            or 0
+        ),
+        "unassigned_non_filler_count": unassigned_non_filler_count,
+        "unassigned_tokens": unassigned_tokens,
+        "zero_duration_tokens": zero_duration_tokens,
+        "diagnostic_flags": sorted(set(str(flag) for flag in diagnostic_flags)),
+        "invalid_timestamp_units": [
+            _canonical_invalid_timestamp_unit(unit)
+            for unit in invalid_timestamp_units
+            if isinstance(unit, dict)
+        ],
+        "raw_timestamp_word_count": int(
+            legacy_diagnostics.get("raw_timestamp_word_count", raw_word_count) or 0
+        ),
+        "raw_timestamp_segment_count": int(
+            legacy_diagnostics.get("raw_timestamp_segment_count", raw_segment_count) or 0
+        ),
+        "candidate_count": int(legacy_diagnostics.get("candidate_count", 0) or 0),
+        "score_computation_count": int(legacy_diagnostics.get("score_computation_count", 0) or 0),
+        "alignment_elapsed_ms": float(legacy_diagnostics.get("alignment_elapsed_ms", 0.0) or 0.0),
+    }
+    if outcome == "no_speech":
+        unassigned_non_filler_count = 0
+        diagnostics["unassigned_non_filler_count"] = 0
+        diagnostics["unassigned_tokens"] = []
+        diagnostics["zero_duration_tokens"] = []
+        complete = False
+    return {
+        "alignment_contract_version": 1,
+        "outcome": outcome,
+        "target_language": legacy.get("target_language"),
+        "available": playable_phrase_count > 0,
+        "target_phrase_count": target_phrase_count,
+        "playable_phrase_count": playable_phrase_count,
+        "all_phrases_playable": all_phrases_playable if outcome != "no_speech" else False,
+        "unassigned_non_filler_count": unassigned_non_filler_count,
+        "complete": complete,
+        "phrases": phrases,
+        "diagnostics": diagnostics,
+    }
+
+
+def _canonical_phrase_result(legacy: dict[str, object]) -> dict[str, object]:
+    matched_text = str(legacy.get("matched_text") or "")
+    available = bool(legacy.get("available"))
+    assignment_status = "assigned" if available else "text_only" if matched_text else "unassigned"
+    source = str(legacy.get("source") or "none")
+    word_start = legacy.get("token_start_index")
+    word_end = legacy.get("token_end_index")
+    text_source = source if matched_text and source in {"words", "segments", "transcription"} else (
+        "words" if matched_text and word_start is not None else "none"
+    )
+    timestamp_source = source if available and source in {"words", "segments"} else "none"
+    confidence = legacy.get("alignment_confidence")
+    if confidence not in {"high", "medium", "low"}:
+        confidence = "medium" if assignment_status == "text_only" else None
+    return {
+        "index": int(legacy.get("index") or 0),
+        "source_index": int(legacy.get("source_index") or 0),
+        "target_text": str(legacy.get("target") or ""),
+        "assignment_status": assignment_status,
+        "available": available,
+        "matched_text": matched_text,
+        "content_matched": legacy.get("content_matched") if assignment_status != "unassigned" else None,
+        "alignment_confidence": confidence,
+        "boundary_sources": _canonical_boundary_sources(str(legacy.get("boundary_source") or ""), source),
+        "text_source": text_source,
+        "timestamp_source": timestamp_source,
+        "word_start_index": int(word_start) if word_start is not None else None,
+        "word_end_index": int(word_end) if word_end is not None else None,
+        "audio_start": legacy.get("audio_start") if available else None,
+        "audio_end": legacy.get("audio_end") if available else None,
+    }
+
+
+def _canonical_boundary_sources(boundary_source: str, source: str) -> list[str]:
+    values = []
+    if "lexical" in boundary_source or source == "words":
+        values.append("text_anchor")
+    if "neighbor" in boundary_source:
+        values.append("neighbor_anchors")
+    if "pause" in boundary_source:
+        values.append("pause")
+    if "segment" in boundary_source or source == "segments":
+        values.append("asr_segment")
+    if "single" in boundary_source:
+        values.append("single_phrase")
+    if "leading" in boundary_source or "trailing" in boundary_source:
+        values.append("utterance_edge")
+    order = ["text_anchor", "neighbor_anchors", "pause", "asr_segment", "single_phrase", "utterance_edge"]
+    return [value for value in order if value in values]
+
+
+def _canonical_unassigned_token(token: dict[str, object]) -> dict[str, object]:
+    reason_map = {
+        "edge_or_boundary_filler": "boundary_filler",
+        "unexplained_internal_token": "ambiguous_assignment",
+        "no_structural_anchor": "ambiguous_assignment",
+    }
+    return {
+        "source": str(token.get("source") or "words"),
+        "source_index": int(token.get("source_index", token.get("index", 0)) or 0),
+        "text": str(token.get("text") or ""),
+        "start": token.get("start"),
+        "end": token.get("end"),
+        "reason": reason_map.get(str(token.get("reason") or ""), str(token.get("reason") or "ambiguous_assignment")),
+    }
+
+
+def _canonical_invalid_timestamp_unit(token: dict[str, object]) -> dict[str, object]:
+    return {
+        "source": str(token.get("source") or "words"),
+        "source_index": int(token.get("source_index", token.get("index", 0)) or 0),
+        "text": str(token.get("text") or ""),
+        "start": token.get("start"),
+        "end": token.get("end"),
+        "reason": str(token.get("reason") or "non_numeric"),
     }
 
 
@@ -377,13 +910,19 @@ def _target_character_coverage(target_normalized: str, candidate: str) -> float:
 def _comparison_target_phrases(target_text: str, target_language: str) -> list[dict[str, object]]:
     phrases: list[dict[str, object]] = []
     for source_index, phrase in enumerate(split_practice_phrases(target_text)):
-        normalized = normalize_practice_text(phrase, target_language)
-        if not normalized or _is_comparison_label_phrase(phrase, normalized):
+        target_phrase = re.sub(
+            r"^(?i:speaker\s*\d+|[a-z]\d*|\d+)\s*[：:]\s*",
+            "",
+            phrase,
+            count=1,
+        ).strip()
+        normalized = normalize_practice_text(target_phrase, target_language)
+        if not normalized or _is_comparison_label_phrase(target_phrase, normalized):
             continue
         phrases.append(
             {
                 "source_index": source_index,
-                "target": phrase,
+                "target": target_phrase,
                 "normalized_target": normalized,
             }
         )
@@ -399,21 +938,38 @@ def _is_comparison_label_phrase(phrase: str, normalized: str) -> bool:
     return len(normalized) <= 2 and phrase.strip().endswith((":", "："))
 
 
-def _asr_word_spans(words: object, target_language: str) -> tuple[list[dict[str, object]], str]:
+def _asr_word_spans(
+    words: object,
+    target_language: str,
+) -> tuple[list[dict[str, object]], str, dict[str, object]]:
     if not isinstance(words, list):
-        return [], ""
+        return [], "", {
+            "raw_count": 0,
+            "source_valid": True,
+            "flags": [],
+            "invalid_units": [],
+        }
 
     spans: list[dict[str, object]] = []
     normalized_pieces: list[str] = []
+    invalid_units: list[dict[str, object]] = []
+    flags: set[str] = set()
     cursor = 0
     for raw_index, item in enumerate(words):
         if not isinstance(item, dict):
+            invalid_units.append(
+                _invalid_timestamp_unit("words", raw_index, "", None, None, "non_numeric")
+            )
             continue
         text = str(item.get("text") or item.get("word") or "").strip()
-        start = _safe_float(item.get("start"))
-        end = _safe_float(item.get("end"))
+        start, end, invalid_reason = _timestamp_unit_values(item.get("start"), item.get("end"))
+        if invalid_reason is not None:
+            invalid_units.append(
+                _invalid_timestamp_unit("words", raw_index, text, start, end, invalid_reason)
+            )
+            continue
         normalized = normalize_practice_text(text, target_language)
-        if not normalized or start is None or end is None or end < start:
+        if not normalized:
             continue
         normalized_pieces.append(normalized)
         span_end = cursor + len(normalized)
@@ -430,28 +986,459 @@ def _asr_word_spans(words: object, target_language: str) -> tuple[list[dict[str,
             }
         )
         cursor = span_end
-    return spans, "".join(normalized_pieces)
+    for previous, current in zip(spans, spans[1:]):
+        if float(current["audio_start"]) < float(previous["audio_start"]):
+            flags.add("non_monotonic_timestamp_source")
+        if (
+            current["text"] == previous["text"]
+            and current["audio_start"] == previous["audio_start"]
+            and current["audio_end"] == previous["audio_end"]
+        ):
+            flags.add("duplicate_timestamp_unit")
+        if (
+            float(previous["audio_end"]) > float(previous["audio_start"])
+            and float(current["audio_end"]) > float(current["audio_start"])
+            and float(current["audio_start"]) < float(previous["audio_end"])
+        ):
+            flags.add("overlapping_timestamp_units")
+    if invalid_units:
+        flags.add("invalid_timestamp_unit")
+    source_valid = not any(
+        flag in {
+            "non_monotonic_timestamp_source",
+            "duplicate_timestamp_unit",
+            "overlapping_timestamp_units",
+        }
+        for flag in flags
+    )
+    if not source_valid:
+        source_reason = next(
+            flag
+            for flag in (
+                "non_monotonic_timestamp_source",
+                "duplicate_timestamp_unit",
+                "overlapping_timestamp_units",
+            )
+            if flag in flags
+        )
+        invalid_units.extend(
+            _invalid_timestamp_unit(
+                "words",
+                int(span["token_index"]),
+                str(span["text"]),
+                span["audio_start"],
+                span["audio_end"],
+                source_reason,
+            )
+            for span in spans
+        )
+    return spans, "".join(normalized_pieces), {
+        "raw_count": len(words),
+        "source_valid": source_valid,
+        "flags": sorted(flags),
+        "invalid_units": invalid_units,
+    }
 
 
-def _asr_segments(segments: object) -> list[dict[str, object]]:
-    if not isinstance(segments, list):
-        return []
-    normalized: list[dict[str, object]] = []
-    for item in segments:
-        if not isinstance(item, dict):
+def _transcription_only_alignment_result(
+    phrases: list[dict[str, object]],
+    recognized_text: str,
+    target_language: str,
+    *,
+    raw_word_count: int,
+    raw_segment_count: int,
+    elapsed_ms: float,
+    contradictory: bool = False,
+    diagnostic_flags: list[str] | None = None,
+    invalid_timestamp_units: list[dict[str, object]] | None = None,
+    unassigned_timestamp_units: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    ranges = [
+        _unavailable_alignment_range(index, phrase, str(phrase["normalized_target"]))
+        for index, phrase in enumerate(phrases)
+    ]
+    recognized_normalized = normalize_practice_text(recognized_text, target_language)
+    if len(phrases) == 1 and recognized_normalized:
+        phrase = phrases[0]
+        content_matched = practice_content_matches(
+            str(phrase["target"]),
+            recognized_text,
+            target_language,
+        )
+        ranges[0] = {
+            "index": 0,
+            "source_index": phrase["source_index"],
+            "target": phrase["target"],
+            "normalized_target": phrase["normalized_target"],
+            "available": False,
+            "matched": content_matched,
+            "content_matched": content_matched,
+            "source": "transcription",
+            "similarity": _round_score(
+                practice_similarity(str(phrase["normalized_target"]), recognized_normalized)
+            ),
+            "content_similarity": _round_score(
+                practice_similarity(str(phrase["normalized_target"]), recognized_normalized)
+            ),
+            "coverage": _round_score(
+                _target_character_coverage(str(phrase["normalized_target"]), recognized_normalized)
+            ),
+            "recognized_start": 0,
+            "recognized_end": len(recognized_normalized),
+            "normalized_recognized": recognized_normalized,
+            "matched_text": str(recognized_text),
+            "audio_start": None,
+            "audio_end": None,
+            "alignment_confidence": "high",
+            "boundary_source": "single_phrase",
+            "token_start_index": None,
+            "token_end_index": None,
+        }
+    flags = list(diagnostic_flags or [])
+    if contradictory:
+        flags.append("contradictory_timestamp_payload")
+    flags = sorted(set(flags))
+    unassigned_tokens = [
+        {
+            "source": str(unit.get("source") or "words"),
+            "source_index": int(unit.get("source_index", 0) or 0),
+            "index": int(unit.get("source_index", 0) or 0),
+            "text": str(unit.get("text") or ""),
+            "start": unit.get("start"),
+            "end": unit.get("end"),
+            "reason": "ambiguous_assignment",
+        }
+        for unit in (unassigned_timestamp_units or [])
+    ]
+    return {
+        "outcome": "evaluated" if recognized_normalized else "no_speech",
+        "available": False,
+        "complete": False,
+        "mode": "transcription_only" if recognized_normalized else "unavailable",
+        "reason": "timestamp payload was unavailable; only formal transcription was retained",
+        "target_language": target_language,
+        "recognized_normalized": recognized_normalized,
+        "target_phrase_count": len(phrases),
+        "ranges": ranges,
+        "diagnostics": {
+            "total_timestamp_token_count": 0,
+            "playable_token_count": 0,
+            "unassigned_tokens": unassigned_tokens,
+            "zero_duration_tokens": [],
+            "candidate_count": 0,
+            "score_computation_count": 0,
+            "alignment_elapsed_ms": round(max(0.0, elapsed_ms), 3),
+            "valid_word_count": 0,
+            "valid_segment_count": 0,
+            "assigned_word_count": 0,
+            "assigned_segment_count": 0,
+            "playable_word_count": 0,
+            "unassigned_non_filler_count": len(unassigned_tokens),
+            "diagnostic_flags": flags,
+            "invalid_timestamp_units": list(invalid_timestamp_units or []),
+            "raw_timestamp_word_count": raw_word_count,
+            "raw_timestamp_segment_count": raw_segment_count,
+        },
+    }
+
+
+def _primary_invalid_timestamp_units(
+    word_source: dict[str, object],
+    segment_source: dict[str, object],
+) -> list[dict[str, object]]:
+    word_units = list(word_source.get("invalid_units", []))
+    if int(word_source.get("raw_count", 0)) and word_units:
+        return word_units
+    return list(segment_source.get("invalid_units", []))
+
+
+def _align_phrases_to_segments(
+    phrases: list[dict[str, object]],
+    segments: list[dict[str, object]],
+    source: dict[str, object],
+    recognized_text: str,
+    target_language: str,
+    *,
+    elapsed_ms: float,
+    discarded_word_source: dict[str, object] | None = None,
+) -> dict[str, object]:
+    ranges = [
+        _unavailable_alignment_range(index, phrase, str(phrase["normalized_target"]))
+        for index, phrase in enumerate(phrases)
+    ]
+    matches_by_segment = [
+        [
+            phrase_index
+            for phrase_index, phrase in enumerate(phrases)
+            if practice_content_matches(str(phrase["target"]), str(segment["text"]), target_language)
+        ]
+        for segment in segments
+    ]
+    unique_sequence = [matches[0] for matches in matches_by_segment if len(matches) == 1]
+    sequence_conflict = any(
+        right < left for left, right in zip(unique_sequence, unique_sequence[1:])
+    )
+    assigned_segment_indexes: set[int] = set()
+    assigned_phrase_indexes: set[int] = set()
+    if bool(source["source_valid"]) and not sequence_conflict:
+        for segment, matches in zip(segments, matches_by_segment, strict=True):
+            if len(matches) != 1:
+                continue
+            phrase_index = matches[0]
+            if phrase_index in assigned_phrase_indexes:
+                continue
+            phrase = phrases[phrase_index]
+            segment_text = str(segment["text"])
+            available = float(segment["end"]) > float(segment["start"])
+            ranges[phrase_index] = {
+                "index": phrase_index,
+                "source_index": phrase["source_index"],
+                "target": phrase["target"],
+                "normalized_target": phrase["normalized_target"],
+                "available": available,
+                "matched": True,
+                "content_matched": True,
+                "source": "segments",
+                "similarity": 1.0,
+                "content_similarity": 1.0,
+                "coverage": 1.0,
+                "recognized_start": None,
+                "recognized_end": None,
+                "normalized_recognized": normalize_practice_text(segment_text, target_language),
+                "matched_text": segment_text,
+                "audio_start": segment["start"] if available else None,
+                "audio_end": segment["end"] if available else None,
+                "alignment_confidence": "high",
+                "boundary_source": "segment",
+                "token_start_index": None,
+                "token_end_index": None,
+            }
+            assigned_phrase_indexes.add(phrase_index)
+            assigned_segment_indexes.add(int(segment["segment_index"]))
+
+    raw_units = list(source["raw_units"])
+    unassigned_tokens = []
+    invalid_segment_indexes = {
+        int(unit["source_index"])
+        for unit in source["invalid_units"]
+        if unit.get("source") == "segments"
+    }
+    for unit in raw_units:
+        unit_index = int(unit["index"])
+        if unit_index in assigned_segment_indexes or unit_index in invalid_segment_indexes:
             continue
-        start = _safe_float(item.get("start"))
-        end = _safe_float(item.get("end"))
-        if start is None or end is None or end <= start:
+        matching = next(
+            (
+                matches
+                for segment, matches in zip(segments, matches_by_segment, strict=True)
+                if int(segment["segment_index"]) == unit_index
+            ),
+            [],
+        )
+        reason = "ambiguous_assignment" if matching or not bool(source["source_valid"]) else "unrelated_speech"
+        unassigned_tokens.append(
+            {
+                "source": "segments",
+                "source_index": unit_index,
+                "index": unit_index,
+                "text": unit["text"],
+                "start": unit["start"],
+                "end": unit["end"],
+                "reason": reason,
+            }
+        )
+    zero_duration_tokens = [
+        {
+            "source": "segments",
+            "source_index": int(segment["segment_index"]),
+            "index": int(segment["segment_index"]),
+            "text": segment["text"],
+            "start": segment["start"],
+            "end": segment["end"],
+            "owner_phrase_index": phrase_index,
+        }
+        for phrase_index, phrase_range in enumerate(ranges)
+        for segment in segments
+        if phrase_range["source"] == "segments"
+        and phrase_range["matched_text"] == segment["text"]
+        and int(segment["segment_index"]) in assigned_segment_indexes
+        and float(segment["start"]) == float(segment["end"])
+    ]
+    playable_count = sum(bool(phrase_range["available"]) for phrase_range in ranges)
+    complete = bool(ranges) and playable_count == len(ranges) and not unassigned_tokens
+    diagnostics = {
+        "total_timestamp_token_count": int(source["raw_count"]),
+        "playable_token_count": playable_count,
+        "unassigned_tokens": unassigned_tokens,
+        "zero_duration_tokens": zero_duration_tokens,
+        "candidate_count": sum(bool(matches) for matches in matches_by_segment),
+        "score_computation_count": len(segments) * len(phrases),
+        "alignment_elapsed_ms": round(max(0.0, elapsed_ms), 3),
+        "valid_word_count": 0,
+        "valid_segment_count": len(segments),
+        "assigned_word_count": 0,
+        "assigned_segment_count": len(assigned_segment_indexes),
+        "playable_word_count": 0,
+        "unassigned_non_filler_count": len(unassigned_tokens),
+        "diagnostic_flags": sorted(
+            {
+                *(str(flag) for flag in source["flags"]),
+                *(
+                    str(flag)
+                    for flag in (discarded_word_source or {}).get("flags", [])
+                ),
+            }
+        ),
+        "invalid_timestamp_units": [
+            *(discarded_word_source or {}).get("invalid_units", []),
+            *source["invalid_units"],
+        ],
+        "raw_timestamp_word_count": int((discarded_word_source or {}).get("raw_count", 0)),
+        "raw_timestamp_segment_count": int(source["raw_count"]),
+    }
+    return {
+        "outcome": "evaluated",
+        "available": playable_count > 0,
+        "complete": complete,
+        "mode": "target_phrase_segment_alignment",
+        "reason": "" if complete else "some segments could not be mapped safely",
+        "target_language": target_language,
+        "recognized_normalized": normalize_practice_text(recognized_text, target_language),
+        "target_phrase_count": len(phrases),
+        "ranges": ranges,
+        "diagnostics": diagnostics,
+    }
+
+
+def _asr_segments(segments: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    if not isinstance(segments, list):
+        return [], {
+            "raw_count": 0,
+            "source_valid": True,
+            "flags": [],
+            "raw_units": [],
+            "invalid_units": [],
+        }
+    normalized: list[dict[str, object]] = []
+    raw_units: list[dict[str, object]] = []
+    invalid_units: list[dict[str, object]] = []
+    flags: set[str] = set()
+    for raw_index, item in enumerate(segments):
+        if not isinstance(item, dict):
+            raw_units.append({"index": raw_index, "text": "", "start": None, "end": None})
+            invalid_units.append(
+                _invalid_timestamp_unit("segments", raw_index, "", None, None, "non_numeric")
+            )
+            continue
+        text = str(item.get("text") or "")
+        start, end, invalid_reason = _timestamp_unit_values(item.get("start"), item.get("end"))
+        raw_units.append({"index": raw_index, "text": text, "start": start, "end": end})
+        if invalid_reason is not None:
+            invalid_units.append(
+                _invalid_timestamp_unit("segments", raw_index, text, start, end, invalid_reason)
+            )
             continue
         normalized.append(
             {
-                "text": str(item.get("text") or ""),
+                "text": text,
                 "start": start,
                 "end": end,
+                "segment_index": raw_index,
             }
         )
-    return normalized
+    source_valid = True
+    for previous, current in zip(normalized, normalized[1:]):
+        if float(current["start"]) < float(previous["start"]):
+            flags.add("non_monotonic_timestamp_source")
+            source_valid = False
+        if (
+            current["text"] == previous["text"]
+            and current["start"] == previous["start"]
+            and current["end"] == previous["end"]
+        ):
+            flags.add("duplicate_timestamp_unit")
+            source_valid = False
+        if (
+            float(previous["end"]) > float(previous["start"])
+            and float(current["end"]) > float(current["start"])
+            and float(current["start"]) < float(previous["end"])
+        ):
+            flags.add("overlapping_timestamp_units")
+            source_valid = False
+    if invalid_units:
+        flags.add("invalid_timestamp_unit")
+    if not source_valid:
+        source_reason = next(
+            flag
+            for flag in (
+                "non_monotonic_timestamp_source",
+                "duplicate_timestamp_unit",
+                "overlapping_timestamp_units",
+            )
+            if flag in flags
+        )
+        invalid_units.extend(
+            _invalid_timestamp_unit(
+                "segments",
+                int(segment["segment_index"]),
+                str(segment["text"]),
+                segment["start"],
+                segment["end"],
+                source_reason,
+            )
+            for segment in normalized
+        )
+    return normalized, {
+        "raw_count": len(segments),
+        "source_valid": source_valid,
+        "flags": sorted(flags),
+        "raw_units": raw_units,
+        "invalid_units": invalid_units,
+    }
+
+
+def _exclude_disjoint_segment_source(
+    word_spans: list[dict[str, object]],
+    word_source_valid: bool,
+    segments: list[dict[str, object]],
+    segment_source: dict[str, object],
+) -> list[dict[str, object]]:
+    if not word_source_valid or not segment_source["source_valid"]:
+        return segments
+    positive_words = [
+        span
+        for span in word_spans
+        if float(span["audio_end"]) > float(span["audio_start"])
+    ]
+    positive_segments = [
+        segment
+        for segment in segments
+        if float(segment["end"]) > float(segment["start"])
+    ]
+    if not positive_words or not positive_segments:
+        return segments
+    word_start = min(float(span["audio_start"]) for span in positive_words)
+    word_end = max(float(span["audio_end"]) for span in positive_words)
+    segment_start = min(float(segment["start"]) for segment in positive_segments)
+    segment_end = max(float(segment["end"]) for segment in positive_segments)
+    if word_start < segment_end and segment_start < word_end:
+        return segments
+    segment_source["source_valid"] = False
+    segment_source["flags"] = sorted(
+        {*segment_source["flags"], "word_segment_boundary_conflict"}
+    )
+    segment_source["invalid_units"].extend(
+        _invalid_timestamp_unit(
+            "segments",
+            int(segment["segment_index"]),
+            str(segment["text"]),
+            segment["start"],
+            segment["end"],
+            "word_segment_boundary_conflict",
+        )
+        for segment in segments
+    )
+    return []
 
 
 def _align_phrases_to_word_spans(
@@ -624,6 +1611,7 @@ def _align_phrases_to_word_spans(
         recognized_normalized,
         target_language,
     )
+    selected = _reject_weak_one_sided_assignments(phrases, selected, word_spans)
     ranges: list[dict[str, object]] = []
     for index, (phrase, selection) in enumerate(zip(phrases, selected, strict=True)):
         normalized_target = str(phrase["normalized_target"])
@@ -654,7 +1642,11 @@ def _align_phrases_to_word_spans(
                 )
             )
             continue
-        content_matched = float(selection["similarity"]) >= 0.45 and float(selection["coverage"]) >= 0.45
+        content_matched = practice_content_matches(
+            str(phrase["target"]),
+            _join_matched_words(selected_spans, target_language),
+            target_language,
+        )
         ranges.append(
             {
                 "index": index,
@@ -687,6 +1679,56 @@ def _align_phrases_to_word_spans(
         "candidate_count": sum(len(candidates) for candidates in candidates_by_phrase),
         "score_computation_count": score_computation_count,
     }
+
+
+def _reject_weak_one_sided_assignments(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+) -> tuple[dict[str, object] | None, ...]:
+    resolved = [dict(item) if item is not None else None for item in selected]
+    exact_indexes = [
+        index
+        for index, item in enumerate(resolved)
+        if item is not None
+        and float(item.get("similarity") or 0.0) >= 0.95
+        and float(item.get("coverage") or 0.0) >= 0.95
+    ]
+    assigned_indexes = [index for index, item in enumerate(resolved) if item is not None]
+    if len(exact_indexes) != 1 or len(assigned_indexes) != 2:
+        return tuple(resolved)
+    exact_index = exact_indexes[0]
+    weak_index = next(index for index in assigned_indexes if index != exact_index)
+    if abs(weak_index - exact_index) != 1:
+        return tuple(resolved)
+    weak = resolved[weak_index]
+    assert weak is not None
+    target = str(phrases[weak_index]["normalized_target"])
+    if _matching_target_piece_count(
+        target,
+        word_spans[int(weak["start_word"]) : int(weak["end_word"])],
+    ) < 2:
+        resolved[weak_index] = None
+    return tuple(resolved)
+
+
+def _matching_target_piece_count(target: str, spans: list[dict[str, object]]) -> int:
+    matching_pieces = set()
+    for span in spans:
+        piece = str(span["normalized"])
+        if not piece:
+            continue
+        if piece in target:
+            matching_pieces.add(piece)
+            continue
+        if not piece.isascii():
+            longest_match = max(
+                (block.size for block in SequenceMatcher(None, target, piece, autojunk=False).get_matching_blocks()),
+                default=0,
+            )
+            if longest_match >= 2:
+                matching_pieces.add(piece)
+    return len(matching_pieces)
 
 
 def _alignment_confidence(similarity: float, coverage: float) -> str:
@@ -797,6 +1839,7 @@ def _add_structural_fallback_ranges(
         following = resolved[run_end] if run_end < len(resolved) else None
         if previous is None and following is None:
             continue
+        one_sided_anchor = previous if following is None else following if previous is None else None
         lower = int(previous["end_word"]) if previous is not None else 0
         upper = int(following["start_word"]) if following is not None else len(word_spans)
         if lower >= upper:
@@ -812,6 +1855,13 @@ def _add_structural_fallback_ranges(
             continue
         phrase = phrases[run_start]
         normalized_target = str(phrase["normalized_target"])
+        if (
+            one_sided_anchor is not None
+            and float(one_sided_anchor.get("similarity") or 0.0) >= 0.95
+            and float(one_sided_anchor.get("coverage") or 0.0) >= 0.95
+            and _matching_target_piece_count(normalized_target, candidate_spans) < 2
+        ):
+            continue
         candidate = "".join(str(span["normalized"]) for span in candidate_spans)
         similarity = practice_similarity(normalized_target, candidate)
         coverage = _target_character_coverage(normalized_target, candidate)
@@ -913,11 +1963,18 @@ def _apply_pause_partition_ranges(
         pass
     elif len(phrases) != 2:
         return selected
-    elif selected_count == 1 and any(
-        similarity < 0.30 or coverage < 0.30
-        for similarity, coverage in zip(similarities, coverages, strict=True)
-    ):
-        return selected
+    elif selected_count == 1:
+        anchor = next(item for item in selected if item is not None)
+        if (
+            float(anchor.get("similarity") or 0.0) >= 0.95
+            and float(anchor.get("coverage") or 0.0) >= 0.95
+        ):
+            return selected
+        if any(
+            similarity < 0.30 or coverage < 0.30
+            for similarity, coverage in zip(similarities, coverages, strict=True)
+        ):
+            return selected
 
     resolved: list[dict[str, object] | None] = []
     for phrase, (start_word, end_word) in zip(phrases, expected_bounds, strict=True):
@@ -1057,14 +2114,20 @@ def _text_only_alignment_range(
     similarity: float,
     coverage: float,
 ) -> dict[str, object]:
+    matched_text = _join_matched_words(selected_spans, target_language)
+    content_matched = practice_content_matches(
+        str(phrase["target"]),
+        matched_text,
+        target_language,
+    )
     return {
         "index": index,
         "source_index": phrase["source_index"],
         "target": phrase["target"],
         "normalized_target": normalized_target,
         "available": False,
-        "matched": similarity >= 0.45 and coverage >= 0.45,
-        "content_matched": similarity >= 0.45 and coverage >= 0.45,
+        "matched": content_matched,
+        "content_matched": content_matched,
         "source": "none",
         "similarity": _round_score(similarity),
         "content_similarity": _round_score(similarity),
@@ -1072,7 +2135,7 @@ def _text_only_alignment_range(
         "recognized_start": start,
         "recognized_end": end,
         "normalized_recognized": recognized_normalized[start:end],
-        "matched_text": _join_matched_words(selected_spans, target_language),
+        "matched_text": matched_text,
         "audio_start": None,
         "audio_end": None,
         "alignment_confidence": "text_only",
@@ -1090,7 +2153,20 @@ def _alignment_diagnostics(
     candidate_count: int,
     score_computation_count: int,
     elapsed_ms: float,
+    source: dict[str, object] | None = None,
+    segment_source: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    source = source or {
+        "raw_count": len(word_spans),
+        "flags": [],
+        "invalid_units": [],
+    }
+    segment_source = segment_source or {
+        "raw_count": 0,
+        "segments": [],
+        "flags": [],
+        "invalid_units": [],
+    }
     owned: set[int] = set()
     playable: set[int] = set()
     for entry in ranges:
@@ -1133,6 +2209,8 @@ def _alignment_diagnostics(
             reason = "no_structural_anchor"
         unassigned.append(
             {
+                "source": "words",
+                "source_index": int(span["token_index"]),
                 "index": index,
                 "text": span["text"],
                 "start": span["audio_start"],
@@ -1146,6 +2224,8 @@ def _alignment_diagnostics(
         "unassigned_tokens": unassigned,
         "zero_duration_tokens": [
             {
+                "source": "words",
+                "source_index": int(span["token_index"]),
                 "index": index,
                 "text": span["text"],
                 "start": span["audio_start"],
@@ -1157,6 +2237,26 @@ def _alignment_diagnostics(
         "candidate_count": candidate_count,
         "score_computation_count": score_computation_count,
         "alignment_elapsed_ms": round(max(0.0, elapsed_ms), 3),
+        "valid_word_count": len(word_spans),
+        "valid_segment_count": len(segment_source.get("segments", [])),
+        "assigned_word_count": len(owned),
+        "assigned_segment_count": 0,
+        "playable_word_count": len(playable),
+        "unassigned_non_filler_count": sum(
+            token["reason"] != "edge_or_boundary_filler" for token in unassigned
+        ),
+        "diagnostic_flags": sorted(
+            {
+                *(str(flag) for flag in source["flags"]),
+                *(str(flag) for flag in segment_source["flags"]),
+            }
+        ),
+        "invalid_timestamp_units": [
+            *source["invalid_units"],
+            *segment_source["invalid_units"],
+        ],
+        "raw_timestamp_word_count": int(source["raw_count"]),
+        "raw_timestamp_segment_count": int(segment_source["raw_count"]),
     }
 
 
@@ -1435,7 +2535,7 @@ def _unavailable_alignment_range(
         "normalized_target": normalized_target,
         "available": False,
         "matched": False,
-        "content_matched": False,
+        "content_matched": None,
         "source": "none",
         "similarity": 0.0,
         "content_similarity": 0.0,
@@ -1487,7 +2587,11 @@ def _align_single_phrase_to_word_spans(
             similarity,
             coverage,
         )
-    content_matched = similarity >= 0.45 and coverage >= 0.45
+    content_matched = practice_content_matches(
+        str(phrase["target"]),
+        _join_matched_words(selected_spans, target_language),
+        target_language,
+    )
     return {
         "index": 0,
         "source_index": phrase["source_index"],
@@ -1542,9 +2646,54 @@ def _join_matched_words(word_spans: list[dict[str, object]], target_language: st
 
 def _safe_float(value: object) -> float | None:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return number if isfinite(number) else None
+
+
+def _timestamp_value(value: object) -> tuple[float | None, str | None]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None, "non_numeric"
+    if not isfinite(number):
+        return None, "non_finite"
+    return number, None
+
+
+def _timestamp_unit_values(
+    start_value: object,
+    end_value: object,
+) -> tuple[float | None, float | None, str | None]:
+    start, start_error = _timestamp_value(start_value)
+    end, end_error = _timestamp_value(end_value)
+    if start_error is not None or end_error is not None:
+        reason = "non_numeric" if "non_numeric" in {start_error, end_error} else "non_finite"
+        return start, end, reason
+    if start is not None and start < 0:
+        return start, end, "negative_start"
+    if start is not None and end is not None and end < start:
+        return start, end, "end_before_start"
+    return start, end, None
+
+
+def _invalid_timestamp_unit(
+    source: str,
+    source_index: int,
+    text: str,
+    start: object,
+    end: object,
+    reason: str,
+) -> dict[str, object]:
+    return {
+        "source": source,
+        "source_index": source_index,
+        "text": text,
+        "start": start,
+        "end": end,
+        "reason": reason,
+    }
 
 
 def _is_han_character(char: str) -> bool:

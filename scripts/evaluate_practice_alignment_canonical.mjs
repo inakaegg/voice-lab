@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { practiceComparisonAlignment } from "../cloudflare/worker.mjs";
+import { practiceComparisonAlignmentCanonical } from "../cloudflare/worker.mjs";
 
 
 function sameTimestamp(actual, expected) {
@@ -16,7 +16,7 @@ function sameTimestamp(actual, expected) {
 function compareCase(sourceCase, overlayCase) {
   let actual;
   try {
-    actual = practiceComparisonAlignment({
+    actual = practiceComparisonAlignmentCanonical({
       targetText: sourceCase.target_text,
       recognizedText: sourceCase.recognized_text,
       targetLanguage: sourceCase.target_language,
@@ -50,14 +50,11 @@ function compareCase(sourceCase, overlayCase) {
   }
   const expected = overlayCase.expected;
   const mismatches = [];
-  const actualPlayable = actual.ranges.filter((phrase) => phrase.available).length;
-  const actualUnassignedNonFiller = actual.diagnostics.unassigned_tokens
-    .filter((token) => token.reason !== "edge_or_boundary_filler").length;
   const topLevel = {
     target_phrase_count: actual.target_phrase_count,
-    playable_phrase_count: actualPlayable,
-    all_phrases_playable: actual.target_phrase_count > 0 && actualPlayable === actual.target_phrase_count,
-    unassigned_non_filler_count: actualUnassignedNonFiller,
+    playable_phrase_count: actual.playable_phrase_count,
+    all_phrases_playable: actual.all_phrases_playable,
+    unassigned_non_filler_count: actual.unassigned_non_filler_count,
     complete: actual.complete,
   };
   for (const [key, value] of Object.entries(topLevel)) {
@@ -66,26 +63,23 @@ function compareCase(sourceCase, overlayCase) {
     }
   }
 
-  if (actual.ranges.length !== expected.phrases.length) {
-    mismatches.push({ field: "phrase_count", expected: expected.phrases.length, actual: actual.ranges.length });
+  if (actual.phrases.length !== expected.phrases.length) {
+    mismatches.push({ field: "phrase_count", expected: expected.phrases.length, actual: actual.phrases.length });
   }
-  for (let index = 0; index < Math.min(actual.ranges.length, expected.phrases.length); index += 1) {
-    const actualPhrase = actual.ranges[index];
+  for (let index = 0; index < Math.min(actual.phrases.length, expected.phrases.length); index += 1) {
+    const actualPhrase = actual.phrases[index];
     const expectedPhrase = expected.phrases[index];
-    const assignmentStatus = actualPhrase.available ? "assigned" : (actualPhrase.matched_text ? "text_only" : "unassigned");
-    const textSource = actualPhrase.matched_text ? actualPhrase.source : "none";
-    const timestampSource = actualPhrase.available ? actualPhrase.source : "none";
     const fields = {
       index: actualPhrase.index,
       source_index: actualPhrase.source_index,
-      target_text: actualPhrase.target,
-      assignment_status: assignmentStatus,
+      target_text: actualPhrase.target_text,
+      assignment_status: actualPhrase.assignment_status,
       available: actualPhrase.available,
       matched_text: actualPhrase.matched_text,
-      text_source: textSource,
-      timestamp_source: timestampSource,
-      word_start_index: actualPhrase.token_start_index,
-      word_end_index: actualPhrase.token_end_index,
+      text_source: actualPhrase.text_source,
+      timestamp_source: actualPhrase.timestamp_source,
+      word_start_index: actualPhrase.word_start_index,
+      word_end_index: actualPhrase.word_end_index,
     };
     for (const [key, value] of Object.entries(fields)) {
       if (value !== expectedPhrase[key]) {

@@ -1057,6 +1057,77 @@ def test_practice_attempt_api_uses_target_language_for_asr() -> None:
     assert response.json()["providers"]["asr"] == "runpod-funasr-paraformer-zh"
 
 
+def test_practice_attempt_api_returns_typed_provider_contract_error() -> None:
+    class InvalidTimestampAsr:
+        name = "invalid-timestamp-asr"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            return AsrTranscription(
+                text="",
+                model="invalid-timestamp-asr",
+                words=[{"text": "ghost", "start": "invalid", "end": 1.0}],
+                timestamp_granularities=["word"],
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=InvalidTimestampAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempts",
+        data={"target_language": "en-US", "target_text": "Open it."},
+        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": {
+            "code": "practice_alignment_provider_contract_error",
+            "reason": "invalid_timestamp_payload",
+            "stage": "attempt_asr",
+            "retryable": True,
+            "message": "音声の解析結果を確認できませんでした。もう一度お試しください。",
+            "diagnostic_flags": ["invalid_timestamp_payload"],
+        }
+    }
+
+
+def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> None:
+    class MustNotRunAsr:
+        name = "must-not-run"
+
+        def transcribe_detail(self, *args, **kwargs):
+            raise AssertionError("ASR must not run for an invalid target")
+
+    pipeline = SpeechTranslationPipeline(
+        asr=MustNotRunAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempts",
+        data={"target_language": "en-US", "target_text": "..."},
+        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "practice_alignment_invalid_input",
+            "reason": "empty_target",
+            "stage": "input",
+            "retryable": False,
+            "message": "入力内容を確認して、もう一度お試しください。",
+            "diagnostic_flags": ["empty_target"],
+        }
+    }
+
+
 def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(tmp_path, monkeypatch) -> None:
     class FakeAsyncRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
@@ -1164,9 +1235,9 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert diagnostics["model_recognized_text"] == "你好吗？你今天去哪里？"
     assert diagnostics["asr_timestamps"]["words"][0] == {"text": "你哈吗", "start": 0.1, "end": 0.8}
     assert diagnostics["model_asr_timestamps"]["words"][0] == {"text": "你好吗", "start": 0.1, "end": 0.8}
-    assert diagnostics["comparison_alignment"]["ranges"][1]["audio_end"] == pytest.approx(2.3)
+    assert diagnostics["comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.3)
     assert diagnostics["comparison_alignment"]["diagnostics"]["candidate_count"] > 0
-    assert diagnostics["model_comparison_alignment"]["ranges"][1]["audio_end"] == pytest.approx(2.4)
+    assert diagnostics["model_comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.4)
 
 
 def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
@@ -1202,6 +1273,56 @@ def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
     assert payload["current_stage"]["label"] == "RunPod imageの更新が必要です"
     assert "practice ASR contract v2" in payload["error"]
     assert "再デプロイ" in payload["error"]
+
+
+def test_practice_attempt_job_fails_with_typed_empty_reference_error() -> None:
+    class EmptyReferenceRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def job_status(self, job_id):
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "你好吗？",
+                    "text": "你好吗？",
+                    "model": "funasr/paraformer-zh",
+                    "words": [{"text": "你好吗", "start": 0.1, "end": 0.8}],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "",
+                        "model": "funasr/paraformer-zh",
+                        "words": [],
+                        "segments": [],
+                    },
+                },
+            }
+
+        def health(self):
+            return {}
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=EmptyReferenceRunpodAsr()))
+
+    response = client.get("/api/practice/attempt-jobs/empty-reference")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["result"] is None
+    assert payload["error"] == {
+        "code": "practice_alignment_provider_contract_error",
+        "reason": "empty_reference_asr",
+        "stage": "reference_asr",
+        "retryable": True,
+        "message": "音声の解析結果を確認できませんでした。もう一度お試しください。",
+        "diagnostic_flags": ["empty_reference_asr"],
+    }
 
 
 def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> None:

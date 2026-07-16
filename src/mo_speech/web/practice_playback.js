@@ -1,7 +1,9 @@
 (function practicePlaybackContract(global) {
   function availableRanges(alignment) {
-    if (!Array.isArray(alignment?.ranges)) return [];
-    return alignment.ranges.filter((range) => {
+    const entries = Array.isArray(alignment?.phrases)
+      ? alignment.phrases
+      : (Array.isArray(alignment?.ranges) ? alignment.ranges : []);
+    return entries.filter((range) => {
       const start = Number(range?.audio_start);
       const end = Number(range?.audio_end);
       return range?.available === true && Number.isFinite(start) && Number.isFinite(end) && end > start;
@@ -29,9 +31,9 @@
   }
 
   function comparisonPlaybackPlan(options) {
-    if (!options.modelReady) return { mode: "none", label: "再生", ranges: [] };
+    if (!options.modelReady) return { mode: "none", label: "再生", description: "", ranges: [] };
     if (options.outcome === "no_speech" || !options.repeatReady || !options.resultVisible) {
-      return { mode: "model", label: "再生", ranges: [] };
+      return { mode: "model", label: "再生", description: "", ranges: [] };
     }
     const modelDuration = Number(options.modelDuration);
     const repeatDuration = Number(options.repeatDuration);
@@ -40,7 +42,12 @@
       !Number.isFinite(modelDuration) || modelDuration <= 0 ||
       !Number.isFinite(repeatDuration) || repeatDuration <= 0
     ) {
-      return { mode: "whole", label: "全体比較再生", ranges: [] };
+      return {
+        mode: "whole",
+        label: "全体比較再生",
+        description: "フレーズの区切りを確認できなかったため、全体を比較します。",
+        ranges: [],
+      };
     }
     const ranges = pairedRanges(
       options.attemptAlignment,
@@ -48,18 +55,28 @@
       modelDuration,
       repeatDuration,
     );
-    if (!ranges.length) return { mode: "whole", label: "全体比較再生", ranges: [] };
+    if (!ranges.length) {
+      return {
+        mode: "whole",
+        label: "全体比較再生",
+        description: "フレーズの区切りを確認できなかったため、全体を比較します。",
+        ranges: [],
+      };
+    }
     const targetCount = Math.max(
       Number(options.attemptAlignment?.target_phrase_count || 0),
       Number(options.modelAlignment?.target_phrase_count || 0),
     );
     const complete =
-      options.attemptAlignment?.complete === true &&
-      options.modelAlignment?.complete === true &&
+      (options.attemptAlignment?.all_phrases_playable ?? options.attemptAlignment?.complete) === true &&
+      (options.modelAlignment?.all_phrases_playable ?? options.modelAlignment?.complete) === true &&
       (!targetCount || ranges.length === targetCount);
     return {
       mode: complete ? "phrase" : "partial_phrase",
       label: complete ? "フレーズごと比較再生" : "一部フレーズ比較再生",
+      description: complete
+        ? `${ranges.length}/${targetCount || ranges.length}フレーズを順番に比較できます。`
+        : `確認できた${ranges.length}/${targetCount || ranges.length}フレーズを順番に比較します。`,
       ranges,
     };
   }

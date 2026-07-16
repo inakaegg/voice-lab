@@ -1383,8 +1383,8 @@ test("Cloudflare worker requests whisper timestamps for pronunciation practice",
   assert.equal(payload.asr_timestamps.available, true);
   assert.equal(payload.asr_timestamps.words[0].text, "I");
   assert.equal(payload.comparison_alignment.complete, true);
-  assert.equal(payload.comparison_alignment.ranges[0].audio_start, 0.1);
-  assert.equal(payload.comparison_alignment.ranges[0].audio_end, 1.1);
+  assert.equal(payload.comparison_alignment.phrases[0].audio_start, 0.1);
+  assert.equal(payload.comparison_alignment.phrases[0].audio_end, 1.1);
   assert.equal(payload.providers.asr, "openai-asr-whisper-1");
 
   const cookie = await adminCookie(env);
@@ -1393,6 +1393,68 @@ test("Cloudflare worker requests whisper timestamps for pronunciation practice",
   ).json();
   assert.equal(history.settings.enabled, false);
   assert.deepEqual(history.recordings, []);
+});
+
+test("Cloudflare worker returns a typed alignment provider contract error", async () => {
+  const env = adminAuthEnv(async (url) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return json({
+        text: "",
+        words: [{ word: "ghost", start: "invalid", end: 1.0 }],
+        segments: [],
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("target_language", "en-US");
+  form.append("target_text", "Open it.");
+  form.append("asr_model", "whisper-1");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempts", { method: "POST", body: form }),
+    env,
+  );
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(await response.json(), {
+    error: {
+      code: "practice_alignment_provider_contract_error",
+      reason: "invalid_timestamp_payload",
+      stage: "attempt_asr",
+      retryable: true,
+      message: "音声の解析結果を確認できませんでした。もう一度お試しください。",
+      diagnostic_flags: ["invalid_timestamp_payload"],
+    },
+  });
+});
+
+test("Cloudflare worker rejects a boundary-only practice target before ASR", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("ASR must not run for an invalid target");
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("target_language", "en-US");
+  form.append("target_text", "...");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempts", { method: "POST", body: form }),
+    env,
+  );
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: {
+      code: "practice_alignment_invalid_input",
+      reason: "empty_target",
+      stage: "input",
+      retryable: false,
+      message: "入力内容を確認して、もう一度お試しください。",
+      diagnostic_flags: ["empty_target"],
+    },
+  });
 });
 
 test("Cloudflare worker returns no_speech for a silent practice attempt without scoring", async () => {
@@ -1627,8 +1689,8 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(snapshot.result.recognized_text, "你哈吗？你今天到那里？");
   assert.equal(snapshot.result.comparison_alignment.complete, true);
   assert.equal(snapshot.result.model_comparison_alignment.complete, true);
-  assert.equal(snapshot.result.comparison_alignment.ranges[1].audio_end, 2.3);
-  assert.equal(snapshot.result.model_comparison_alignment.ranges[1].audio_end, 2.4);
+  assert.equal(snapshot.result.comparison_alignment.phrases[1].audio_end, 2.3);
+  assert.equal(snapshot.result.model_comparison_alignment.phrases[1].audio_end, 2.4);
 });
 
 test("Cloudflare worker explains when the RunPod practice image predates the dual-audio contract", async () => {
@@ -1658,6 +1720,50 @@ test("Cloudflare worker explains when the RunPod practice image predates the dua
   assert.equal(payload.current_stage.label, "RunPod imageの更新が必要です");
   assert.match(payload.error, /practice ASR contract v2/);
   assert.match(payload.error, /再デプロイ/);
+});
+
+test("Cloudflare worker reports an empty reference ASR as a typed failed job", async () => {
+  const env = fakeEnv(async (url) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/status/empty-reference") {
+      return json({
+        id: "empty-reference",
+        status: "COMPLETED",
+        output: {
+          practice_asr_contract_version: 2,
+          target_text: "你好吗？",
+          text: "你好吗？",
+          model: "funasr/paraformer-zh",
+          words: [{ text: "你好吗", start: 0.1, end: 0.8 }],
+          segments: [],
+          model_transcription: {
+            text: "",
+            model: "funasr/paraformer-zh",
+            words: [],
+            segments: [],
+          },
+        },
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs/empty-reference"),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.result, null);
+  assert.deepEqual(payload.error, {
+    code: "practice_alignment_provider_contract_error",
+    reason: "empty_reference_asr",
+    stage: "reference_asr",
+    retryable: true,
+    message: "音声の解析結果を確認できませんでした。もう一度お試しください。",
+    diagnostic_flags: ["empty_reference_asr"],
+  });
 });
 
 test("Cloudflare worker surfaces RunPod practice progress and explicit balance failures", async () => {

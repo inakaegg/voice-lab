@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { practiceComparisonAlignment } from "../cloudflare/worker.mjs";
+import {
+  practiceComparisonAlignment,
+  practiceComparisonAlignmentCanonical,
+} from "../cloudflare/worker.mjs";
 
 const FIXTURES = [
   "tests/fixtures/practice_alignment_golden_cases.json",
@@ -40,6 +43,31 @@ test("Python and Cloudflare alignment return the same playback and diagnostic co
   }
 });
 
+test("Python and Cloudflare return the same canonical alignment contract", () => {
+  const pythonPayload = JSON.parse(execFileSync(
+    "python3",
+    ["scripts/evaluate_practice_alignment.py", "--canonical", ...FIXTURES],
+    {
+      cwd: new URL("..", import.meta.url),
+      encoding: "utf8",
+      env: { ...process.env, PYTHONPATH: "src" },
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  ));
+  const cases = FIXTURES.flatMap((filename) => JSON.parse(readFileSync(filename, "utf8")));
+  for (const [caseIndex, fixture] of cases.entries()) {
+    const worker = practiceComparisonAlignmentCanonical({
+      targetText: fixture.target_text,
+      recognizedText: fixture.recognized_text,
+      targetLanguage: fixture.target_language,
+      asrTimestamps: fixture.asr_timestamps,
+    });
+    const python = pythonPayload.results[caseIndex]?.actual;
+    assert.ok(python, `missing canonical Python result for ${fixture.name}`);
+    assert.deepEqual(canonicalContract(worker), canonicalContract(python), fixture.name);
+  }
+});
+
 function contract(result) {
   return {
     available: result.available,
@@ -70,6 +98,16 @@ function contract(result) {
       score_computation_count: result.diagnostics.score_computation_count,
       unassigned_tokens: result.diagnostics.unassigned_tokens,
       zero_duration_tokens: result.diagnostics.zero_duration_tokens,
+    },
+  };
+}
+
+function canonicalContract(result) {
+  return {
+    ...result,
+    diagnostics: {
+      ...result.diagnostics,
+      alignment_elapsed_ms: 0,
     },
   };
 }

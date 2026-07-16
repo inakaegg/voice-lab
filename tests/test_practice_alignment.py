@@ -95,7 +95,7 @@ def test_practice_comparison_alignment_keeps_the_mistaken_end_of_a_phrase_on_a_s
     assert second_phrase["audio_end"] == pytest.approx(2.3)
 
 
-def test_long_eight_phrase_alignment_reuses_candidate_scores() -> None:
+def test_long_four_phrase_alignment_reuses_candidate_scores() -> None:
     target_text = (
         "你知道吗？北海道里面也有比较热的地方，也有比较冷、比较凉快的地方。"
         "不同地区的气候、气温其实差别还挺大的。毕竟北海道很大嘛，当然中国更大就是了。"
@@ -116,7 +116,7 @@ def test_long_eight_phrase_alignment_reuses_candidate_scores() -> None:
         asr_timestamps={"available": True, "words": words},
     )
 
-    assert result["target_phrase_count"] == 8
+    assert result["target_phrase_count"] == 4
     assert result["diagnostics"]["candidate_count"] > 0
     assert result["diagnostics"]["score_computation_count"] < 20_000
 

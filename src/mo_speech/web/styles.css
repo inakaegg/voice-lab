@@ -2504,6 +2504,19 @@ fieldset.public-samples-admin {
   grid-column: 1 / -1;
 }
 
+.practice-comparison-note {
+  color: var(--react-muted);
+  font-size: 13px;
+  font-weight: 700;
+  grid-column: 1 / -1;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.practice-comparison-note[data-mode="partial_phrase"] {
+  color: var(--react-accent);
+}
+
 .practice-speed-control {
   align-items: center;
   background: #eef5ff;
@@ -4632,6 +4645,7 @@ html[data-theme="dark"] .react-public-body .practice-script-setting,
 html[data-theme="dark"] .react-public-body .react-flow-card,
 html[data-theme="dark"] .react-public-body .react-work-card,
 html[data-theme="dark"] .react-public-body .react-result-card { background: var(--react-paper); border-color: var(--react-border); color: var(--react-ink); }
+html[data-theme="dark"] .react-public-body .practice-comparison-note[data-mode="partial_phrase"] { color: var(--react-muted); }
 html[data-theme="dark"] .react-public-body .react-generate-card { background: linear-gradient(180deg, rgba(46, 37, 34, 0.98), rgba(25, 31, 42, 0.96)); border-color: var(--react-border); color: var(--react-ink); }
 html[data-theme="dark"] .react-public-body .react-theme-menu { background: #1b2230; border-color: var(--react-border); }
 html[data-theme="dark"] .react-public-body .react-theme-menu button { color: #cbd3e1; }

@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import Annotated
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_audio_history import (
@@ -54,10 +54,13 @@ from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
 from .practice import (
     PRACTICE_TARGET_LANGUAGES,
+    PracticeAlignmentError,
+    PracticeAlignmentInputError,
     evaluate_practice_attempt,
     normalize_practice_text,
-    practice_comparison_alignment,
+    practice_comparison_alignment_canonical,
     simplify_chinese_text,
+    split_practice_phrases,
     supported_practice_target_language,
 )
 from .public_sample_audio import PublicSampleAudioStore
@@ -135,6 +138,26 @@ def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
 
 
+def _practice_alignment_error_envelope(
+    error: PracticeAlignmentError | PracticeAlignmentInputError,
+) -> dict[str, object]:
+    message = (
+        "入力内容を確認して、もう一度お試しください。"
+        if isinstance(error, PracticeAlignmentInputError)
+        else "音声の解析結果を確認できませんでした。もう一度お試しください。"
+    )
+    return {
+        "error": {
+            "code": error.error_code,
+            "reason": error.reason,
+            "stage": error.stage,
+            "retryable": error.retryable,
+            "message": message,
+            "diagnostic_flags": [error.reason],
+        }
+    }
+
+
 def _practice_asr_provider(pipeline: SpeechTranslationPipeline, asr_model: str):
     if isinstance(pipeline.asr, OpenAiAsrProvider):
         return OpenAiAsrProvider(model=asr_model)
@@ -152,12 +175,30 @@ def _transcribe_practice_audio(asr_provider, audio_path: Path, source_language: 
 
 
 def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
+    raw_words = result.words if isinstance(result.words, list) else []
+    raw_segments = result.segments if isinstance(result.segments, list) else []
+
+    def safe_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        safe: list[dict[str, object]] = []
+        for row in rows:
+            try:
+                start = float(row.get("start"))
+                end = float(row.get("end"))
+            except (TypeError, ValueError):
+                continue
+            if start < 0 or end < start:
+                continue
+            safe.append({**row, "start": start, "end": end})
+        return safe
+
     return {
         "available": result.has_timestamps,
         "model": result.model,
         "timestamp_granularities": result.timestamp_granularities,
-        "words": result.words,
-        "segments": result.segments,
+        "words": safe_rows(raw_words),
+        "segments": safe_rows(raw_segments),
+        "raw_timestamp_word_count": len(raw_words),
+        "raw_timestamp_segment_count": len(raw_segments),
     }
 
 
@@ -915,6 +956,21 @@ def create_app(
     public_sample_audio_store: PublicSampleAudioStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Voice Lab")
+
+    @app.exception_handler(PracticeAlignmentError)
+    async def practice_alignment_error_handler(
+        _request: Request,
+        error: PracticeAlignmentError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=502, content=_practice_alignment_error_envelope(error))
+
+    @app.exception_handler(PracticeAlignmentInputError)
+    async def practice_alignment_input_error_handler(
+        _request: Request,
+        error: PracticeAlignmentInputError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=400, content=_practice_alignment_error_envelope(error))
+
     active_pipeline = pipeline or create_pipeline_from_env()
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
     active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()
@@ -1613,28 +1669,41 @@ def create_app(
             else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
         )
         compare_started = perf_counter()
-        comparison_alignment = practice_comparison_alignment(
+        if model_transcription is not None:
+            try:
+                model_comparison_alignment = practice_comparison_alignment_canonical(
+                    target_text=target_text,
+                    recognized_text=model_recognized_text,
+                    target_language=practice_target_language,
+                    asr_timestamps=model_asr_timestamps,
+                )
+            except PracticeAlignmentError as error:
+                raise PracticeAlignmentError(
+                    error.reason,
+                    stage="reference_asr",
+                    retryable=error.retryable,
+                ) from error
+            if model_comparison_alignment.get("outcome") == "no_speech":
+                raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
+        else:
+            model_comparison_alignment = {
+                "alignment_contract_version": 1,
+                "outcome": "evaluated",
+                "available": False,
+                "target_phrase_count": 0,
+                "playable_phrase_count": 0,
+                "all_phrases_playable": False,
+                "unassigned_non_filler_count": 0,
+                "complete": False,
+                "target_language": practice_target_language,
+                "phrases": [],
+                "diagnostics": {},
+            }
+        comparison_alignment = practice_comparison_alignment_canonical(
             target_text=target_text,
             recognized_text=recognized_text,
             target_language=practice_target_language,
             asr_timestamps=asr_timestamps,
-        )
-        model_comparison_alignment = (
-            practice_comparison_alignment(
-                target_text=target_text,
-                recognized_text=model_recognized_text,
-                target_language=practice_target_language,
-                asr_timestamps=model_asr_timestamps,
-            )
-            if model_transcription is not None
-            else {
-                "available": False,
-                "complete": False,
-                "mode": "unavailable",
-                "reason": "model audio ASR was not requested",
-                "target_language": practice_target_language,
-                "ranges": [],
-            }
         )
         compare_ms = _elapsed_ms(compare_started)
         no_speech = (
@@ -1798,16 +1867,33 @@ def create_app(
             providers = output.get("providers") if isinstance(output.get("providers"), dict) else {}
             provider_name = str(providers.get("asr") or active_runpod_practice_asr_provider.name)
             timings = output.get("timings_ms") if isinstance(output.get("timings_ms"), dict) else {}
-            result = _create_practice_attempt_result_from_transcriptions(
-                practice_target_language="zh-CN",
-                target_text=str(output.get("target_text") or ""),
-                attempt_transcription=attempt_transcription,
-                attempt_provider_name=provider_name,
-                attempt_asr_ms=float(timings.get("asr") or 0.0),
-                model_transcription=model_transcription,
-                model_provider_name=provider_name,
-                model_asr_ms=float(timings.get("model_asr") or 0.0),
-            )
+            try:
+                result = _create_practice_attempt_result_from_transcriptions(
+                    practice_target_language="zh-CN",
+                    target_text=str(output.get("target_text") or ""),
+                    attempt_transcription=attempt_transcription,
+                    attempt_provider_name=provider_name,
+                    attempt_asr_ms=float(timings.get("asr") or 0.0),
+                    model_transcription=model_transcription,
+                    model_provider_name=provider_name,
+                    model_asr_ms=float(timings.get("model_asr") or 0.0),
+                )
+            except PracticeAlignmentError as error:
+                return {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "current_stage": {
+                        "stage": "failed",
+                        "label": "音声の解析結果を確認できませんでした",
+                        "provider": "Voice Lab",
+                        "model": attempt_transcription.model,
+                        "detail": "もう一度お試しください。",
+                    },
+                    "stages": stages,
+                    "metrics": metrics,
+                    "result": None,
+                    **_practice_alignment_error_envelope(error),
+                }
             return {
                 "job_id": job_id,
                 "status": "succeeded",
@@ -1850,12 +1936,15 @@ def create_app(
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
+        except ValueError as exc:
+            raise PracticeAlignmentInputError("unsupported_target_language") from exc
+        try:
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         normalized_target_text = str(target_text or "").strip()
-        if not normalized_target_text:
-            raise HTTPException(status_code=400, detail="target_text is required")
+        if not split_practice_phrases(normalized_target_text):
+            raise PracticeAlignmentInputError("empty_target")
 
         attempt_audio_bytes = await audio.read()
         model_audio_bytes = await model_audio.read()
@@ -1986,13 +2075,16 @@ def create_app(
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
+        except ValueError as exc:
+            raise PracticeAlignmentInputError("unsupported_target_language") from exc
+        try:
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if recording_intent not in {"prompt", "attempt"}:
             raise HTTPException(status_code=400, detail="recording_intent must be prompt or attempt")
-        if recording_intent == "attempt" and not current_target_text.strip():
-            raise HTTPException(status_code=400, detail="current_target_text is required for attempt recordings")
+        if recording_intent == "attempt" and not split_practice_phrases(current_target_text):
+            raise PracticeAlignmentInputError("empty_target")
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -2062,6 +2154,9 @@ def create_app(
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
+        except ValueError as exc:
+            raise PracticeAlignmentInputError("unsupported_target_language") from exc
+        try:
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2168,11 +2263,14 @@ def create_app(
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
+        except ValueError as exc:
+            raise PracticeAlignmentInputError("unsupported_target_language") from exc
+        try:
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not target_text.strip():
-            raise HTTPException(status_code=400, detail="target_text is required")
+        if not split_practice_phrases(target_text):
+            raise PracticeAlignmentInputError("empty_target")
         if practice_target_language == "zh-CN":
             target_text = simplify_chinese_text(target_text)
 

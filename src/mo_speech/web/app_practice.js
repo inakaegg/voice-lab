@@ -42,6 +42,7 @@ const recognizedLabel = document.querySelector("#practice-recognized-label");
 const repeatAudio = document.querySelector("#practice-repeat-audio");
 const resultSummary = document.querySelector("#practice-result-panel .practice-result-summary");
 const scoreBar = document.querySelector("#practice-result-panel .practice-score-bar");
+const comparisonNote = document.querySelector("#practice-comparison-note");
 const gradeGuide = document.querySelector("#practice-prompt-panel .practice-grade-guide");
 const playbackContract = window.voiceLabPracticePlayback;
 
@@ -349,7 +350,7 @@ async function waitForPracticeVoiceJob(initialSnapshot) {
       const response = await fetch(`/api/practice/voice-jobs/${encodeURIComponent(snapshot.job_id)}`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload.detail || payload.error || `job status failed: ${response.status}`);
+        throw new Error(apiErrorMessage(payload, `job status failed: ${response.status}`));
       }
       snapshot = payload;
       consecutiveErrors = 0;
@@ -389,7 +390,7 @@ async function waitForPracticeAttemptJob(initialSnapshot) {
       const response = await fetch(`/api/practice/attempt-jobs/${encodeURIComponent(snapshot.job_id)}`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload.detail || payload.error || `job status failed: ${response.status}`);
+        throw new Error(apiErrorMessage(payload, `job status failed: ${response.status}`));
       }
       snapshot = payload;
       consecutiveErrors = 0;
@@ -544,13 +545,26 @@ async function postPracticeForm(url, form) {
     const response = await fetch(url, { method: "POST", body: form });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload.detail || payload.error || `${url} failed: ${response.status}`);
+      throw new Error(apiErrorMessage(payload, `${url} failed: ${response.status}`));
     }
     return payload;
   } catch (error) {
     setBusy(false, "");
     throw error;
   }
+}
+
+function apiErrorMessage(payload, fallback) {
+  if (typeof payload?.error?.message === "string" && payload.error.message) {
+    return payload.error.message;
+  }
+  if (typeof payload?.detail === "string" && payload.detail) {
+    return payload.detail;
+  }
+  if (typeof payload?.error === "string" && payload.error) {
+    return payload.error;
+  }
+  return fallback;
 }
 
 function renderAttemptResult(payload) {
@@ -697,6 +711,14 @@ function syncPlayButton() {
   playModelButton.querySelector("span:last-child").textContent = isPlaying
     ? "停止"
     : playbackButtonLabel();
+  syncComparisonNote();
+}
+
+function syncComparisonNote() {
+  const plan = currentComparisonPlaybackPlan();
+  comparisonNote.textContent = plan.description;
+  comparisonNote.dataset.mode = plan.mode;
+  comparisonNote.hidden = !plan.description;
 }
 
 function playbackButtonLabel() {
@@ -1038,10 +1060,10 @@ function playAudioSegmentToEnd(audio, start, end, token) {
 }
 
 function availableComparisonRanges(alignment) {
-  if (!Array.isArray(alignment?.ranges)) {
-    return [];
-  }
-  return alignment.ranges.filter((range) => {
+  const entries = Array.isArray(alignment?.phrases)
+    ? alignment.phrases
+    : (Array.isArray(alignment?.ranges) ? alignment.ranges : []);
+  return entries.filter((range) => {
     const start = Number(range?.audio_start);
     const end = Number(range?.audio_end);
     return range?.available === true && Number.isFinite(start) && Number.isFinite(end) && end > start;

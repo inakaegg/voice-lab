@@ -181,8 +181,12 @@ def _validate_fixed_case(case: dict[str, Any], source_case: dict[str, Any]) -> N
         phrase = expected["phrases"][owner["phrase_index"]]
         assert phrase["word_start_index"] <= owner["word_index"] < phrase["word_end_index"]
 
-    words = source_case["asr_timestamps"].get("words") or []
-    segments = source_case["asr_timestamps"].get("segments") or []
+    timestamp_payload = source_case["asr_timestamps"]
+    if timestamp_payload.get("available") is False:
+        assert expected["unassigned_non_filler_count"] == 0
+        return
+    words = timestamp_payload.get("words") or []
+    segments = timestamp_payload.get("segments") or []
     if words:
         assigned_units = {
             word_index

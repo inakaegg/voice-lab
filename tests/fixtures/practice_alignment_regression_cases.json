@@ -17,8 +17,7 @@
       "available": true,
       "complete": true,
       "ranges": [
-        {"index": 0, "source": "words", "available": true, "matched_text": "不懂及地主的气候", "audio_start": 0.1, "audio_end": 1.0},
-        {"index": 1, "source": "words", "available": true, "matched_text": "资源其是差别还挺大的", "audio_start": 1.0, "audio_end": 2.4}
+        {"index": 0, "source": "words", "available": true, "matched_text": "不懂及地主的气候资源其是差别还挺大的", "audio_start": 0.1, "audio_end": 2.4}
       ]
     }
   },
@@ -39,8 +38,7 @@
       "available": true,
       "complete": true,
       "ranges": [
-        {"index": 0, "source": "words", "available": true, "matched_text": "毕竟北海道很大", "audio_start": 0.1, "audio_end": 1.2},
-        {"index": 1, "source": "words", "available": true, "matched_text": "虽然其实敢大就小", "audio_start": 1.55, "audio_end": 2.8}
+        {"index": 0, "source": "words", "available": true, "matched_text": "毕竟北海道很大虽然其实敢大就小", "audio_start": 0.1, "audio_end": 2.8}
       ]
     }
   },

@@ -1286,10 +1286,18 @@
       "name": "manual_r2_zh_030_available_false_ignores_words",
       "expectation_status": "fixed",
       "excluded_from_score": false,
-      "expected_error": {
-        "error_code": "practice_alignment_provider_contract_error",
-        "reason": "contradictory_timestamp_payload",
-        "retryable": true
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 0,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {"index": 0, "source_index": 0, "target_text": "请保存收据。", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null},
+          {"index": 1, "source_index": 1, "target_text": "以后可能会用到。", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null}
+        ],
+        "zero_duration_owners": []
       }
     },
     {
@@ -2577,10 +2585,18 @@
       "name": "manual_r2_en_040_available_false_ignores_words",
       "expectation_status": "fixed",
       "excluded_from_score": false,
-      "expected_error": {
-        "error_code": "practice_alignment_provider_contract_error",
-        "reason": "contradictory_timestamp_payload",
-        "retryable": true
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 0,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {"index": 0, "source_index": 0, "target_text": "The parcel is at reception.", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null},
+          {"index": 1, "source_index": 1, "target_text": "Collect it before six.", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null}
+        ],
+        "zero_duration_owners": []
       }
     },
     {
@@ -3549,4 +3565,3 @@
     }
   ]
 }
-

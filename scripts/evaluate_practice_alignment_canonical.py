@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mo_speech.practice import practice_comparison_alignment
+from mo_speech.practice import practice_comparison_alignment_canonical
 
 
 def _same_timestamp(actual: object, expected: object) -> bool:
@@ -17,7 +17,7 @@ def _same_timestamp(actual: object, expected: object) -> bool:
 
 def _compare_case(source_case: dict[str, Any], overlay_case: dict[str, Any]) -> dict[str, Any]:
     try:
-        actual = practice_comparison_alignment(
+        actual = practice_comparison_alignment_canonical(
             target_text=str(source_case["target_text"]),
             recognized_text=str(source_case["recognized_text"]),
             target_language=str(source_case["target_language"]),
@@ -65,50 +65,39 @@ def _compare_case(source_case: dict[str, Any], overlay_case: dict[str, Any]) -> 
     expected = overlay_case["expected"]
     mismatches: list[dict[str, object]] = []
 
-    actual_playable = sum(bool(phrase["available"]) for phrase in actual["ranges"])
-    actual_unassigned_non_filler = sum(
-        token.get("reason") != "edge_or_boundary_filler"
-        for token in actual["diagnostics"]["unassigned_tokens"]
-    )
     top_level = {
         "target_phrase_count": actual["target_phrase_count"],
-        "playable_phrase_count": actual_playable,
-        "all_phrases_playable": bool(actual["target_phrase_count"])
-        and actual_playable == actual["target_phrase_count"],
-        "unassigned_non_filler_count": actual_unassigned_non_filler,
+        "playable_phrase_count": actual["playable_phrase_count"],
+        "all_phrases_playable": actual["all_phrases_playable"],
+        "unassigned_non_filler_count": actual["unassigned_non_filler_count"],
         "complete": actual["complete"],
     }
     for key, value in top_level.items():
         if value != expected[key]:
             mismatches.append({"field": key, "expected": expected[key], "actual": value})
 
-    if len(actual["ranges"]) != len(expected["phrases"]):
+    if len(actual["phrases"]) != len(expected["phrases"]):
         mismatches.append(
             {
                 "field": "phrase_count",
                 "expected": len(expected["phrases"]),
-                "actual": len(actual["ranges"]),
+                "actual": len(actual["phrases"]),
             }
         )
     for index, (actual_phrase, expected_phrase) in enumerate(
-        zip(actual["ranges"], expected["phrases"], strict=False)
+        zip(actual["phrases"], expected["phrases"], strict=False)
     ):
-        assignment_status = "assigned" if actual_phrase["available"] else (
-            "text_only" if actual_phrase["matched_text"] else "unassigned"
-        )
-        text_source = actual_phrase["source"] if actual_phrase["matched_text"] else "none"
-        timestamp_source = actual_phrase["source"] if actual_phrase["available"] else "none"
         fields = {
             "index": actual_phrase["index"],
             "source_index": actual_phrase["source_index"],
-            "target_text": actual_phrase["target"],
-            "assignment_status": assignment_status,
+            "target_text": actual_phrase["target_text"],
+            "assignment_status": actual_phrase["assignment_status"],
             "available": actual_phrase["available"],
             "matched_text": actual_phrase["matched_text"],
-            "text_source": text_source,
-            "timestamp_source": timestamp_source,
-            "word_start_index": actual_phrase["token_start_index"],
-            "word_end_index": actual_phrase["token_end_index"],
+            "text_source": actual_phrase["text_source"],
+            "timestamp_source": actual_phrase["timestamp_source"],
+            "word_start_index": actual_phrase["word_start_index"],
+            "word_end_index": actual_phrase["word_end_index"],
         }
         for key, value in fields.items():
             if value != expected_phrase[key]:

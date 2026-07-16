@@ -33,7 +33,7 @@
   {
     "name": "observed_zh_long_three_phrase_substitutions",
     "evaluation_source": "observed-local-recording",
-    "description": "実録音由来の長文。先頭脱落、中央の複数誤認識、句読点なしを含む。",
+    "description": "実録音由来の長文。読点はphrase境界にせず、文全体の先頭脱落と複数誤認識を含む。",
     "target_language": "zh-CN",
     "target_text": "我现在正在做一个应用，但有些处理的实现比较难，所以一直有点卡住。",
     "recognized_text": "现在正在做一个应用,但有些距离的细节是相比较难,所以一直有点卡住。",
@@ -74,9 +74,7 @@
       "available": true,
       "complete": true,
       "ranges": [
-        {"index": 0, "source": "words", "available": true, "matched_text": "现在正在做一个应用", "audio_start": 1.18, "audio_end": 5.74},
-        {"index": 1, "source": "words", "available": true, "matched_text": "但有些距离的细节是相比较难", "audio_start": 6.0, "audio_end": 10.44},
-        {"index": 2, "source": "words", "available": true, "matched_text": "所以一直有点卡住。", "audio_start": 11.22, "audio_end": 13.16}
+        {"index": 0, "source": "words", "available": true, "matched_text": "现在正在做一个应用但有些距离的细节是相比较难所以一直有点卡住。", "audio_start": 1.18, "audio_end": 13.16}
       ]
     }
   },

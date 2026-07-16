@@ -50,7 +50,7 @@
     },
     "expected": {
       "complete": true,
-      "range_count": 4,
+    "range_count": 2,
       "sources": ["words"]
     }
   },

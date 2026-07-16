@@ -447,7 +447,7 @@
     "target_text": "我想喝咖啡。",
     "recognized_text": "我想喝咖啡。",
     "asr_timestamps": {"available": false, "model": "funasr/paraformer-zh", "timestamp_granularities": [], "words": [], "segments": []},
-    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}]}
+    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "transcription", "available": false, "matched_text": "我想喝咖啡。", "audio_start": null, "audio_end": null}]}
   },
   {
     "name": "en_exact_single_phrase",
@@ -544,16 +544,15 @@
     "name": "en_short_suffix_similarity_trap",
     "category": "multiple_substitutions",
     "tags": ["en-US", "two-phrases", "short-substring-trap"],
-    "description": "カンマ前の誤認識により後半だけの類似度が高くても、前後2フレーズをそれぞれ比較する。",
+    "description": "カンマはphrase境界にせず、疑問文全体を1フレーズとして比較する。",
     "target_language": "en-US",
     "target_text": "Which is better, Codex or Claude Code?",
     "recognized_text": "Which do you prefer, Codex or Claude Code?",
     "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
       {"text": "Which", "start": 0.2, "end": 0.5}, {"text": "do", "start": 0.5, "end": 0.65}, {"text": "you", "start": 0.65, "end": 0.8}, {"text": "prefer", "start": 0.8, "end": 1.2}, {"text": "Codex", "start": 1.35, "end": 1.75}, {"text": "or", "start": 1.75, "end": 1.9}, {"text": "Claude", "start": 1.9, "end": 2.3}, {"text": "Code", "start": 2.3, "end": 2.6}
     ], "segments": [{"text": "Which do you prefer, Codex or Claude Code?", "start": 0.2, "end": 2.6}]},
-    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
-      {"index": 0, "source": "words", "available": true, "matched_text": "Which do you prefer", "audio_start": 0.2, "audio_end": 1.2},
-      {"index": 1, "source": "words", "available": true, "matched_text": "Codex or Claude Code", "audio_start": 1.35, "audio_end": 2.6}
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Which do you prefer Codex or Claude Code", "audio_start": 0.2, "audio_end": 2.6}
     ]}
   },
   {
@@ -615,7 +614,7 @@
     "target_text": "I would like some coffee.",
     "recognized_text": "I would like some coffee.",
     "asr_timestamps": {"available": false, "model": "whisper-1", "timestamp_granularities": [], "words": [], "segments": []},
-    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}]}
+    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "transcription", "available": false, "matched_text": "I would like some coffee.", "audio_start": null, "audio_end": null}]}
   },
   {
     "name": "zh_only_edge_fillers_is_unavailable",

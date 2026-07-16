@@ -184,12 +184,12 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
           comparison_alignment: {
             available: true,
             complete: true,
-            ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.8 }],
+            phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.8 }],
           },
           model_comparison_alignment: {
             available: true,
             complete: true,
-            ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.9 }],
+            phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.9 }],
           },
         },
       }),
@@ -219,6 +219,7 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   )).toBe("软_开发者很受欢迎");
   await expect(page.locator("#practice-recognized-text .practice-diff-correction", { hasText: "件" })).toHaveCount(1);
   await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
+  await expect(page.locator("#practice-comparison-note")).toHaveText("1/1フレーズを順番に比較できます。");
   expect(recordingRequests).toBe(2);
 
   const scriptIndicator = page.locator(".practice-script-indicator");
@@ -313,12 +314,12 @@ test("SpeakLoop no-speech result hides scoring and clears stale comparison range
         phrase_similarity: null,
         grade: null,
         diff: [],
-        comparison_alignment: { available: false, complete: false, target_phrase_count: 1, ranges: [] },
+        comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
         model_comparison_alignment: {
           available: true,
           complete: true,
           target_phrase_count: 1,
-          ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.2 }],
+          phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.2 }],
         },
       },
     }),
@@ -354,6 +355,127 @@ test("SpeakLoop no-speech result hides scoring and clears stale comparison range
       path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-no-speech.png`,
       fullPage: true,
     });
+  }
+});
+
+test("SpeakLoop falls back to whole comparison for text-only alignment and explains reference errors", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const event = new Event("dataavailable") as Event & { data: Blob };
+        event.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(event);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.route("**/api/practice/recordings", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      recording_kind: "prompt",
+      transcript: "開いて、閉じて",
+      target_text: "Open it. Close it.",
+      target_language: "en-US",
+      display_text: { primary_text: "Open it. Close it." },
+      audio_base64: "UklGRg==",
+      audio_mime_type: "audio/wav",
+    }),
+  }));
+  let attempts = 0;
+  await page.route("**/api/practice/attempt-jobs", (route) => {
+    attempts += 1;
+    const body = attempts === 1 ? {
+      job_id: "text-only-browser-job",
+      status: "succeeded",
+      current_stage: { stage: "complete", label: "比較準備が完了しました" },
+      result: {
+        outcome: "evaluated",
+        target_language: "en-US",
+        target_text: "Open it. Close it.",
+        recognized_text: "Open it",
+        similarity: 0.6,
+        grade: "retry",
+        comparison_alignment: {
+          available: false,
+          complete: false,
+          all_phrases_playable: false,
+          target_phrase_count: 2,
+          phrases: [
+            { index: 0, assignment_status: "text_only", available: false, audio_start: null, audio_end: null },
+            { index: 1, assignment_status: "unassigned", available: false, audio_start: null, audio_end: null },
+          ],
+        },
+        model_comparison_alignment: {
+          available: true,
+          complete: true,
+          all_phrases_playable: true,
+          target_phrase_count: 2,
+          phrases: [
+            { index: 0, available: true, audio_start: 0.1, audio_end: 0.8 },
+            { index: 1, available: true, audio_start: 0.9, audio_end: 1.6 },
+          ],
+        },
+      },
+      error: null,
+    } : {
+      job_id: "empty-reference-browser-job",
+      status: "failed",
+      current_stage: {
+        stage: "failed",
+        label: "音声の解析結果を確認できませんでした",
+        detail: "もう一度お試しください。",
+      },
+      result: null,
+      error: {
+        code: "practice_alignment_provider_contract_error",
+        reason: "empty_reference_asr",
+        stage: "reference_asr",
+        retryable: true,
+        message: "音声の解析結果を確認できませんでした。もう一度お試しください。",
+        diagnostic_flags: ["empty_reference_asr"],
+      },
+    };
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+
+  await page.goto("/speakloop");
+  const nativeRecord = page.locator("#practice-native-record-button");
+  await nativeRecord.click();
+  await nativeRecord.click();
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  await repeatRecord.click();
+  await repeatRecord.click();
+
+  await expect(page.locator("#practice-result-panel")).toBeVisible();
+  await expect(page.locator("#practice-play-model-button")).toContainText("全体比較再生");
+  await expect(page.locator("#practice-comparison-note")).toHaveText("フレーズの区切りを確認できなかったため、全体を比較します。");
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-text-only-whole.png`, fullPage: true });
+  }
+
+  await repeatRecord.click();
+  await repeatRecord.click();
+  await expect(page.locator("#practice-result-panel")).toBeHidden();
+  await expect(page.locator("#practice-error")).toContainText("音声処理を完了できませんでした");
+  await expect(page.locator("#practice-error")).not.toContainText(/reference_asr|empty_reference|provider/);
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-reference-error.png`, fullPage: true });
   }
 });
 
@@ -414,8 +536,8 @@ test("SpeakLoop does not mark omitted English punctuation as a pronunciation err
           similarity: 1,
           grade: "perfect",
           diff: [],
-          comparison_alignment: { available: true, complete: true, ranges: [] },
-          model_comparison_alignment: { available: true, complete: true, ranges: [] },
+          comparison_alignment: { available: true, complete: true, phrases: [] },
+          model_comparison_alignment: { available: true, complete: true, phrases: [] },
         },
       }),
     });
@@ -735,8 +857,8 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
           model_recognized_text: "你好吗？你今天去哪里？",
           similarity: 0.8,
           grade: "retry",
-          comparison_alignment: { available: true, complete: false, ranges: [{ index: 0, available: false, audio_start: null, audio_end: null }, { index: 1, available: true, audio_start: 1, audio_end: 2 }] },
-          model_comparison_alignment: { available: true, complete: true, ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 0.9 }, { index: 1, available: true, audio_start: 1, audio_end: 2.1 }] },
+          comparison_alignment: { available: true, complete: false, all_phrases_playable: false, target_phrase_count: 2, phrases: [{ index: 0, available: false, audio_start: null, audio_end: null }, { index: 1, available: true, audio_start: 1, audio_end: 2 }] },
+          model_comparison_alignment: { available: true, complete: true, all_phrases_playable: true, target_phrase_count: 2, phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 0.9 }, { index: 1, available: true, audio_start: 1, audio_end: 2.1 }] },
         },
       }),
     });
@@ -756,7 +878,14 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
           detail: "RunPodの残高不足でGPU処理を開始できません。RunPodのBillingを確認してください。",
         },
         result: null,
-        error: "RunPodの残高不足でGPU処理を開始できません。RunPodのBillingを確認してください。",
+        error: {
+          code: "practice_alignment_provider_contract_error",
+          reason: "invalid_timestamp_payload",
+          stage: "attempt_asr",
+          retryable: true,
+          message: "音声の解析結果を確認できませんでした。もう一度お試しください。",
+          diagnostic_flags: ["invalid_timestamp_payload"],
+        },
       }),
     });
   });
@@ -789,6 +918,7 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
     (elements) => elements.map((element) => element.textContent || "").join(""),
   )).toBe("你哈_你今天这_里");
   await expect(page.locator("#practice-play-model-button")).toContainText("一部フレーズ比較再生");
+  await expect(page.locator("#practice-comparison-note")).toHaveText("確認できた1/2フレーズを順番に比較します。");
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-result.png`, fullPage: true });
     await page.locator("html").evaluate((element) => {

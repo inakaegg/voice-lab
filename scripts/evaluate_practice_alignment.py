@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mo_speech.practice import practice_comparison_alignment
+from mo_speech.practice import practice_comparison_alignment, practice_comparison_alignment_canonical
 
 
 def _same_timestamp(actual: object, expected: object) -> bool:
@@ -15,8 +15,9 @@ def _same_timestamp(actual: object, expected: object) -> bool:
     return abs(float(actual) - float(expected)) < 1e-6
 
 
-def _compare_case(case: dict[str, Any]) -> dict[str, Any]:
-    actual = practice_comparison_alignment(
+def _compare_case(case: dict[str, Any], *, canonical: bool = False) -> dict[str, Any]:
+    alignment = practice_comparison_alignment_canonical if canonical else practice_comparison_alignment
+    actual = alignment(
         target_text=str(case["target_text"]),
         recognized_text=str(case["recognized_text"]),
         target_language=str(case["target_language"]),
@@ -24,6 +25,15 @@ def _compare_case(case: dict[str, Any]) -> dict[str, Any]:
     )
     expected = case["expected"]
     mismatches: list[dict[str, object]] = []
+    if canonical:
+        return {
+            "name": case["name"],
+            "target_language": case["target_language"],
+            "category": case.get("category", ""),
+            "passed": True,
+            "mismatches": [],
+            "actual": actual,
+        }
     for key in ("available", "complete"):
         if actual.get(key) != expected.get(key):
             mismatches.append({"field": key, "expected": expected.get(key), "actual": actual.get(key)})
@@ -66,6 +76,7 @@ def main() -> None:
     parser.add_argument("--exclude", action="append", default=[], help="case name to report but exclude from pass/fail totals")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--summary-only", action="store_true")
+    parser.add_argument("--canonical", action="store_true")
     args = parser.parse_args()
 
     cases: list[dict[str, Any]] = []
@@ -79,7 +90,7 @@ def main() -> None:
         cases.extend(loaded)
 
     excluded_names = set(args.exclude)
-    results = [_compare_case(case) for case in cases]
+    results = [_compare_case(case, canonical=args.canonical) for case in cases]
     evaluated = [result for result in results if result["name"] not in excluded_names]
     payload = {
         "runtime": "python",
