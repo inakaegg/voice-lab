@@ -2582,8 +2582,13 @@ async function createPracticeAttemptJob(request, env) {
   }
 
   const started = Date.now();
-  const [modelTranscription, attemptTranscription] = await Promise.all([
-    openAiTranscribeDetail(env, {
+  const transcribeWithTiming = async (options) => {
+    const transcriptionStarted = Date.now();
+    const transcription = await openAiTranscribeDetail(env, options);
+    return { transcription, elapsedMs: Date.now() - transcriptionStarted };
+  };
+  const [modelAsr, attemptAsr] = await Promise.all([
+    transcribeWithTiming({
       audioBytes: modelAudioBytes,
       audioMimeType: modelAudioMimeType,
       sourceLanguage: targetLanguage,
@@ -2591,7 +2596,7 @@ async function createPracticeAttemptJob(request, env) {
       model: asrModel,
       includeTimestamps: true,
     }),
-    openAiTranscribeDetail(env, {
+    transcribeWithTiming({
       audioBytes,
       audioMimeType,
       sourceLanguage: targetLanguage,
@@ -2601,6 +2606,8 @@ async function createPracticeAttemptJob(request, env) {
     }),
   ]);
   const totalMs = Date.now() - started;
+  const modelTranscription = modelAsr.transcription;
+  const attemptTranscription = attemptAsr.transcription;
   const result = practiceAttemptComparisonResult({
     targetLanguage,
     targetText,
@@ -2612,7 +2619,7 @@ async function createPracticeAttemptJob(request, env) {
       ...modelTranscription,
       provider: `openai-asr-${modelTranscription.model}`,
     },
-    timings: { asr: totalMs, model_asr: totalMs, total: totalMs },
+    timings: { asr: attemptAsr.elapsedMs, model_asr: modelAsr.elapsedMs, total: totalMs },
   });
   return {
     job_id: "",

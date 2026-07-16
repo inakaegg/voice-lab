@@ -165,6 +165,9 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   });
   await page.route("**/api/practice/attempt-jobs", async (route) => {
     recordingRequests += 1;
+    const multipartBody = route.request().postDataBuffer()?.toString("latin1") || "";
+    expect(multipartBody).toContain('name="model_audio"; filename="model.wav"');
+    expect(multipartBody).toContain("Content-Type: audio/wav");
     await route.fulfill({
       status: 200,
       contentType: "application/json",

@@ -1461,6 +1461,7 @@ test("Cloudflare worker returns no_speech for a silent practice attempt without 
   const env = adminAuthEnv(async (url, init) => {
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       const filename = init.body.get("file")?.name || "";
+      await new Promise((resolve) => setTimeout(resolve, filename === "model.wav" ? 40 : 1));
       if (filename === "model.wav") {
         return json({
           text: "Please close the window.",
@@ -1495,6 +1496,9 @@ test("Cloudflare worker returns no_speech for a silent practice attempt without 
   assert.deepEqual(snapshot.result.diff, []);
   assert.equal(snapshot.result.comparison_alignment.available, false);
   assert.equal(snapshot.result.model_comparison_alignment.available, true);
+  assert.ok(snapshot.result.timings_ms.model_asr >= 25);
+  assert.ok(snapshot.result.timings_ms.asr < snapshot.result.timings_ms.model_asr);
+  assert.ok(snapshot.result.timings_ms.total >= snapshot.result.timings_ms.model_asr);
 });
 
 test("Cloudflare worker creates practice pinyin without Latin or numeric tokens", async () => {

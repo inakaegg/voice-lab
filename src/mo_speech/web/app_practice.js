@@ -1291,6 +1291,7 @@ function preferredRecordingMimeType() {
 
 function extensionForMimeType(mimeType) {
   const normalized = String(mimeType || "").split(";")[0].toLowerCase();
+  if (normalized.includes("wav")) return "wav";
   if (normalized.includes("mp4")) return "m4a";
   if (normalized.includes("mpeg")) return "mp3";
   if (normalized.includes("ogg")) return "ogg";
