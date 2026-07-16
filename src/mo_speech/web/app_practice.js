@@ -40,6 +40,10 @@ const nativeTranscriptLabel = document.querySelector("#practice-native-transcrip
 const nativeTranscript = document.querySelector("#practice-native-transcript");
 const recognizedLabel = document.querySelector("#practice-recognized-label");
 const repeatAudio = document.querySelector("#practice-repeat-audio");
+const resultSummary = document.querySelector("#practice-result-panel .practice-result-summary");
+const scoreBar = document.querySelector("#practice-result-panel .practice-score-bar");
+const gradeGuide = document.querySelector("#practice-prompt-panel .practice-grade-guide");
+const playbackContract = window.voiceLabPracticePlayback;
 
 const languageLabels = {
   "ja-JP": "日本語",
@@ -179,6 +183,14 @@ async function startRecording(slot) {
     return;
   }
   pausePlaybackForRecording();
+  if (slot === "repeat") {
+    currentRecognizedText = "";
+    currentAttemptPayload = null;
+    currentAttemptComparisonAlignment = null;
+    currentModelComparisonAlignment = null;
+    resultPanel.hidden = true;
+    syncPlayButton();
+  }
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -294,7 +306,9 @@ async function submitPracticeRecording(blob, kind) {
     setRepeatAudio(blob);
     renderAttemptResult(completed.result);
     setBusy(false, "");
-    playComparisonAudios().catch((error) => showError(error.message));
+    if (completed.result.outcome !== "no_speech") {
+      playComparisonAudios().catch((error) => showError(error.message));
+    }
     return;
   }
   const payload = await postPracticeForm("/api/practice/recordings", form);
@@ -541,17 +555,29 @@ async function postPracticeForm(url, form) {
 
 function renderAttemptResult(payload) {
   stopComparisonPlayback();
-  const percent = Math.round(Number(payload.similarity || 0) * 100);
-  const grade = renderPracticeGrade(percent);
-  gradeBadge.textContent = grade.label;
-  gradeBadge.dataset.grade = grade.key;
-  scoreText.textContent = `${percent}%`;
-  scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  currentRecognizedText = payload.recognized_text || "";
+  const noSpeech = payload.outcome === "no_speech";
+  currentRecognizedText = noSpeech ? "" : (payload.recognized_text || "");
   currentAttemptPayload = payload;
   currentAttemptComparisonAlignment = payload.comparison_alignment || null;
   currentModelComparisonAlignment = payload.model_comparison_alignment || null;
-  renderRecognizedDiff(payload);
+  resultSummary.hidden = noSpeech;
+  scoreBar.hidden = noSpeech;
+  gradeGuide.hidden = noSpeech;
+  if (noSpeech) {
+    gradeBadge.textContent = "";
+    gradeBadge.removeAttribute("data-grade");
+    scoreText.textContent = "";
+    scoreFill.style.width = "0%";
+    recognizedText.textContent = payload.message || "音声を検出できませんでした。もう一度録音してください。";
+  } else {
+    const percent = Math.round(Number(payload.similarity || 0) * 100);
+    const grade = renderPracticeGrade(percent);
+    gradeBadge.textContent = grade.label;
+    gradeBadge.dataset.grade = grade.key;
+    scoreText.textContent = `${percent}%`;
+    scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    renderRecognizedDiff(payload);
+  }
   nativePanel.hidden = false;
   resultPanel.hidden = false;
   setActiveRecordSlot("repeat");
@@ -674,18 +700,26 @@ function syncPlayButton() {
 }
 
 function playbackButtonLabel() {
-  if (!shouldUseComparisonPlayback()) {
-    return "再生";
-  }
-  return canUsePhraseComparisonPlayback() ? "フレーズごと比較再生" : "全体比較再生";
+  return currentComparisonPlaybackPlan().label;
 }
 
-function canUsePhraseComparisonPlayback() {
-  return (
-    shouldUseComparisonPlayback() &&
-    recognizedTextMatchesLearningLanguage(currentRecognizedText, selectedTargetLanguage) &&
-    hasPairedComparisonAlignment(currentAttemptComparisonAlignment, currentModelComparisonAlignment)
-  );
+function audioDurationOrAlignmentEnd(audio, alignment) {
+  if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
+  return Math.max(0, ...availableComparisonRanges(alignment).map((range) => Number(range.audio_end) || 0));
+}
+
+function currentComparisonPlaybackPlan() {
+  return playbackContract.comparisonPlaybackPlan({
+    modelReady: Boolean(modelAudio.src),
+    repeatReady: Boolean(repeatAudio.src),
+    resultVisible: !resultPanel.hidden,
+    outcome: currentAttemptPayload?.outcome || "evaluated",
+    recognizedLanguageMatches: recognizedTextMatchesLearningLanguage(currentRecognizedText, selectedTargetLanguage),
+    attemptAlignment: currentAttemptComparisonAlignment,
+    modelAlignment: currentModelComparisonAlignment,
+    modelDuration: audioDurationOrAlignmentEnd(modelAudio, currentModelComparisonAlignment),
+    repeatDuration: audioDurationOrAlignmentEnd(repeatAudio, currentAttemptComparisonAlignment),
+  });
 }
 
 function syncModelAudioSpeed() {
@@ -870,13 +904,12 @@ async function playComparisonAudios() {
       await playAudioElementToEnd(repeatAudio, token);
       return;
     }
-    const comparisonRanges = comparisonAlignmentPlaybackRanges(
-      currentAttemptComparisonAlignment,
-      currentModelComparisonAlignment,
-      modelAudio.duration,
-      repeatAudio.duration,
-    );
-    if (!comparisonRanges) {
+    const plan = currentComparisonPlaybackPlan();
+    if (plan.mode === "model") {
+      await playAudioElementToEnd(modelAudio, token);
+      return;
+    }
+    if (plan.mode === "whole" || !plan.ranges.length) {
       await playAudioElementToEnd(modelAudio, token);
       if (!isActiveComparisonPlayback(token)) {
         return;
@@ -884,7 +917,7 @@ async function playComparisonAudios() {
       await playAudioElementToEnd(repeatAudio, token);
       return;
     }
-    for (const range of comparisonRanges) {
+    for (const range of plan.ranges) {
       if (!isActiveComparisonPlayback(token)) {
         return;
       }
@@ -984,7 +1017,12 @@ function playAudioSegmentToEnd(audio, start, end, token) {
       resolve();
     };
     const watch = () => {
-      if (!isActiveComparisonPlayback(token) || audio.currentTime >= segmentEnd - 0.03 || audio.ended) {
+      if (playbackContract.shouldStopAudioSegment({
+        active: isActiveComparisonPlayback(token),
+        ended: audio.ended,
+        currentTime: audio.currentTime,
+        segmentEnd,
+      })) {
         done();
         return;
       }
@@ -999,41 +1037,6 @@ function playAudioSegmentToEnd(audio, start, end, token) {
   });
 }
 
-function comparisonAlignmentPlaybackRanges(attemptAlignment, modelAlignment, modelDuration, repeatDuration) {
-  const attemptRanges = availableComparisonRanges(attemptAlignment);
-  const modelRanges = availableComparisonRanges(modelAlignment);
-  if (!attemptRanges.length || !modelRanges.length) {
-    return null;
-  }
-  const safeModelDuration = Number(modelDuration);
-  const safeRepeatDuration = Number(repeatDuration);
-  if (!Number.isFinite(safeModelDuration) || safeModelDuration <= 0 || !Number.isFinite(safeRepeatDuration) || safeRepeatDuration <= 0) {
-    return null;
-  }
-  const modelByIndex = new Map(modelRanges.map((range) => [Number(range.index), range]));
-  const paired = attemptRanges.map((attemptRange) => {
-    const modelRange = modelByIndex.get(Number(attemptRange.index));
-    if (!modelRange) return null;
-    const modelStart = Number(modelRange.audio_start);
-    const modelEnd = Number(modelRange.audio_end);
-    const repeatStart = Number(attemptRange.audio_start);
-    const repeatEnd = Number(attemptRange.audio_end);
-    return {
-      model: {
-        start: Math.max(0, Math.min(modelStart, safeModelDuration)),
-        end: Math.max(0, Math.min(modelEnd, safeModelDuration)),
-      },
-      repeat: {
-        start: Math.max(0, Math.min(repeatStart, safeRepeatDuration)),
-        end: Math.max(0, Math.min(repeatEnd, safeRepeatDuration)),
-      },
-    };
-  }).filter((range) => (
-    range && range.model.end > range.model.start && range.repeat.end > range.repeat.start
-  ));
-  return paired.length ? paired : null;
-}
-
 function availableComparisonRanges(alignment) {
   if (!Array.isArray(alignment?.ranges)) {
     return [];
@@ -1043,11 +1046,6 @@ function availableComparisonRanges(alignment) {
     const end = Number(range?.audio_end);
     return range?.available === true && Number.isFinite(start) && Number.isFinite(end) && end > start;
   });
-}
-
-function hasPairedComparisonAlignment(attemptAlignment, modelAlignment) {
-  const modelIndexes = new Set(availableComparisonRanges(modelAlignment).map((range) => Number(range.index)));
-  return availableComparisonRanges(attemptAlignment).some((range) => modelIndexes.has(Number(range.index)));
 }
 
 function recognizedTextMatchesLearningLanguage(text, language) {

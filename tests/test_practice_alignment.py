@@ -17,6 +17,9 @@ HOLDOUT_CASES = json.loads(
 VALIDATION_CASES = json.loads(
     (Path(__file__).parent / "fixtures" / "practice_alignment_validation_cases.json").read_text()
 )
+REGRESSION_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "practice_alignment_regression_cases.json").read_text()
+)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
@@ -92,6 +95,32 @@ def test_practice_comparison_alignment_keeps_the_mistaken_end_of_a_phrase_on_a_s
     assert second_phrase["audio_end"] == pytest.approx(2.3)
 
 
+def test_long_eight_phrase_alignment_reuses_candidate_scores() -> None:
+    target_text = (
+        "你知道吗？北海道里面也有比较热的地方，也有比较冷、比较凉快的地方。"
+        "不同地区的气候、气温其实差别还挺大的。毕竟北海道很大嘛，当然中国更大就是了。"
+    )
+    recognized_text = (
+        "你知道吗北海道里面也有比较露的地方也有比较比较让比较让可爱的地方"
+        "不懂及地主的气候资源其是差别还挺大的毕竟北海道很大嘛当然中国感大就是啊"
+    )
+    words = [
+        {"text": character, "start": index * 0.3, "end": index * 0.3 + 0.24}
+        for index, character in enumerate(recognized_text)
+    ]
+
+    result = practice_comparison_alignment(
+        target_text=target_text,
+        recognized_text=recognized_text,
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert result["target_phrase_count"] == 8
+    assert result["diagnostics"]["candidate_count"] > 0
+    assert result["diagnostics"]["score_computation_count"] < 20_000
+
+
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=[case["name"] for case in GOLDEN_CASES])
 def test_practice_comparison_alignment_golden_cases(case: dict[str, object]) -> None:
     _assert_practice_comparison_alignment_case(case)
@@ -107,7 +136,38 @@ def test_practice_comparison_alignment_validation_cases(case: dict[str, object])
     _assert_practice_comparison_alignment_case(case)
 
 
-def _assert_practice_comparison_alignment_case(case: dict[str, object]) -> None:
+@pytest.mark.parametrize("case", REGRESSION_CASES, ids=[case["name"] for case in REGRESSION_CASES])
+def test_practice_comparison_alignment_regression_cases(case: dict[str, object]) -> None:
+    result = _assert_practice_comparison_alignment_case(case)
+    ranges = result["ranges"]
+    available_ranges = [entry for entry in ranges if entry["available"]]
+    token_ranges = [
+        (int(entry["token_start_index"]), int(entry["token_end_index"]))
+        for entry in available_ranges
+    ]
+    assert token_ranges == sorted(token_ranges)
+    assert all(left[1] <= right[0] for left, right in zip(token_ranges, token_ranges[1:]))
+    audio_ranges = [(float(entry["audio_start"]), float(entry["audio_end"])) for entry in available_ranges]
+    assert all(start < end for start, end in audio_ranges)
+    assert all(left[1] <= right[0] for left, right in zip(audio_ranges, audio_ranges[1:]))
+    if result["complete"]:
+        unexplained = [
+            token
+            for token in result["diagnostics"]["unassigned_tokens"]
+            if token["reason"] == "unexplained_internal_token"
+        ]
+        assert unexplained == []
+    zero_text = "".join(str(token["text"]) for token in result["diagnostics"]["zero_duration_tokens"])
+    if case["category"] == "zero_duration":
+        expected_zero_text = "".join(
+            str(token["text"])
+            for token in case["asr_timestamps"]["words"]
+            if token["start"] == token["end"]
+        )
+        assert zero_text == expected_zero_text
+
+
+def _assert_practice_comparison_alignment_case(case: dict[str, object]) -> dict[str, object]:
     result = practice_comparison_alignment(
         target_text=str(case["target_text"]),
         recognized_text=str(case["recognized_text"]),
@@ -132,3 +192,4 @@ def _assert_practice_comparison_alignment_case(case: dict[str, object]) -> None:
             assert actual_range["audio_end"] is None
         else:
             assert actual_range["audio_end"] == pytest.approx(expected_range["audio_end"])
+    return result

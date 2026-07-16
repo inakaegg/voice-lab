@@ -9,6 +9,7 @@ const FIXTURE_FILES = [
   "practice_alignment_boundary_cases.json",
   "practice_alignment_holdout_cases.json",
   "practice_alignment_validation_cases.json",
+  "practice_alignment_regression_cases.json",
 ];
 
 const CASES = FIXTURE_FILES.flatMap((filename) =>
@@ -37,6 +38,13 @@ test("Cloudflare practice alignment matches the shared Python contract fixtures"
         assert.equal(actualRange.matched_text, expectedRange.matched_text);
         assertTimestamp(actualRange.audio_start, expectedRange.audio_start);
         assertTimestamp(actualRange.audio_end, expectedRange.audio_end);
+      }
+      if (fixture.category === "zero_duration") {
+        const expectedZeroText = fixture.asr_timestamps.words
+          .filter((word) => word.start === word.end)
+          .map((word) => word.text)
+          .join("");
+        assert.equal(result.diagnostics.zero_duration_tokens.map((token) => token.text).join(""), expectedZeroText);
       }
     });
   }

@@ -55,4 +55,4 @@ function SpeakLoop() {
   </PageShell>;
 }
 
-mountPublicPage(<SpeakLoop />, ["/static/app_public_session.js", "/static/app_public_sample_audio.js", "/static/app_practice.js"]);
+mountPublicPage(<SpeakLoop />, ["/static/app_public_session.js", "/static/app_public_sample_audio.js", "/static/practice_playback.js", "/static/app_practice.js"]);

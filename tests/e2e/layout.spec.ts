@@ -259,6 +259,104 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   await expect(page.locator("#practice-script-traditional")).toHaveAttribute("aria-pressed", "true");
 });
 
+test("SpeakLoop no-speech result hides scoring and clears stale comparison ranges on retry", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const event = new Event("dataavailable") as Event & { data: Blob };
+        event.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(event);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.route("**/api/practice/recordings", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      recording_kind: "prompt",
+      transcript: "窓を閉めてください",
+      target_text: "Please close the window.",
+      target_language: "en-US",
+      display_text: { primary_text: "Please close the window." },
+      audio_base64: "UklGRg==",
+      audio_mime_type: "audio/wav",
+    }),
+  }));
+  await page.route("**/api/practice/attempt-jobs", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      job_id: "silent-browser-job",
+      status: "succeeded",
+      current_stage: { stage: "complete", label: "比較準備が完了しました" },
+      result: {
+        outcome: "no_speech",
+        message: "音声を検出できませんでした。もう一度録音してください。",
+        target_language: "en-US",
+        target_text: "Please close the window.",
+        recognized_text: "",
+        similarity: null,
+        global_similarity: null,
+        phrase_similarity: null,
+        grade: null,
+        diff: [],
+        comparison_alignment: { available: false, complete: false, target_phrase_count: 1, ranges: [] },
+        model_comparison_alignment: {
+          available: true,
+          complete: true,
+          target_phrase_count: 1,
+          ranges: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.2 }],
+        },
+      },
+    }),
+  }));
+
+  await page.goto("/speakloop");
+  const nativeRecord = page.locator("#practice-native-record-button");
+  await nativeRecord.click();
+  await nativeRecord.click();
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible();
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  await repeatRecord.click();
+  await repeatRecord.click();
+
+  await expect(page.locator("#practice-result-panel")).toBeVisible();
+  await expect(page.locator("#practice-recognized-text")).toHaveText("音声を検出できませんでした。もう一度録音してください。");
+  await expect(page.locator("#practice-result-panel .practice-result-summary")).toBeHidden();
+  await expect(page.locator("#practice-result-panel .practice-score-bar")).toBeHidden();
+  await expect(page.locator("#practice-prompt-panel .practice-grade-guide")).toBeHidden();
+  await expect(page.locator("#practice-play-model-button")).toContainText("再生");
+  await expect(repeatRecord).toBeEnabled();
+  await assertNoHorizontalOverflow(page);
+
+  await repeatRecord.click();
+  await expect(page.locator("#practice-result-panel")).toBeHidden();
+  await expect(page.locator("#practice-play-model-button")).toContainText("再生");
+  await repeatRecord.click();
+  await expect(page.locator("#practice-result-panel")).toBeVisible();
+
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({
+      path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-no-speech.png`,
+      fullPage: true,
+    });
+  }
+});
+
 test("SpeakLoop does not mark omitted English punctuation as a pronunciation error", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {
@@ -690,7 +788,7 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
   await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
     (elements) => elements.map((element) => element.textContent || "").join(""),
   )).toBe("你哈_你今天这_里");
-  await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
+  await expect(page.locator("#practice-play-model-button")).toContainText("一部フレーズ比較再生");
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-result.png`, fullPage: true });
     await page.locator("html").evaluate((element) => {

@@ -55,6 +55,7 @@ from .pipeline import PipelineResult
 from .practice import (
     PRACTICE_TARGET_LANGUAGES,
     evaluate_practice_attempt,
+    normalize_practice_text,
     practice_comparison_alignment,
     simplify_chinese_text,
     supported_practice_target_language,
@@ -284,12 +285,18 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
     )
     diagnostics = {
         "recording_kind": result.get("recording_kind") or "",
+        "outcome": result.get("outcome") or "",
+        "message": result.get("message") or "",
         "target_language": result.get("target_language") or "",
         "target_text": result.get("target_text") or "",
         "recognized_text": result.get("recognized_text") or "",
         "model_recognized_text": result.get("model_recognized_text") or "",
         "transcript": result.get("transcript") or "",
         "asr_model": result.get("asr_model") or "",
+        "global_similarity": result.get("global_similarity"),
+        "phrase_similarity": result.get("phrase_similarity"),
+        "similarity": result.get("similarity"),
+        "grade": result.get("grade"),
         "phrase_matches": result.get("phrase_matches") or [],
         "comparison_alignment": result.get("comparison_alignment") or {},
         "model_comparison_alignment": result.get("model_comparison_alignment") or {},
@@ -1599,19 +1606,18 @@ def create_app(
             recognized_text = simplify_chinese_text(recognized_text)
             model_recognized_text = simplify_chinese_text(model_recognized_text)
 
-        compare_started = perf_counter()
-        evaluation = evaluate_practice_attempt(target_text, recognized_text, practice_target_language)
         asr_timestamps = _serialize_asr_timestamps(attempt_transcription)
+        model_asr_timestamps = (
+            _serialize_asr_timestamps(model_transcription)
+            if model_transcription is not None
+            else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
+        )
+        compare_started = perf_counter()
         comparison_alignment = practice_comparison_alignment(
             target_text=target_text,
             recognized_text=recognized_text,
             target_language=practice_target_language,
             asr_timestamps=asr_timestamps,
-        )
-        model_asr_timestamps = (
-            _serialize_asr_timestamps(model_transcription)
-            if model_transcription is not None
-            else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
         )
         model_comparison_alignment = (
             practice_comparison_alignment(
@@ -1631,6 +1637,32 @@ def create_app(
             }
         )
         compare_ms = _elapsed_ms(compare_started)
+        no_speech = (
+            not recognized_text.strip()
+            and not asr_timestamps.get("words")
+            and not asr_timestamps.get("segments")
+        )
+        evaluation = (
+            {
+                "outcome": "no_speech",
+                "message": "音声を検出できませんでした。もう一度録音してください。",
+                "normalized_target": normalize_practice_text(target_text, practice_target_language),
+                "normalized_recognized": "",
+                "global_similarity": None,
+                "phrase_similarity": None,
+                "similarity": None,
+                "grade": None,
+                "grade_label": "",
+                "diff": [],
+                "phrase_matches": [],
+            }
+            if no_speech
+            else {
+                "outcome": "evaluated",
+                "message": "",
+                **evaluate_practice_attempt(target_text, recognized_text, practice_target_language),
+            }
+        )
         return {
             "recording_kind": "attempt",
             "target_language": practice_target_language,

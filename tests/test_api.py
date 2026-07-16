@@ -1157,11 +1157,15 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert metadata["practice_job_status"] == "succeeded"
     assert metadata["practice_job_metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
     diagnostics = metadata["practice_diagnostics"]
+    assert diagnostics["outcome"] == "evaluated"
+    assert diagnostics["similarity"] == snapshot["result"]["similarity"]
+    assert diagnostics["grade"] == snapshot["result"]["grade"]
     assert diagnostics["recognized_text"] == "你哈吗？你今天到那里？"
     assert diagnostics["model_recognized_text"] == "你好吗？你今天去哪里？"
     assert diagnostics["asr_timestamps"]["words"][0] == {"text": "你哈吗", "start": 0.1, "end": 0.8}
     assert diagnostics["model_asr_timestamps"]["words"][0] == {"text": "你好吗", "start": 0.1, "end": 0.8}
     assert diagnostics["comparison_alignment"]["ranges"][1]["audio_end"] == pytest.approx(2.3)
+    assert diagnostics["comparison_alignment"]["diagnostics"]["candidate_count"] > 0
     assert diagnostics["model_comparison_alignment"]["ranges"][1]["audio_end"] == pytest.approx(2.4)
 
 
@@ -1247,6 +1251,56 @@ def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> 
         (b"model audio", "en-US", True),
         (b"attempt audio", "en-US", True),
     ]
+
+
+def test_practice_attempt_job_returns_no_speech_without_scoring_or_alignment() -> None:
+    class NoSpeechAttemptAsr:
+        name = "fake-whisper"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            if audio_path.read_bytes() == b"model audio":
+                return AsrTranscription(
+                    text="Please close the window.",
+                    model="whisper-1",
+                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(
+                text="",
+                model="whisper-1",
+                words=[],
+                segments=[],
+                timestamp_granularities=["word", "segment"],
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=NoSpeechAttemptAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "en-US", "target_text": "Please close the window."},
+        files={
+            "audio": ("silent.wav", b"0.72 seconds of silence", "audio/wav"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["result"]["outcome"] == "no_speech"
+    assert snapshot["result"]["message"] == "音声を検出できませんでした。もう一度録音してください。"
+    assert snapshot["result"]["similarity"] is None
+    assert snapshot["result"]["global_similarity"] is None
+    assert snapshot["result"]["phrase_similarity"] is None
+    assert snapshot["result"]["grade"] is None
+    assert snapshot["result"]["diff"] == []
+    assert snapshot["result"]["comparison_alignment"]["available"] is False
+    assert snapshot["result"]["model_comparison_alignment"]["available"] is True
 
 
 def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
