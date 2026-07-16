@@ -75,7 +75,7 @@
       "complete": true,
       "ranges": [
         {"index": 0, "source": "words", "available": true, "matched_text": "现在正在做一个应用", "audio_start": 1.18, "audio_end": 5.74},
-        {"index": 1, "source": "words", "available": true, "matched_text": "但有些距离的细是相比较难", "audio_start": 6.0, "audio_end": 10.44},
+        {"index": 1, "source": "words", "available": true, "matched_text": "但有些距离的细节是相比较难", "audio_start": 6.0, "audio_end": 10.44},
         {"index": 2, "source": "words", "available": true, "matched_text": "所以一直有点卡住。", "audio_start": 11.22, "audio_end": 13.16}
       ]
     }
@@ -151,7 +151,7 @@
       "available": true,
       "complete": true,
       "ranges": [
-        {"index": 0, "source": "words", "available": true, "matched_text": "我是日本人你是中国人我们说一吧。", "audio_start": 2.32, "audio_end": 8.7}
+        {"index": 0, "source": "words", "available": true, "matched_text": "我是日本人你是中国人我们说一说中文吧。", "audio_start": 2.32, "audio_end": 8.7}
       ]
     }
   },

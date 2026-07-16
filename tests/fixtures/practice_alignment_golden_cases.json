@@ -383,7 +383,7 @@
     "name": "zh_repeated_first_phrase_uses_first_complete_occurrence",
     "category": "repetition",
     "tags": ["zh-CN", "repeat-phrase", "two-phrases"],
-    "description": "最初の文を丸ごと繰り返した場合、第一フレーズは最初の完全な発話へ対応させる。",
+    "description": "最初の文を丸ごと繰り返した場合、言い直しを第一フレーズの比較区間へ含める。",
     "target_language": "zh-CN",
     "target_text": "你好。今天天气很好。",
     "recognized_text": "你好你好今天天气很好",
@@ -391,7 +391,7 @@
       {"text": "你", "start": 0.1, "end": 0.3}, {"text": "好", "start": 0.3, "end": 0.5}, {"text": "你", "start": 0.65, "end": 0.85}, {"text": "好", "start": 0.85, "end": 1.05}, {"text": "今", "start": 1.25, "end": 1.45}, {"text": "天", "start": 1.45, "end": 1.65}, {"text": "天", "start": 1.65, "end": 1.85}, {"text": "气", "start": 1.85, "end": 2.05}, {"text": "很", "start": 2.05, "end": 2.25}, {"text": "好", "start": 2.25, "end": 2.55}
     ], "segments": [{"text": "你好，你好，今天天气很好。", "start": 0.1, "end": 2.55}]},
     "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
-      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.1, "audio_end": 0.5},
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好你好", "audio_start": 0.1, "audio_end": 1.05},
       {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 1.25, "audio_end": 2.55}
     ]}
   },
@@ -577,7 +577,7 @@
     "name": "en_repeated_first_phrase_uses_first_complete_occurrence",
     "category": "repetition",
     "tags": ["en-US", "repeat-phrase", "two-phrases"],
-    "description": "最初の文を丸ごと繰り返した場合、第一フレーズは最初の完全な発話へ対応させる。",
+    "description": "最初の文を丸ごと繰り返した場合、言い直しを第一フレーズの比較区間へ含める。",
     "target_language": "en-US",
     "target_text": "Good morning. How are you?",
     "recognized_text": "Good morning good morning how are you",
@@ -585,7 +585,7 @@
       {"text": "Good", "start": 0.1, "end": 0.35}, {"text": "morning", "start": 0.35, "end": 0.7}, {"text": "good", "start": 0.85, "end": 1.1}, {"text": "morning", "start": 1.1, "end": 1.45}, {"text": "how", "start": 1.7, "end": 1.9}, {"text": "are", "start": 1.9, "end": 2.05}, {"text": "you", "start": 2.05, "end": 2.3}
     ], "segments": [{"text": "Good morning, good morning, how are you?", "start": 0.1, "end": 2.3}]},
     "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
-      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning", "audio_start": 0.1, "audio_end": 0.7},
+      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning good morning", "audio_start": 0.1, "audio_end": 1.45},
       {"index": 1, "source": "words", "available": true, "matched_text": "how are you", "audio_start": 1.7, "audio_end": 2.3}
     ]}
   },
