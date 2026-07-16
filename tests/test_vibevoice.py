@@ -58,7 +58,7 @@ class FakeDirectedVoiceConversionService:
         self.events = events
         self.calls: list[object] = []
 
-    def convert(self, request):
+    def convert(self, request, progress_callback=None):
         self.calls.append(request)
         if self.events is not None:
             self.events.append(f"vc:{request.source_audio_path.name}")
@@ -1532,6 +1532,55 @@ def test_runpod_vibevoice_service_submits_generation_payload(tmp_path: Path) -> 
     assert client.payload["generation"]["directed_retry_max_lines"] == 4
     assert client.payload["voices"][0]["audio_base64"] != ""
     assert client.payload["voices"][0]["speaker"] == 1
+
+
+def test_runpod_vibevoice_service_forwards_remote_job_progress(tmp_path: Path) -> None:
+    class FakeClient:
+        configured = True
+        endpoint_id = "endpoint"
+        request_mode = "async"
+
+        def submit(self, payload, *, progress_callback=None):
+            assert progress_callback is not None
+            progress_callback({"id": "vv-job", "status": "IN_QUEUE"})
+            progress_callback(
+                {
+                    "id": "vv-job",
+                    "status": "IN_PROGRESS",
+                    "output": {
+                        "stage": "loading_vibevoice_model",
+                        "label": "VibeVoice Largeモデルを読み込んでいます",
+                        "model": "vibevoice-large-aoi-pinned",
+                        "detail": "初回起動中",
+                    },
+                }
+            )
+            return {
+                "audio_mime_type": "audio/wav",
+                "audio_base64": "UklGRg==",
+                "normalized_script": payload["script"],
+                "timings_ms": {"vibevoice": 3.0},
+                "providers": {"vibevoice": "runpod-serverless-vibevoice"},
+            }
+
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"voice")
+    progress: list[tuple[str, str]] = []
+
+    RunpodServerlessVibeVoiceService(client=FakeClient()).generate(
+        script_text="Speaker 1: 你好。",
+        voice_paths=[voice],
+        progress_callback=lambda stage, label: progress.append((stage, label)),
+    )
+
+    assert ("gpu_wait", "利用可能なGPUを待っています") in progress
+    assert any(
+        stage == "loading_vibevoice_model"
+        and "VibeVoice Large" in label
+        and "vibevoice-large-aoi-pinned" not in label
+        and "初回起動中" in label
+        for stage, label in progress
+    )
 
 
 def test_runpod_vibevoice_service_auto_enables_line_by_line_for_long_scripts(tmp_path: Path) -> None:

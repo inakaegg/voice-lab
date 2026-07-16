@@ -407,6 +407,7 @@ class SeedVcVoiceConversionTtsProvider:
             if self.config is not None:
                 command.extend(["--config", self.config])
 
+            _notify_progress(progress_callback, "loading_model", "Seed-VCモデル読込中", _seed_vc_model_name(self))
             _notify_progress(progress_callback, "voice_conversion", "声質変換", _seed_vc_model_name(self))
             conversion_started = perf_counter()
             _run_command(command, timeout_seconds=self.timeout_seconds, cwd=self.work_dir)
@@ -694,9 +695,11 @@ class SeedVcResidentDirectVoiceConversionProvider(SeedVcDirectVoiceConversionPro
             target_name = _file_content_hash(reference_wav)
             output_wav = temp_path / "converted.wav"
 
-            _notify_progress(progress_callback, "voice_conversion", "声質変換", self.name)
             with self._lock:
+                if self._stream_state is None:
+                    _notify_progress(progress_callback, "loading_model", "Seed-VCモデル読込中", self.name)
                 self._ensure_stream_state(seed_vc_api)
+                _notify_progress(progress_callback, "voice_conversion", "声質変換", self.name)
                 conversion_started = perf_counter()
                 output_audio = seed_vc_api.inference(
                     source=source_audio,

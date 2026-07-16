@@ -371,6 +371,7 @@ def test_seed_vc_provider_reports_conversion_progress(
 
     assert progress == [
         PipelineProgress(stage="tts", label="音声生成", provider="source-model"),
+        PipelineProgress(stage="loading_model", label="Seed-VCモデル読込中", provider="Plachta/Seed-VC"),
         PipelineProgress(stage="voice_conversion", label="声質変換", provider="Plachta/Seed-VC"),
     ]
 
@@ -547,6 +548,7 @@ def test_seed_vc_resident_provider_reuses_loaded_model(
     reference_audio.write_bytes(b"reference audio")
     load_calls: list[object] = []
     inference_calls: list[dict[str, object]] = []
+    progress = []
 
     class FakeStreamState:
         def __init__(self, args, target=None, new_target_name=None, realtime=True):
@@ -585,12 +587,16 @@ def test_seed_vc_resident_provider_reuses_loaded_model(
     )
     monkeypatch.setattr(provider, "_load_seed_vc_api", lambda: fake_api)
 
-    provider.preload()
-    first = provider.convert(source_audio_path=source_audio, reference_audio_path=reference_audio)
+    first = provider.convert(
+        source_audio_path=source_audio,
+        reference_audio_path=reference_audio,
+        progress_callback=progress.append,
+    )
     second = provider.convert(
         source_audio_path=source_audio,
         reference_audio_path=reference_audio,
         seed_vc_settings=SeedVcRuntimeSettings(diffusion_steps=4),
+        progress_callback=progress.append,
     )
 
     assert len(load_calls) == 1
@@ -601,6 +607,8 @@ def test_seed_vc_resident_provider_reuses_loaded_model(
     assert inference_calls[1]["diffusion_steps"] == 4
     assert inference_calls[0]["streaming"] is True
     assert inference_calls[0]["end_of_stream"] is True
+    assert [item.stage for item in progress].count("loading_model") == 1
+    assert next(item for item in progress if item.stage == "loading_model").provider == "Plachta/Seed-VC resident"
 
 
 def test_voice_conversion_service_preloads_resident_capable_provider() -> None:

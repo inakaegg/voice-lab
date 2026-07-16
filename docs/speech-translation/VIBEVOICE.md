@@ -1,5 +1,7 @@
 # VibeVoiceスキット生成
 
+更新日: 2026-07-15
+
 ## 現在の位置づけ
 
 `/skitvoice` は、指定台詞向け生成のユーザー向け通常画面である。台本、最大4つの参照音声、生成ボタン、結果確認に絞り、backend/model/サンプリング、実行環境、診断JSONなどの技術情報は通常表示しない。`/skitvoice/admin` は、`zhskit` のスキット生成機能をこのアプリへ移すための検証・管理画面であり、生成パラメータや診断を直接確認できる。旧routeの互換エイリアスは提供しない。
@@ -185,7 +187,7 @@ ComfyUI-VibeVoice固定refでは、processorのraw text fallbackが `vibevoice.m
 
 VibeVoice本体の既定生成長は、テキストだけでなく参照音声promptを含む入力長から決まるため、短い台本でも150 token程度まで生成が続くことがある。アプリ内CLIでは、`max_new_tokens` を台本文字数と行数から見積もって明示的に渡し、短文が20秒級の無関係な音声として伸び続ける回帰を避ける。
 
-ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。行単位生成では、各行の内部tqdmをそのまま表示すると行ごとに0%へ戻って全体の進み具合が分からないため、`行単位生成 2/11 (18.2%, 行内 16/32 50%)` のように全体行数に対する進捗へ変換して表示する。Web UIはpollingごとに現在のstage labelと直近ログを表示し、数値進捗が取れた時点でプログレスバーをdeterminate表示へ切り替える。完了まで無変化のアニメーションだけが続く状態にしない。キャンセル要求はこのストリーミング実行中にも監視し、子プロセスを終了する。ローカルjob API経由では固定timeoutで停止せず、ユーザーのキャンセル要求で子プロセスを終了する。`MO_VIBEVOICE_TIMEOUT_SECONDS` は互換用の同期生成やRunPod handler内の直接実行など、キャンセルイベントを持たない呼び出しの上限として扱う。
+ローカル実行では、VibeVoice CLIの標準エラー出力をAPI側で逐次読み取り、`Generating ... 22/32` のようなtqdm進捗をjob statusへ反映する。行単位生成では、各行の内部tqdmをそのまま表示すると行ごとに0%へ戻って全体の進み具合が分からないため、`行単位生成 2/11 (18.2%, 行内 16/32 50%)` のように全体行数に対する進捗へ変換して表示する。RunPod実行ではhandlerがServerless progress updateに現在stage、表示名、provider、model、補足を書き、Cloudflare WorkerまたはローカルFastAPIが `/status/<job-id>` から取得する。外部の進捗storeは使わず、最終音声も従来のjob outputだけで受け取る。Web UIはpollingごとに現在のstage label、モデル名、補足、直近ログを表示し、数値進捗が取れた時点でプログレスバーをdeterminate表示へ切り替える。キャンセル要求はストリーミング実行中にも監視し、子プロセスを終了する。ローカルjob API経由では固定timeoutで停止せず、ユーザーのキャンセル要求で子プロセスを終了する。`MO_VIBEVOICE_TIMEOUT_SECONDS` は互換用の同期生成やRunPod handler内の直接実行など、キャンセルイベントを持たない呼び出しの上限として扱う。
 
 ```bash
 MO_VIBEVOICE_HOME=/workspace/models/vibevoice/huggingface/hub
@@ -209,7 +211,7 @@ VIBEVOICE_GENERATION_CONFIG_MODE=explicit
 VIBEVOICE_MIN_AUDIO_TOKENS=1
 ```
 
-20GB級GPUでLargeを使う場合は、VibeVoice以外のresident GPUモデルを同じworker processに残さない。特に `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` でSeed-VCを起動時preloadすると、親process側に数GiBのVRAMが残り、Largeのロード中にOOMしやすい。VibeVoice用RunPod imageの既定は `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` とし、VibeVoice request前に既存のVoice Conversion serviceを解放する。指定台詞向けASR再配置モードでは、複数話者のVibeVoice生成、VibeVoice音声ASR、低スコアretry生成、retry音声ASRを全て終えてから、採用行クリップだけSeed-VCへ通す。ASRの既定をOpenAI `whisper-1` にすることで、Large生成とfaster-whisper ASRが同じGPUへ同時または連続で載る状態を避ける。
+20GB級GPUでLargeを使う場合は、VibeVoice以外のresident GPUモデルを同じworker processに残さない。特に `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` でSeed-VCを起動時preloadすると、親process側に数GiBのVRAMが残り、Largeのロード中にOOMしやすい。VibeVoice用RunPod imageの既定は `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` とし、VibeVoice request前に既存のVoice Conversion serviceと中国語練習用FunASRを解放する。指定台詞向けASR再配置モードでは、複数話者のVibeVoice生成、VibeVoice音声ASR、低スコアretry生成、retry音声ASRを全て終えてから、採用行クリップだけSeed-VCへ通す。ASRの既定をOpenAI `whisper-1` にすることで、Large生成とfaster-whisper ASRが同じGPUへ同時または連続で載る状態を避ける。
 
 `VIBEVOICE_MIN_AUDIO_TOKENS` はLargeで `speech_start` 直後にEOSへ落ちる挙動を避けるための下限指定である。CLIはこの値を固定の生成長としては扱わず、台本文字数、行数、`max_new_tokens` から実際に強制する最低音声token数を見積もる。これにより短文でも1tokenだけで終了せず、長い台本では台本長に応じた最低限の音声tokenを要求する。
 
@@ -312,7 +314,7 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 - ローカル: `subprocess.Popen` のstderrを逐次読み、`Loading weights`、`Generating`、`line-by-line` の現在値、総数、割合をジョブstoreへ保存する。
 - UI: indeterminate表示は初期化や未知ステージだけに使い、進捗値が取れるステージではバー幅とパーセントを実値へ切り替える。
 - キャンセル: 進捗読取中でもキャンセル要求を優先し、subprocessをterminate/killする。
-- RunPod: 通常のRunPod job statusだけではCLI内部stderrの細かい進捗は取れない。RunPodでも実進捗を出す場合は、handlerから外部storeへ進捗を書き、gateway/UIがそれを読む設計が必要になる。
+- RunPod: handlerのprogress updateをjob statusの `output` としてpollingし、GPU待ち、worker初期化、VibeVoiceモデル読込／生成、指定台詞ASR、Seed-VCモデル読込／声質変換、再配置、仕上げを表示する。queue中はRunPod `/health` のworker数からGPU割り当て待ちと初期化中を区別する。
 
 ## zhskitから未移植の主な機能
 
@@ -331,5 +333,7 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 - 簡易画面では翻訳チェックを表示しない。台本の言語を固定せず、出力言語と異なる場合だけ生成前に自動翻訳する。
 - 翻訳処理を行った場合は、生成結果に「翻訳後の台本」を表示する。
 - タブ音声録音の開始時に、権利確認ダイアログや必須チェックを毎回要求しない。
+- タブ音声録音は `getDisplayMedia` と `MediaRecorder` を利用できるブラウザだけに表示する。初期判定で非対応なら操作と「タブ音声」の案内を隠し、利用開始時に非対応と判明した場合だけtoastでファイルまたはマイク録音を案内し、そのセッション中は操作を隠す。権限ダイアログを利用者がキャンセルしただけの場合は操作を隠さない。
+- 公開画面の主要な生成ステータスとエラーは、GPUサーバーの準備、音声生成の準備、生成、仕上げのように処理目的で表現し、RunPod、VibeVoice、Seed-VCなどの固有名詞を含めない。provider、モデル、raw stage、詳細エラーは進捗ログ、管理画面、サーバーログへ残す。
 - 画面には「個人・家庭内の私的利用を超えて公開・共有する場合は、音声の利用条件を確認してください。」と常設表示する。
 - 自動翻訳の診断には、モデルが判定した入力台本の言語コードを残す。

@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 
+PRACTICE_ASR_CONTRACT_VERSION = 2
+
+
 def _optional_float_env(name: str) -> float | None:
     value = os.getenv(name)
     if value is None or value == "":
@@ -27,18 +30,20 @@ def _optional_int_env(name: str) -> int | None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, text-TTS, or voice-conversion smoke request.")
+    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, practice-ASR, text-TTS, or voice-conversion smoke request.")
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
     parser.add_argument(
         "--operation-mode",
-        choices=("translation", "text_tts", "voice_conversion", "warmup", "diagnostics", "vibevoice"),
+        choices=("translation", "practice_asr", "text_tts", "voice_conversion", "warmup", "diagnostics", "vibevoice"),
         default="translation",
     )
     parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
     parser.add_argument("--audio")
+    parser.add_argument("--model-audio")
     parser.add_argument("--reference-audio")
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
+    parser.add_argument("--target-text", default=os.getenv("RUNPOD_SMOKE_TARGET_TEXT"))
     parser.add_argument("--script", default=os.getenv("RUNPOD_SMOKE_SCRIPT"))
     parser.add_argument("--script-file")
     parser.add_argument("--voice-audio", action="append", default=[])
@@ -60,6 +65,11 @@ def main() -> int:
         "--preload-voice-conversion",
         action="store_true",
         default=os.getenv("RUNPOD_SMOKE_PRELOAD_VOICE_CONVERSION") == "1",
+    )
+    parser.add_argument(
+        "--preload-practice-asr",
+        action="store_true",
+        default=os.getenv("RUNPOD_SMOKE_PRELOAD_PRACTICE_ASR") == "1",
     )
     parser.add_argument("--timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--http-timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_HTTP_TIMEOUT_SECONDS", "120")))
@@ -126,8 +136,11 @@ def main() -> int:
         input_payload = {
             "operation_mode": "warmup",
             "translation_backend": args.translation_backend,
-            "preload_translation": args.preload_translation or not args.preload_voice_conversion,
+            "preload_translation": args.preload_translation or not (
+                args.preload_voice_conversion or args.preload_practice_asr
+            ),
             "preload_voice_conversion": args.preload_voice_conversion,
+            "preload_practice_asr": args.preload_practice_asr,
         }
     elif args.operation_mode == "text_tts":
         if not args.text:
@@ -178,9 +191,9 @@ def main() -> int:
         }
     else:
         if not args.audio:
-            raise SystemExit("--audio is required for translation and voice_conversion")
+            raise SystemExit("--audio is required for translation, practice_asr, and voice_conversion")
         audio_path = Path(args.audio)
-        mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+        mime_type = "audio/webm" if audio_path.suffix.lower() == ".webm" else (mimetypes.guess_type(audio_path.name)[0] or "audio/wav")
 
     if args.operation_mode == "voice_conversion":
         if not args.reference_audio:
@@ -205,6 +218,21 @@ def main() -> int:
             "voice_mode": args.voice_mode,
             "text_transform_unit": args.text_transform_unit,
         }
+    elif args.operation_mode == "practice_asr":
+        input_payload = {
+            "operation_mode": "practice_asr",
+            "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+            "audio_mime_type": mime_type,
+            "source_language": "zh-CN",
+        }
+        if args.model_audio:
+            model_audio_path = Path(args.model_audio)
+            input_payload["model_audio_base64"] = base64.b64encode(model_audio_path.read_bytes()).decode("ascii")
+            input_payload["model_audio_mime_type"] = (
+                mimetypes.guess_type(model_audio_path.name)[0] or "audio/wav"
+            )
+        if args.target_text:
+            input_payload["target_text"] = args.target_text
     if args.seed_vc_diffusion_steps is not None:
         input_payload["seed_vc_diffusion_steps"] = args.seed_vc_diffusion_steps
     if args.seed_vc_reference_max_seconds is not None:
@@ -246,6 +274,22 @@ def main() -> int:
     print(json.dumps(printable_body, ensure_ascii=False, indent=2))
     if body.get("status") in {"FAILED", "TIMED_OUT", "CANCELLED"}:
         return 1
+    if args.operation_mode == "practice_asr" and args.model_audio:
+        output = body.get("output")
+        if not isinstance(output, dict) and isinstance(body.get("text"), str):
+            output = body
+        if not isinstance(output, dict):
+            sys.stderr.write("practice_asr smoke did not return an output object\n")
+            return 1
+        if output.get("practice_asr_contract_version") != PRACTICE_ASR_CONTRACT_VERSION:
+            sys.stderr.write(
+                f"practice_asr contract mismatch: expected v{PRACTICE_ASR_CONTRACT_VERSION}; "
+                "redeploy the current RunPod image\n"
+            )
+            return 1
+        if not isinstance(output.get("model_transcription"), dict):
+            sys.stderr.write("practice_asr smoke did not return model_transcription\n")
+            return 1
     return 0
 
 
@@ -330,8 +374,8 @@ def _redact_audio_base64(value: Any) -> Any:
     if isinstance(value, dict):
         output: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "audio_base64" and isinstance(item, str):
-                output[key] = f"<audio_base64 {len(item)} chars>"
+            if key.endswith("audio_base64") and isinstance(item, str):
+                output[key] = f"<{key} {len(item)} chars>"
             else:
                 output[key] = _redact_audio_base64(item)
         return output

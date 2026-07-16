@@ -5,6 +5,7 @@ import test from "node:test";
 const source = await readFile(new URL("../src/mo_speech/web/app_user.js", import.meta.url), "utf8");
 const userHtml = await readFile(new URL("../src/mo_speech/web/user.html", import.meta.url), "utf8");
 const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
+const practicePlaybackSource = await readFile(new URL("../src/mo_speech/web/practice_playback.js", import.meta.url), "utf8");
 const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_admin.html", import.meta.url), "utf8");
 const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_practice_history.js", import.meta.url), "utf8");
 const vibevoiceHtml = await readFile(new URL("../src/mo_speech/web/vibevoice.html", import.meta.url), "utf8");
@@ -67,7 +68,7 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.doesNotMatch(practiceSource, /zhTraditionalToSimplified/);
   assert.match(practiceSource, /speed:/);
   assert.doesNotMatch(practiceSource, /auto_play_comparison|autoPlayComparisonControl/);
-  assert.match(practiceSource, /renderAttemptResult\(payload\);[\s\S]*setBusy\(false, ""\);[\s\S]*playComparisonAudios\(\)\.catch/);
+  assert.match(practiceSource, /renderAttemptResult\(completed\.result\);[\s\S]*setBusy\(false, ""\);[\s\S]*playComparisonAudios\(\)\.catch/);
   assert.doesNotMatch(practiceSource, /asr_model:/);
   assert.match(practiceSource, /Math\.round\(parsed \/ 0\.1\) \* 0\.1/);
   assert.match(practiceSource, /Math\.max\(0\.5/);
@@ -104,20 +105,29 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(practiceSource, /repeatRecordButton/);
   assert.doesNotMatch(practiceSource, /const\s+\w+\s*=\s*currentTargetText\s*\?\s*"repeat"\s*:\s*"native"/);
   assert.match(practiceSource, /recognizedTextMatchesLearningLanguage/);
-  assert.match(practiceSource, /hasCompleteComparisonAlignment/);
+  assert.doesNotMatch(practiceSource, /hasPairedComparisonAlignment/);
   assert.match(practiceSource, /renderRecognizedDiff/);
-  assert.match(practiceSource, /renderMissingTargetDiff/);
+  assert.match(practiceSource, /buildPracticeDiffCells/);
   assert.match(practiceSource, /renderPracticeGrade/);
   assert.match(practiceSource, /practice-diff-correction/);
   assert.doesNotMatch(practiceSource, /抜け:/);
-  assert.match(practiceSource, /practice-diff-mismatch/);
-  assert.match(practiceSource, /practice-diff-missing/);
+  assert.match(practiceSource, /practice-diff-cell/);
+  assert.match(practiceSource, /heard: "_"/);
   assert.match(practiceSource, /repeatAudio\.src/);
   assert.match(practiceSource, /currentAttemptComparisonAlignment/);
-  assert.match(practiceSource, /comparisonAlignmentPlaybackRanges/);
-  assert.match(practiceSource, /全体比較再生/);
-  assert.match(practiceSource, /フレーズごと比較再生/);
-  assert.match(practiceSource, /canUsePhraseComparisonPlayback/);
+  assert.match(practiceSource, /currentModelComparisonAlignment/);
+  assert.doesNotMatch(practiceSource, /comparisonAlignmentPlaybackRanges/);
+  assert.match(practiceSource, /\/api\/practice\/attempt-jobs/);
+  assert.match(practiceSource, /form\.append\("use_own_voice", ownVoiceToggle\.checked \? "true" : "false"\)/);
+  assert.match(practiceSource, /\/api\/practice\/voice-jobs\//);
+  assert.match(practiceSource, /voice_conversion_job/);
+  assert.match(practiceSource, /renderPracticeJobStatus/);
+  assert.match(practicePlaybackSource, /全体比較再生/);
+  assert.match(practicePlaybackSource, /一部フレーズ比較再生/);
+  assert.match(practicePlaybackSource, /フレーズごと比較再生/);
+  assert.match(practicePlaybackSource, /no_speech/);
+  assert.match(practiceSource, /currentComparisonPlaybackPlan/);
+  assert.doesNotMatch(practiceSource, /canUsePhraseComparisonPlayback/);
   assert.match(practiceSource, /playAudioSegmentToEnd/);
   assert.match(styles, /\.practice-shell\s*\{[^}]*min-height:\s*100svh/s);
   assert.match(styles, /\.practice-shell\s*\{[^}]*align-content:\s*start/s);
@@ -145,8 +155,9 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(styles, /\.practice-target-text\.has-ruby/s);
   assert.match(styles, /\.practice-target-text rt/s);
   assert.match(styles, /\.practice-diff-correction/);
-  assert.match(styles, /\.practice-diff-mismatch/);
-  assert.match(styles, /\.practice-diff-missing/);
+  assert.match(styles, /\.practice-diff-cell\.is-substitute/);
+  assert.match(styles, /\.practice-diff-cell\.is-delete/);
+  assert.match(styles, /\.practice-diff-heard/);
   assert.doesNotMatch(styles, /\.practice-next-prompt-button/);
   assert.doesNotMatch(styles, /\.practice-repeat-card\s*\{[^}]*order:\s*-1/s);
   assert.doesNotMatch(styles, /\.practice-actions/);
@@ -157,6 +168,14 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(publicSessionSource, /session\.is_admin/);
   assert.match(publicSampleAudioSource, /\/api\/public-sample-audios/);
   assert.match(publicSampleAudioSource, /data-public-sample-feature/);
+});
+
+test("SkitVoice promotes transient reference-audio feedback to dismissible toasts", () => {
+  assert.match(vibevoiceSource, /function showVibeVoiceToast/);
+  assert.match(vibevoiceSource, /voice-lab-toast-close/);
+  assert.match(vibevoiceSource, /参照音声として保存しました/);
+  assert.match(vibevoiceSource, /このブラウザではタブ音声録音を使えません/);
+  assert.match(styles, /\.voice-lab-toast\[data-state="error"\]/);
 });
 
 test("practice history admin uses separated practice history API", () => {
@@ -328,6 +347,9 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceSource, /audio_base64/);
   assert.match(vibevoiceSource, /renderSpeakerScripts/);
   assert.match(vibevoiceSource, /renderArtifacts/);
+  assert.match(vibevoiceSource, /friendlyProgressModel/);
+  assert.match(vibevoiceSource, /VibeVoice Large/);
+  assert.match(vibevoiceSource, /item\.detail/);
   assert.match(vibevoiceSource, /function extensionForMimeType/);
   assert.match(vibevoiceSource, /downloadLink\.download = `vibevoice-output\.\$\{extensionForMimeType\(audioMimeType\)\}`/);
   assert.match(vibevoiceSource, /audio\/mpeg/);

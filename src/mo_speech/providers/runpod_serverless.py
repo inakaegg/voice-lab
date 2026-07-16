@@ -6,11 +6,12 @@ import mimetypes
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 
 from ..env import load_runpod_gateway_env
 from ..pipeline import (
@@ -21,7 +22,11 @@ from ..pipeline import (
     SpeechTranslationPipeline,
     TtsOutput,
 )
-from .openai_api import OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES, OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES
+from .openai_api import (
+    OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES,
+    OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES,
+    AsrTranscription,
+)
 from .voice import SeedVcRuntimeSettings, VoiceConversionBackendInfo
 
 
@@ -56,25 +61,65 @@ class RunpodServerlessClient:
     def configured(self) -> bool:
         return bool(self.endpoint_id and self.api_key)
 
-    def submit(self, input_payload: dict[str, object]) -> dict[str, object]:
+    def submit(
+        self,
+        input_payload: dict[str, object],
+        *,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> dict[str, object]:
         if not self.configured:
             raise RuntimeError("RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.")
         if self.request_mode == "sync":
-            return self._completed_output(
-                self._request_json(
+            body = self._request_json(
                     "/runsync",
                     method="POST",
                     payload={"input": input_payload},
                     timeout_seconds=self.timeout_seconds,
                 )
-            )
+            _notify_runpod_status(progress_callback, body)
+            return self._completed_output(body)
         body = self._request_json(
             "/run",
             method="POST",
             payload={"input": input_payload},
             timeout_seconds=self.timeout_seconds,
         )
-        return self._poll_output(body)
+        _notify_runpod_status(progress_callback, body)
+        return self._poll_output(body, progress_callback=progress_callback)
+
+    def submit_sync(self, input_payload: dict[str, object]) -> dict[str, object]:
+        if not self.configured:
+            raise RuntimeError("RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.")
+        return self._completed_output(
+            self._request_json(
+                "/runsync",
+                method="POST",
+                payload={"input": input_payload},
+                timeout_seconds=self.timeout_seconds,
+            )
+        )
+
+    def submit_job(self, input_payload: dict[str, object]) -> dict[str, object]:
+        """Submit a RunPod job without polling it in this process."""
+        if not self.configured:
+            raise RuntimeError("RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.")
+        return self._request_json(
+            "/run",
+            method="POST",
+            payload={"input": input_payload},
+            timeout_seconds=self.timeout_seconds,
+        )
+
+    def job_status(self, job_id: str) -> dict[str, object]:
+        if not self.configured:
+            raise RuntimeError("RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.")
+        normalized_job_id = str(job_id or "").strip()
+        if not normalized_job_id:
+            raise ValueError("job_id is required")
+        return self._request_json(
+            f"/status/{urllib.parse.quote(normalized_job_id, safe='')}",
+            timeout_seconds=self.timeout_seconds,
+        )
 
     def warmup(self, input_payload: dict[str, object] | None = None) -> dict[str, object]:
         return self.submit({"operation_mode": "warmup", **(input_payload or {})})
@@ -87,7 +132,12 @@ class RunpodServerlessClient:
             timeout_seconds=float(os.getenv("RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS", "3")),
         )
 
-    def _poll_output(self, body: dict[str, object]) -> dict[str, object]:
+    def _poll_output(
+        self,
+        body: dict[str, object],
+        *,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> dict[str, object]:
         job_id = str(body.get("id") or body.get("job_id") or "")
         if not job_id:
             return self._completed_output(body)
@@ -98,6 +148,7 @@ class RunpodServerlessClient:
                 time.sleep(self.poll_interval_seconds)
             first_poll = False
             status_body = self._request_json(f"/status/{job_id}", timeout_seconds=self.timeout_seconds)
+            _notify_runpod_status(progress_callback, status_body)
             status = str(status_body.get("status", "")).upper()
             if status == "COMPLETED":
                 return self._completed_output(status_body)
@@ -243,7 +294,11 @@ class RunpodServerlessVoiceConversionProvider:
         seed_vc_settings: SeedVcRuntimeSettings | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TtsOutput:
-        _notify(progress_callback, "voice_conversion", "声質変換", self.name)
+        def report_runpod_progress(body: dict[str, object]) -> None:
+            progress = _runpod_voice_conversion_progress(body)
+            if progress_callback is not None and progress is not None:
+                progress_callback(progress)
+
         output = self.client.submit(
             {
                 "operation_mode": "voice_conversion",
@@ -253,9 +308,73 @@ class RunpodServerlessVoiceConversionProvider:
                 "reference_audio_mime_type": _audio_mime_type(reference_audio_path),
                 "voice_backend": "seed-vc",
                 **_seed_vc_payload(seed_vc_settings),
-            }
+            },
+            progress_callback=report_runpod_progress,
         )
         return _tts_output_from_output(output)
+
+
+@dataclass
+class RunpodServerlessPracticeAsrProvider:
+    client: RunpodServerlessClient = field(default_factory=RunpodServerlessClient.from_env)
+
+    name = "runpod-funasr-paraformer-zh"
+
+    def transcribe(self, audio_path: Path, source_language: str) -> str:
+        return self.transcribe_detail(audio_path, source_language).text
+
+    def transcribe_detail(
+        self,
+        audio_path: Path,
+        source_language: str,
+        *,
+        include_timestamps: bool = False,
+    ) -> AsrTranscription:
+        if source_language != "zh-CN":
+            raise ValueError("RunPod FunASR practice ASR only supports zh-CN")
+        output = self.client.submit_sync(
+            {
+                "operation_mode": "practice_asr",
+                "source_language": source_language,
+                "audio_mime_type": _audio_mime_type(audio_path),
+                "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+            }
+        )
+        return AsrTranscription(
+            text=str(output.get("text") or "").strip(),
+            model=str(output.get("model") or "funasr/paraformer-zh"),
+            words=_asr_timing_rows(output.get("words")),
+            segments=_asr_timing_rows(output.get("segments")),
+            timestamp_granularities=_string_list(output.get("timestamp_granularities")),
+        )
+
+    def submit_comparison_job(
+        self,
+        *,
+        attempt_audio_path: Path,
+        model_audio_path: Path,
+        source_language: str,
+        target_text: str,
+    ) -> dict[str, object]:
+        if source_language != "zh-CN":
+            raise ValueError("RunPod FunASR practice ASR only supports zh-CN")
+        return self.client.submit_job(
+            {
+                "operation_mode": "practice_asr",
+                "source_language": source_language,
+                "target_text": str(target_text or ""),
+                "audio_mime_type": _audio_mime_type(attempt_audio_path),
+                "audio_base64": base64.b64encode(attempt_audio_path.read_bytes()).decode("ascii"),
+                "model_audio_mime_type": _audio_mime_type(model_audio_path),
+                "model_audio_base64": base64.b64encode(model_audio_path.read_bytes()).decode("ascii"),
+            }
+        )
+
+    def job_status(self, job_id: str) -> dict[str, object]:
+        return self.client.job_status(job_id)
+
+    def health(self) -> dict[str, object]:
+        return self.client.health()
 
 
 def create_runpod_serverless_pipeline() -> RunpodServerlessSpeechTranslationPipeline:
@@ -407,6 +526,8 @@ def _worker_counts(workers: object) -> dict[str, int]:
 
 
 def _audio_mime_type(path: Path) -> str:
+    if path.suffix.lower() == ".webm":
+        return "audio/webm"
     return mimetypes.guess_type(path.name)[0] or "audio/wav"
 
 
@@ -438,9 +559,56 @@ def _float_dict(value: object) -> dict[str, float]:
     return result
 
 
+def _asr_timing_rows(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        try:
+            start = float(item.get("start"))
+            end = float(item.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if start < 0 or end < start:
+            continue
+        rows.append(
+            {
+                "text": str(item.get("text") or item.get("word") or ""),
+                "start": start,
+                "end": end,
+            }
+        )
+    return rows
+
+
 def _runpod_error_message(body: dict[str, object]) -> str:
     error = body.get("error") or body.get("message") or body
     return f"RunPod job failed: {error}"
+
+
+def _runpod_voice_conversion_progress(body: dict[str, object]) -> PipelineProgress | None:
+    status = str(body.get("status") or "").upper()
+    if status in {"", "IN_QUEUE", "QUEUED"}:
+        return PipelineProgress("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless")
+    output = body.get("output")
+    if status in {"IN_PROGRESS", "RUNNING"} and isinstance(output, dict):
+        stage = str(output.get("stage") or "voice_conversion")
+        label = str(output.get("label") or "自分の声に変換しています")
+        provider = str(output.get("model") or output.get("provider") or "Seed-VC")
+        return PipelineProgress(stage, label, provider)
+    if status in {"IN_PROGRESS", "RUNNING"}:
+        return PipelineProgress("initializing", "RunPod workerを初期化しています", "RunPod Serverless")
+    return None
+
+
+def _notify_runpod_status(
+    progress_callback: Callable[[dict[str, object]], None] | None,
+    body: dict[str, object],
+) -> None:
+    if progress_callback is not None:
+        progress_callback(dict(body))
 
 
 def _notify(

@@ -1,0 +1,3567 @@
+{
+  "fixture_contract_version": 1,
+  "alignment_contract_version": 1,
+  "evaluation_role": "challenge",
+  "source_fixture": "../practice_alignment_manual_round2/holdout_cases.json",
+  "source_sha256": "3a2bc2d080acfd130b822686cdcdd412e11b6d8472a0345919ac3855851ee152",
+  "adjudication_fixture": "partial_overlap_attempt_intent.json",
+  "adjudication_sha256": "72d9f89e47de5c9a1d1f74dbbfd9ee023218a1dc3e9b150791d6291a63b10b20",
+  "ownership_profile": "ownership.conservative",
+  "content_profile": "content.literal_normalized",
+  "cases": [
+    {
+      "name": "manual_r2_zh_011_point_timestamp_phrase_end_table",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "把钥匙放桌上。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "把钥匙放桌上",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.61
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "别忘了关门。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "别忘了关门",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 6,
+            "audio_start": 0.98,
+            "audio_end": 1.64
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 3,
+            "phrase_index": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_zh_012_point_timestamp_phrase_start_bath",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先检查水温。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先检查水温",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.8
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "再给孩子洗澡。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "再给孩子洗澡",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.16,
+            "audio_end": 1.85
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 3,
+            "phrase_index": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_zh_013_internal_insertion_bank",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "我明天去银行。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "我明天先去那个银行",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 1.23
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "办完事就回来。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "办完事就回来",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 7,
+            "audio_start": 1.58,
+            "audio_end": 2.3
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_014_self_correction_meeting_time",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "把会议改到三点。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "把会议改到两点不对三点",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.1,
+            "audio_end": 1.47
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "通知所有人。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "通知所有人",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 7,
+            "audio_start": 1.83,
+            "audio_end": 2.45
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_015_restart_map",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "请打开地图。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请打开打开一下地图",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 1.14
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "找到最近的车站。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "找到最近的车站",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 7,
+            "audio_start": 1.49,
+            "audio_end": 2.36
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_016_opposite_clothing_content",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "这件外套太大了。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "这条裤子太短了",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.91
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "我要换小一号。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "我要换长一点",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.32,
+            "audio_end": 2.02
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_017_breakfast_drink_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "早餐我想喝豆浆。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "早餐我想喝咖啡",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.13,
+            "audio_end": 0.98
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "不要加糖。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "不要放牛奶",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.37,
+            "audio_end": 2.04
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_018_repeated_open_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先打开冰箱。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先打开冰箱",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.1,
+            "audio_end": 0.75
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "打开以后拿出牛奶。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "打开以后打开门拿出牛奶",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 7,
+            "audio_start": 1.11,
+            "audio_end": 2.34
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_019_shared_departure_prefix_negative",
+      "adjudication_id": "case_03",
+      "attempt_intent": "ambiguous",
+      "expectation_status": "ambiguous_excluded",
+      "excluded_from_score": true,
+      "reason": "具体的な時刻表現は一致するが、後続は出発ではなく別の完結した行動であり、大きな言い間違いと別発話のどちらも成立する。"
+    },
+    {
+      "name": "manual_r2_zh_020_middle_instruction_omitted",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先填写表格。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先填写表格",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.76
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "然后出示护照。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "最后签名。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "最后签名",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 5,
+            "audio_start": 1.42,
+            "audio_end": 1.94
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_011_point_timestamp_phrase_end_shelf",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Put the keys on the shelf.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Put the keys on the shelf",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.1,
+            "audio_end": 0.79
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Lock the back door.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "lock the back door",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 10,
+            "audio_start": 1.17,
+            "audio_end": 1.94
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 5,
+            "phrase_index": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_en_012_point_timestamp_phrase_start_timer",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Check the oven.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Check the oven",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.72
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Then set the timer.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "then set the timer",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 7,
+            "audio_start": 1.08,
+            "audio_end": 1.65
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 3,
+            "phrase_index": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_en_013_internal_insertion_hotel",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "I will call the hotel.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "I will quickly call the hotel",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.1,
+            "audio_end": 1.25
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "I need to confirm the booking.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "I need to confirm the booking",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 12,
+            "audio_start": 1.61,
+            "audio_end": 2.72
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_014_self_correction_appointment_day",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The appointment is on Tuesday.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The appointment is on Monday no Tuesday",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 7,
+            "audio_start": 0.11,
+            "audio_end": 1.52
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Please arrive early.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "please arrive early",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 7,
+            "word_end_index": 10,
+            "audio_start": 1.88,
+            "audio_end": 2.62
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_015_opposite_jacket_size",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "This jacket is too large.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "These shoes are too tight",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.12,
+            "audio_end": 1.06
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "I need a smaller size.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "I need a larger size",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 10,
+            "audio_start": 1.45,
+            "audio_end": 2.34
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_016_drink_and_delivery_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "I ordered tea without sugar.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "I ordered coffee with milk",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 1.18
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Please bring it to my table.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "please leave it at the counter",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 11,
+            "audio_start": 1.56,
+            "audio_end": 2.62
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_017_repeated_open_anchor_settings",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Open the settings menu.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Open the settings menu",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.95
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Open privacy and disable tracking.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "open the menu open privacy and disable tracking",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 12,
+            "audio_start": 1.31,
+            "audio_end": 3.12
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_018_shared_arrival_prefix_negative",
+      "adjudication_id": "case_04",
+      "attempt_intent": "relevant_attempt",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The bus leaves from platform four.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The bus leaves from platform four",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.11,
+            "audio_end": 1.37
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "It arrives before noon.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "it arrives with new seats",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 11,
+            "audio_start": 1.76,
+            "audio_end": 2.73
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_019_middle_cutting_step_omitted",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Wash the vegetables.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Wash the vegetables",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.82
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Cut them into small pieces.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "Put them in the bowl.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "put them in the bowl",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 8,
+            "audio_start": 1.54,
+            "audio_end": 2.36
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_020_segment_count_mismatch_unavailable",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 0,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 1,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The lecture starts at ten.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Bring your notebook.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_021_point_timestamp_inside_delivery",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "快递已经到了。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "快递已经到了",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.68
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "请下楼取件。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请下楼取件",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.04,
+            "audio_end": 1.72
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 1,
+            "phrase_index": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_zh_022_internal_filler_appointment",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "我想预约明天下午。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "我想预约嗯明天下午",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 1.28
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "两点以后都可以。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "两点以后都可以",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 6,
+            "audio_start": 1.65,
+            "audio_end": 2.4
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_023_failed_restart_wifi",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先连接无线网络。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先连接连接不上再连接无线网络",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.1,
+            "audio_end": 1.55
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "然后打开应用。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "然后打开应用",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 8,
+            "audio_start": 1.91,
+            "audio_end": 2.65
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_024_temperature_device_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "房间里有点冷。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "房间里特别热",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 2,
+            "audio_start": 0.12,
+            "audio_end": 0.79
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "请把暖气打开。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请把空调关掉",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 2,
+            "word_end_index": 5,
+            "audio_start": 1.18,
+            "audio_end": 1.95
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_025_schedule_topic_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "今天的会议取消了。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "今天的课程照常进行",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 1.08
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "我们改到下周再谈。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "我们明天继续上课",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.48,
+            "audio_end": 2.36
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_026_repeated_download_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先下载文件。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先下载文件",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.1,
+            "audio_end": 0.75
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "下载完成以后解压。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "下载完成以后下载到桌面再解压",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.12,
+            "audio_end": 2.39
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_027_repeated_confirm_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "请确认姓名。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请确认姓名",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.76
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "确认以后按提交。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "确认姓名以后按提交",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.13,
+            "audio_end": 2.05
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_028_shared_exit_prefix_negative",
+      "adjudication_id": "case_05",
+      "attempt_intent": "ambiguous",
+      "expectation_status": "ambiguous_excluded",
+      "excluded_from_score": true,
+      "reason": "依頼形式と場所は一致するが中心動作が変わり、認識文だけでも自然な別の依頼として成立するため、試行意図を確定できない。"
+    },
+    {
+      "name": "manual_r2_zh_029_first_phrase_omitted",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先关窗。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "再关灯。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "再关灯",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 2,
+            "audio_start": 0.14,
+            "audio_end": 0.55
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "最后锁门。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "最后锁门",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 2,
+            "word_end_index": 4,
+            "audio_start": 0.91,
+            "audio_end": 1.43
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_030_available_false_ignores_words",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 0,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {"index": 0, "source_index": 0, "target_text": "请保存收据。", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null},
+          {"index": 1, "source_index": 1, "target_text": "以后可能会用到。", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null}
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_021_point_timestamp_inside_sunrise",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "We should leave before sunrise.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "We should leave before sunrise",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 0.94
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The road gets busy later.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the road gets busy later",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 10,
+            "audio_start": 1.33,
+            "audio_end": 2.31
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 3,
+            "phrase_index": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_en_022_internal_insertion_signed_form",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Please upload the signed form.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Please upload the fully signed form",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.1,
+            "audio_end": 1.39
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Keep a copy for yourself.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "keep a copy for yourself",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 11,
+            "audio_start": 1.77,
+            "audio_end": 2.75
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_023_direction_self_correction",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Turn left at the pharmacy.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Turn right sorry turn left at the pharmacy",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 8,
+            "audio_start": 0.1,
+            "audio_end": 1.77
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The station is across the street.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the station is across the street",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 8,
+            "word_end_index": 14,
+            "audio_start": 2.15,
+            "audio_end": 3.27
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_024_battery_storage_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The battery is almost empty.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The storage is nearly full",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 1.09
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Charge the phone tonight.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "delete the photos tomorrow",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 9,
+            "audio_start": 1.47,
+            "audio_end": 2.49
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_025_room_reservation_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Our table is near the window.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Our room is beside the elevator",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.12,
+            "audio_end": 1.3
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The reservation is under Lee.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the booking is under Chen",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 11,
+            "audio_start": 1.69,
+            "audio_end": 2.62
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_026_repeated_read_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Read the first paragraph.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Read the first paragraph",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.98
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Read it again more slowly.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "read the paragraph again more slowly",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 10,
+            "audio_start": 1.35,
+            "audio_end": 2.73
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_027_repeated_blue_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Press the blue button.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Press the blue button",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 0.91
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Press confirm when the light turns blue.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "press confirm when the button light turns blue",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 12,
+            "audio_start": 1.28,
+            "audio_end": 2.97
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_028_shared_museum_prefix_negative",
+      "adjudication_id": "case_06",
+      "attempt_intent": "relevant_attempt",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Tickets are sold at the front desk.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Tickets are sold at the front desk",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 7,
+            "audio_start": 0.11,
+            "audio_end": 1.4
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The museum closes at five.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the museum closes for renovation",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 7,
+            "word_end_index": 12,
+            "audio_start": 1.79,
+            "audio_end": 2.96
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_029_first_phrase_omitted_travel",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Buy the ticket online.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Show the code at the gate.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Show the code at the gate",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.13,
+            "audio_end": 1.15
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "Keep your passport ready.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "keep your passport ready",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 10,
+            "audio_start": 1.52,
+            "audio_end": 2.47
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_030_segment_fallback_three_phrases",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 3,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Check in at the desk.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Check in at the desk",
+            "text_source": "segments",
+            "timestamp_source": "segments",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": 0.16,
+            "audio_end": 1.08
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Leave your bag here.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Leave your bag here",
+            "text_source": "segments",
+            "timestamp_source": "segments",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": 1.42,
+            "audio_end": 2.24
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "Wait by the elevator.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Wait by the elevator",
+            "text_source": "segments",
+            "timestamp_source": "segments",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": 2.6,
+            "audio_end": 3.48
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_031_point_timestamp_inside_medicine",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先把药吃了。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先把药吃了",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.58
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "半小时后再喝水。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "半小时后再喝水",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 0.96,
+            "audio_end": 1.77
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 1,
+            "phrase_index": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_zh_032_descriptive_insertion_photo",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "我把照片发给你。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "我把刚才拍的照片发给你",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 1.3
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "你收到以后告诉我。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "你收到以后告诉我",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 6,
+            "audio_start": 1.67,
+            "audio_end": 2.42
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_033_destination_self_correction",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "这趟车开往机场。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "这趟车开往火车站不对机场",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 1.49
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "下一站不能下车。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "下一站不能下车",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 8,
+            "audio_start": 1.87,
+            "audio_end": 2.65
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_034_file_photo_version_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "桌上的文件是新的。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "柜子里的照片是旧的",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 1.08
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "旧版本已经删除了。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "新版还没有上传",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.47,
+            "audio_end": 2.29
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_035_advice_activity_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "医生建议多休息。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "教练建议多运动",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.96
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "明天不要去上班。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "明天照常去训练",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.34,
+            "audio_end": 2.15
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_036_repeated_copy_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先复制链接。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先复制链接",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.1,
+            "audio_end": 0.73
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "复制完成后贴到浏览器。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "复制完成后再复制一次贴到浏览器",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 7,
+            "audio_start": 1.1,
+            "audio_end": 2.49
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_037_shared_pickup_time_negative",
+      "adjudication_id": "case_07",
+      "attempt_intent": "unrelated_speech",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 1,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 3,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "包裹放在前台。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "包裹放在前台",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.86
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "下午三点来取。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_038_shared_child_prefix_negative",
+      "adjudication_id": "case_08",
+      "attempt_intent": "ambiguous",
+      "expectation_status": "ambiguous_excluded",
+      "excluded_from_score": true,
+      "reason": "主語と完了相は共有するが出来事が睡眠から水泳習得へ変わり、どちらも自然な文として成立するため、試行意図を確定できない。"
+    },
+    {
+      "name": "manual_r2_zh_039_trailing_phrase_omitted",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先输入密码。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先输入密码",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.76
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "再点击登录。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "再点击登录",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.13,
+            "audio_end": 1.78
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "确认页面已经打开。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_040_empty_timestamp_arrays",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 0,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "今天先到这里。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "明天继续练习。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_031_point_timestamp_phrase_end_address",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Please write down the address.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Please write down the address",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.1,
+            "audio_end": 0.78
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Keep the note with you.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "keep the note with you",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 10,
+            "audio_start": 1.17,
+            "audio_end": 2.03
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 4,
+            "phrase_index": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_en_032_adverb_insertion_train",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The train stops at Oxford.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The train briefly stops at Oxford",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.1,
+            "audio_end": 1.36
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "We change there for Bristol.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "we change there for Bristol",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 11,
+            "audio_start": 1.74,
+            "audio_end": 2.73
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_033_room_number_self_correction",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "My room number is four oh eight.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "My room number is four eighty sorry four oh eight",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 10,
+            "audio_start": 0.1,
+            "audio_end": 2.01
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The key is in my pocket.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the key is in my pocket",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 10,
+            "word_end_index": 16,
+            "audio_start": 2.39,
+            "audio_end": 3.31
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_034_kitchen_gym_schedule_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The kitchen closes at nine.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The gym opens at six",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 1.0
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Order dinner before then.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "finish exercise after that",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 9,
+            "audio_start": 1.38,
+            "audio_end": 2.4
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_035_medicine_vitamin_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "This medicine may cause drowsiness.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "This vitamin gives me energy",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.12,
+            "audio_end": 1.27
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Do not drive tonight.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "I will run tomorrow",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 9,
+            "audio_start": 1.65,
+            "audio_end": 2.46
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_036_repeated_code_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Copy the access code.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Copy the access code",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.91
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Paste the code into the login form.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "copy the code again paste the code into the login form",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 15,
+            "audio_start": 1.28,
+            "audio_end": 3.35
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_037_shared_garden_prefix_negative",
+      "adjudication_id": "case_09",
+      "attempt_intent": "ambiguous",
+      "expectation_status": "ambiguous_excluded",
+      "excluded_from_score": true,
+      "reason": "target固有の主語は共有するが述語全体が異なり、庭についての独立した説明文としても成立するため、試行意図を確定できない。"
+    },
+    {
+      "name": "manual_r2_en_038_shared_inside_structure_negative",
+      "adjudication_id": "case_10",
+      "attempt_intent": "relevant_attempt",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Please charge the tablet.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Please charge the tablet",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.96
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The cable is inside the drawer.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the label is inside the folder",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 10,
+            "audio_start": 1.35,
+            "audio_end": 2.45
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_039_trailing_phrase_omitted",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Return the key at the desk.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Return the key at the desk",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 6,
+            "audio_start": 0.11,
+            "audio_end": 1.12
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Sign the checkout form.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "sign the checkout form",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 6,
+            "word_end_index": 10,
+            "audio_start": 1.5,
+            "audio_end": 2.35
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "Keep the receipt.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_040_available_false_ignores_words",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 0,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {"index": 0, "source_index": 0, "target_text": "The parcel is at reception.", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null},
+          {"index": 1, "source_index": 1, "target_text": "Collect it before six.", "assignment_status": "unassigned", "available": false, "matched_text": "", "text_source": "none", "timestamp_source": "none", "word_start_index": null, "word_end_index": null, "audio_start": null, "audio_end": null}
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_041_point_timestamp_phrase_start_departure",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "雨已经停了。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "雨已经停了",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.12,
+            "audio_end": 0.73
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "我们现在出发。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "我们现在出发",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.1,
+            "audio_end": 1.62
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 3,
+            "phrase_index": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_zh_042_address_detail_insertion",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "请把地址写清楚。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请把地址门牌号也写清楚",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 1.31
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "快递员才能找到。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "快递员才能找到",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 7,
+            "audio_start": 1.69,
+            "audio_end": 2.49
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_043_language_self_correction",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先选择中文。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先选择英文不对中文",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 1.18
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "再按确认按钮。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "再按确认按钮",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 7,
+            "audio_start": 1.55,
+            "audio_end": 2.3
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_044_payment_atm_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "这家店只收现金。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "这家店可以刷卡",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.9
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "附近有一台取款机。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "楼下的取款机坏了",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.29,
+            "audio_end": 2.17
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_045_repeated_battery_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先检查电池。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先检查电池",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.1,
+            "audio_end": 0.72
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "检查电量以后重新启动。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "检查电量以后再看电池状态重新启动",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 7,
+            "audio_start": 1.09,
+            "audio_end": 2.5
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_046_repeated_open_order_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "请打开订单。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请打开订单",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.74
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "打开详情查看价格。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "打开订单以后再打开详情查看价格",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 8,
+            "audio_start": 1.11,
+            "audio_end": 2.61
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_047_shared_remember_prefix_negative",
+      "adjudication_id": "case_11",
+      "attempt_intent": "relevant_attempt",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "明天早上会下雨。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "明天早上会下雨",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 2,
+            "audio_start": 0.12,
+            "audio_end": 0.83
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "记得带一把伞。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "记得带一盒彩笔",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 2,
+            "word_end_index": 5,
+            "audio_start": 1.22,
+            "audio_end": 2.02
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_048_leading_phrase_omitted_package",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "包裹已经到了。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "请带身份证下楼。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "请带身份证下楼",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.13,
+            "audio_end": 0.96
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "取完以后给我消息。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "取完以后给我消息",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.33,
+            "audio_end": 2.19
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_049_trailing_phrase_omitted_backup",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先连接硬盘。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "先连接硬盘",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 3,
+            "audio_start": 0.11,
+            "audio_end": 0.76
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "然后开始备份。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "然后开始备份",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 3,
+            "word_end_index": 6,
+            "audio_start": 1.13,
+            "audio_end": 1.87
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "完成以后关闭窗口。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_zh_050_segment_count_mismatch_three_targets",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 1,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 1,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "先打开盒子。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "取出说明书。",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "按照步骤安装。",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "按照步骤安装",
+            "text_source": "segments",
+            "timestamp_source": "segments",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": 1.91,
+            "audio_end": 2.76
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_041_point_timestamp_phrase_start_departure",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The rain has stopped.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The rain has stopped",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 0.85
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "We can leave now.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "we can leave now",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 8,
+            "audio_start": 1.23,
+            "audio_end": 1.82
+          }
+        ],
+        "zero_duration_owners": [
+          {
+            "word_index": 4,
+            "phrase_index": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "manual_r2_en_042_address_detail_insertion",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Write the address clearly.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Write the complete address clearly",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.1,
+            "audio_end": 1.31
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "The courier needs the number.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the courier needs the apartment number",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 11,
+            "audio_start": 1.69,
+            "audio_end": 3.0
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_043_language_self_correction",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Select English.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Select Spanish no English",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 1.13
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Then press continue.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "then press continue",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 7,
+            "audio_start": 1.51,
+            "audio_end": 2.23
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_044_payment_atm_mismatch",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "This shop accepts cash only.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "This market takes cards",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 1.02
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "There is an ATM across the road.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "the bank machine downstairs is broken",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 10,
+            "audio_start": 1.41,
+            "audio_end": 2.73
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_045_repeated_battery_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Check the battery level.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Check the battery level",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.94
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Check the charger before restarting.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "check the battery connector and charger before restarting",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 12,
+            "audio_start": 1.31,
+            "audio_end": 3.28
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_046_repeated_open_order_anchor",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Open the order page.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Open the order page",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.1,
+            "audio_end": 0.89
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Open the details and check the price.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "open the order again then open the details and check the price",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 16,
+            "audio_start": 1.26,
+            "audio_end": 3.48
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_047_shared_remember_prefix_negative",
+      "adjudication_id": "case_12",
+      "attempt_intent": "relevant_attempt",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": true,
+        "unassigned_non_filler_count": 0,
+        "complete": true,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "The forecast says rain tomorrow.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "The forecast says rain tomorrow",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 5,
+            "audio_start": 0.11,
+            "audio_end": 1.26
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Remember to carry an umbrella.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "remember to carry a paint brush",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 5,
+            "word_end_index": 11,
+            "audio_start": 1.64,
+            "audio_end": 2.84
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_048_leading_phrase_omitted_package",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Your package has arrived.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Bring your identification downstairs.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Bring your identification downstairs",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.12,
+            "audio_end": 1.25
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "Message me after collecting it.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "message me after collecting it",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 9,
+            "audio_start": 1.62,
+            "audio_end": 2.65
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_049_trailing_phrase_omitted_backup",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 3,
+        "playable_phrase_count": 2,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 0,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Connect the external drive.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Connect the external drive",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 0,
+            "word_end_index": 4,
+            "audio_start": 0.11,
+            "audio_end": 1.03
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Start the backup process.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "start the backup process",
+            "text_source": "words",
+            "timestamp_source": "words",
+            "word_start_index": 4,
+            "word_end_index": 8,
+            "audio_start": 1.4,
+            "audio_end": 2.26
+          },
+          {
+            "index": 2,
+            "source_index": 2,
+            "target_text": "Remove the drive when finished.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    },
+    {
+      "name": "manual_r2_en_050_segment_count_exceeds_targets",
+      "expectation_status": "fixed",
+      "excluded_from_score": false,
+      "expected": {
+        "outcome": "evaluated",
+        "target_phrase_count": 2,
+        "playable_phrase_count": 1,
+        "all_phrases_playable": false,
+        "unassigned_non_filler_count": 2,
+        "complete": false,
+        "phrases": [
+          {
+            "index": 0,
+            "source_index": 0,
+            "target_text": "Open the package carefully.",
+            "assignment_status": "unassigned",
+            "available": false,
+            "matched_text": "",
+            "text_source": "none",
+            "timestamp_source": "none",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": null,
+            "audio_end": null
+          },
+          {
+            "index": 1,
+            "source_index": 1,
+            "target_text": "Read the instructions first.",
+            "assignment_status": "assigned",
+            "available": true,
+            "matched_text": "Read the instructions first",
+            "text_source": "segments",
+            "timestamp_source": "segments",
+            "word_start_index": null,
+            "word_end_index": null,
+            "audio_start": 1.64,
+            "audio_end": 2.72
+          }
+        ],
+        "zero_duration_owners": []
+      }
+    }
+  ]
+}

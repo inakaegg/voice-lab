@@ -11,9 +11,9 @@
 1. 母語で言いたい内容を録音する
 2. 学習言語の文と模範音声を生成する
 3. その文を発音して録音する
-4. ASR結果、類似度、フレーズ単位の交互再生で聞き比べる
+4. お手本と復唱の両音声をtimestamp付きASRし、差分とフレーズ単位の交互再生で聞き比べる
 
-現在は日本語話者向けとして、中国語と英語を学習対象に選べます。
+現在は日本語話者向けとして、中国語と英語を学習対象に選べます。任意の `自分の声` を有効にすると、最初の録音をSeed-VCの参照音声として、模範音声を自分の声質へ変換できます。
 
 ### SkitVoice — かんたんスキット生成
 
@@ -34,8 +34,8 @@ URL切り出しはローカル版の `yt-dlp` と `ffmpeg` だけが担当しま
 ```mermaid
 flowchart LR
     Browser[Browser\nSpeakLoop / SkitVoice] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
-    Worker --> OpenAI[OpenAI API\nASR / Translation / TTS]
-    Worker --> RunPod[RunPod Serverless\nVibeVoice / Seed-VC]
+    Worker --> OpenAI[OpenAI API\nNative + English ASR / Translation / TTS]
+    Worker --> RunPod[RunPod Serverless\nChinese FunASR / VibeVoice / Seed-VC]
     Worker --> KV[Workers KV\nSettings / Short-lived Jobs / Fallback]
     Worker --> D1[D1\nQuota / Audit / Sample Metadata]
     Worker --> R2[R2\nPublic Sample Audio]
@@ -45,6 +45,8 @@ flowchart LR
 - ブラウザへOpenAI/RunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
 - 公開版はGoogleログイン、feature別quota、入力上限、管理者quota除外、簡易監査ログをWorkerで処理します。
 - GPU課金が必要なテストと、fake modelで検証できるrequest・job・error処理を分離しています。
+- 中国語復唱はRunPodの非同期jobとprogress updateを使い、GPU worker待ち、初期化、FunASR処理中、完了／失敗を画面に表示します。
+- SkitVoiceもRunPodの非同期進捗を表示し、VibeVoiceとSeed-VCのモデル読込み、生成、ASR、声質変換、出力仕上げを区別します。
 
 詳細は [Cloudflare構成](docs/deployment/CLOUDFLARE.md)、[RunPod構成](docs/deployment/RUNPOD.md)、[SkitVoice仕様](docs/speech-translation/VIBEVOICE.md) を参照してください。
 

@@ -1,8 +1,10 @@
 # RunPodデプロイ手順
 
+更新日: 2026-07-15
+
 ## 現在の状態
 
-RunPodへデプロイするためのDockerfile、CLI補助スクリプト、Serverless handlerは用意している。RunPod APIキー、Docker registry、Network Volume ID、GPU在庫はアカウント側の設定が必要なため、実リソース作成は未実行。
+RunPod向けDockerfile、CLI補助スクリプト、Serverless handler、Cloudflare／ローカルFastAPIからの接続経路を実装している。RunPod APIキー、Docker registry、Network Volume ID、GPU在庫などの実リソース状態はアカウント側で変わるため、この文書では固定の作成済み／未作成状態を正とせず、デプロイ時に `.runpod.env` とRunPod管理画面で確認する。
 
 結論として、次のRunPod対応ブランチではServerlessを先にアプリの推論backendとして接続する。
 
@@ -11,6 +13,12 @@ RunPodへデプロイするためのDockerfile、CLI補助スクリプト、Serv
 3. RunPod `/health` と `warmup` operationでcold startとwarm状態を分けて表示、計測する。
 4. Seed-VCのwarm実行が十分速いと実測できた場合だけ、ユーザー画面ではVCを既定動作にし、`にてるこえ` トグルを隠す検討に進む。
 5. 公開MVPではUI/gatewayをCloudflare側へ分け、RunPodは推論APIだけにする。
+
+Serverless handlerは、音声翻訳、テキスト読み上げ、Seed-VC、VibeVoiceに加え、SpeakLoopの中国語発音練習用 `practice_asr` を受ける。`practice_asr` はお手本と復唱の2音声をFunASR Paraformer Chineseでtimestamp付きASRし、VAD・句読点モデルを併用する。SpeakLoopの英語発音練習は両音声にOpenAI `whisper-1`、母語で話す録音はOpenAIの自動言語判定を引き続き使う。
+
+SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り `/status/<job-id>` をpollingする。handlerはprogress updateとして `initializing`、`loading_model`、`transcribing_model`、`transcribing_attempt`、`finalizing` を送る。queue中はjob statusと `/health` のworker数から、worker割り当て待ちとworker初期化中を区別する。RunPodが返す `delayTime` と `executionTime` もUIの補足情報に使う。
+
+SkitVoiceも同じ非同期job経路で進捗を返す。handlerは `loading_vibevoice_model`、`vibevoice_generation`、`directed_asr`、`loading_seed_vc_model`、`voice_conversion`、`reconstruct`、`finalizing` をモデル名付きで送る。SpeakLoopで `自分の声` を選んだ場合も、通常TTSを変換元、最初の録音をSeed-VC参照音声として同じvoice conversion jobへ送り、GPU待機、Seed-VCモデル読込、声質変換を表示する。Cloudflare WorkerとローカルFastAPIは途中結果を履歴保存せず、RunPod job statusをpollingして既存進捗欄へ表示する。失敗時はRunPodが返した原因を保持し、残高不足を文言から明確に判別できる場合だけBillingの確認を案内する。
 
 ## Podで確認する場合
 
@@ -80,6 +88,11 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_WORKERS_MAX` | 最大worker数。既定は `1`。`2` 以上にすると同時VC jobを別workerへ振れるが、新規workerはcold startとSeed-VC preloadをそれぞれ行うため、低頻度デモでは必ず高速化する設定ではない。 |
 | `MO_PRELOAD_MODELS` | FastAPI通常pipelineの起動時preload。30GB最小デモでは `0` にし、VCだけを別途preloadする。 |
 | `MO_VC_BACKENDS` | UI/VC比較で使うVC backend。RunPod単体デモでは `seed-vc` に絞る。 |
+| `FUNASR_MODEL` / `FUNASR_VAD_MODEL` / `FUNASR_PUNC_MODEL` | 中国語発音練習ASRの本体、VAD、句読点モデル。既定は `funasr/paraformer-zh`、`funasr/fsmn-vad`、`funasr/ct-punc`。 |
+| `FUNASR_HUB` / `FUNASR_DEVICE` | FunASRの取得元と実行device。RunPod imageの既定は `hf` / `cuda`。 |
+| `MO_RUNPOD_PRELOAD_FUNASR_ON_START` | 起動時にFunASRを先読みするか。VibeVoiceやSeed-VCとVRAMを共用するため既定は `0`。 |
+| `MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR` | FunASRをロードする前に常駐Seed-VCを解放するか。既定は `1`。 |
+| `MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION` / `MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE` | Seed-VCまたはVibeVoiceの前にFunASRを解放するか。既定は `1`。 |
 | `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー。VibeVoice指定台詞モードの既定ASRでも使う。 |
 | `MO_VIBEVOICE_DIRECTED_ASR_PROVIDER` | VibeVoice指定台詞モードのtimestamp ASR。既定は `openai`。GPU上の自前ASRを使う場合だけ `faster-whisper` にする。 |
 | `MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL` | 指定台詞モードでOpenAI ASRを使う時のモデル。timestamp取得のため既定は `whisper-1`。 |
@@ -160,7 +173,7 @@ push後にRunPod Serverlessへ反映する通常手順では、まず `scripts/r
 | `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` と `RUNPOD_IMAGE` を使い、既存templateを更新する。endpoint切替やworker入れ替えは行わない |
 | `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` の `RUNPOD_IMAGE` から新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
 | `scripts/runpod_build_push.sh` | ローカルDockerで直接build/pushしたい時 | `Dockerfile.runpod` をローカルでbuildx buildしてregistryへpushする。Actions運用では通常使わない |
-| `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、VibeVoiceなどのjobを直接投げる |
+| `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、中国語練習ASR、VibeVoiceなどのjobを直接投げる |
 
 判断に迷う場合は、`RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh` で実行予定のtag、template名、workflow起動内容を確認してからdry-runなしで実行する。
 
@@ -389,6 +402,23 @@ python scripts/runpod_smoke_serverless.py \
   --preload-voice-conversion
 ```
 
+中国語発音練習ASRだけを直接確認する場合:
+
+```sh
+RUNPOD_ENDPOINT_ID=<endpoint-id> \
+RUNPOD_API_KEY=<api-key> \
+python scripts/runpod_smoke_serverless.py \
+  --operation-mode practice_asr \
+  --audio /path/to/chinese-attempt.webm \
+  --model-audio /path/to/chinese-model.wav \
+  --target-text '你好吗？你今天去哪里？' \
+  --request-mode async
+```
+
+`--model-audio` と `--target-text` を省略すると復唱音声単体のFunASR確認になる。SpeakLoopの比較経路を確認する場合は省略しない。両音声を指定したsmokeは `practice_asr_contract_version=2` と `model_transcription` も検査し、旧imageまたは不完全なhandler応答では終了コード1にする。
+
+FunASRをwarmupする場合は `--operation-mode warmup --preload-practice-asr` を使う。Seed-VCとFunASRを同じwarmup requestで同時に先読みする指定は受け付けない。
+
 ローカルFastAPIからServerless backendを使う場合は、FastAPI側にもRunPod接続設定を渡す。シェルで渡してもよいし、git管理外の `.runpod.env` に `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を入れてもよい。ローカルFastAPI自体のprovider設定を変える場合は、`.env` またはシェルで明示する。
 
 ```sh
@@ -459,7 +489,7 @@ Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker
 
 FlashBoot状態はRunPod REST APIのendpoint詳細で `flashboot=true` を確認する。`runpodctl serverless create --help` ではFlashBootが既定有効になっているが、既存endpointの確認や更新はCLIのversion差分を受ける場合がある。既存endpointが `flashboot=false` の場合は、REST APIの `POST /v1/endpoints/{endpoint_id}/update` に `{"flashboot": true}` を送るか、FlashBoot有効のendpointを作り直す。
 
-VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードできる。ただしVibeVoice Largeを同じworkerで使う場合、Seed-VC residentが数GiBのVRAMを保持し、20GB級GPUではLargeのロード中にOOMしやすい。そのためVibeVoice用image/envでは `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` を既定にし、必要な時だけwarmup requestでVCを前倒しする。`MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE=1` の場合、VibeVoice request前に既存のVC serviceを解放してVRAMを空ける。指定台詞モードは `全話者VibeVoice生成 -> 話者別Seed-VC -> VC後音声のASR -> 分割/再配置` の順に進める。ASRは既定でOpenAI `whisper-1` を使い、Largeとfaster-whisperを同じGPUへ載せない。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前に管理者用画面 `/admin` の手動準備ボタンからwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。CloudflareのページHTML配信だけではRunPod jobは起きず、管理者用画面の手動操作、または録音送信後の実変換でRunPod jobが作られる。
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードできる。ただしVibeVoice Largeを同じworkerで使う場合、Seed-VC residentが数GiBのVRAMを保持し、20GB級GPUではLargeのロード中にOOMしやすい。そのためVibeVoice用image/envでは `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` を既定にし、必要な時だけwarmup requestでVCを前倒しする。中国語練習用FunASRも同じworker processへ遅延ロードするが、Seed-VCまたはVibeVoiceを使う操作へ切り替える際はFunASRを解放し、逆にFunASRを使う前は常駐Seed-VCを解放する。つまりDocker imageとendpointは共通でも、大きいGPUモデルをすべて同時常駐させる構成ではない。`MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE=1` の場合、VibeVoice request前にも既存のVC serviceを解放してVRAMを空ける。指定台詞モードは `全話者VibeVoice生成 -> 話者別Seed-VC -> VC後音声のASR -> 分割/再配置` の順に進める。指定台詞モードのASRは既定でOpenAI `whisper-1` を使い、Largeとfaster-whisperを同じGPUへ載せない。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前に管理者用画面 `/admin` の手動準備ボタンからwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。CloudflareのページHTML配信だけではRunPod jobは起きず、管理者用画面の手動操作、または録音送信後の実変換でRunPod jobが作られる。
 
 `RUNPOD_WORKERS_MAX` を増やすと、同時アクセス時にRunPodが追加workerを起動できる。ただし `RUNPOD_WORKERS_MIN=0` のデモ運用では、追加workerは基本的にcold状態から起動し、各worker内でSeed-VC preloadが必要になる。1つ目のwarm workerだけで処理できる程度の同時数なら `workers-max=1` の方が予測しやすい。複数人が同時にVCを使うデモでは `workers-max=2` を試せるが、2人目以降の初回VCはcold start分だけ遅くなる可能性を測定して判断する。
 

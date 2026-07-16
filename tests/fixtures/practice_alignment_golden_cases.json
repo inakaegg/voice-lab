@@ -1,0 +1,885 @@
+[
+  {
+    "name": "zh_actual_short_suffix_similarity_trap",
+    "category": "multiple_substitutions",
+    "tags": ["zh-CN", "real-log", "single-phrase", "short-substring-trap"],
+    "description": "実ログ由来。複数の誤認識があっても、類似度の高い後半だけでなく発話全体を比較する。",
+    "target_language": "zh-CN",
+    "target_text": "我家猫掉毛特别厉害。",
+    "recognized_text": "我叫猫叼猫特别厉害。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "我", "start": 1.09, "end": 1.81},
+        {"text": "叫", "start": 2.11, "end": 2.35},
+        {"text": "猫", "start": 2.35, "end": 2.589},
+        {"text": "叼", "start": 2.589, "end": 2.83},
+        {"text": "猫", "start": 2.83, "end": 3.009},
+        {"text": "特", "start": 3.009, "end": 3.25},
+        {"text": "别", "start": 3.25, "end": 3.43},
+        {"text": "厉", "start": 3.43, "end": 3.67},
+        {"text": "害", "start": 3.67, "end": 4.0}
+      ],
+      "segments": [{"text": "我叫猫叼猫特别厉害。", "start": 1.09, "end": 4.0}]
+    },
+    "expected": {
+      "available": true,
+      "complete": true,
+      "range_count": 1,
+      "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我叫猫叼猫特别厉害", "audio_start": 1.09, "audio_end": 4.0}]
+    }
+  },
+  {
+    "name": "zh_exact_single_phrase",
+    "category": "exact",
+    "tags": ["zh-CN", "single-phrase"],
+    "description": "中国語1文を正確に発話した基準ケース。",
+    "target_language": "zh-CN",
+    "target_text": "今天天气很好。",
+    "recognized_text": "今天天气很好。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "今", "start": 0.2, "end": 0.4},
+        {"text": "天", "start": 0.4, "end": 0.6},
+        {"text": "天", "start": 0.6, "end": 0.8},
+        {"text": "气", "start": 0.8, "end": 1.0},
+        {"text": "很", "start": 1.0, "end": 1.2},
+        {"text": "好", "start": 1.2, "end": 1.5}
+      ],
+      "segments": [{"text": "今天天气很好。", "start": 0.2, "end": 1.5}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 0.2, "audio_end": 1.5}]}
+  },
+  {
+    "name": "zh_leading_filler_excluded",
+    "category": "filler",
+    "tags": ["zh-CN", "leading-filler", "single-phrase"],
+    "description": "文頭のフィラーは比較区間から除外する。",
+    "target_language": "zh-CN",
+    "target_text": "我想喝咖啡。",
+    "recognized_text": "嗯我想喝咖啡。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "嗯", "start": 0.0, "end": 0.35},
+        {"text": "我", "start": 0.55, "end": 0.75},
+        {"text": "想", "start": 0.75, "end": 1.0},
+        {"text": "喝", "start": 1.0, "end": 1.2},
+        {"text": "咖", "start": 1.2, "end": 1.4},
+        {"text": "啡", "start": 1.4, "end": 1.7}
+      ],
+      "segments": [{"text": "嗯，我想喝咖啡。", "start": 0.0, "end": 1.7}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我想喝咖啡", "audio_start": 0.55, "audio_end": 1.7}]}
+  },
+  {
+    "name": "zh_trailing_filler_excluded",
+    "category": "filler",
+    "tags": ["zh-CN", "trailing-filler", "single-phrase"],
+    "description": "文末のフィラーは比較区間から除外する。",
+    "target_language": "zh-CN",
+    "target_text": "我想喝咖啡。",
+    "recognized_text": "我想喝咖啡嗯。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "我", "start": 0.2, "end": 0.4},
+        {"text": "想", "start": 0.4, "end": 0.65},
+        {"text": "喝", "start": 0.65, "end": 0.85},
+        {"text": "咖", "start": 0.85, "end": 1.05},
+        {"text": "啡", "start": 1.05, "end": 1.35},
+        {"text": "嗯", "start": 1.6, "end": 1.95}
+      ],
+      "segments": [{"text": "我想喝咖啡，嗯。", "start": 0.2, "end": 1.95}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我想喝咖啡", "audio_start": 0.2, "audio_end": 1.35}]}
+  },
+  {
+    "name": "zh_internal_hesitation_kept",
+    "category": "hesitation",
+    "tags": ["zh-CN", "internal-filler", "single-phrase"],
+    "description": "文中の言い淀みは本人の発話として比較区間内に残す。",
+    "target_language": "zh-CN",
+    "target_text": "我明天去北京。",
+    "recognized_text": "我明天呃去北京。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "我", "start": 0.2, "end": 0.4},
+        {"text": "明", "start": 0.4, "end": 0.6},
+        {"text": "天", "start": 0.6, "end": 0.8},
+        {"text": "呃", "start": 0.9, "end": 1.25},
+        {"text": "去", "start": 1.4, "end": 1.6},
+        {"text": "北", "start": 1.6, "end": 1.8},
+        {"text": "京", "start": 1.8, "end": 2.1}
+      ],
+      "segments": [{"text": "我明天，呃，去北京。", "start": 0.2, "end": 2.1}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我明天呃去北京", "audio_start": 0.2, "audio_end": 2.1}]}
+  },
+  {
+    "name": "zh_long_pause_inside_phrase_kept",
+    "category": "hesitation",
+    "tags": ["zh-CN", "long-pause", "single-phrase"],
+    "description": "文中の長い間があっても前後を別フレーズへ誤分割しない。",
+    "target_language": "zh-CN",
+    "target_text": "我明天去北京。",
+    "recognized_text": "我明天去北京。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "我", "start": 0.2, "end": 0.4},
+        {"text": "明", "start": 0.4, "end": 0.6},
+        {"text": "天", "start": 0.6, "end": 0.8},
+        {"text": "去", "start": 2.0, "end": 2.2},
+        {"text": "北", "start": 2.2, "end": 2.4},
+        {"text": "京", "start": 2.4, "end": 2.7}
+      ],
+      "segments": [{"text": "我明天……去北京。", "start": 0.2, "end": 2.7}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我明天去北京", "audio_start": 0.2, "audio_end": 2.7}]}
+  },
+  {
+    "name": "zh_stutter_initial_character_kept",
+    "category": "stutter",
+    "tags": ["zh-CN", "initial-repetition", "single-phrase"],
+    "description": "語頭のどもりを落とさず本人の比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "今天有点冷。",
+    "recognized_text": "今今今天有点冷。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "今", "start": 0.1, "end": 0.25},
+        {"text": "今", "start": 0.3, "end": 0.45},
+        {"text": "今", "start": 0.5, "end": 0.65},
+        {"text": "天", "start": 0.65, "end": 0.85},
+        {"text": "有", "start": 0.85, "end": 1.05},
+        {"text": "点", "start": 1.05, "end": 1.25},
+        {"text": "冷", "start": 1.25, "end": 1.55}
+      ],
+      "segments": [{"text": "今、今、今天有点冷。", "start": 0.1, "end": 1.55}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "今今今天有点冷", "audio_start": 0.1, "audio_end": 1.55}]}
+  },
+  {
+    "name": "zh_stutter_word_repetition_kept",
+    "category": "stutter",
+    "tags": ["zh-CN", "word-repetition", "single-phrase"],
+    "description": "語の反復を途中から切り捨てず比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "我喜欢学习中文。",
+    "recognized_text": "我喜欢喜欢学习中文。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "我", "start": 0.2, "end": 0.4},
+        {"text": "喜", "start": 0.4, "end": 0.6},
+        {"text": "欢", "start": 0.6, "end": 0.8},
+        {"text": "喜", "start": 0.9, "end": 1.1},
+        {"text": "欢", "start": 1.1, "end": 1.3},
+        {"text": "学", "start": 1.3, "end": 1.5},
+        {"text": "习", "start": 1.5, "end": 1.7},
+        {"text": "中", "start": 1.7, "end": 1.9},
+        {"text": "文", "start": 1.9, "end": 2.2}
+      ],
+      "segments": [{"text": "我喜欢、喜欢学习中文。", "start": 0.2, "end": 2.2}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我喜欢喜欢学习中文", "audio_start": 0.2, "audio_end": 2.2}]}
+  },
+  {
+    "name": "zh_false_start_self_correction_kept",
+    "category": "self_correction",
+    "tags": ["zh-CN", "false-start", "single-phrase"],
+    "description": "言い直し前の語も本人が確認できるよう比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "我想去上海。",
+    "recognized_text": "我想去北京不上海。",
+    "asr_timestamps": {
+      "available": true,
+      "model": "funasr/paraformer-zh",
+      "timestamp_granularities": ["word"],
+      "words": [
+        {"text": "我", "start": 0.2, "end": 0.4},
+        {"text": "想", "start": 0.4, "end": 0.65},
+        {"text": "去", "start": 0.65, "end": 0.85},
+        {"text": "北", "start": 0.85, "end": 1.05},
+        {"text": "京", "start": 1.05, "end": 1.3},
+        {"text": "不", "start": 1.5, "end": 1.7},
+        {"text": "上", "start": 1.8, "end": 2.0},
+        {"text": "海", "start": 2.0, "end": 2.3}
+      ],
+      "segments": [{"text": "我想去北京，不，上海。", "start": 0.2, "end": 2.3}]
+    },
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我想去北京不上海", "audio_start": 0.2, "audio_end": 2.3}]}
+  },
+  {
+    "name": "zh_omission_at_start_keeps_spoken_span",
+    "category": "omission",
+    "tags": ["zh-CN", "omit-start", "single-phrase"],
+    "description": "文頭を抜かしても、残りの発話全体を比較区間として保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我明天去北京。",
+    "recognized_text": "明天去北京。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "明", "start": 0.4, "end": 0.6}, {"text": "天", "start": 0.6, "end": 0.8}, {"text": "去", "start": 0.8, "end": 1.0}, {"text": "北", "start": 1.0, "end": 1.2}, {"text": "京", "start": 1.2, "end": 1.5}
+    ], "segments": [{"text": "明天去北京。", "start": 0.4, "end": 1.5}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "明天去北京", "audio_start": 0.4, "audio_end": 1.5}]}
+  },
+  {
+    "name": "zh_omission_in_middle_keeps_both_sides",
+    "category": "omission",
+    "tags": ["zh-CN", "omit-middle", "single-phrase"],
+    "description": "中央の語を抜かしても、抜けの前後を含む発話全体を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我明天坐火车去北京。",
+    "recognized_text": "我明天去北京。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "明", "start": 0.4, "end": 0.6}, {"text": "天", "start": 0.6, "end": 0.8}, {"text": "去", "start": 1.0, "end": 1.2}, {"text": "北", "start": 1.2, "end": 1.4}, {"text": "京", "start": 1.4, "end": 1.7}
+    ], "segments": [{"text": "我明天去北京。", "start": 0.2, "end": 1.7}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我明天去北京", "audio_start": 0.2, "audio_end": 1.7}]}
+  },
+  {
+    "name": "zh_omission_at_end_keeps_spoken_span",
+    "category": "omission",
+    "tags": ["zh-CN", "omit-end", "single-phrase"],
+    "description": "文末を言い忘れても発話済み部分を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我明天去北京旅游。",
+    "recognized_text": "我明天去北京。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "明", "start": 0.4, "end": 0.6}, {"text": "天", "start": 0.6, "end": 0.8}, {"text": "去", "start": 0.8, "end": 1.0}, {"text": "北", "start": 1.0, "end": 1.2}, {"text": "京", "start": 1.2, "end": 1.5}
+    ], "segments": [{"text": "我明天去北京。", "start": 0.2, "end": 1.5}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我明天去北京", "audio_start": 0.2, "audio_end": 1.5}]}
+  },
+  {
+    "name": "zh_inserted_extra_word_kept",
+    "category": "insertion",
+    "tags": ["zh-CN", "extra-word", "single-phrase"],
+    "description": "余計な語を含む発話全体を比較する。",
+    "target_language": "zh-CN",
+    "target_text": "我每天学习中文。",
+    "recognized_text": "我每天晚上学习中文。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "每", "start": 0.4, "end": 0.6}, {"text": "天", "start": 0.6, "end": 0.8}, {"text": "晚", "start": 0.8, "end": 1.0}, {"text": "上", "start": 1.0, "end": 1.2}, {"text": "学", "start": 1.2, "end": 1.4}, {"text": "习", "start": 1.4, "end": 1.6}, {"text": "中", "start": 1.6, "end": 1.8}, {"text": "文", "start": 1.8, "end": 2.1}
+    ], "segments": [{"text": "我每天晚上学习中文。", "start": 0.2, "end": 2.1}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我每天晚上学习中文", "audio_start": 0.2, "audio_end": 2.1}]}
+  },
+  {
+    "name": "zh_tone_confusion_mai3_mai4",
+    "category": "tone_confusion",
+    "tags": ["zh-CN", "tone", "买-卖", "single-phrase"],
+    "description": "第三声の买を第四声の卖としてASRが認識した想定。発話全体を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我想买一杯咖啡。",
+    "recognized_text": "我想卖一杯咖啡。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "想", "start": 0.4, "end": 0.65}, {"text": "卖", "start": 0.65, "end": 0.9}, {"text": "一", "start": 0.9, "end": 1.1}, {"text": "杯", "start": 1.1, "end": 1.3}, {"text": "咖", "start": 1.3, "end": 1.5}, {"text": "啡", "start": 1.5, "end": 1.8}
+    ], "segments": [{"text": "我想卖一杯咖啡。", "start": 0.2, "end": 1.8}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我想卖一杯咖啡", "audio_start": 0.2, "audio_end": 1.8}]}
+  },
+  {
+    "name": "zh_tone_confusion_shi4_shi2",
+    "category": "tone_confusion",
+    "tags": ["zh-CN", "tone", "是-十", "single-phrase"],
+    "description": "第四声の是を第二声の十としてASRが認識した想定。",
+    "target_language": "zh-CN",
+    "target_text": "这是我的书。",
+    "recognized_text": "这十我的书。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "这", "start": 0.2, "end": 0.4}, {"text": "十", "start": 0.4, "end": 0.65}, {"text": "我", "start": 0.65, "end": 0.85}, {"text": "的", "start": 0.85, "end": 1.05}, {"text": "书", "start": 1.05, "end": 1.35}
+    ], "segments": [{"text": "这十我的书。", "start": 0.2, "end": 1.35}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "这十我的书", "audio_start": 0.2, "audio_end": 1.35}]}
+  },
+  {
+    "name": "zh_tone_confusion_wen4_wen2",
+    "category": "tone_confusion",
+    "tags": ["zh-CN", "tone", "问-闻", "single-phrase"],
+    "description": "第四声の问を第二声の闻としてASRが認識した想定。",
+    "target_language": "zh-CN",
+    "target_text": "请问一下。",
+    "recognized_text": "请闻一下。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "请", "start": 0.2, "end": 0.45}, {"text": "闻", "start": 0.45, "end": 0.7}, {"text": "一", "start": 0.7, "end": 0.9}, {"text": "下", "start": 0.9, "end": 1.2}
+    ], "segments": [{"text": "请闻一下。", "start": 0.2, "end": 1.2}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "请闻一下", "audio_start": 0.2, "audio_end": 1.2}]}
+  },
+  {
+    "name": "zh_tone_confusion_zhu4_zhu1",
+    "category": "tone_confusion",
+    "tags": ["zh-CN", "tone", "住-猪", "single-phrase"],
+    "description": "第四声の住を第一声の猪としてASRが認識した想定。",
+    "target_language": "zh-CN",
+    "target_text": "他住在上海。",
+    "recognized_text": "他猪在上海。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "他", "start": 0.2, "end": 0.4}, {"text": "猪", "start": 0.4, "end": 0.65}, {"text": "在", "start": 0.65, "end": 0.85}, {"text": "上", "start": 0.85, "end": 1.05}, {"text": "海", "start": 1.05, "end": 1.35}
+    ], "segments": [{"text": "他猪在上海。", "start": 0.2, "end": 1.35}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "他猪在上海", "audio_start": 0.2, "audio_end": 1.35}]}
+  },
+  {
+    "name": "zh_tone_confusion_hao3_hao4",
+    "category": "tone_confusion",
+    "tags": ["zh-CN", "tone", "好-号", "single-phrase"],
+    "description": "第三声の好を第四声の号としてASRが認識した想定。",
+    "target_language": "zh-CN",
+    "target_text": "这里的风景很好。",
+    "recognized_text": "这里的风景很号。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "这", "start": 0.2, "end": 0.4}, {"text": "里", "start": 0.4, "end": 0.6}, {"text": "的", "start": 0.6, "end": 0.8}, {"text": "风", "start": 0.8, "end": 1.0}, {"text": "景", "start": 1.0, "end": 1.2}, {"text": "很", "start": 1.2, "end": 1.4}, {"text": "号", "start": 1.4, "end": 1.7}
+    ], "segments": [{"text": "这里的风景很号。", "start": 0.2, "end": 1.7}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "这里的风景很号", "audio_start": 0.2, "audio_end": 1.7}]}
+  },
+  {
+    "name": "zh_multiple_phrases_without_asr_punctuation",
+    "category": "multiple_phrases",
+    "tags": ["zh-CN", "no-asr-punctuation", "two-phrases"],
+    "description": "ASR本文に句読点がなくても目標文の2フレーズへ対応させる。",
+    "target_language": "zh-CN",
+    "target_text": "你好。你今天去哪里？",
+    "recognized_text": "你好你今天去哪里",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.2, "end": 0.4}, {"text": "好", "start": 0.4, "end": 0.65}, {"text": "你", "start": 0.9, "end": 1.1}, {"text": "今", "start": 1.1, "end": 1.3}, {"text": "天", "start": 1.3, "end": 1.5}, {"text": "去", "start": 1.5, "end": 1.7}, {"text": "哪", "start": 1.7, "end": 1.9}, {"text": "里", "start": 1.9, "end": 2.2}
+    ], "segments": [{"text": "你好你今天去哪里", "start": 0.2, "end": 2.2}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.65},
+      {"index": 1, "source": "words", "available": true, "matched_text": "你今天去哪里", "audio_start": 0.9, "audio_end": 2.2}
+    ]}
+  },
+  {
+    "name": "zh_filler_between_phrases_excluded",
+    "category": "filler",
+    "tags": ["zh-CN", "between-phrases", "two-phrases"],
+    "description": "フレーズ間のフィラーをどちらの比較区間にも含めない。",
+    "target_language": "zh-CN",
+    "target_text": "你好。你今天去哪里？",
+    "recognized_text": "你好嗯你今天去哪里",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.2, "end": 0.4}, {"text": "好", "start": 0.4, "end": 0.65}, {"text": "嗯", "start": 0.8, "end": 1.1}, {"text": "你", "start": 1.3, "end": 1.5}, {"text": "今", "start": 1.5, "end": 1.7}, {"text": "天", "start": 1.7, "end": 1.9}, {"text": "去", "start": 1.9, "end": 2.1}, {"text": "哪", "start": 2.1, "end": 2.3}, {"text": "里", "start": 2.3, "end": 2.6}
+    ], "segments": [{"text": "你好，嗯，你今天去哪里？", "start": 0.2, "end": 2.6}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.65},
+      {"index": 1, "source": "words", "available": true, "matched_text": "你今天去哪里", "audio_start": 1.3, "audio_end": 2.6}
+    ]}
+  },
+  {
+    "name": "zh_repeated_first_phrase_uses_first_complete_occurrence",
+    "category": "repetition",
+    "tags": ["zh-CN", "repeat-phrase", "two-phrases"],
+    "description": "最初の文を丸ごと繰り返した場合、言い直しを第一フレーズの比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。",
+    "recognized_text": "你好你好今天天气很好",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.1, "end": 0.3}, {"text": "好", "start": 0.3, "end": 0.5}, {"text": "你", "start": 0.65, "end": 0.85}, {"text": "好", "start": 0.85, "end": 1.05}, {"text": "今", "start": 1.25, "end": 1.45}, {"text": "天", "start": 1.45, "end": 1.65}, {"text": "天", "start": 1.65, "end": 1.85}, {"text": "气", "start": 1.85, "end": 2.05}, {"text": "很", "start": 2.05, "end": 2.25}, {"text": "好", "start": 2.25, "end": 2.55}
+    ], "segments": [{"text": "你好，你好，今天天气很好。", "start": 0.1, "end": 2.55}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好你好", "audio_start": 0.1, "audio_end": 1.05},
+      {"index": 1, "source": "words", "available": true, "matched_text": "今天天气很好", "audio_start": 1.25, "audio_end": 2.55}
+    ]}
+  },
+  {
+    "name": "zh_mixed_latin_token",
+    "category": "mixed_script",
+    "tags": ["zh-CN", "latin", "AI", "single-phrase"],
+    "description": "中国語文中の英字tokenを含めて正しい音声範囲を得る。",
+    "target_language": "zh-CN",
+    "target_text": "我在学习AI技术。",
+    "recognized_text": "我在学习AI技术。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "在", "start": 0.4, "end": 0.6}, {"text": "学", "start": 0.6, "end": 0.8}, {"text": "习", "start": 0.8, "end": 1.0}, {"text": "AI", "start": 1.0, "end": 1.45}, {"text": "技", "start": 1.45, "end": 1.65}, {"text": "术", "start": 1.65, "end": 1.95}
+    ], "segments": [{"text": "我在学习AI技术。", "start": 0.2, "end": 1.95}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我在学习AI技术", "audio_start": 0.2, "audio_end": 1.95}]}
+  },
+  {
+    "name": "zh_traditional_asr_text_normalizes_for_alignment",
+    "category": "script_normalization",
+    "tags": ["zh-CN", "traditional", "single-phrase"],
+    "description": "繁体字ASR結果を簡体字へ正規化しても、表示用matched_textは生の字形を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我爱学习中文。",
+    "recognized_text": "我愛學習中文。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "愛", "start": 0.4, "end": 0.65}, {"text": "學", "start": 0.65, "end": 0.85}, {"text": "習", "start": 0.85, "end": 1.05}, {"text": "中", "start": 1.05, "end": 1.25}, {"text": "文", "start": 1.25, "end": 1.55}
+    ], "segments": [{"text": "我愛學習中文。", "start": 0.2, "end": 1.55}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我愛學習中文", "audio_start": 0.2, "audio_end": 1.55}]}
+  },
+  {
+    "name": "zh_segment_fallback_when_phrase_count_matches",
+    "category": "segment_fallback",
+    "tags": ["zh-CN", "no-word-timestamps", "two-phrases"],
+    "description": "word timestampがなくてもsegment数と目標フレーズ数が一致すれば低信頼fallbackを使う。",
+    "target_language": "zh-CN",
+    "target_text": "你好。你今天去哪里？",
+    "recognized_text": "你好。你今天去哪里？",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["segment"], "words": [], "segments": [
+      {"text": "你好。", "start": 0.2, "end": 0.7},
+      {"text": "你今天去哪里？", "start": 0.9, "end": 2.2}
+    ]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "segments", "available": true, "matched_text": "你好。", "audio_start": 0.2, "audio_end": 0.7},
+      {"index": 1, "source": "segments", "available": true, "matched_text": "你今天去哪里？", "audio_start": 0.9, "audio_end": 2.2}
+    ]}
+  },
+  {
+    "name": "zh_unavailable_without_timestamps",
+    "category": "unavailable",
+    "tags": ["zh-CN", "missing-timestamps", "single-phrase"],
+    "description": "word/segment timestampがなければ範囲を捏造しない。",
+    "target_language": "zh-CN",
+    "target_text": "我想喝咖啡。",
+    "recognized_text": "我想喝咖啡。",
+    "asr_timestamps": {"available": false, "model": "funasr/paraformer-zh", "timestamp_granularities": [], "words": [], "segments": []},
+    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "transcription", "available": false, "matched_text": "我想喝咖啡。", "audio_start": null, "audio_end": null}]}
+  },
+  {
+    "name": "en_exact_single_phrase",
+    "category": "exact",
+    "tags": ["en-US", "single-phrase"],
+    "description": "英語1文を正確に発話した基準ケース。",
+    "target_language": "en-US",
+    "target_text": "The weather is cloudy today.",
+    "recognized_text": "The weather is cloudy today.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "The", "start": 0.2, "end": 0.4}, {"text": "weather", "start": 0.4, "end": 0.8}, {"text": "is", "start": 0.8, "end": 0.95}, {"text": "cloudy", "start": 0.95, "end": 1.3}, {"text": "today", "start": 1.3, "end": 1.7}
+    ], "segments": [{"text": "The weather is cloudy today.", "start": 0.2, "end": 1.7}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "The weather is cloudy today", "audio_start": 0.2, "audio_end": 1.7}]}
+  },
+  {
+    "name": "en_leading_fillers_excluded",
+    "category": "filler",
+    "tags": ["en-US", "leading-filler", "single-phrase"],
+    "description": "文頭のwell/umを比較区間から除外する。",
+    "target_language": "en-US",
+    "target_text": "I would like some coffee.",
+    "recognized_text": "Well um I would like some coffee.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "Well", "start": 0.0, "end": 0.3}, {"text": "um", "start": 0.35, "end": 0.65}, {"text": "I", "start": 0.85, "end": 0.95}, {"text": "would", "start": 0.95, "end": 1.2}, {"text": "like", "start": 1.2, "end": 1.45}, {"text": "some", "start": 1.45, "end": 1.7}, {"text": "coffee", "start": 1.7, "end": 2.1}
+    ], "segments": [{"text": "Well, um, I would like some coffee.", "start": 0.0, "end": 2.1}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "I would like some coffee", "audio_start": 0.85, "audio_end": 2.1}]}
+  },
+  {
+    "name": "en_internal_hesitation_kept",
+    "category": "hesitation",
+    "tags": ["en-US", "internal-filler", "single-phrase"],
+    "description": "文中のuhを本人が確認できるよう比較区間内に残す。",
+    "target_language": "en-US",
+    "target_text": "I want to visit London.",
+    "recognized_text": "I want to uh visit London.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "I", "start": 0.2, "end": 0.3}, {"text": "want", "start": 0.3, "end": 0.55}, {"text": "to", "start": 0.55, "end": 0.7}, {"text": "uh", "start": 0.8, "end": 1.15}, {"text": "visit", "start": 1.3, "end": 1.6}, {"text": "London", "start": 1.6, "end": 2.0}
+    ], "segments": [{"text": "I want to, uh, visit London.", "start": 0.2, "end": 2.0}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "I want to uh visit London", "audio_start": 0.2, "audio_end": 2.0}]}
+  },
+  {
+    "name": "en_stutter_initial_word_kept",
+    "category": "stutter",
+    "tags": ["en-US", "word-repetition", "single-phrase"],
+    "description": "語頭のIの反復を比較区間へ含める。",
+    "target_language": "en-US",
+    "target_text": "I think it is useful.",
+    "recognized_text": "I I I think it is useful.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "I", "start": 0.1, "end": 0.2}, {"text": "I", "start": 0.3, "end": 0.4}, {"text": "I", "start": 0.5, "end": 0.6}, {"text": "think", "start": 0.65, "end": 0.95}, {"text": "it", "start": 0.95, "end": 1.1}, {"text": "is", "start": 1.1, "end": 1.25}, {"text": "useful", "start": 1.25, "end": 1.65}
+    ], "segments": [{"text": "I, I, I think it is useful.", "start": 0.1, "end": 1.65}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "I I I think it is useful", "audio_start": 0.1, "audio_end": 1.65}]}
+  },
+  {
+    "name": "en_false_start_self_correction_kept",
+    "category": "self_correction",
+    "tags": ["en-US", "false-start", "single-phrase"],
+    "description": "言い直し前の語も含めて本人の発話全体を比較する。",
+    "target_language": "en-US",
+    "target_text": "I went to the station.",
+    "recognized_text": "I went to the airport no the station.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "I", "start": 0.2, "end": 0.3}, {"text": "went", "start": 0.3, "end": 0.55}, {"text": "to", "start": 0.55, "end": 0.7}, {"text": "the", "start": 0.7, "end": 0.85}, {"text": "airport", "start": 0.85, "end": 1.3}, {"text": "no", "start": 1.45, "end": 1.65}, {"text": "the", "start": 1.75, "end": 1.9}, {"text": "station", "start": 1.9, "end": 2.35}
+    ], "segments": [{"text": "I went to the airport—no, the station.", "start": 0.2, "end": 2.35}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "I went to the airport no the station", "audio_start": 0.2, "audio_end": 2.35}]}
+  },
+  {
+    "name": "en_omission_in_middle_keeps_both_sides",
+    "category": "omission",
+    "tags": ["en-US", "omit-middle", "single-phrase"],
+    "description": "中央の語を抜かしても前後を含む発話全体を保持する。",
+    "target_language": "en-US",
+    "target_text": "I usually take the train to work.",
+    "recognized_text": "I take the train to work.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "I", "start": 0.2, "end": 0.3}, {"text": "take", "start": 0.3, "end": 0.55}, {"text": "the", "start": 0.55, "end": 0.7}, {"text": "train", "start": 0.7, "end": 1.0}, {"text": "to", "start": 1.0, "end": 1.15}, {"text": "work", "start": 1.15, "end": 1.5}
+    ], "segments": [{"text": "I take the train to work.", "start": 0.2, "end": 1.5}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "I take the train to work", "audio_start": 0.2, "audio_end": 1.5}]}
+  },
+  {
+    "name": "en_homophone_like_asr_substitutions",
+    "category": "pronunciation_confusion",
+    "tags": ["en-US", "homophone", "to-too", "there-their", "single-phrase"],
+    "description": "発音由来でto/too、there/theirが別綴りになっても発話全体を比較する。",
+    "target_language": "en-US",
+    "target_text": "I want to go there.",
+    "recognized_text": "I want too go their.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "I", "start": 0.2, "end": 0.3}, {"text": "want", "start": 0.3, "end": 0.6}, {"text": "too", "start": 0.6, "end": 0.8}, {"text": "go", "start": 0.8, "end": 1.0}, {"text": "their", "start": 1.0, "end": 1.35}
+    ], "segments": [{"text": "I want too go their.", "start": 0.2, "end": 1.35}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "I want too go their", "audio_start": 0.2, "audio_end": 1.35}]}
+  },
+  {
+    "name": "en_short_suffix_similarity_trap",
+    "category": "multiple_substitutions",
+    "tags": ["en-US", "two-phrases", "short-substring-trap"],
+    "description": "カンマはphrase境界にせず、疑問文全体を1フレーズとして比較する。",
+    "target_language": "en-US",
+    "target_text": "Which is better, Codex or Claude Code?",
+    "recognized_text": "Which do you prefer, Codex or Claude Code?",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "Which", "start": 0.2, "end": 0.5}, {"text": "do", "start": 0.5, "end": 0.65}, {"text": "you", "start": 0.65, "end": 0.8}, {"text": "prefer", "start": 0.8, "end": 1.2}, {"text": "Codex", "start": 1.35, "end": 1.75}, {"text": "or", "start": 1.75, "end": 1.9}, {"text": "Claude", "start": 1.9, "end": 2.3}, {"text": "Code", "start": 2.3, "end": 2.6}
+    ], "segments": [{"text": "Which do you prefer, Codex or Claude Code?", "start": 0.2, "end": 2.6}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Which do you prefer Codex or Claude Code", "audio_start": 0.2, "audio_end": 2.6}
+    ]}
+  },
+  {
+    "name": "en_multiple_phrases_without_asr_punctuation",
+    "category": "multiple_phrases",
+    "tags": ["en-US", "no-asr-punctuation", "three-phrases"],
+    "description": "ASR本文に句読点がなくても目標文の3フレーズへ対応させる。",
+    "target_language": "en-US",
+    "target_text": "Hello. Can you hear me? The weather is cloudy today.",
+    "recognized_text": "hello can you hear me the weather is cloudy today",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "hello", "start": 0.2, "end": 0.5}, {"text": "can", "start": 0.75, "end": 0.95}, {"text": "you", "start": 0.95, "end": 1.1}, {"text": "hear", "start": 1.1, "end": 1.35}, {"text": "me", "start": 1.35, "end": 1.55}, {"text": "the", "start": 1.85, "end": 2.0}, {"text": "weather", "start": 2.0, "end": 2.35}, {"text": "is", "start": 2.35, "end": 2.5}, {"text": "cloudy", "start": 2.5, "end": 2.85}, {"text": "today", "start": 2.85, "end": 3.2}
+    ], "segments": [{"text": "hello can you hear me the weather is cloudy today", "start": 0.2, "end": 3.2}]},
+    "expected": {"available": true, "complete": true, "range_count": 3, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "hello", "audio_start": 0.2, "audio_end": 0.5},
+      {"index": 1, "source": "words", "available": true, "matched_text": "can you hear me", "audio_start": 0.75, "audio_end": 1.55},
+      {"index": 2, "source": "words", "available": true, "matched_text": "the weather is cloudy today", "audio_start": 1.85, "audio_end": 3.2}
+    ]}
+  },
+  {
+    "name": "en_repeated_first_phrase_uses_first_complete_occurrence",
+    "category": "repetition",
+    "tags": ["en-US", "repeat-phrase", "two-phrases"],
+    "description": "最初の文を丸ごと繰り返した場合、言い直しを第一フレーズの比較区間へ含める。",
+    "target_language": "en-US",
+    "target_text": "Good morning. How are you?",
+    "recognized_text": "Good morning good morning how are you",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word", "segment"], "words": [
+      {"text": "Good", "start": 0.1, "end": 0.35}, {"text": "morning", "start": 0.35, "end": 0.7}, {"text": "good", "start": 0.85, "end": 1.1}, {"text": "morning", "start": 1.1, "end": 1.45}, {"text": "how", "start": 1.7, "end": 1.9}, {"text": "are", "start": 1.9, "end": 2.05}, {"text": "you", "start": 2.05, "end": 2.3}
+    ], "segments": [{"text": "Good morning, good morning, how are you?", "start": 0.1, "end": 2.3}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning good morning", "audio_start": 0.1, "audio_end": 1.45},
+      {"index": 1, "source": "words", "available": true, "matched_text": "how are you", "audio_start": 1.7, "audio_end": 2.3}
+    ]}
+  },
+  {
+    "name": "en_segment_fallback_when_phrase_count_matches",
+    "category": "segment_fallback",
+    "tags": ["en-US", "no-word-timestamps", "two-phrases"],
+    "description": "word timestampがなくてもsegment数と目標フレーズ数が一致すればfallbackを使う。",
+    "target_language": "en-US",
+    "target_text": "Good morning. Nice weather.",
+    "recognized_text": "Good morning. Nice weather.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["segment"], "words": [], "segments": [
+      {"text": "Good morning.", "start": 0.2, "end": 0.9},
+      {"text": "Nice weather.", "start": 1.1, "end": 1.9}
+    ]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "segments", "available": true, "matched_text": "Good morning.", "audio_start": 0.2, "audio_end": 0.9},
+      {"index": 1, "source": "segments", "available": true, "matched_text": "Nice weather.", "audio_start": 1.1, "audio_end": 1.9}
+    ]}
+  },
+  {
+    "name": "en_unavailable_without_timestamps",
+    "category": "unavailable",
+    "tags": ["en-US", "missing-timestamps", "single-phrase"],
+    "description": "word/segment timestampがなければ範囲を捏造しない。",
+    "target_language": "en-US",
+    "target_text": "I would like some coffee.",
+    "recognized_text": "I would like some coffee.",
+    "asr_timestamps": {"available": false, "model": "whisper-1", "timestamp_granularities": [], "words": [], "segments": []},
+    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "transcription", "available": false, "matched_text": "I would like some coffee.", "audio_start": null, "audio_end": null}]}
+  },
+  {
+    "name": "zh_only_edge_fillers_is_unavailable",
+    "category": "filler",
+    "tags": ["zh-CN", "only-fillers", "single-phrase"],
+    "description": "明確なフィラーしか認識されていない場合は比較区間を作らない。",
+    "target_language": "zh-CN",
+    "target_text": "我喜欢学习中文。",
+    "recognized_text": "嗯呃。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "嗯", "start": 0.2, "end": 0.55}, {"text": "呃", "start": 0.7, "end": 1.05}
+    ], "segments": [{"text": "嗯，呃。", "start": 0.2, "end": 1.05}]},
+    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}]}
+  },
+  {
+    "name": "zh_unrelated_false_start_is_not_treated_as_filler",
+    "category": "self_correction",
+    "tags": ["zh-CN", "leading-false-start", "single-phrase"],
+    "description": "文頭の言い直しは明確なフィラーではないため発話全体へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "我想去上海。",
+    "recognized_text": "北京不对我想去上海。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "北", "start": 0.2, "end": 0.4}, {"text": "京", "start": 0.4, "end": 0.65}, {"text": "不", "start": 0.8, "end": 1.0}, {"text": "对", "start": 1.0, "end": 1.2}, {"text": "我", "start": 1.35, "end": 1.55}, {"text": "想", "start": 1.55, "end": 1.8}, {"text": "去", "start": 1.8, "end": 2.0}, {"text": "上", "start": 2.0, "end": 2.2}, {"text": "海", "start": 2.2, "end": 2.5}
+    ], "segments": [{"text": "北京，不对，我想去上海。", "start": 0.2, "end": 2.5}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "北京不对我想去上海", "audio_start": 0.2, "audio_end": 2.5}]}
+  },
+  {
+    "name": "zh_completely_different_single_phrase_still_compares_spoken_audio",
+    "category": "wrong_content",
+    "tags": ["zh-CN", "single-phrase", "low-similarity"],
+    "description": "1フレーズしかない場合は内容が大きく違っても本人の発話区間を比較できるよう保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我想喝咖啡。",
+    "recognized_text": "明天下雨了。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "明", "start": 0.2, "end": 0.4}, {"text": "天", "start": 0.4, "end": 0.6}, {"text": "下", "start": 0.6, "end": 0.8}, {"text": "雨", "start": 0.8, "end": 1.0}, {"text": "了", "start": 1.0, "end": 1.3}
+    ], "segments": [{"text": "明天下雨了。", "start": 0.2, "end": 1.3}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "明天下雨了", "audio_start": 0.2, "audio_end": 1.3}]}
+  },
+  {
+    "name": "zh_multiple_tone_confusions_keep_full_span",
+    "category": "tone_confusion",
+    "tags": ["zh-CN", "multiple-tone-errors", "single-phrase"],
+    "description": "複数の声調違いで複数漢字が変わっても短い一致部分へ縮めない。",
+    "target_language": "zh-CN",
+    "target_text": "我想买好吃的桃子。",
+    "recognized_text": "我像卖号吃的逃子。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "像", "start": 0.4, "end": 0.65}, {"text": "卖", "start": 0.65, "end": 0.9}, {"text": "号", "start": 0.9, "end": 1.15}, {"text": "吃", "start": 1.15, "end": 1.35}, {"text": "的", "start": 1.35, "end": 1.55}, {"text": "逃", "start": 1.55, "end": 1.8}, {"text": "子", "start": 1.8, "end": 2.1}
+    ], "segments": [{"text": "我像卖号吃的逃子。", "start": 0.2, "end": 2.1}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我像卖号吃的逃子", "audio_start": 0.2, "audio_end": 2.1}]}
+  },
+  {
+    "name": "zh_tone_confusion_with_middle_omission",
+    "category": "combined_error",
+    "tags": ["zh-CN", "tone", "omission", "single-phrase"],
+    "description": "声調違いと中央の抜けが同時にあっても発話全体を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "我想买一杯热咖啡。",
+    "recognized_text": "我像卖热咖啡。",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "像", "start": 0.4, "end": 0.65}, {"text": "卖", "start": 0.65, "end": 0.9}, {"text": "热", "start": 1.05, "end": 1.3}, {"text": "咖", "start": 1.3, "end": 1.5}, {"text": "啡", "start": 1.5, "end": 1.8}
+    ], "segments": [{"text": "我像卖热咖啡。", "start": 0.2, "end": 1.8}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "我像卖热咖啡", "audio_start": 0.2, "audio_end": 1.8}]}
+  },
+  {
+    "name": "zh_second_phrase_initial_stutter_kept",
+    "category": "stutter",
+    "tags": ["zh-CN", "second-phrase", "initial-repetition"],
+    "description": "第2フレーズ冒頭のどもりも第2フレーズの比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。",
+    "recognized_text": "你好今今今天天气很好",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.2, "end": 0.4}, {"text": "好", "start": 0.4, "end": 0.65}, {"text": "今", "start": 0.9, "end": 1.05}, {"text": "今", "start": 1.15, "end": 1.3}, {"text": "今", "start": 1.4, "end": 1.55}, {"text": "天", "start": 1.55, "end": 1.75}, {"text": "天", "start": 1.75, "end": 1.95}, {"text": "气", "start": 1.95, "end": 2.15}, {"text": "很", "start": 2.15, "end": 2.35}, {"text": "好", "start": 2.35, "end": 2.65}
+    ], "segments": [{"text": "你好。今、今、今天天气很好。", "start": 0.2, "end": 2.65}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.65},
+      {"index": 1, "source": "words", "available": true, "matched_text": "今今今天天气很好", "audio_start": 0.9, "audio_end": 2.65}
+    ]}
+  },
+  {
+    "name": "zh_internal_filler_in_second_phrase_kept",
+    "category": "hesitation",
+    "tags": ["zh-CN", "second-phrase", "internal-filler"],
+    "description": "第2フレーズ内のフィラーを第2フレーズの比較区間へ含める。",
+    "target_language": "zh-CN",
+    "target_text": "你好。你今天去哪里？",
+    "recognized_text": "你好你今天呃去哪里",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.2, "end": 0.4}, {"text": "好", "start": 0.4, "end": 0.65}, {"text": "你", "start": 0.9, "end": 1.1}, {"text": "今", "start": 1.1, "end": 1.3}, {"text": "天", "start": 1.3, "end": 1.5}, {"text": "呃", "start": 1.6, "end": 1.9}, {"text": "去", "start": 2.0, "end": 2.2}, {"text": "哪", "start": 2.2, "end": 2.4}, {"text": "里", "start": 2.4, "end": 2.7}
+    ], "segments": [{"text": "你好。你今天，呃，去哪里？", "start": 0.2, "end": 2.7}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.65},
+      {"index": 1, "source": "words", "available": true, "matched_text": "你今天呃去哪里", "audio_start": 0.9, "audio_end": 2.7}
+    ]}
+  },
+  {
+    "name": "zh_middle_phrase_completely_omitted",
+    "category": "omission",
+    "tags": ["zh-CN", "omit-whole-phrase", "three-phrases"],
+    "description": "中間フレーズを丸ごと抜かした場合、前後だけを対応させて中間をunavailableにする。",
+    "target_language": "zh-CN",
+    "target_text": "你好。今天天气很好。你要去哪里？",
+    "recognized_text": "你好你要去哪里",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.2, "end": 0.4}, {"text": "好", "start": 0.4, "end": 0.65}, {"text": "你", "start": 0.95, "end": 1.15}, {"text": "要", "start": 1.15, "end": 1.35}, {"text": "去", "start": 1.35, "end": 1.55}, {"text": "哪", "start": 1.55, "end": 1.75}, {"text": "里", "start": 1.75, "end": 2.05}
+    ], "segments": [{"text": "你好。你要去哪里？", "start": 0.2, "end": 2.05}]},
+    "expected": {"available": true, "complete": false, "range_count": 3, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.65},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 2, "source": "words", "available": true, "matched_text": "你要去哪里", "audio_start": 0.95, "audio_end": 2.05}
+    ]}
+  },
+  {
+    "name": "zh_last_phrase_partially_spoken",
+    "category": "omission",
+    "tags": ["zh-CN", "partial-last-phrase", "two-phrases"],
+    "description": "第2フレーズを半分だけ話した場合も取得できた区間を保持する。",
+    "target_language": "zh-CN",
+    "target_text": "你好。我明天去北京。",
+    "recognized_text": "你好我明天",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "你", "start": 0.2, "end": 0.4}, {"text": "好", "start": 0.4, "end": 0.65}, {"text": "我", "start": 0.95, "end": 1.15}, {"text": "明", "start": 1.15, "end": 1.35}, {"text": "天", "start": 1.35, "end": 1.65}
+    ], "segments": [{"text": "你好。我明天。", "start": 0.2, "end": 1.65}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "你好", "audio_start": 0.2, "audio_end": 0.65},
+      {"index": 1, "source": "words", "available": true, "matched_text": "我明天", "audio_start": 0.95, "audio_end": 1.65}
+    ]}
+  },
+  {
+    "name": "zh_two_phrases_with_same_prefix",
+    "category": "repeated_prefix",
+    "tags": ["zh-CN", "same-prefix", "two-phrases"],
+    "description": "同じ書き出しの2文を誤って同じ区間へ対応させない。",
+    "target_language": "zh-CN",
+    "target_text": "我喜欢咖啡。我喜欢红茶。",
+    "recognized_text": "我喜欢咖啡我喜欢红茶",
+    "asr_timestamps": {"available": true, "model": "funasr/paraformer-zh", "timestamp_granularities": ["word"], "words": [
+      {"text": "我", "start": 0.2, "end": 0.4}, {"text": "喜", "start": 0.4, "end": 0.6}, {"text": "欢", "start": 0.6, "end": 0.8}, {"text": "咖", "start": 0.8, "end": 1.0}, {"text": "啡", "start": 1.0, "end": 1.25}, {"text": "我", "start": 1.5, "end": 1.7}, {"text": "喜", "start": 1.7, "end": 1.9}, {"text": "欢", "start": 1.9, "end": 2.1}, {"text": "红", "start": 2.1, "end": 2.3}, {"text": "茶", "start": 2.3, "end": 2.6}
+    ], "segments": [{"text": "我喜欢咖啡。我喜欢红茶。", "start": 0.2, "end": 2.6}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "我喜欢咖啡", "audio_start": 0.2, "audio_end": 1.25},
+      {"index": 1, "source": "words", "available": true, "matched_text": "我喜欢红茶", "audio_start": 1.5, "audio_end": 2.6}
+    ]}
+  },
+  {
+    "name": "en_only_edge_fillers_is_unavailable",
+    "category": "filler",
+    "tags": ["en-US", "only-fillers", "single-phrase"],
+    "description": "明確なフィラーしか認識されていない場合は比較区間を作らない。",
+    "target_language": "en-US",
+    "target_text": "I would like some coffee.",
+    "recognized_text": "Um uh.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "Um", "start": 0.2, "end": 0.55}, {"text": "uh", "start": 0.7, "end": 1.05}
+    ], "segments": [{"text": "Um, uh.", "start": 0.2, "end": 1.05}]},
+    "expected": {"available": false, "complete": false, "range_count": 1, "ranges": [{"index": 0, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null}]}
+  },
+  {
+    "name": "en_unrelated_false_start_is_not_treated_as_filler",
+    "category": "self_correction",
+    "tags": ["en-US", "leading-false-start", "single-phrase"],
+    "description": "文頭の言い直しは明確なフィラーではないため発話全体へ含める。",
+    "target_language": "en-US",
+    "target_text": "I went to the station.",
+    "recognized_text": "The airport no I went to the station.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "The", "start": 0.2, "end": 0.35}, {"text": "airport", "start": 0.35, "end": 0.8}, {"text": "no", "start": 0.95, "end": 1.15}, {"text": "I", "start": 1.3, "end": 1.4}, {"text": "went", "start": 1.4, "end": 1.65}, {"text": "to", "start": 1.65, "end": 1.8}, {"text": "the", "start": 1.8, "end": 1.95}, {"text": "station", "start": 1.95, "end": 2.4}
+    ], "segments": [{"text": "The airport—no—I went to the station.", "start": 0.2, "end": 2.4}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "The airport no I went to the station", "audio_start": 0.2, "audio_end": 2.4}]}
+  },
+  {
+    "name": "en_completely_different_single_phrase_still_compares_spoken_audio",
+    "category": "wrong_content",
+    "tags": ["en-US", "single-phrase", "low-similarity"],
+    "description": "1フレーズしかない場合は内容が大きく違っても本人の発話区間を保持する。",
+    "target_language": "en-US",
+    "target_text": "I would like some coffee.",
+    "recognized_text": "It will rain tomorrow.",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "It", "start": 0.2, "end": 0.35}, {"text": "will", "start": 0.35, "end": 0.55}, {"text": "rain", "start": 0.55, "end": 0.8}, {"text": "tomorrow", "start": 0.8, "end": 1.3}
+    ], "segments": [{"text": "It will rain tomorrow.", "start": 0.2, "end": 1.3}]},
+    "expected": {"available": true, "complete": true, "range_count": 1, "ranges": [{"index": 0, "source": "words", "available": true, "matched_text": "It will rain tomorrow", "audio_start": 0.2, "audio_end": 1.3}]}
+  },
+  {
+    "name": "en_second_phrase_initial_stutter_kept",
+    "category": "stutter",
+    "tags": ["en-US", "second-phrase", "initial-repetition"],
+    "description": "第2フレーズ冒頭のどもりも第2フレーズの比較区間へ含める。",
+    "target_language": "en-US",
+    "target_text": "Good morning. I think it is useful.",
+    "recognized_text": "Good morning I I I think it is useful",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "Good", "start": 0.2, "end": 0.45}, {"text": "morning", "start": 0.45, "end": 0.8}, {"text": "I", "start": 1.05, "end": 1.15}, {"text": "I", "start": 1.25, "end": 1.35}, {"text": "I", "start": 1.45, "end": 1.55}, {"text": "think", "start": 1.55, "end": 1.85}, {"text": "it", "start": 1.85, "end": 2.0}, {"text": "is", "start": 2.0, "end": 2.15}, {"text": "useful", "start": 2.15, "end": 2.55}
+    ], "segments": [{"text": "Good morning. I, I, I think it is useful.", "start": 0.2, "end": 2.55}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning", "audio_start": 0.2, "audio_end": 0.8},
+      {"index": 1, "source": "words", "available": true, "matched_text": "I I I think it is useful", "audio_start": 1.05, "audio_end": 2.55}
+    ]}
+  },
+  {
+    "name": "en_internal_filler_in_second_phrase_kept",
+    "category": "hesitation",
+    "tags": ["en-US", "second-phrase", "internal-filler"],
+    "description": "第2フレーズ内のフィラーを第2フレーズの比較区間へ含める。",
+    "target_language": "en-US",
+    "target_text": "Good morning. I want to visit London.",
+    "recognized_text": "Good morning I want to uh visit London",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "Good", "start": 0.2, "end": 0.45}, {"text": "morning", "start": 0.45, "end": 0.8}, {"text": "I", "start": 1.05, "end": 1.15}, {"text": "want", "start": 1.15, "end": 1.4}, {"text": "to", "start": 1.4, "end": 1.55}, {"text": "uh", "start": 1.65, "end": 1.95}, {"text": "visit", "start": 2.05, "end": 2.35}, {"text": "London", "start": 2.35, "end": 2.75}
+    ], "segments": [{"text": "Good morning. I want to, uh, visit London.", "start": 0.2, "end": 2.75}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Good morning", "audio_start": 0.2, "audio_end": 0.8},
+      {"index": 1, "source": "words", "available": true, "matched_text": "I want to uh visit London", "audio_start": 1.05, "audio_end": 2.75}
+    ]}
+  },
+  {
+    "name": "en_middle_phrase_completely_omitted",
+    "category": "omission",
+    "tags": ["en-US", "omit-whole-phrase", "three-phrases"],
+    "description": "中間フレーズを丸ごと抜かした場合、前後だけを対応させる。",
+    "target_language": "en-US",
+    "target_text": "Hello. The weather is cloudy. Can you hear me?",
+    "recognized_text": "Hello can you hear me",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "Hello", "start": 0.2, "end": 0.5}, {"text": "can", "start": 0.8, "end": 1.0}, {"text": "you", "start": 1.0, "end": 1.15}, {"text": "hear", "start": 1.15, "end": 1.4}, {"text": "me", "start": 1.4, "end": 1.65}
+    ], "segments": [{"text": "Hello. Can you hear me?", "start": 0.2, "end": 1.65}]},
+    "expected": {"available": true, "complete": false, "range_count": 3, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.2, "audio_end": 0.5},
+      {"index": 1, "source": "none", "available": false, "matched_text": "", "audio_start": null, "audio_end": null},
+      {"index": 2, "source": "words", "available": true, "matched_text": "can you hear me", "audio_start": 0.8, "audio_end": 1.65}
+    ]}
+  },
+  {
+    "name": "en_last_phrase_partially_spoken",
+    "category": "omission",
+    "tags": ["en-US", "partial-last-phrase", "two-phrases"],
+    "description": "第2フレーズを途中まで話した場合も取得できた区間を保持する。",
+    "target_language": "en-US",
+    "target_text": "Hello. I will go to the station tomorrow.",
+    "recognized_text": "Hello I will go to",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "Hello", "start": 0.2, "end": 0.5}, {"text": "I", "start": 0.8, "end": 0.9}, {"text": "will", "start": 0.9, "end": 1.1}, {"text": "go", "start": 1.1, "end": 1.3}, {"text": "to", "start": 1.3, "end": 1.5}
+    ], "segments": [{"text": "Hello. I will go to.", "start": 0.2, "end": 1.5}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "Hello", "audio_start": 0.2, "audio_end": 0.5},
+      {"index": 1, "source": "words", "available": true, "matched_text": "I will go to", "audio_start": 0.8, "audio_end": 1.5}
+    ]}
+  },
+  {
+    "name": "en_two_phrases_with_same_prefix",
+    "category": "repeated_prefix",
+    "tags": ["en-US", "same-prefix", "two-phrases"],
+    "description": "同じ書き出しの2文を別々の区間へ対応させる。",
+    "target_language": "en-US",
+    "target_text": "I like coffee. I like tea.",
+    "recognized_text": "I like coffee I like tea",
+    "asr_timestamps": {"available": true, "model": "whisper-1", "timestamp_granularities": ["word"], "words": [
+      {"text": "I", "start": 0.2, "end": 0.3}, {"text": "like", "start": 0.3, "end": 0.55}, {"text": "coffee", "start": 0.55, "end": 0.9}, {"text": "I", "start": 1.2, "end": 1.3}, {"text": "like", "start": 1.3, "end": 1.55}, {"text": "tea", "start": 1.55, "end": 1.85}
+    ], "segments": [{"text": "I like coffee. I like tea.", "start": 0.2, "end": 1.85}]},
+    "expected": {"available": true, "complete": true, "range_count": 2, "ranges": [
+      {"index": 0, "source": "words", "available": true, "matched_text": "I like coffee", "audio_start": 0.2, "audio_end": 0.9},
+      {"index": 1, "source": "words", "available": true, "matched_text": "I like tea", "audio_start": 1.2, "audio_end": 1.85}
+    ]}
+  }
+]

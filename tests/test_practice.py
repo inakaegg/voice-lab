@@ -56,14 +56,13 @@ def test_practice_attempt_aligns_target_phrases_to_recognized_positions() -> Non
 
     assert result["phrase_similarity"] >= 0.9
     assert result["similarity"] >= result["global_similarity"]
-    assert len(result["phrase_matches"]) == 3
+    assert len(result["phrase_matches"]) == 2
     assert result["phrase_matches"][0]["matched"] is True
     assert result["phrase_matches"][0]["recognized_start"] > 0
     assert result["phrase_matches"][1]["recognized_start"] >= result["phrase_matches"][0]["recognized_end"]
-    assert result["phrase_matches"][2]["recognized_start"] >= result["phrase_matches"][1]["recognized_end"]
 
 
-def test_practice_attempt_splits_colon_phrases_like_worker() -> None:
+def test_practice_attempt_keeps_colon_inside_canonical_phrases() -> None:
     result = evaluate_practice_attempt(
         "A: 我想要咖啡。B: 明天天气好吗？",
         "我想要咖啡。明天天气好吗？",
@@ -71,10 +70,8 @@ def test_practice_attempt_splits_colon_phrases_like_worker() -> None:
     )
 
     assert [match["target"] for match in result["phrase_matches"]] == [
-        "A:",
-        "我想要咖啡。",
-        "B:",
-        "明天天气好吗？",
+        "A: 我想要咖啡。",
+        "B: 明天天气好吗？",
     ]
+    assert result["phrase_matches"][0]["matched"] is True
     assert result["phrase_matches"][1]["matched"] is True
-    assert result["phrase_matches"][3]["matched"] is True
