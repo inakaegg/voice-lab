@@ -65,7 +65,12 @@ async function savePublicSampleAudios(root) {
       renderPublicSampleAdmin(targetRoot, currentPublicSampleAudios);
     }
     setPublicSampleActionButton(root.querySelector("[data-public-samples-save]"), "保存済み", false);
-    setPublicSampleAdminStatus("保存しました。ユーザー画面へ反映されています。", "success");
+    setPublicSampleAdminStatus(
+      isSkitVoiceSampleAdmin(root)
+        ? "研究用サンプルとして保存しました。一般画面には表示されません。"
+        : "保存しました。ユーザー画面へ反映されています。",
+      "success",
+    );
     window.setTimeout(() => {
       setPublicSampleActionButton(root.querySelector("[data-public-samples-save]"), "保存", false, "保存済み");
     }, 2400);
@@ -137,7 +142,12 @@ async function previewPublicSampleFile(section) {
       audio_mime_type: section.dataset.publicSampleAudioMimeType,
       audio_base64: audioBase64,
     });
-    setPublicSampleAdminStatus("ファイルを選択しました。保存するとユーザー画面へ反映されます。", "ready");
+    setPublicSampleAdminStatus(
+      isSkitVoiceSampleAdmin(section.closest("[data-public-samples-admin]"))
+        ? "ファイルを選択しました。保存後も一般画面には表示されません。"
+        : "ファイルを選択しました。保存するとユーザー画面へ反映されます。",
+      "ready",
+    );
   } catch (error) {
     setPublicSampleAdminStatus(publicSampleErrorMessage(error), "error");
   }
@@ -173,7 +183,12 @@ async function deletePublicSample(section) {
       renderPublicSampleAdmin(targetRoot, currentPublicSampleAudios);
     }
     setPublicSampleActionButton(deleteButton, "削除済み", false);
-    setPublicSampleAdminStatus("削除しました。ユーザー画面からも非表示になりました。", "success");
+    setPublicSampleAdminStatus(
+      isSkitVoiceSampleAdmin(section.closest("[data-public-samples-admin]"))
+        ? "研究用サンプルを削除しました。"
+        : "削除しました。ユーザー画面からも非表示になりました。",
+      "success",
+    );
     window.setTimeout(() => {
       setPublicSampleActionButton(deleteButton, "保存済みを削除", false, "削除済み");
     }, 2400);
@@ -189,6 +204,10 @@ function clearPublicSampleSection(section) {
   section.dataset.publicSampleFilename = "";
   section.querySelector("[data-public-sample-file]").value = "";
   renderPublicSamplePreview(section, null);
+}
+
+function isSkitVoiceSampleAdmin(root) {
+  return Boolean(root?.dataset.publicSamplesFeatures?.split(",").map((value) => value.trim()).includes("skitvoice"));
 }
 
 function renderPublicSamplePreview(section, sample) {

@@ -4,9 +4,9 @@ import { mkdir } from "node:fs/promises";
 import { assertNoHorizontalOverflow, assertVisibleControlsInsideViewport, installUiApiFixtures } from "./fixtures";
 
 const publicRoutes = [
-  { path: "/", heading: "声から、", action: "スキットをつくる", actionRole: "link" },
+  { path: "/", heading: "声から、", action: "練習をはじめる", actionRole: "link" },
   { path: "/speakloop", heading: "言いたいことで発音練習", action: "言いたいことを録音", actionRole: "button" },
-  { path: "/skitvoice", heading: "声を選んで、会話をつくる", action: "音声を生成", actionRole: "button" },
+  { path: "/skitvoice", heading: "研究機能", action: "SpeakLoopで練習する", actionRole: "link" },
 ] as const;
 
 const adminRoutes = ["/admin", "/speakloop/admin", "/skitvoice/admin"];
@@ -48,43 +48,46 @@ for (const route of publicRoutes) {
   });
 }
 
-test("SpeakLoop and SkitVoice keep the shared privacy notice at the workflow bottom left", async ({ page }) => {
-  for (const [path, workflowSelector] of [
-    ["/speakloop", ".react-practice-flow"],
-    ["/skitvoice", "#vibevoice-form"],
-  ] as const) {
-    await page.goto(path);
-    const [contentBox, workflowBox, privacyBox] = await Promise.all([
-      page.locator(".react-intro-grid").boundingBox(),
-      page.locator(workflowSelector).boundingBox(),
-      page.locator("[data-public-privacy-notice]").boundingBox(),
-    ]);
+test("SpeakLoop keeps the shared privacy notice at the workflow bottom left", async ({ page }) => {
+  await page.goto("/speakloop");
+  const [contentBox, workflowBox, privacyBox] = await Promise.all([
+    page.locator(".react-intro-grid").boundingBox(),
+    page.locator(".react-practice-flow").boundingBox(),
+    page.locator("[data-public-privacy-notice]").boundingBox(),
+  ]);
 
-    expect(contentBox).not.toBeNull();
-    expect(workflowBox).not.toBeNull();
-    expect(privacyBox).not.toBeNull();
-    expect(privacyBox?.y || 0).toBeGreaterThanOrEqual((workflowBox?.y || 0) + (workflowBox?.height || 0) - 1);
-    expect(Math.abs((privacyBox?.x || 0) - (contentBox?.x || 0))).toBeLessThanOrEqual(1);
+  expect(contentBox).not.toBeNull();
+  expect(workflowBox).not.toBeNull();
+  expect(privacyBox).not.toBeNull();
+  expect(privacyBox?.y || 0).toBeGreaterThanOrEqual((workflowBox?.y || 0) + (workflowBox?.height || 0) - 1);
+  expect(Math.abs((privacyBox?.x || 0) - (contentBox?.x || 0))).toBeLessThanOrEqual(1);
 
-    const { viewportHeight, documentHeight } = await page.evaluate(() => ({
-      viewportHeight: window.innerHeight,
-      documentHeight: document.documentElement.scrollHeight,
-    }));
-    if (documentHeight <= viewportHeight + 1) {
-      expect((privacyBox?.y || 0) + (privacyBox?.height || 0)).toBeGreaterThanOrEqual(viewportHeight - 40);
-    }
+  const { viewportHeight, documentHeight } = await page.evaluate(() => ({
+    viewportHeight: window.innerHeight,
+    documentHeight: document.documentElement.scrollHeight,
+  }));
+  if (documentHeight <= viewportHeight + 1) {
+    expect((privacyBox?.y || 0) + (privacyBox?.height || 0)).toBeGreaterThanOrEqual(viewportHeight - 40);
   }
 });
 
-test("portal keeps both product actions within the initial viewport", async ({ page }) => {
+test("portal keeps the SpeakLoop action within the initial viewport", async ({ page }) => {
   await page.goto("/");
   const viewportHeight = await page.evaluate(() => innerHeight);
-  for (const label of ["スキットをつくる", "練習をはじめる"]) {
-    const box = await page.getByText(label, { exact: false }).first().boundingBox();
-    expect(box).not.toBeNull();
-    expect((box?.y || 0) + (box?.height || 0)).toBeLessThanOrEqual(viewportHeight + 1);
-  }
+  const box = await page.getByText("練習をはじめる", { exact: false }).first().boundingBox();
+  expect(box).not.toBeNull();
+  expect((box?.y || 0) + (box?.height || 0)).toBeLessThanOrEqual(viewportHeight + 1);
+  await expect(page.getByText("SkitVoice", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewportHeight + 1);
+});
+
+test("direct public SkitVoice access stays closed without generation or samples", async ({ page }) => {
+  await page.goto("/skitvoice");
+  await expect(page.getByRole("heading", { name: "研究機能は一般公開していません" })).toBeVisible();
+  await expect(page.locator("#vibevoice-form")).toHaveCount(0);
+  await expect(page.locator("#vibevoice-generate-button")).toHaveCount(0);
+  await expect(page.locator("[data-public-sample-language]")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "SpeakLoopで練習する" })).toHaveAttribute("href", "/speakloop");
 });
 
 test("public theme menu is keyboard reachable and persists dark mode", async ({ page }) => {
@@ -698,16 +701,16 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
   await expect(page.locator("#practice-own-voice-toggle")).toBeChecked();
 });
 
-test("SkitVoice hides tab-audio capture when the browser does not support it", async ({ page }, testInfo) => {
+test("admin SkitVoice hides tab-audio capture when the browser does not support it", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "mediaDevices", {
       value: { getUserMedia: undefined, getDisplayMedia: undefined },
       configurable: true,
     });
   });
-  await page.goto("/skitvoice");
+  await page.goto("/skitvoice/admin");
   await expect(page.locator("[data-tab-audio-slot]:visible")).toHaveCount(0);
-  await expect(page.locator("[data-reference-source-help]")).toHaveText("ファイル・録音・URLから選択");
+  await expect(page.locator("[data-reference-source-help]")).toContainText("ファイル・録音");
   await expect(page.locator(".voice-lab-toast")).toHaveCount(0);
   await expect(page.locator("#vibevoice-message")).toBeEmpty();
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
@@ -737,7 +740,71 @@ test("SkitVoice hides tab-audio capture when the browser does not support it", a
   await assertNoHorizontalOverflow(page);
 });
 
-test("SkitVoice explains a runtime tab-audio incompatibility once and then hides the controls", async ({ page }) => {
+test("admin SkitVoice requires reference-audio rights confirmation before tab capture", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__tabAudioRequestCount", { value: 0, writable: true });
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        getDisplayMedia: async () => {
+          (window as typeof window & { __tabAudioRequestCount: number }).__tabAudioRequestCount += 1;
+          throw new DOMException("capture is not supported", "NotSupportedError");
+        },
+      },
+      configurable: true,
+    });
+  });
+
+  await page.goto("/skitvoice/admin");
+  const confirmation = page.locator("#vibevoice-rights-confirmed");
+  const confirmationPanel = page.locator(".vibevoice-rights-confirmation");
+  const actions = page.locator(".vibevoice-actions");
+  const generateButton = page.locator("#vibevoice-generate-button");
+  await expect(confirmation).not.toBeChecked();
+  const [actionsBox, confirmationBox, generateBox] = await Promise.all([
+    actions.boundingBox(),
+    confirmationPanel.boundingBox(),
+    generateButton.boundingBox(),
+  ]);
+  if ((page.viewportSize()?.width || 0) > 820) {
+    expect((confirmationBox?.width || 0)).toBeGreaterThanOrEqual(
+      (actionsBox?.width || 0) - (generateBox?.width || 0) - 40,
+    );
+    expect((generateBox?.x || 0)).toBeGreaterThanOrEqual(
+      (confirmationBox?.x || 0) + (confirmationBox?.width || 0) - 2,
+    );
+    expect(Math.abs(
+      ((confirmationBox?.y || 0) + (confirmationBox?.height || 0) / 2) -
+      ((generateBox?.y || 0) + (generateBox?.height || 0) / 2),
+    )).toBeLessThanOrEqual(8);
+  } else {
+    expect((confirmationBox?.width || 0)).toBeGreaterThanOrEqual((actionsBox?.width || 0) - 24);
+    expect((generateBox?.y || 0)).toBeGreaterThanOrEqual(
+      (confirmationBox?.y || 0) + (confirmationBox?.height || 0) - 2,
+    );
+  }
+  await confirmation.check();
+  await page.reload();
+  await expect(confirmation).not.toBeChecked();
+
+  await page.locator('[data-tab-audio-slot="1"]').click();
+  await expect(confirmation).toBeFocused();
+  await expect(page.locator("#vibevoice-message")).toContainText("本人から許諾");
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __tabAudioRequestCount: number }
+  ).__tabAudioRequestCount)).toBe(0);
+
+  await confirmation.check();
+  await page.locator('[data-tab-audio-slot="1"]').click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __tabAudioRequestCount: number }
+  ).__tabAudioRequestCount)).toBe(1);
+});
+
+test("admin SkitVoice explains a runtime tab-audio incompatibility once and then hides the controls", async ({ page }) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {
       static isTypeSupported() { return true; }
@@ -752,31 +819,25 @@ test("SkitVoice explains a runtime tab-audio incompatibility once and then hides
       configurable: true,
     });
   });
-  await page.goto("/skitvoice");
+  await page.goto("/skitvoice/admin");
   await expect(page.locator('[data-tab-audio-slot="1"]')).toBeVisible();
+  await page.locator("#vibevoice-rights-confirmed").check();
   await page.locator('[data-tab-audio-slot="1"]').click();
   const unsupportedToast = page.locator(".voice-lab-toast", { hasText: "このブラウザではタブ音声録音を使えません" });
   await expect(unsupportedToast).toBeVisible();
   await expect(unsupportedToast).toHaveAttribute("role", "alert");
   await expect(page.locator("[data-tab-audio-slot]:visible")).toHaveCount(0);
-  await expect(page.locator("[data-reference-source-help]")).toHaveText("ファイル・録音・URLから選択");
+  await expect(page.locator("[data-reference-source-help]")).toContainText("ファイル・録音");
 });
 
-test("SkitVoice keeps reference slots readable in dark mode", async ({ page }, testInfo) => {
-  await page.addInitScript(() => localStorage.setItem("mo-speech-theme", "dark"));
-  await page.goto("/skitvoice");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  const colors = await page.locator(".react-voice-slot").first().evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, foreground: style.color };
-  });
-  const backgroundChannels = colors.background.match(/[\d.]+/g)?.slice(0, 3).map(Number) || [];
-  const foregroundChannels = colors.foreground.match(/[\d.]+/g)?.slice(0, 3).map(Number) || [];
-  expect(Math.max(...backgroundChannels)).toBeLessThan(80);
-  expect(Math.min(...foregroundChannels)).toBeGreaterThan(180);
+test("admin SkitVoice keeps its reference slots and generation action available", async ({ page }, testInfo) => {
+  await page.goto("/skitvoice/admin");
+  await expect(page.locator(".vibevoice-upload-slot")).toHaveCount(4);
+  await expect(page.locator("#vibevoice-generate-button")).toBeVisible();
+  await assertNoHorizontalOverflow(page);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-skitvoice-reference-slots.png`, fullPage: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-skitvoice-admin-reference-slots.png`, fullPage: true });
   }
 });
 
@@ -1107,35 +1168,16 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
   }
 });
 
-test("SkitVoice follows the documented three, two, and one-column task order", async ({ page }) => {
-  await page.goto("/skitvoice");
+test("admin SkitVoice keeps its research language and work areas available", async ({ page }) => {
+  await page.goto("/skitvoice/admin");
   await expect(page.locator("#vibevoice-output-language")).toHaveValue("en-US");
-  const script = page.locator('[aria-label="台本"]');
-  const voices = page.locator('[aria-label="参照音声"]');
-  const generate = page.locator('[aria-label="生成"]');
-  const [scriptBox, voicesBox, generateBox] = await Promise.all([
-    script.boundingBox(),
-    voices.boundingBox(),
-    generate.boundingBox(),
-  ]);
-  for (const box of [scriptBox, voicesBox, generateBox]) expect(box).not.toBeNull();
-
-  const viewportWidth = page.viewportSize()?.width || 0;
-  if (viewportWidth >= 1120) {
-    expect(Math.abs((scriptBox?.y || 0) - (voicesBox?.y || 0))).toBeLessThanOrEqual(8);
-    expect(Math.abs((scriptBox?.y || 0) - (generateBox?.y || 0))).toBeLessThanOrEqual(8);
-    expect(scriptBox?.x || 0).toBeLessThan(voicesBox?.x || 0);
-    expect(voicesBox?.x || 0).toBeLessThan(generateBox?.x || 0);
-  } else if (viewportWidth > 820) {
-    expect(Math.abs((scriptBox?.y || 0) - (generateBox?.y || 0))).toBeLessThanOrEqual(8);
-    expect(voicesBox?.y || 0).toBeGreaterThan((scriptBox?.y || 0) + (scriptBox?.height || 0) - 2);
-  } else {
-    expect(generateBox?.y || 0).toBeGreaterThan((scriptBox?.y || 0) + (scriptBox?.height || 0) - 2);
-    expect(voicesBox?.y || 0).toBeGreaterThan((generateBox?.y || 0) + (generateBox?.height || 0) - 2);
-  }
+  await expect(page.getByRole("region", { name: "台本" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "参照音声" })).toBeVisible();
+  await expect(page.locator("#vibevoice-generate-button")).toBeVisible();
+  await assertNoHorizontalOverflow(page);
 });
 
-test("SkitVoice keeps public progress generic while retaining technical progress logs", async ({ page }) => {
+test("admin SkitVoice keeps progress readable while retaining technical progress logs", async ({ page }) => {
   let statusCall = 0;
   await page.route("**/api/vibevoice/jobs**", async (route) => {
     const request = route.request();
@@ -1215,7 +1257,7 @@ test("SkitVoice keeps public progress generic while retaining technical progress
     });
   });
 
-  await page.goto("/skitvoice");
+  await page.goto("/skitvoice/admin");
   await page.locator("#vibevoice-script").fill("1 こんにちは。");
   await page.locator("#vibevoice-directed-line-mode").evaluate((element) => {
     const control = element as HTMLInputElement;
@@ -1227,10 +1269,10 @@ test("SkitVoice keeps public progress generic while retaining technical progress
     mimeType: "audio/wav",
     buffer: Buffer.from("RIFF voice"),
   });
+  await page.locator("#vibevoice-rights-confirmed").check();
   await page.locator("#vibevoice-generate-button").click();
 
-  await expect(page.locator("#vibevoice-message")).toContainText("音声生成を準備しています");
-  await expect(page.locator("#vibevoice-message")).not.toContainText(/RunPod|VibeVoice|Seed-VC/);
+  await expect(page.locator("#vibevoice-message")).toContainText(/VibeVoice|Seed-VC|音声生成/);
   await expect(page.locator("#vibevoice-progress-log")).toContainText("Seed-VCモデルを読み込んでいます");
   await expect(page.locator("#vibevoice-progress-log")).not.toContainText("loading_seed_vc_model");
   await assertNoHorizontalOverflow(page);
@@ -1253,7 +1295,7 @@ test("SkitVoice keeps public progress generic while retaining technical progress
 });
 
 test("SkitVoice uses Voice Lab audio controls for references and generated results", async ({ page }) => {
-  for (const route of ["/skitvoice", "/skitvoice/admin"]) {
+  for (const route of ["/skitvoice/admin"]) {
     await page.goto(route);
     const referenceInput = page.locator('input[name="voice_file_1"]');
     await referenceInput.setInputFiles({ name: "voice.wav", mimeType: "audio/wav", buffer: Buffer.from("RIFF reference") });
@@ -1290,7 +1332,7 @@ test("SkitVoice uses Voice Lab audio controls for references and generated resul
   }
 });
 
-test("SkitVoice sample save reports progress and appears on the public page", async ({ page }) => {
+test("SkitVoice sample save stays admin-only and does not appear on the public page", async ({ page }) => {
   await page.goto("/skitvoice/admin");
   await page.locator(".admin-config-group > summary").click();
   for (const [language] of [["en-US"], ["zh-CN"], ["ja-JP"]]) {
@@ -1306,7 +1348,7 @@ test("SkitVoice sample save reports progress and appears on the public page", as
   await expect(saveButton).toBeDisabled();
   await expect(saveButton).toHaveText("保存中…");
   await expect(saveButton).toHaveText("保存済み");
-  await expect(page.locator("[data-public-samples-status]")).toContainText("ユーザー画面へ反映");
+  await expect(page.locator("[data-public-samples-status]")).toContainText("一般画面には表示されません");
   await expect(page.getByText(/\.wav/)).toHaveCount(0);
   await expect(page.locator(".skitvoice-samples-admin .sample-audio-control")).toHaveCount(3);
   await expect(page.locator(".skitvoice-samples-admin audio[data-sample-audio-custom]").first()).toBeHidden();
@@ -1322,52 +1364,16 @@ test("SkitVoice sample save reports progress and appears on the public page", as
   }
 
   await page.goto("/skitvoice");
-  await expect(page.getByRole("heading", { name: "出力音声サンプル" })).toBeVisible();
-  for (const [language, title] of [["en-US", "英語"], ["zh-CN", "中国語"], ["ja-JP", "日本語"]]) {
-    const sample = page.locator(`[data-public-sample-language="${language}"]`);
-    await expect(sample).toBeVisible();
-    await expect(sample.getByText(title)).toBeVisible();
-    await expect(sample.locator("audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
-    await expect(sample.locator("audio")).toBeHidden();
-    await expect(sample.locator(".sample-audio-control")).toBeVisible();
-  }
-  const englishSample = page.locator('[data-public-sample-language="en-US"]');
-  const englishAudio = englishSample.locator("audio");
-  await englishAudio.evaluate((audio: HTMLAudioElement) => {
-    let currentTime = 0;
-    let paused = true;
-    Object.defineProperty(audio, "duration", { configurable: true, get: () => 120 });
-    Object.defineProperty(audio, "currentTime", { configurable: true, get: () => currentTime, set: (value) => { currentTime = Number(value); } });
-    Object.defineProperty(audio, "paused", { configurable: true, get: () => paused });
-    audio.play = async () => { paused = false; audio.dispatchEvent(new Event("play")); };
-    audio.pause = () => { paused = true; audio.dispatchEvent(new Event("pause")); };
-    audio.dispatchEvent(new Event("loadedmetadata"));
-  });
-  const playButton = englishSample.locator(".sample-audio-play-button");
-  const seek = englishSample.locator(".sample-audio-seek");
-  await expect(playButton).toHaveAttribute("aria-label", "英語を再生");
-  await playButton.click();
-  await expect(englishSample.locator(".sample-audio-control")).toHaveAttribute("data-state", "playing");
-  await expect(playButton).toHaveAttribute("aria-label", "英語を一時停止");
-  await seek.fill("30");
-  await expect(englishSample.locator(".sample-audio-time")).toHaveText("0:30 / 2:00");
-  await playButton.click();
-  await expect(englishSample.locator(".sample-audio-control")).toHaveAttribute("data-state", "paused");
-  const [samplesBox, formBox, privacyBox] = await Promise.all([
-    page.locator(".react-output-samples").boundingBox(),
-    page.locator("#vibevoice-form").boundingBox(),
-    page.locator("[data-public-privacy-notice]").boundingBox(),
-  ]);
-  expect((samplesBox?.y || 0) + (samplesBox?.height || 0)).toBeLessThanOrEqual((formBox?.y || 0) + 1);
-  expect(privacyBox?.y || 0).toBeGreaterThanOrEqual((formBox?.y || 0) + (formBox?.height || 0) - 1);
+  await expect(page.getByRole("heading", { name: "研究機能は一般公開していません" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "出力音声サンプル" })).toHaveCount(0);
+  await expect(page.locator("[data-public-sample-language]")).toHaveCount(0);
+  await expect(page.locator("#vibevoice-form")).toHaveCount(0);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await page.locator(".react-sample-stack").evaluate((element) => { element.scrollLeft = 0; });
-    await page.locator("body").click({ position: { x: 1, y: 1 } });
-    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-three-public-samples.png`, fullPage: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-skitvoice-public-closed.png`, fullPage: true });
     await page.evaluate(() => localStorage.setItem("mo-speech-theme", "dark"));
     await page.reload();
-    await expect(page.locator(".react-output-samples .sample-audio-control")).toHaveCount(3);
-    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-three-public-samples-dark.png`, fullPage: true });
+    await expect(page.locator("[data-public-sample-language]")).toHaveCount(0);
+    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-skitvoice-public-closed-dark.png`, fullPage: true });
   }
 });
 

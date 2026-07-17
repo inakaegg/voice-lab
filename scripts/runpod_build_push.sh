@@ -15,6 +15,10 @@ require_env RUNPOD_IMAGE
 
 cd "${REPO_ROOT}"
 
+image_repository="${RUNPOD_IMAGE%:*}"
+image_visibility="${RUNPOD_IMAGE_VISIBILITY:-private}"
+bash scripts/check_dockerhub_visibility.sh "${image_repository}" "${image_visibility}"
+
 BUILD_PLATFORM="${RUNPOD_BUILD_PLATFORM:-linux/amd64}"
 cmd=(docker buildx build --platform "${BUILD_PLATFORM}" -f Dockerfile.runpod -t "${RUNPOD_IMAGE}" --push)
 if [[ -n "${RUNPOD_BASE_IMAGE:-}" ]]; then

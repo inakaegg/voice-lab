@@ -84,12 +84,15 @@
 - pushが必要な場合は作業内容、確認結果、未確認範囲を報告し、ユーザー側で実行してもらう。
 - ユーザーがそのターンで明示的に「pushして」と依頼した場合だけ、Codexがpushしてよい。
 - コミットする場合は、可能なら `日本語 / English` の1行形式にする。
+- 各worktreeで `./scripts/install_git_hooks.sh` を実行し、Gitleaksの `pre-commit` と `pre-push` hookを有効にする。Gitleaksがない環境ではcommit・pushを黙って通さず停止する。
+- ローカルhookはGitHub ActionsとGitHub Push Protectionの代替ではない。全branchへのpush・pull requestの専用CI再検査を維持し、公開前にはGit履歴全体を別途検査する。
 
 ## 現在の検証コマンド
 
 通常の変更では、影響範囲に応じて次を実行する。
 
 ```sh
+gitleaks git --redact --log-opts='--all' .
 python3 -m pytest
 npm test
 npm run check:js

@@ -56,11 +56,12 @@
         <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
           </section>
 
-          <section class="public-samples-admin skitvoice-samples-admin" data-public-samples-admin data-public-samples-features="skitvoice" aria-label="出力音声サンプル">
+          <section class="public-samples-admin skitvoice-samples-admin" data-public-samples-admin data-public-samples-features="skitvoice" aria-label="研究用サンプル音声">
         <div class="public-access-header">
           <div>
-            <h2>出力音声サンプル</h2>
-            <p>SkitVoiceユーザー画面に表示する出力例を登録します。</p>
+            <h2>研究用サンプル音声</h2>
+            <p>由来・許諾・生成model・AI生成表示を確認できるまで、一般画面には表示しません。</p>
+            <p>管理者が研究素材の状態を確認するための出力例を登録します。</p>
           </div>
           <div class="public-samples-header-actions"><p class="public-access-status public-samples-header-status" data-public-samples-status role="status" aria-live="polite"></p><button type="button" class="secondary-button" data-public-samples-save>保存</button></div>
         </div>
@@ -73,7 +74,7 @@
         <div class="public-sample-admin-feature" data-public-sample-admin-feature="skitvoice" data-public-sample-language="ja-JP">
           <h3>日本語</h3><label class="public-access-wide">説明 <textarea data-public-sample-description rows="2" maxlength="300"></textarea></label><label class="public-sample-file-button"><span>音声ファイルを選択</span><input type="file" accept="audio/*" data-public-sample-file /></label><button type="button" class="secondary-button public-sample-delete-button" data-public-sample-delete>保存済みを削除</button><audio data-public-sample-preview data-sample-audio-custom controls preload="metadata" hidden></audio>
         </div>
-        <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
+        <p class="public-access-note">保存データは管理者経路だけで扱います。一般公開へ戻す場合は権利と表示要件を別途確認してください。</p>
           </section>
         </div>
       </details>
@@ -166,6 +167,7 @@
                   <audio class="vibevoice-saved-voice-preview" data-saved-voice-preview-slot="4" data-voice-lab-audio-label="Speaker 4 参照音声" preload="metadata" hidden aria-label="Speaker 4 参照音声プレビュー"></audio>
                 </label>
               </div>
+              <p class="vibevoice-help" data-reference-source-help>参照音声はファイル・録音から選べます。対応環境ではタブ音声とローカルURLも表示します。</p>
             </section>
 
             <details class="vibevoice-panel vibevoice-settings-panel admin-advanced-group" aria-label="生成設定">
@@ -355,6 +357,10 @@
             </details>
 
             <div class="vibevoice-actions">
+              <label class="vibevoice-rights-confirmation">
+                <input id="vibevoice-rights-confirmed" name="rights_confirmed" required type="checkbox" autocomplete="off" />
+                <span>参照音声（ファイル、マイク、タブ音声、URL）は、自分の音声、本人から許諾を得た音声、またはライセンス上この用途に利用できる音声です。</span>
+              </label>
               <button id="vibevoice-generate-button" class="vibevoice-generate-button" type="submit">生成</button>
               <button id="vibevoice-cancel-button" class="vibevoice-cancel-button" type="button" hidden>キャンセル</button>
               <p id="vibevoice-message" class="vibevoice-message" role="status" aria-live="polite"></p>
@@ -443,6 +449,7 @@
         </summary>
         <dl id="vibevoice-runtime-details" class="vibevoice-runtime-details"></dl>
       </details>
+      <section id="voice-lab-toast-viewport" class="voice-lab-toast-viewport" aria-label="操作結果" aria-live="polite" aria-atomic="false"></section>
     </main>
     <script src="/static/app_public_access_settings.js" defer></script>
     <script src="/static/app_sample_audio_controls.js" defer></script>

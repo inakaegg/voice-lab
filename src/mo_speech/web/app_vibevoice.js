@@ -737,10 +737,7 @@ function formatRangeValue(input) {
 
 async function handleGenerate(event) {
   event.preventDefault();
-  if (rightsConfirmedControl && !rightsConfirmedControl.checked) {
-    message.dataset.state = "error";
-    message.textContent = "参照音声の利用許諾を確認してください。";
-    rightsConfirmedControl?.focus();
+  if (!ensureVibeVoiceReferenceRightsConfirmed()) {
     return;
   }
   if (activeVoiceRecording) {
@@ -809,6 +806,16 @@ async function handleGenerate(event) {
       : errorText;
     message.dataset.state = "error";
   }
+}
+
+function ensureVibeVoiceReferenceRightsConfirmed() {
+  if (rightsConfirmedControl?.checked) {
+    return true;
+  }
+  message.dataset.state = "error";
+  message.textContent = "参照音声が、自分の音声、本人から許諾を得た音声、またはライセンス上この用途に利用できる音声であることを確認してください。";
+  rightsConfirmedControl?.focus();
+  return false;
 }
 
 async function handleScriptFileChange() {
@@ -961,6 +968,9 @@ async function toggleTabAudioRecording(event) {
 }
 
 async function startTabAudioRecording(slot, button) {
+  if (!ensureVibeVoiceReferenceRightsConfirmed()) {
+    return;
+  }
   if (generationBusy) {
     message.dataset.state = "error";
     message.textContent = "生成中はタブ音声を録音できません。";

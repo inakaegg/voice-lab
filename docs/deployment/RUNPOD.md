@@ -1,6 +1,6 @@
 # RunPodデプロイ手順
 
-更新日: 2026-07-15
+更新日: 2026-07-17
 
 ## 現在の状態
 
@@ -19,6 +19,33 @@ Serverless handlerは、音声翻訳、テキスト読み上げ、Seed-VC、Vibe
 SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り `/status/<job-id>` をpollingする。handlerはprogress updateとして `initializing`、`loading_model`、`transcribing_model`、`transcribing_attempt`、`finalizing` を送る。queue中はjob statusと `/health` のworker数から、worker割り当て待ちとworker初期化中を区別する。RunPodが返す `delayTime` と `executionTime` もUIの補足情報に使う。
 
 SkitVoiceも同じ非同期job経路で進捗を返す。handlerは `loading_vibevoice_model`、`vibevoice_generation`、`directed_asr`、`loading_seed_vc_model`、`voice_conversion`、`reconstruct`、`finalizing` をモデル名付きで送る。SpeakLoopで `自分の声` を選んだ場合も、通常TTSを変換元、最初の録音をSeed-VC参照音声として同じvoice conversion jobへ送り、GPU待機、Seed-VCモデル読込、声質変換を表示する。Cloudflare WorkerとローカルFastAPIは途中結果を履歴保存せず、RunPod job statusをpollingして既存進捗欄へ表示する。失敗時はRunPodが返した原因を保持し、残高不足を文言から明確に判別できる場合だけBillingの確認を案内する。
+
+## operation別policyとprivacy停止条件
+
+RunPodへ送るcanonical operationとpersonal dataは次のとおりである。handlerの互換aliasはcanonical名へ正規化して同じpolicyを使う。
+
+| operation | 主な送信データ | 主な呼出元 | 2026-07-17の実測状態 |
+| --- | --- | --- | --- |
+| `translation` | 入力音声、変換設定、翻訳途中結果 | ローカルFastAPI | operation別実測なし |
+| `text_tts` | 読み上げテキスト | ローカルFastAPI | operation別実測なし |
+| `voice_conversion` | 変換元音声、本人参照録音 | SpeakLoop自己音声、管理者VC | operation別実測なし |
+| `practice_asr` | 復唱音声、お手本音声、target text | SpeakLoop中国語比較 | operation別実測なし |
+| `vibevoice` | 管理者の台本、参照音声、生成設定、翻訳結果 | SkitVoice管理者研究 | operation別実測なし |
+| `warmup` | preload指定。利用者音声なし | 管理者準備 | operation別実測なし |
+| `diagnostics` | 診断指定。利用者音声なし | 管理者診断 | operation別実測なし |
+
+既存の `RUNPOD_SERVERLESS_TIMEOUT_SECONDS=1800` はclient全体のpolling上限、`MO_VIBEVOICE_TIMEOUT_SECONDS=1800` は同期VibeVoice呼出し上限であり、operation別の実処理時間ではない。repository内に実jobのcold/warm、queue、cancel、timeoutを分けた計測結果がなく、この作業では課金を伴うjobを送信しない。そのため値を推測せず、`RUNPOD_OPERATION_POLICIES_JSON` にcanonical operationごとの正の整数ミリ秒 `ttl` と `executionTimeout` が揃うまでRunPod submitを送信前に停止する。Cloudflare WorkerとPython clientの双方が同じ契約を使い、送信時は次のtop-level形にする。
+
+```json
+{
+  "input": { "operation_mode": "voice_conversion" },
+  "policy": { "ttl": 0, "executionTimeout": 0 }
+}
+```
+
+上例の `0` はschema説明用であり有効値ではない。実設定はRunPodの許容範囲内の正の整数とし、`ttl >= executionTimeout` を満たす。各operationを同じ値で一括設定せず、ownerがRunPod logsの `delayTime`、`executionTime`、cold/warm、入力上限を確認して決める。設定不足・未知operation・不正値は外部request前に失敗させる。これにより、値が未決定の状態をRunPod既定保持期間へfallbackさせない。
+
+application logと利用者向けerrorにはraw音声base64、台本、翻訳結果、request/response全体を含めない。cancel、failure、timeout、JSON parse failureでもjob ID、HTTP status、正規化したstageのような非payload metadataだけを使う。RunPod platform側のjob input/result/log保持とcancel後の残存は別境界であり、owner認証で実ログを確認するまで未確認とする。正式な値と保持条件、問い合わせ先を確定するまでは公開deployのblocking項目である。
 
 ## Podで確認する場合
 
@@ -82,6 +109,7 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
+| `RUNPOD_OPERATION_POLICIES_JSON` | canonical operationごとの明示的な `ttl` / `executionTimeout`（ミリ秒）。未設定・不完全ならsubmitを安全停止する。 |
 | `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `300`。 |
 | `RUNPOD_FLASH_BOOT` | Serverless endpoint作成時にFlashBootを有効にする。デモ用途では `1` を既定にする。 |
 | `RUNPOD_WORKERS_MIN` | 最小worker数。デモ用途では待機課金を避けるため `0` を既定にする。 |
@@ -117,9 +145,9 @@ RUNPOD_DRY_RUN=1 scripts/runpod_create_gpu_pod.sh
 
 ### registryの選択
 
-初回はDocker Hubのpublic imageが最も簡単。RunPodから追加認証なしでpullでき、CLIスクリプトも `RUNPOD_IMAGE=docker.io/<user>/mo-speech:gpu-smoke` を前提にできる。Docker Hub Personalではpublic repositoryを使えるため、秘密情報をimageに含めない限りMVP検証には足りる。
+RunPod imageはprivate repositoryを既定とする。imageには `/app/src` と実行環境が含まれるため、GitHub repositoryをprivateにしてもcontainer repositoryがpublicなら実装を取得できる。Docker Hub側でrepositoryを先にprivateとして作成し、RunPodへregistry認証を設定してから使う。
 
-GHCRはGitHub Container Registryのこと。GitHub repositoryとimageの権限を合わせたい場合、またはGitHub Actionsでbuild/pushしたい場合に向く。ただしprivate imageにするとRunPod側のregistry auth設定が必要になるため、初回検証ではDocker Hub publicより手順が増える。
+GHCRはGitHub Container Registryのこと。GitHub repositoryとimageの権限を合わせたい場合に向く。Docker Hub、GHCRのどちらでもprivate imageにはRunPod側のregistry auth設定が必要である。手順が増えることを理由にpublicへ切り替えず、public配布は [公開前チェックリスト](PUBLICATION_CHECKLIST.md) の権利・プライバシー・外部設定を完了した場合だけ明示的に選ぶ。
 
 RunPodのGitHub連携は、GitHub repositoryからRunPod側でimageをbuildし、RunPodのregistryに保存してServerless endpointへdeployする用途に向く。ローカルMacのDocker build容量を避けられるのが利点。ただし初回のWeb UI込みPod検証では、明示的なDocker imageをregistryへpushしてPodからpullする方が手順を追いやすい。
 
@@ -142,6 +170,8 @@ Mac上のDocker buildは容量を使う。`buildx --push` を使い、最終imag
 ローカル回線の上りが遅い場合は、GitHub ActionsでRunPod用imageをbuildし、GitHub側からDocker Hubへpushする。ローカルMacから大きいDocker layerをアップロードしないため、個人回線の上り速度に依存しにくい。
 
 このリポジトリでは手動実行用workflowとして `.github/workflows/runpod-image.yml` を使う。通常のpushごとに巨大imageをbuildしないよう、`workflow_dispatch` のみで起動する。
+
+workflowには既定の `image_name` を持たせない。実行時に既存のDocker Hub repositoryと `expected_visibility` を毎回指定し、Docker Hub APIが返す実際の可視性と一致しなければlogin・build・push前に停止する。既定の期待値は `private` であり、public repositoryへpushするには `public` を明示選択する。
 
 GitHub Actionsの手動実行では、`workflow_dispatch` を持つworkflowファイルがdefault branchに存在している必要がある。新規workflowをfeature branchで追加した直後は、そのbranchをpushするだけではActions画面や `gh workflow run` から見つからない場合がある。初回はworkflowファイルをmainへ入れてから、必要に応じて `--ref <branch>` で対象branchのコードをbuildする。
 
@@ -198,7 +228,8 @@ RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh
 ```bash
 gh workflow run runpod-image.yml \
   --ref feature/vibevoice-zhskit-mode \
-  -f image_name=docker.io/dockerhubfd/mo-speech \
+  -f image_name=docker.io/<user>/<private-repository> \
+  -f expected_visibility=private \
   -f image_tag=runpod-vibevoice-$(git rev-parse --short HEAD)
 ```
 
@@ -210,7 +241,8 @@ Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh
 
 ```bash
 # .runpod.env
-RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-<short-sha>
+RUNPOD_IMAGE=docker.io/<user>/<private-repository>:runpod-vibevoice-<short-sha>
+RUNPOD_IMAGE_VISIBILITY=private
 ```
 
 既存templateへ反映する場合:

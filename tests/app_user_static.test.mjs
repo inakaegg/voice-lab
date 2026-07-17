@@ -242,7 +242,15 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.equal((vibevoiceHtml.match(/data-public-sample-language="(?:ja-JP|zh-CN|en-US)"/g) || []).length, 3);
   assert.ok(vibevoiceHtml.indexOf('data-public-sample-language="en-US"') < vibevoiceHtml.indexOf('data-public-sample-language="zh-CN"'));
   assert.ok(vibevoiceHtml.indexOf('data-public-sample-language="zh-CN"') < vibevoiceHtml.indexOf('data-public-sample-language="ja-JP"'));
-  assert.match(vibevoiceHtml, /<h2>出力音声サンプル<\/h2>/);
+  assert.match(vibevoiceHtml, /<h2>研究用サンプル音声<\/h2>/);
+  assert.match(vibevoiceHtml, /一般画面には表示しません/);
+  assert.match(vibevoiceHtml, /data-reference-source-help/);
+  assert.match(vibevoiceHtml, /id="voice-lab-toast-viewport"/);
+  assert.match(vibevoiceHtml, /name="rights_confirmed"[^>]*required/);
+  assert.match(vibevoiceHtml, /ファイル、マイク、タブ音声、URL/);
+  assert.match(vibevoiceSource, /function ensureVibeVoiceReferenceRightsConfirmed\(\)/);
+  assert.match(vibevoiceSource, /handleGenerate[\s\S]*ensureVibeVoiceReferenceRightsConfirmed\(\)/);
+  assert.match(vibevoiceSource, /startTabAudioRecording[\s\S]*ensureVibeVoiceReferenceRightsConfirmed\(\)[\s\S]*getDisplayMedia/);
   assert.match(vibevoiceHtml, /skitvoice-samples-admin/);
   assert.doesNotMatch(vibevoiceHtml, /<label>タイトル/);
   assert.doesNotMatch(vibevoiceHtml, /data-public-sample-details/);

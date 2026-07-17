@@ -72,6 +72,7 @@ mo_speech = [
   "web/react/*.html",
   "web/react/assets/*.css",
   "web/react/assets/*.js",
+  "web/react/assets/*.md",
 ]
 
 [tool.pytest.ini_options]

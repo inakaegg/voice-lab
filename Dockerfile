@@ -10,6 +10,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml /app/
+COPY LICENSE THIRD_PARTY_NOTICES.md /app/
 COPY src /app/src
 COPY scripts /app/scripts
 

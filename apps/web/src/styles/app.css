@@ -1095,6 +1095,10 @@ html[data-theme="dark"] .react-generate-card .vibevoice-generate-button {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .voice-lab-admin-body .vibevoice-actions .vibevoice-rights-confirmation {
+    grid-column: 1 / -1;
+  }
+
   .voice-lab-admin-body .vibevoice-actions .vibevoice-message,
   .voice-lab-admin-body .vibevoice-actions .vibevoice-job-progress {
     grid-column: 1 / -1;

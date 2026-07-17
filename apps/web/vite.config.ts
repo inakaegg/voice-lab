@@ -17,7 +17,10 @@ export default defineConfig({
   build: {
     outDir: resolve(rootDir, "../../src/mo_speech/web/react"),
     emptyOutDir: true,
-    rollupOptions: {
+    license: {
+      fileName: "assets/licenses.md",
+    },
+    rolldownOptions: {
       input: {
         appStyles: resolve(rootDir, "app-styles.html"),
         portal: resolve(rootDir, "portal.html"),
@@ -28,6 +31,7 @@ export default defineConfig({
         entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",
         assetFileNames: "assets/[name][extname]",
+        postBanner: "/* Bundled dependency licenses: /react/assets/licenses.md */",
       },
     },
   },
