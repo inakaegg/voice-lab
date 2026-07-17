@@ -60,7 +60,7 @@ export function PageShell({ children, className = "" }: { children: ReactNode; c
 }
 
 export function PrivacyNotice() {
-  return <footer className="react-workflow-privacy-note" data-public-privacy-notice><p className="public-privacy-notice">音声は生成・評価のため外部サービスで処理されます。個人情報や機密情報を含む音声は入力しないでください。</p></footer>;
+  return <footer className="react-workflow-privacy-note" data-public-privacy-notice><p className="public-privacy-notice">音声は生成・評価のため外部サービスで処理されます。個人情報や機密情報を含む音声は入力しないでください。<a href="/privacy">プライバシーポリシー</a></p></footer>;
 }
 
 export function ToastViewport() {

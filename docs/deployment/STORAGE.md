@@ -12,7 +12,7 @@
 | 短期job snapshot、warmup ready | Workers KV | 実装済み。TTL付き |
 | ユーザー音声履歴 | Cloudflare公開版では保存しない | ローカルFastAPI版だけで利用 |
 | 研究用SkitVoice sample metadata/blob | D1 / R2（bindingなしではKV fallback） | dataは削除せず管理者経路だけで扱い、一般向けAPIから除外 |
-| quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存 |
+| quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存。日次quotaは48時間、auditは90日 |
 
 `MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは翻訳、VC、SpeakLoop、SkitVoice、TTSの入力・生成音声を履歴indexやblobとして書き込まない。
 
@@ -80,7 +80,7 @@ CREATE INDEX audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
 
 音声、台本、入力本文、OAuth token、raw IP addressはauditへ保存しない。emailを保存する必要がある場合も用途と保持期間を決め、表示用情報と台帳用識別子を分ける。
 
-現在のD1 `audit_events`、日次・累計quotaには期限による自動削除がなく、保持期間も未決定である。これは公開再開前のblocking事項とし、[データ取扱い境界](PRIVACY.md)で期間と削除手段を決めてからmigrationまたは定期削除処理を追加する。KV fallbackにも同じ保持契約を適用する。
+D1の日次quotaは48時間、`audit_events`は90日保持し、WorkerのCron Triggerで1日1回期限切れを削除する。累計quotaと`public_users`のhash識別子は利用上限を維持するため公開デモの運用中に限り保持し、デモ終了時に削除する。KV fallbackの日次quotaは48時間、auditは90日のTTLを設定し、累計quotaはD1と同じく公開デモの運用中に保持する。
 
 現在のKV fallbackはquota keyとaudit eventの利用者識別子をSHA-256 hash化する。旧実装の平文email key／eventは利用時にhashへ移行するが、利用されない旧データは自動移行されないため、公開環境で残存確認と削除を行う。管理設定の `admin_google_emails` は運営者allowlistとして平文のまま保存するため、一般利用者のquota・auditデータと混同しない。
 

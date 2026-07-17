@@ -24,6 +24,7 @@ export default defineConfig({
       input: {
         appStyles: resolve(rootDir, "app-styles.html"),
         portal: resolve(rootDir, "portal.html"),
+        privacy: resolve(rootDir, "privacy.html"),
         speakloop: resolve(rootDir, "speakloop.html"),
         skitvoice: resolve(rootDir, "skitvoice.html"),
       },

@@ -3,18 +3,20 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [portal, speakloop, skitvoice, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, skitvoiceHtml] = await Promise.all([
+const [portal, speakloop, skitvoice, privacy, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, skitvoiceHtml, privacyHtml] = await Promise.all([
   read("apps/web/src/portal/main.tsx"), read("apps/web/src/speakloop/main.tsx"),
-  read("apps/web/src/skitvoice/main.tsx"), read("apps/web/src/shared/components.tsx"),
+  read("apps/web/src/skitvoice/main.tsx"), read("apps/web/src/privacy/main.tsx"),
+  read("apps/web/src/shared/components.tsx"),
   read("src/mo_speech/web/styles.css"),
   read("cloudflare/worker.mjs"), read("package.json"), read("apps/web/vite.config.ts"),
-  read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/skitvoice.html"),
+  read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/skitvoice.html"), read("apps/web/privacy.html"),
 ]);
 
-test("public portal, SpeakLoop, and the SkitVoice closed page are React TypeScript entries", () => {
+test("public portal, SpeakLoop, SkitVoice, and privacy policy are React TypeScript entries", () => {
   assert.match(portal, /mountPublicPage\(<Portal/);
   assert.match(speakloop, /mountPublicPage\(<SpeakLoop/);
   assert.match(skitvoice, /mountPublicPage\(<SkitVoice/);
+  assert.match(privacy, /mountPublicPage\(<PrivacyPolicy/);
   assert.match(shared, /function ProductHeader/);
   assert.match(shared, /activateCompactLayout/);
   assert.match(shared, /"compact"/);
@@ -60,8 +62,23 @@ test("React layouts include responsive product and workflow structure", () => {
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {
   assert.match(shared, /export function PrivacyNotice[\s\S]*<footer className="react-workflow-privacy-note" data-public-privacy-notice>/);
+  assert.match(shared, /href="\/privacy"[\s\S]*プライバシーポリシー/);
   assert.equal((speakloop.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
   assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
+});
+
+test("privacy policy discloses processors, retention, and a private inquiry path", () => {
+  for (const provider of ["Cloudflare", "Google", "OpenAI", "RunPod"]) {
+    assert.match(privacy, new RegExp(provider));
+  }
+  assert.match(privacy, /音声と生成音声[\s\S]*履歴として保存しません/);
+  assert.match(privacy, /処理結果の短期データ[\s\S]*1時間/);
+  assert.match(privacy, /1日ごとの利用回数[\s\S]*48時間/);
+  assert.match(privacy, /監査ログ[\s\S]*90日/);
+  assert.match(privacy, /累計利用回数[\s\S]*公開デモの運用中/);
+  assert.match(privacy, /GitHub[\s\S]*Report a vulnerability/);
+  assert.match(viteConfig, /privacy:\s*resolve\(rootDir,\s*"privacy\.html"\)/);
+  assert.match(privacyHtml, /\/src\/privacy\/main\.tsx/);
 });
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {

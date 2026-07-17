@@ -71,6 +71,16 @@ test("SpeakLoop keeps the shared privacy notice at the workflow bottom left", as
   }
 });
 
+test("privacy policy stays readable and links back to Voice Lab", async ({ page }) => {
+  await page.goto("/privacy");
+  await expect(page.getByRole("heading", { name: "プライバシーポリシー", level: 1 })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Voice Lab/ })).toHaveAttribute("href", "/");
+  await expect(page.getByRole("heading", { name: "保持期間" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Report a vulnerability" })).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+  await assertVisibleControlsInsideViewport(page);
+});
+
 test("SpeakLoop shows own-voice details on hover, focus, and click without shifting the workflow", async ({ page }, testInfo) => {
   await page.goto("/speakloop");
   const help = page.locator("#practice-own-voice-help > button");

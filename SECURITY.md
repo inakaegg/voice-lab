@@ -6,6 +6,8 @@
 
 `Report a vulnerability` が表示されない場合は、公開Issueへ再現情報を書かず、repository ownerのGitHub profileに掲載された連絡手段からprivateな報告経路を確認してください。
 
+公開デモの保存情報に関する問い合わせ・削除依頼も、個人情報を公開Issueへ書かず、同じPrivate vulnerability reportingから連絡してください。
+
 報告には、影響するrouteまたはcomponent、再現条件、想定される影響、確認したrevisionを含めてください。API key、token、個人情報、第三者の音声データは添付しないでください。
 
 ## 対象

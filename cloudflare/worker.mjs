@@ -11,6 +11,8 @@ const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
 const PUBLIC_AUDIT_D1_MIGRATED_KV_KEY = "public-audit-log:d1-migrated";
 const PUBLIC_AUDIT_LOG_DEFAULT_LIMIT = 500;
+const PUBLIC_AUDIT_RETENTION_SECONDS = 60 * 60 * 24 * 90;
+const PUBLIC_DAILY_QUOTA_RETENTION_SECONDS = 60 * 60 * 48;
 const PUBLIC_SAMPLE_AUDIOS_KV_KEY = "public-sample-audios";
 const PUBLIC_SAMPLE_AUDIO_MAX_BASE64_CHARS = 2_500_000;
 const PUBLIC_SAMPLE_LANGUAGES = ["ja-JP", "zh-CN", "en-US"];
@@ -186,6 +188,9 @@ const ephemeralPublicUsage = new Map();
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request, env, ctx);
+  },
+  async scheduled(controller, env) {
+    await runPublicDataRetention(env, new Date(controller.scheduledTime));
   },
 };
 
@@ -812,6 +817,8 @@ async function serveAsset(request, env, url) {
   }
   if (url.pathname === "/") {
     assetUrl.pathname = "/react/portal.html";
+  } else if (url.pathname === "/privacy" || url.pathname === "/privacy/") {
+    assetUrl.pathname = "/react/privacy.html";
   } else if (url.pathname === "/fun" || url.pathname === "/fun/") {
     assetUrl.pathname = "/user.html";
   } else if (url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
@@ -1429,7 +1436,7 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
   const dailyUsed = Math.max(hashedDailyUsed, legacyDailyUsed);
   const totalUsed = Math.max(hashedTotalUsed, legacyTotalUsed);
   if (legacyDailyUsed > hashedDailyUsed) {
-    await publicUsagePut(env, dailyKey, legacyDailyUsed, 60 * 60 * 48);
+    await publicUsagePut(env, dailyKey, legacyDailyUsed, PUBLIC_DAILY_QUOTA_RETENTION_SECONDS);
   }
   if (legacyTotalUsed > hashedTotalUsed) {
     await publicUsagePut(env, totalKey, legacyTotalUsed);
@@ -1460,7 +1467,7 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
     });
     throw httpError(429, "public quota exceeded");
   }
-  await publicUsagePut(env, dailyKey, dailyUsed + 1, 60 * 60 * 48);
+  await publicUsagePut(env, dailyKey, dailyUsed + 1, PUBLIC_DAILY_QUOTA_RETENTION_SECONDS);
   await publicUsagePut(env, totalKey, totalUsed + 1);
   await appendPublicAuditEvent(env, {
     action: "public_quota_consumed",
@@ -1542,10 +1549,16 @@ async function readPublicAuditLog(env, url = null) {
   const kv = stateKv(env);
   const events = kv ? await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []) : [];
   const storedEvents = Array.isArray(events) ? events : [];
-  const normalizedEvents = await Promise.all(storedEvents.map((entry) => publicAuditEventWithHashedEmail(entry)));
+  const normalizedEvents = await retainedPublicAuditEvents(storedEvents);
   if (kv && JSON.stringify(normalizedEvents) !== JSON.stringify(storedEvents)) {
     try {
-      await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(normalizedEvents));
+      if (normalizedEvents.length > 0) {
+        await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(normalizedEvents), {
+          expirationTtl: PUBLIC_AUDIT_RETENTION_SECONDS,
+        });
+      } else {
+        await kv.delete(PUBLIC_AUDIT_LOG_KV_KEY);
+      }
     } catch (_error) {
       // 既存監査ログのhash化失敗で読み取りを止めない。
     }
@@ -1587,10 +1600,12 @@ async function appendPublicAuditEvent(env, event) {
   });
   try {
     const current = await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []);
-    const events = await Promise.all((Array.isArray(current) ? current : []).map((item) => publicAuditEventWithHashedEmail(item)));
+    const events = await retainedPublicAuditEvents(Array.isArray(current) ? current : [], now);
     events.push(entry);
     const limit = publicAuditLogLimit(env);
-    await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(events.slice(-limit)));
+    await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(events.slice(-limit)), {
+      expirationTtl: PUBLIC_AUDIT_RETENTION_SECONDS,
+    });
   } catch (_error) {
     // 監査ログ保存の失敗で、ログインや生成APIの本処理を止めない。
   }
@@ -1610,6 +1625,42 @@ async function migrateLegacyAuditEventsToD1(env) {
     ).bind(entry.id || crypto.randomUUID(), entry.created_at || new Date().toISOString(), emailHash, entry.action || "unknown", entry.feature || null, entry.path || null, JSON.stringify(detail)).run();
   }
   await kv.put(PUBLIC_AUDIT_D1_MIGRATED_KV_KEY, "1");
+}
+
+export async function runPublicDataRetention(env = {}, now = new Date()) {
+  const referenceTime = Number.isFinite(now?.getTime?.()) ? now : new Date();
+  const dailyQuotaCutoff = new Date(referenceTime.getTime() - PUBLIC_DAILY_QUOTA_RETENTION_SECONDS * 1000).toISOString();
+  const auditCutoff = new Date(referenceTime.getTime() - PUBLIC_AUDIT_RETENTION_SECONDS * 1000).toISOString();
+
+  if (env.MO_SPEECH_DB) {
+    await env.MO_SPEECH_DB.batch([
+      env.MO_SPEECH_DB.prepare("DELETE FROM quota_usage_daily WHERE updated_at < ?").bind(dailyQuotaCutoff),
+      env.MO_SPEECH_DB.prepare("DELETE FROM audit_events WHERE occurred_at < ?").bind(auditCutoff),
+    ]);
+  }
+
+  const kv = stateKv(env);
+  if (!kv) {
+    return;
+  }
+  const current = await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []);
+  const events = await retainedPublicAuditEvents(Array.isArray(current) ? current : [], referenceTime);
+  if (events.length > 0) {
+    await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(events), {
+      expirationTtl: PUBLIC_AUDIT_RETENTION_SECONDS,
+    });
+  } else {
+    await kv.delete(PUBLIC_AUDIT_LOG_KV_KEY);
+  }
+}
+
+async function retainedPublicAuditEvents(events, now = new Date()) {
+  const cutoff = now.getTime() - PUBLIC_AUDIT_RETENTION_SECONDS * 1000;
+  const normalized = await Promise.all(events.map((entry) => publicAuditEventWithHashedEmail(entry)));
+  return normalized.filter((entry) => {
+    const occurredAt = Date.parse(String(entry.created_at || ""));
+    return Number.isFinite(occurredAt) && occurredAt >= cutoff;
+  });
 }
 
 async function publicIdentityHash(email) {

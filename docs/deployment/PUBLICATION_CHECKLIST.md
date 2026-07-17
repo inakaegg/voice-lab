@@ -13,7 +13,7 @@
 - RunPodのDocker Hub read-only registry credentialは1件を登録済み。endpoint `78i71pqw2h24xc` のtemplate `9oabmrsr64` は `containerRegistryAuthId` を持ち、private image `docker.io/dockerhubfd/mo-speech:runpod-vibevoice-1807d21` を参照する。
 - endpointを一度 `workersMax=0` へ変更してworker 0件を確認し、設定を `workersMin=0`、`workersMax=1`、`idleTimeout=300` へ戻した。強制scale-to-zero後の新しいworkerでdiagnosticsが完了し、image revision `1807d21ed599bd3f0db6f9d29089d9c7b1f0c27e` とtagが一致した。
 - Cloudflare公開デモ `https://voice-lab.inakaegg.workers.dev/` は旧versionのままHTTP 200で公開中。匿名のVibeVoice statusとSkitVoice sample音声を現在も返すため、閉鎖済みとは扱わない。
-- merge済みmainのCloudflare version `0baddaf6-abcf-4c47-a795-1084165d3654` をproduction trafficへ割り当てずpreviewへuploadした。`https://publication-check-voice-lab.inakaegg.workers.dev/` では匿名VibeVoice statusが401、sample APIは200でも全featureが `null`、管理HTMLはGoogle OAuthへ302、旧VibeVoice routeは404。
+- 公開候補のCloudflare version `f1f8810c-5da3-4419-ba05-5d98ed7973ee` をproduction trafficへ割り当てずpreviewへuploadした。`https://publication-check-voice-lab.inakaegg.workers.dev/` では `/privacy` と `/privacy/` が200、匿名VibeVoice statusが401、sample APIは200でも全featureが `null`、管理HTMLはGoogle OAuthへ302、旧VibeVoice routeは404。
 - Cloudflare KVは値を表示せずkey名を集計し、全7件中、平文emailを含むlegacy累計quota keyが2件残っていることを確認した。D1 audit 97件は、hash形式でないactor識別子またはdetail内の平文email候補が0件だった。
 - GitHubのHomepageは旧URL `https://voice-lab.functional-dog.workers.dev/` のまま。
 - Private vulnerability reporting APIは404で、有効であることを確認できない。
@@ -31,8 +31,8 @@
 - [x] endpointを強制scale-to-zeroし、新しいworkerでprivate imageの起動とdiagnosticsのrevision/tag一致を確認する。
 - [x] RunPod image workflowから既定の配布先を削除し、毎回 `image_name` と `expected_visibility` を明示する。
 - [x] workflowがDocker Hub APIで実際の公開状態を確認し、不一致ならbuild/push前に停止する。
-- [ ] Cloudflare公開デモを継続するか停止するかを決め、repository再監査とデモ公開を別の判断として記録する。
-- [x] merge済みmainをCloudflare versioned previewへuploadし、公開ポータル、`/skitvoice`、VibeVoice status、public session/sample API、管理HTML、旧routeの匿名境界を確認する。sample APIは公開契約を維持するため200だが、全featureが `null` で音声を返さない。
+- [x] Cloudflare公開デモはSpeakLoop中心のポートフォリオとして継続し、repositoryのpublic化とは別に公開境界を管理する。
+- [x] 公開候補をCloudflare versioned previewへuploadし、公開ポータル、`/privacy`、`/skitvoice`、VibeVoice status、public session/sample API、管理HTML、旧routeの匿名境界を確認する。sample APIは公開契約を維持するため200だが、全featureが `null` で音声を返さない。
 - [ ] previewで確認したversionをproductionへdeployし、同じ匿名境界を公開URLで再確認する。preview確認だけで現時点の公開環境で停止済みとは扱わない。
 
 ## P0: 権利・第三者依存
@@ -52,11 +52,11 @@
 - [x] 新規のKV fallback quota keyとaudit eventをSHA-256 hash識別子へ変更し、署名cookieから未使用の表示名・画像URLを除く。
 - [x] legacy KVとD1 auditを公開環境で値を表示せず読み取り確認する。2026-07-17時点でKVに平文emailを含むlegacy累計quota keyが2件、D1 audit 97件中の平文email候補は0件。
 - [ ] 新Workerをproductionへ反映してlegacy keyを新規生成しない状態にした後、KVの残存2件を削除し、再検査の件数と実行日を記録する。
-- [ ] D1 audit、日次・累計quota、KV fallbackの保持期間を決める。
-- [ ] Google署名cookieの有効期間を決める。
-- [ ] 期限切れデータの削除処理と検証を実装する。
-- [ ] 削除依頼先、連絡先、本人確認方法を決める。
-- [ ] 外部処理事業者と送信データを示す正式なプライバシーポリシーを作り、公開画面から到達可能にする。
+- [x] D1/KVの日次quotaを48時間、auditを90日、累計quotaを公開デモ運用中とする保持期間を決める。
+- [x] Google署名cookieの有効期間を30日とし、ログアウト時に削除する。
+- [x] D1の日次quota・auditを日次Cronで削除し、KV fallbackへTTLを設定する処理と単体テストを追加する。
+- [x] 問い合わせ・削除依頼はGitHubのPrivate vulnerability reportingを使い、対象特定にGoogleログインemailを確認する運用とする。
+- [x] 外部処理事業者と送信データを示す正式なプライバシーポリシーを作り、公開画面の `/privacy` とSpeakLoopフッターから到達可能にする。
 
 ## P1: GitHubの公開設定
 

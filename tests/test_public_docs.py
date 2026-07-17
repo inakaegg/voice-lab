@@ -120,6 +120,26 @@ def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
     assert "強制scale-to-zero後の新しいworker" in checklist
 
 
+def test_public_privacy_policy_and_retention_are_fixed() -> None:
+    policy = read_text("docs/PRIVACY_POLICY.md")
+    privacy = read_text("docs/deployment/PRIVACY.md")
+    storage = read_text("docs/deployment/STORAGE.md")
+    wrangler = read_text("wrangler.toml")
+
+    for document in (policy, privacy, storage):
+        assert "48時間" in document
+        assert "90日" in document
+        assert "公開デモの運用中" in document
+    for document in (policy, privacy):
+        assert "30日" in document
+
+    for provider in ("Cloudflare", "Google", "OpenAI", "RunPod"):
+        assert provider in policy
+
+    assert "Report a vulnerability" in policy
+    assert 'crons = ["17 3 * * *"]' in wrangler
+
+
 def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
     license_notice = read_text("LICENSE")
     notices = read_text("THIRD_PARTY_NOTICES.md")
@@ -177,7 +197,7 @@ def test_container_images_include_repository_rights_notices() -> None:
 def test_privacy_boundary_explains_external_processing_without_blocking_runpod() -> None:
     privacy = read_text("docs/deployment/PRIVACY.md")
 
-    assert "完全なプライバシーポリシーではない" in privacy
+    assert "Voice Lab プライバシーポリシー" in privacy
     assert "OpenAI" in privacy
     assert "RunPod" in privacy
     assert "SHA-256" in privacy

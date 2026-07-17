@@ -2081,6 +2081,20 @@ audio {
   margin: 0;
 }
 
+.public-privacy-notice a {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.public-privacy-notice a:focus-visible {
+  border-radius: 3px;
+  outline: 3px solid var(--react-focus, rgba(55, 104, 176, 0.32));
+  outline-offset: 2px;
+}
+
 .public-auth-panel {
   align-items: center;
   background: #ffffff;
