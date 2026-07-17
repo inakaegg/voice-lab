@@ -414,7 +414,7 @@ def _normalize_chinese_spoken_forms(text: str) -> str:
     )
     protect(
         r"(?<![a-z0-9])(v)(\d+(?:\.\d+)+)(?![a-z0-9])",
-        lambda match: f"{match.group(1).lower()}{_chinese_decimal_words(match.group(2))}",
+        lambda match: f"{match.group(1).lower()}{_chinese_version_words(match.group(2))}",
     )
     protect(
         r"(?<![a-z0-9])([a-z]+)(\d+)(?![a-z0-9])",
@@ -441,6 +441,13 @@ def _chinese_decimal_words(value: str) -> str:
     if separator:
         result += f"点{_chinese_digit_words(fraction)}"
     return result
+
+
+def _chinese_version_words(value: str) -> str:
+    first, *remaining = str(value).split(".")
+    components = [_chinese_integer_words(first)]
+    components.extend(_chinese_digit_words(component) for component in remaining)
+    return "点".join(components)
 
 
 def _chinese_digit_words(value: str) -> str:

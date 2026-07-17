@@ -4306,7 +4306,7 @@ function normalizeChineseSpokenForms(text) {
   );
   protect(
     /(?<![a-z0-9])(v)(\d+(?:\.\d+)+)(?![a-z0-9])/giu,
-    (_match, prefix, value) => `${prefix.toLowerCase()}${chineseDecimalWords(value)}`,
+    (_match, prefix, value) => `${prefix.toLowerCase()}${chineseVersionWords(value)}`,
   );
   protect(
     /(?<![a-z0-9])([a-z]+)(\d+)(?![a-z0-9])/giu,
@@ -4329,6 +4329,14 @@ function normalizeChineseSpokenForms(text) {
 function chineseDecimalWords(value) {
   const [integer, fraction] = String(value).split(".", 2);
   return chineseIntegerWords(integer) + (fraction === undefined ? "" : `点${chineseDigitWords(fraction)}`);
+}
+
+function chineseVersionWords(value) {
+  const [first, ...remaining] = String(value).split(".");
+  return [
+    chineseIntegerWords(first),
+    ...remaining.map((component) => chineseDigitWords(component)),
+  ].join("点");
 }
 
 function chineseDigitWords(value) {
