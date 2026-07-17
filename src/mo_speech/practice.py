@@ -83,6 +83,7 @@ _ENGLISH_SMALL_NUMBERS = (
 _ENGLISH_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
 _CHINESE_DIGITS = ("零", "一", "二", "三", "四", "五", "六", "七", "八", "九")
 _CHINESE_SMALL_NUMBER_UNITS = ("", "十", "百", "千")
+_CHINESE_LARGE_NUMBER_UNITS = ("", "万", "亿", "兆", "京", "垓", "秭", "穰", "沟", "涧", "正", "载")
 
 
 class PracticeAlignmentError(ValueError):
@@ -403,7 +404,7 @@ def _normalize_chinese_spoken_forms(text: str) -> str:
     protect(
         r"(?<![a-z0-9])([01]?\d|2[0-3]):([0-5]\d)(?!\d)",
         lambda match: (
-            f"{_chinese_integer_words(match.group(1))}点"
+            f"{_chinese_integer_words(str(int(match.group(1))))}点"
             f"{'' if int(match.group(2)) == 0 else _chinese_integer_words(match.group(2))}"
         ),
     )
@@ -455,8 +456,33 @@ def _chinese_integer_words(value: str) -> str:
     number = int(digits)
     if number == 0:
         return _CHINESE_DIGITS[0]
-    if number > 9_999:
+    groups: list[int] = []
+    while number:
+        number, group = divmod(number, 10_000)
+        groups.append(group)
+    if len(groups) > len(_CHINESE_LARGE_NUMBER_UNITS):
         return _chinese_digit_words(digits)
+
+    output: list[str] = []
+    zero_pending = False
+    for group_index in range(len(groups) - 1, -1, -1):
+        group = groups[group_index]
+        if group == 0:
+            if output and any(groups[:group_index]):
+                zero_pending = True
+            continue
+        if output and (zero_pending or group < 1_000):
+            output.append(_CHINESE_DIGITS[0])
+        output.append(
+            f"{_chinese_small_integer_words(group)}{_CHINESE_LARGE_NUMBER_UNITS[group_index]}"
+        )
+        zero_pending = False
+    result = "".join(output)
+    return result[1:] if result.startswith("一十") else result
+
+
+def _chinese_small_integer_words(number: int) -> str:
+    digits = f"{number:d}"
     output: list[str] = []
     zero_pending = False
     for position, digit_text in enumerate(digits):
@@ -470,18 +496,41 @@ def _chinese_integer_words(value: str) -> str:
             output.append(_CHINESE_DIGITS[0])
             zero_pending = False
         output.append(f"{_CHINESE_DIGITS[digit]}{_CHINESE_SMALL_NUMBER_UNITS[unit_index]}")
-    result = "".join(output)
-    return result[1:] if result.startswith("一十") else result
+    return "".join(output)
 
 
 def practice_phrase_matches(target_text: str, recognized_text: str, target_language: str) -> list[dict[str, object]]:
     language = supported_practice_target_language(target_language)
     recognized_normalized = normalize_practice_text(recognized_text, language)
+    phrases = split_practice_phrases(target_text)
+    normalized_targets = [normalize_practice_text(phrase, language) for phrase in phrases]
     cursor = 0
     matches: list[dict[str, object]] = []
-    for index, phrase in enumerate(split_practice_phrases(target_text)):
-        target_normalized = normalize_practice_text(phrase, language)
-        match = _best_practice_phrase_match(target_normalized, recognized_normalized, cursor)
+    for index, (phrase, target_normalized) in enumerate(
+        zip(phrases, normalized_targets, strict=True)
+    ):
+        exact_start = recognized_normalized.find(target_normalized, cursor)
+        later_exact_starts = [
+            start
+            for later_target in normalized_targets[index + 1 :]
+            if later_target
+            for start in [recognized_normalized.find(later_target, cursor)]
+            if start >= 0
+        ]
+        next_exact_start = min(later_exact_starts, default=-1)
+        if exact_start >= 0 and (next_exact_start < 0 or exact_start <= next_exact_start):
+            match = {
+                "recognized_start": exact_start,
+                "recognized_end": exact_start + len(target_normalized),
+                "similarity": 1.0,
+            }
+        else:
+            search_end = next_exact_start if next_exact_start >= cursor else len(recognized_normalized)
+            match = _best_practice_phrase_match(
+                target_normalized,
+                recognized_normalized[:search_end],
+                cursor,
+            )
         similarity = match["similarity"]
         matched = bool(target_normalized) and similarity >= 0.45
         if matched:
@@ -2290,6 +2339,12 @@ def _add_structural_fallback_ranges(
             and float(following.get("coverage") or 0.0)
             >= _HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
         )
+        if constrained_by_neighbors and any(
+            float(current["audio_start"]) - float(previous_span["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
+            for previous_span, current in zip(candidate_spans, candidate_spans[1:])
+        ):
+            continue
         structural_boundary = constrained_by_neighbors or pause_before or pause_after or common_prefix >= 2
         if constrained_by_neighbors:
             lexical_evidence = True

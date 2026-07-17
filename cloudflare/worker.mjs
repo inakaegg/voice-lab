@@ -108,6 +108,7 @@ const ENGLISH_SMALL_NUMBERS = [
 const ENGLISH_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 const CHINESE_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
 const CHINESE_SMALL_NUMBER_UNITS = ["", "十", "百", "千"];
+const CHINESE_LARGE_NUMBER_UNITS = ["", "万", "亿", "兆", "京", "垓", "秭", "穰", "沟", "涧", "正", "载"];
 const traditionalChineseToSimplified = Converter({ from: "t", to: "cn" });
 
 export class PracticeAlignmentError extends Error {
@@ -4297,7 +4298,7 @@ function normalizeChineseSpokenForms(text) {
   );
   protect(
     /(?<![a-z0-9])([01]?\d|2[0-3]):([0-5]\d)(?!\d)/gu,
-    (_match, hour, minute) => `${chineseIntegerWords(hour)}点${Number(minute) === 0 ? "" : chineseIntegerWords(minute)}`,
+    (_match, hour, minute) => `${chineseIntegerWords(String(Number(hour)))}点${Number(minute) === 0 ? "" : chineseIntegerWords(minute)}`,
   );
   protect(
     /(?<![a-z0-9])(\d{4})(?=年)/gu,
@@ -4338,9 +4339,33 @@ function chineseIntegerWords(value) {
   const digits = String(value);
   if (!digits) return "";
   if (digits.length > 1 && digits.startsWith("0")) return chineseDigitWords(digits);
-  const number = Number(digits);
-  if (number === 0) return CHINESE_DIGITS[0];
-  if (number > 9999) return chineseDigitWords(digits);
+  let number = BigInt(digits);
+  if (number === 0n) return CHINESE_DIGITS[0];
+  const groups = [];
+  while (number) {
+    groups.push(Number(number % 10000n));
+    number /= 10000n;
+  }
+  if (groups.length > CHINESE_LARGE_NUMBER_UNITS.length) return chineseDigitWords(digits);
+
+  const output = [];
+  let zeroPending = false;
+  for (let groupIndex = groups.length - 1; groupIndex >= 0; groupIndex -= 1) {
+    const group = groups[groupIndex];
+    if (group === 0) {
+      if (output.length && groups.slice(0, groupIndex).some(Boolean)) zeroPending = true;
+      continue;
+    }
+    if (output.length && (zeroPending || group < 1000)) output.push(CHINESE_DIGITS[0]);
+    output.push(`${chineseSmallIntegerWords(group)}${CHINESE_LARGE_NUMBER_UNITS[groupIndex]}`);
+    zeroPending = false;
+  }
+  const result = output.join("");
+  return result.startsWith("一十") ? result.slice(1) : result;
+}
+
+function chineseSmallIntegerWords(number) {
+  const digits = String(number);
   const output = [];
   let zeroPending = false;
   for (const [position, digitText] of [...digits].entries()) {
@@ -4358,17 +4383,30 @@ function chineseIntegerWords(value) {
     }
     output.push(`${CHINESE_DIGITS[digit]}${CHINESE_SMALL_NUMBER_UNITS[unitIndex]}`);
   }
-  const result = output.join("");
-  return result.startsWith("一十") ? result.slice(1) : result;
+  return output.join("");
 }
 
 function practicePhraseMatches(targetText, recognizedText, targetLanguage) {
   const phrases = splitPracticePhrases(targetText);
   const recognized = normalizePracticeText(recognizedText, targetLanguage);
+  const normalizedTargets = phrases.map((phrase) => normalizePracticeText(phrase, targetLanguage));
   let cursor = 0;
   return phrases.map((phrase, index) => {
-    const normalizedTarget = normalizePracticeText(phrase, targetLanguage);
-    const match = bestPracticePhraseMatch(normalizedTarget, recognized, cursor);
+    const normalizedTarget = normalizedTargets[index];
+    const exactStart = recognized.indexOf(normalizedTarget, cursor);
+    const laterExactStarts = normalizedTargets
+      .slice(index + 1)
+      .filter(Boolean)
+      .map((laterTarget) => recognized.indexOf(laterTarget, cursor))
+      .filter((start) => start >= 0);
+    const nextExactStart = laterExactStarts.length ? Math.min(...laterExactStarts) : -1;
+    const match = exactStart >= 0 && (nextExactStart < 0 || exactStart <= nextExactStart)
+      ? { recognized_start: exactStart, recognized_end: exactStart + normalizedTarget.length, similarity: 1 }
+      : bestPracticePhraseMatch(
+          normalizedTarget,
+          recognized.slice(0, nextExactStart >= cursor ? nextExactStart : recognized.length),
+          cursor,
+        );
     const matched = Boolean(normalizedTarget) && match.similarity >= 0.45;
     if (matched) {
       cursor = match.recognized_end;
@@ -5812,6 +5850,14 @@ function addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, t
       Number(following.similarity || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
       Number(following.coverage || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
     );
+    const hasInternalPartition = constrainedByNeighbors && candidateSpans.some(
+      (span, spanIndex) => spanIndex > 0 &&
+        span.audio_start - candidateSpans[spanIndex - 1].audio_end >=
+          PRACTICE_PAUSE_PARTITION_GAP_SECONDS,
+    );
+    if (hasInternalPartition) {
+      continue;
+    }
     const structuralBoundary = constrainedByNeighbors || pauseBefore || pauseAfter || prefixLength >= 2;
     const lexicalEvidence = constrainedByNeighbors || (coverage >= 0.3 && similarity >= 0.3);
     if (!structuralBoundary || !lexicalEvidence || lengthRatio < 0.35) {
