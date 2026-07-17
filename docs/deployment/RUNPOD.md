@@ -117,9 +117,9 @@ RUNPOD_DRY_RUN=1 scripts/runpod_create_gpu_pod.sh
 
 ### registryの選択
 
-初回はDocker Hubのpublic imageが最も簡単。RunPodから追加認証なしでpullでき、CLIスクリプトも `RUNPOD_IMAGE=docker.io/<user>/mo-speech:gpu-smoke` を前提にできる。Docker Hub Personalではpublic repositoryを使えるため、秘密情報をimageに含めない限りMVP検証には足りる。
+RunPod imageはprivate repositoryを既定とする。imageには `/app/src` と実行環境が含まれるため、GitHub repositoryをprivateにしてもcontainer repositoryがpublicなら実装を取得できる。Docker Hub側でrepositoryを先にprivateとして作成し、RunPodへregistry認証を設定してから使う。
 
-GHCRはGitHub Container Registryのこと。GitHub repositoryとimageの権限を合わせたい場合、またはGitHub Actionsでbuild/pushしたい場合に向く。ただしprivate imageにするとRunPod側のregistry auth設定が必要になるため、初回検証ではDocker Hub publicより手順が増える。
+GHCRはGitHub Container Registryのこと。GitHub repositoryとimageの権限を合わせたい場合に向く。Docker Hub、GHCRのどちらでもprivate imageにはRunPod側のregistry auth設定が必要である。手順が増えることを理由にpublicへ切り替えず、public配布は [公開前チェックリスト](PUBLICATION_CHECKLIST.md) の権利・プライバシー・外部設定を完了した場合だけ明示的に選ぶ。
 
 RunPodのGitHub連携は、GitHub repositoryからRunPod側でimageをbuildし、RunPodのregistryに保存してServerless endpointへdeployする用途に向く。ローカルMacのDocker build容量を避けられるのが利点。ただし初回のWeb UI込みPod検証では、明示的なDocker imageをregistryへpushしてPodからpullする方が手順を追いやすい。
 
@@ -142,6 +142,8 @@ Mac上のDocker buildは容量を使う。`buildx --push` を使い、最終imag
 ローカル回線の上りが遅い場合は、GitHub ActionsでRunPod用imageをbuildし、GitHub側からDocker Hubへpushする。ローカルMacから大きいDocker layerをアップロードしないため、個人回線の上り速度に依存しにくい。
 
 このリポジトリでは手動実行用workflowとして `.github/workflows/runpod-image.yml` を使う。通常のpushごとに巨大imageをbuildしないよう、`workflow_dispatch` のみで起動する。
+
+workflowには既定の `image_name` を持たせない。実行時に既存のDocker Hub repositoryと `expected_visibility` を毎回指定し、Docker Hub APIが返す実際の可視性と一致しなければlogin・build・push前に停止する。既定の期待値は `private` であり、public repositoryへpushするには `public` を明示選択する。
 
 GitHub Actionsの手動実行では、`workflow_dispatch` を持つworkflowファイルがdefault branchに存在している必要がある。新規workflowをfeature branchで追加した直後は、そのbranchをpushするだけではActions画面や `gh workflow run` から見つからない場合がある。初回はworkflowファイルをmainへ入れてから、必要に応じて `--ref <branch>` で対象branchのコードをbuildする。
 
@@ -198,7 +200,8 @@ RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh
 ```bash
 gh workflow run runpod-image.yml \
   --ref feature/vibevoice-zhskit-mode \
-  -f image_name=docker.io/dockerhubfd/mo-speech \
+  -f image_name=docker.io/<user>/<private-repository> \
+  -f expected_visibility=private \
   -f image_tag=runpod-vibevoice-$(git rev-parse --short HEAD)
 ```
 
@@ -210,7 +213,8 @@ Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh
 
 ```bash
 # .runpod.env
-RUNPOD_IMAGE=docker.io/dockerhubfd/mo-speech:runpod-vibevoice-<short-sha>
+RUNPOD_IMAGE=docker.io/<user>/<private-repository>:runpod-vibevoice-<short-sha>
+RUNPOD_IMAGE_VISIBILITY=private
 ```
 
 既存templateへ反映する場合:

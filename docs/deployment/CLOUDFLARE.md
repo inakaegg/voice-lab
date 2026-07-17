@@ -10,6 +10,8 @@
 
 この文書は現在のCloudflareデモ構成を説明する。発音練習アプリとSkitVoiceを分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすい公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
+データフロー、保存範囲、保持期間と削除に関する未決定事項は [PRIVACY.md](PRIVACY.md) を参照する。正式なプライバシーポリシーと公開画面からの導線が完成するまで公開再開を完了扱いにしない。
+
 ```text
 Browser
   -> Cloudflare Worker Static Assets

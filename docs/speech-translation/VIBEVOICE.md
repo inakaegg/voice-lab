@@ -8,6 +8,12 @@
 
 初期実装では、ローカル実行とRunPod Serverless実行を選べる。ローカル実行は開発機上のVibeVoice CLIを呼ぶ。RunPod実行はFastAPIがRunPod jobを作り、RunPod handlerが `operation_mode=vibevoice` として同じ処理を実行する。
 
+## upstreamの現在状態と公開判断
+
+2026-07-16時点で [Microsoft公式VibeVoice repository](https://github.com/microsoft/VibeVoice) は、意図に反する利用事例を確認したとしてTTSコードを削除している。現在のVoice Labは、固定した `microsoft/VibeVoice-1.5B` model revisionと、commit固定した第三者のComfyUI-VibeVoice実装を使う。この構成をMicrosoftの現在の公式TTS実装であるかのように説明しない。
+
+過去にコードへMIT licenseが付与されていたことだけでは、model利用条件、第三者実装の由来、音声クローンの悪用リスク、公開デモとしての妥当性は確定しない。public repositoryまたはpublic container imageを再開する前に、[第三者コンポーネント一覧](../../THIRD_PARTY_NOTICES.md)と[公開前チェックリスト](../deployment/PUBLICATION_CHECKLIST.md)に従い、継続可否、権利表示、利用制限、悪用防止策を明示的に判断する。
+
 ## 生成オプション
 
 - `モデル`: 比較検証用に、RunPod/ローカルへ渡すVibeVoiceモデルを選ぶ。通常候補は以下とする。

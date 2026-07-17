@@ -485,8 +485,6 @@ async function createPublicSessionCookie(env, user) {
   const ttl = Number(env.PUBLIC_SESSION_TTL_SECONDS || PUBLIC_SESSION_TTL_SECONDS) || PUBLIC_SESSION_TTL_SECONDS;
   const value = await createSignedPayload({
     email: normalizeEmail(user.email),
-    name: String(user.name || ""),
-    picture: String(user.picture || ""),
     iat: now,
     exp: now + ttl,
   }, publicSessionSecret(env));
@@ -1401,10 +1399,25 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
   if (env.MO_SPEECH_DB) {
     return consumePublicQuotaD1(env, feature, normalizedEmail, featureSettings, request, today);
   }
-  const dailyKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:${today}`;
-  const totalKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:total`;
-  const dailyUsed = await publicUsageGet(env, dailyKey);
-  const totalUsed = await publicUsageGet(env, totalKey);
+  const emailHash = await publicIdentityHash(normalizedEmail);
+  const dailyKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${emailHash}:${today}`;
+  const totalKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${emailHash}:total`;
+  const legacyDailyKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:${today}`;
+  const legacyTotalKey = `${PUBLIC_USAGE_KV_PREFIX}${feature}:${normalizedEmail}:total`;
+  const hashedDailyUsed = await publicUsageGet(env, dailyKey);
+  const hashedTotalUsed = await publicUsageGet(env, totalKey);
+  const legacyDailyUsed = await publicUsageGet(env, legacyDailyKey);
+  const legacyTotalUsed = await publicUsageGet(env, legacyTotalKey);
+  const dailyUsed = Math.max(hashedDailyUsed, legacyDailyUsed);
+  const totalUsed = Math.max(hashedTotalUsed, legacyTotalUsed);
+  if (legacyDailyUsed > hashedDailyUsed) {
+    await publicUsagePut(env, dailyKey, legacyDailyUsed, 60 * 60 * 48);
+  }
+  if (legacyTotalUsed > hashedTotalUsed) {
+    await publicUsagePut(env, totalKey, legacyTotalUsed);
+  }
+  await publicUsageDelete(env, legacyDailyKey);
+  await publicUsageDelete(env, legacyTotalKey);
   if (dailyLimit >= 0 && dailyUsed >= dailyLimit) {
     await appendPublicAuditEvent(env, {
       action: "public_quota_blocked",
@@ -1510,7 +1523,15 @@ async function readPublicAuditLog(env, url = null) {
   }
   const kv = stateKv(env);
   const events = kv ? await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []) : [];
-  const normalizedEvents = Array.isArray(events) ? events : [];
+  const storedEvents = Array.isArray(events) ? events : [];
+  const normalizedEvents = await Promise.all(storedEvents.map((entry) => publicAuditEventWithHashedEmail(entry)));
+  if (kv && JSON.stringify(normalizedEvents) !== JSON.stringify(storedEvents)) {
+    try {
+      await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(normalizedEvents));
+    } catch (_error) {
+      // 既存監査ログのhash化失敗で読み取りを止めない。
+    }
+  }
   return {
     events: normalizedEvents.slice(-limit).reverse(),
     limit,
@@ -1522,10 +1543,10 @@ async function appendPublicAuditEvent(env, event) {
   if (env.MO_SPEECH_DB) {
     await migrateLegacyAuditEventsToD1(env);
     const now = new Date();
-    const entry = sanitizePublicAuditEvent({ id: crypto.randomUUID(), created_at: now.toISOString(), created_at_unix: Math.floor(now.getTime() / 1000), ...event });
-    const emailHash = entry.email ? await publicIdentityHash(entry.email) : null;
+    const entry = await publicAuditEventWithHashedEmail({ id: crypto.randomUUID(), created_at: now.toISOString(), created_at_unix: Math.floor(now.getTime() / 1000), ...event });
+    const emailHash = entry.email_hash || null;
     const detail = { ...entry };
-    for (const key of ["id", "created_at", "email", "action", "feature", "path"]) delete detail[key];
+    for (const key of ["id", "created_at", "email_hash", "action", "feature", "path"]) delete detail[key];
     try {
       await env.MO_SPEECH_DB.prepare(
         "INSERT INTO audit_events (id, occurred_at, actor_email_hash, action, feature, path, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1540,7 +1561,7 @@ async function appendPublicAuditEvent(env, event) {
     return;
   }
   const now = new Date();
-  const entry = sanitizePublicAuditEvent({
+  const entry = await publicAuditEventWithHashedEmail({
     id: crypto.randomUUID(),
     created_at: now.toISOString(),
     created_at_unix: Math.floor(now.getTime() / 1000),
@@ -1548,7 +1569,7 @@ async function appendPublicAuditEvent(env, event) {
   });
   try {
     const current = await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []);
-    const events = Array.isArray(current) ? current : [];
+    const events = await Promise.all((Array.isArray(current) ? current : []).map((item) => publicAuditEventWithHashedEmail(item)));
     events.push(entry);
     const limit = publicAuditLogLimit(env);
     await kv.put(PUBLIC_AUDIT_LOG_KV_KEY, JSON.stringify(events.slice(-limit)));
@@ -1562,10 +1583,10 @@ async function migrateLegacyAuditEventsToD1(env) {
   if (!kv || await kv.get(PUBLIC_AUDIT_D1_MIGRATED_KV_KEY)) return;
   const legacy = await kvGetJson(kv, PUBLIC_AUDIT_LOG_KV_KEY, []);
   for (const raw of Array.isArray(legacy) ? legacy : []) {
-    const entry = sanitizePublicAuditEvent(raw);
-    const emailHash = entry.email ? await publicIdentityHash(entry.email) : null;
+    const entry = await publicAuditEventWithHashedEmail(raw);
+    const emailHash = entry.email_hash || null;
     const detail = { ...entry };
-    for (const key of ["id", "created_at", "email", "action", "feature", "path"]) delete detail[key];
+    for (const key of ["id", "created_at", "email_hash", "action", "feature", "path"]) delete detail[key];
     await env.MO_SPEECH_DB.prepare(
       "INSERT OR IGNORE INTO audit_events (id, occurred_at, actor_email_hash, action, feature, path, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).bind(entry.id || crypto.randomUUID(), entry.created_at || new Date().toISOString(), emailHash, entry.action || "unknown", entry.feature || null, entry.path || null, JSON.stringify(detail)).run();
@@ -1577,6 +1598,19 @@ async function publicIdentityHash(email) {
   const bytes = new TextEncoder().encode(normalizeEmail(email));
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function publicAuditEventWithHashedEmail(event) {
+  const entry = sanitizePublicAuditEvent(event);
+  const existingHash = /^[0-9a-f]{64}$/.test(String(entry.email_hash || "")) ? entry.email_hash : "";
+  const emailHash = existingHash || (entry.email ? await publicIdentityHash(entry.email) : "");
+  delete entry.email;
+  if (emailHash) {
+    entry.email_hash = emailHash;
+  } else {
+    delete entry.email_hash;
+  }
+  return entry;
 }
 
 function safeJsonObject(value) {
@@ -1598,7 +1632,7 @@ function sanitizePublicAuditEvent(event) {
     if (value === undefined || value === null || value === "") {
       continue;
     }
-    if (["email", "action", "feature", "path", "method", "limit_type", "auth_method", "next", "cf_country", "cf_ray"].includes(key)) {
+    if (["email", "email_hash", "action", "feature", "path", "method", "limit_type", "auth_method", "next", "cf_country", "cf_ray"].includes(key)) {
       allowed[key] = String(value).slice(0, 256);
     } else if (["id", "created_at"].includes(key)) {
       allowed[key] = String(value).slice(0, 128);
@@ -1650,6 +1684,15 @@ async function publicUsagePut(env, key, value, expirationTtl = null) {
     await kv.put(key, String(value), options);
   } else {
     ephemeralPublicUsage.set(key, String(value));
+  }
+}
+
+async function publicUsageDelete(env, key) {
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.delete(key);
+  } else {
+    ephemeralPublicUsage.delete(key);
   }
 }
 

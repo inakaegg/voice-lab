@@ -76,8 +76,9 @@ RunPod handlerはURL、cookie、ブラウザ認証情報を受け取らず、音
 
 ## 保存とプライバシー
 
+- 実装済みのデータフローと未決定事項は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。D1/KVの保持期間、削除手段、連絡先、正式な利用者向けpolicyを確定するまで公開再開を完了扱いにしない。
 - API key、OAuth token、モデル、生成音声、録音サンプルをgit管理しない。
-- 公開デモのquota識別子はGoogle emailをSHA-256 hash化してD1へ保存し、平文emailをquota履歴へ保存しない。
+- 公開デモのquota・audit識別子はGoogle emailをSHA-256 hash化してD1またはKV fallbackへ保存し、平文emailを新規のquota・audit履歴へ保存しない。署名cookieと管理者allowlist、legacy KVの扱いはデータ取扱い境界を正とする。
 - 音声履歴はローカルFastAPI版だけで保存する。Cloudflare公開版は入力音声と生成音声を履歴として保存しない。
 - 公開画面では、外部サービスで処理される音声へ個人情報や機密情報を含めないよう案内する。
 - タブ音声共有はユーザー操作で開始し、選択された共有元の音声trackだけを録音する。映像、URL、cookieは送信しない。

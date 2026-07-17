@@ -1,3 +1,4 @@
+/* Bundled dependency licenses: /react/assets/licenses.md */
 import{c as e,i as t,l as n,n as r,o as i,r as a,s as o,t as s}from"./components.js";/* empty css   */var c=n();o();var l=`1 あっ、こんにちは〜
 2 こんにちは。ご無沙汰してます。
 1 元気ですか？最近、どうしてます？

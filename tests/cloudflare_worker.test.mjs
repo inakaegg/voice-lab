@@ -225,6 +225,10 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
   assert.equal(callback.status, 302);
   assert.equal(callback.headers.get("location"), "/speakloop");
   assert.match(sessionCookie, /mo_public_session=/);
+  const sessionPayload = publicSessionPayload(sessionCookie);
+  assert.equal(sessionPayload.email, "viewer@example.com");
+  assert.equal(sessionPayload.name, undefined);
+  assert.equal(sessionPayload.picture, undefined);
   assert.equal(session.google_login_required, true);
   assert.equal(session.authenticated, true);
   assert.equal(session.email, "viewer@example.com");
@@ -232,7 +236,8 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
   const audit = JSON.parse(await kv.get("public-audit-log"));
   assert.equal(audit.length, 1);
   assert.equal(audit[0].action, "google_login_success");
-  assert.equal(audit[0].email, "viewer@example.com");
+  assert.equal(audit[0].email, undefined);
+  assert.equal(audit[0].email_hash, await publicIdentityHashForTest("viewer@example.com"));
   assert.equal(audit[0].path, "/auth/google/callback");
   assert.equal(audit[0].next, "/speakloop");
 });
@@ -304,7 +309,8 @@ test("Cloudflare worker lets a Google admin use fun generation APIs without cons
   assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
   const audit = JSON.parse(await kv.get("public-audit-log"));
   const funExemption = audit.find((event) => event.action === "public_quota_exempt" && event.feature === "fun");
-  assert.equal(funExemption.email, "admin@example.com");
+  assert.equal(funExemption.email, undefined);
+  assert.equal(funExemption.email_hash, await publicIdentityHashForTest("admin@example.com"));
 });
 
 test("Cloudflare worker always protects fun generation APIs with Google admin auth", async () => {
@@ -390,10 +396,13 @@ test("Cloudflare worker protects fun job status endpoints with Google admin auth
 
 test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
   const kv = fakeKv();
+  const today = new Date().toISOString().slice(0, 10);
+  await kv.put(`public-usage:skitvoice:viewer@example.com:${today}`, "1");
+  await kv.put("public-usage:skitvoice:viewer@example.com:total", "1");
   await kv.put("public-access-settings", JSON.stringify({
     google_login_required: true,
     features: {
-      skitvoice: { daily_limit: 1, total_limit: 1, script_max_chars: 80, audio_max_bytes: 1000 },
+      skitvoice: { daily_limit: 2, total_limit: 2, script_max_chars: 80, audio_max_bytes: 1000 },
     },
   }));
   const calls = [];
@@ -431,9 +440,15 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
     ["google_login_success", "public_quota_consumed", "public_quota_blocked"],
   );
   assert.equal(audit[1].feature, "skitvoice");
-  assert.equal(audit[1].email, "viewer@example.com");
-  assert.equal(audit[1].daily_used, 1);
+  assert.equal(audit[1].email, undefined);
+  const viewerEmailHash = await publicIdentityHashForTest("viewer@example.com");
+  assert.equal(audit[1].email_hash, viewerEmailHash);
+  assert.equal(audit[1].daily_used, 2);
   assert.equal(audit[2].limit_type, "daily");
+  assert.equal(await kv.get(`public-usage:skitvoice:${viewerEmailHash}:${today}`), "2");
+  assert.equal(await kv.get(`public-usage:skitvoice:${viewerEmailHash}:total`), "2");
+  assert.equal(await kv.get(`public-usage:skitvoice:viewer@example.com:${today}`), null);
+  assert.equal(await kv.get("public-usage:skitvoice:viewer@example.com:total"), null);
 });
 
 test("Cloudflare worker stores quota and audit in D1 when bound", async () => {
@@ -2515,6 +2530,18 @@ function parseJsonBody(body) {
     return null;
   }
   return JSON.parse(body);
+}
+
+function publicSessionPayload(setCookie) {
+  const cookieValue = String(setCookie).match(/(?:^|;\s*)mo_public_session=([^;]+)/)?.[1] || "";
+  const encodedPayload = cookieValue.split(".")[0];
+  return JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+}
+
+async function publicIdentityHashForTest(email) {
+  const bytes = new TextEncoder().encode(String(email).trim().toLowerCase());
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 function fakeKv() {

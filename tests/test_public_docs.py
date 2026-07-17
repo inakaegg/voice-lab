@@ -62,6 +62,82 @@ def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     assert "npm test" in workflow
     assert "npm run check:js" in workflow
     assert "Dockerfile.runpod" in workflow
+    assert "gitleaks/gitleaks-action@v2" in workflow
+    assert "fetch-depth: 0" in workflow
+
+
+def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
+    checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
+    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
+    task = read_text("TASK.md")
+
+    for document in (checklist, roadmap, task):
+        assert "GitHub repository" in document
+        assert "private" in document
+
+    assert "Docker Hub" in checklist
+    assert "公開状態" in checklist
+    assert "Private vulnerability reporting" in checklist
+    assert "Secret scanning" in checklist
+    assert "branch protection" in checklist
+    assert "保持期間" in checklist
+    assert "Seed-VC" in checklist
+    assert "GPL-3.0" in checklist
+    assert "VibeVoice" in checklist
+    assert "外部状態スナップショット" in checklist
+    assert "is_private=false" in checklist
+    assert "Secret scanningは無効" in checklist
+    assert "Dependabot alertsは無効" in checklist
+    assert "Code scanningは未導入" in checklist
+    assert "branch protectionとrulesetのAPIは403" in checklist
+
+
+def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
+    license_notice = read_text("LICENSE")
+    notices = read_text("THIRD_PARTY_NOTICES.md")
+    readme = read_text("README.md")
+
+    assert "All rights reserved" in license_notice
+    assert "No license is granted" in license_notice
+    assert "オープンソースライセンスを付与していません" in readme
+    assert "THIRD_PARTY_NOTICES.md" in readme
+    assert "Seed-VC" in notices
+    assert "GPL-3.0" in notices
+    assert "ComfyUI-VibeVoice" in notices
+    assert "bundled dependency licenses" in notices
+
+
+def test_frontend_build_emits_and_packages_bundled_dependency_licenses() -> None:
+    vite_config = read_text("apps/web/vite.config.ts")
+    pyproject = read_text("pyproject.toml")
+    wheel_verifier = read_text("scripts/verify_wheel_assets.py")
+
+    assert 'fileName: "assets/licenses.md"' in vite_config
+    assert "postBanner" in vite_config
+    assert '"web/react/assets/*.md"' in pyproject
+    assert '"mo_speech/web/react/assets/licenses.md"' in wheel_verifier
+
+
+def test_container_images_include_repository_rights_notices() -> None:
+    for dockerfile_path in ("Dockerfile", "Dockerfile.runpod"):
+        dockerfile = read_text(dockerfile_path)
+
+        assert "COPY LICENSE THIRD_PARTY_NOTICES.md /app/" in dockerfile
+
+
+def test_privacy_boundary_records_unresolved_retention_before_publication() -> None:
+    privacy = read_text("docs/deployment/PRIVACY.md")
+
+    assert "完全なプライバシーポリシーではない" in privacy
+    assert "OpenAI" in privacy
+    assert "RunPod" in privacy
+    assert "SHA-256" in privacy
+    assert "署名cookie" in privacy
+    assert "admin_google_emails" in privacy
+    assert "legacy KV" in privacy
+    assert "保持期間" in privacy
+    assert "削除" in privacy
+    assert "公開再開" in privacy
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:

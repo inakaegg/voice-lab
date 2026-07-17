@@ -23,6 +23,7 @@ if [[ -z "${image_name}" ]]; then
   fi
 fi
 image_tag="${RUNPOD_DEPLOY_IMAGE_TAG:-${RUNPOD_IMAGE_TAG:-${RUNPOD_DEPLOY_IMAGE_TAG_PREFIX:-runpod-vibevoice}-${short_sha}}}"
+image_visibility="${RUNPOD_DEPLOY_IMAGE_VISIBILITY:-private}"
 new_image="${image_name}:${image_tag}"
 template_name="${RUNPOD_DEPLOY_TEMPLATE_NAME:-mo-speech-serverless-${short_sha}}"
 endpoint_id="${RUNPOD_ENDPOINT_ID:-}"
@@ -397,12 +398,14 @@ echo "Deploying RunPod Serverless image"
 echo "  ref: ${git_ref}"
 echo "  source: ${source_sha}"
 echo "  image: ${new_image}"
+echo "  image visibility: ${image_visibility}"
 echo "  template: ${template_name}"
 echo "  endpoint: ${endpoint_id}"
 
 run_or_dry gh workflow run "${workflow}" \
   --ref "${git_ref}" \
   -f "image_name=${image_name}" \
+  -f "expected_visibility=${image_visibility}" \
   -f "image_tag=${image_tag}"
 
 if [[ "${DRY_RUN}" != "1" && "${RUNPOD_DEPLOY_WAIT_WORKFLOW:-1}" != "0" ]]; then

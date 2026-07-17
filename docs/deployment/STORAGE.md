@@ -78,6 +78,10 @@ CREATE INDEX audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
 
 音声、台本、入力本文、OAuth token、raw IP addressはauditへ保存しない。emailを保存する必要がある場合も用途と保持期間を決め、表示用情報と台帳用識別子を分ける。
 
+現在のD1 `audit_events`、日次・累計quotaには期限による自動削除がなく、保持期間も未決定である。これは公開再開前のblocking事項とし、[データ取扱い境界](PRIVACY.md)で期間と削除手段を決めてからmigrationまたは定期削除処理を追加する。KV fallbackにも同じ保持契約を適用する。
+
+現在のKV fallbackはquota keyとaudit eventの利用者識別子をSHA-256 hash化する。旧実装の平文email key／eventは利用時にhashへ移行するが、利用されない旧データは自動移行されないため、公開環境で残存確認と削除を行う。管理設定の `admin_google_emails` は運営者allowlistとして平文のまま保存するため、一般利用者のquota・auditデータと混同しない。
+
 ## 移行順
 
 1. 公開サンプル音声blobのR2保存とmetadataのD1保存: 完了。

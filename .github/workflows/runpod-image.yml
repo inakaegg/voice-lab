@@ -6,7 +6,14 @@ on:
       image_name:
         description: "Docker image name"
         required: true
-        default: "docker.io/dockerhubfd/mo-speech"
+      expected_visibility:
+        description: "Existing Docker Hub repository visibility. Public must be selected explicitly."
+        required: true
+        type: choice
+        default: private
+        options:
+          - private
+          - public
       image_tag:
         description: "Docker image tag. Empty uses runpod-<short-sha>."
         required: false
@@ -48,6 +55,15 @@ jobs:
           echo "Disk space after cleanup:"
           df -h
 
+      - name: Verify Docker Hub repository visibility
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          INPUT_IMAGE_NAME: ${{ inputs.image_name }}
+          INPUT_EXPECTED_VISIBILITY: ${{ inputs.expected_visibility }}
+        run: bash scripts/check_dockerhub_visibility.sh "${INPUT_IMAGE_NAME}" "${INPUT_EXPECTED_VISIBILITY}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -60,12 +76,15 @@ jobs:
       - name: Resolve image tag
         id: image
         shell: bash
+        env:
+          INPUT_IMAGE_NAME: ${{ inputs.image_name }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          tag="${{ inputs.image_tag }}"
+          tag="${INPUT_IMAGE_TAG}"
           if [[ -z "${tag}" ]]; then
             tag="runpod-${GITHUB_SHA::7}"
           fi
-          image="${{ inputs.image_name }}:${tag}"
+          image="${INPUT_IMAGE_NAME}:${tag}"
           echo "image=${image}" >> "${GITHUB_OUTPUT}"
           echo "Resolved image: ${image}" >> "${GITHUB_STEP_SUMMARY}"
 
@@ -87,12 +106,17 @@ jobs:
 
       - name: Summary
         shell: bash
+        env:
+          INPUT_BASE_IMAGE: ${{ inputs.base_image }}
+          INPUT_EXPECTED_VISIBILITY: ${{ inputs.expected_visibility }}
+          RESOLVED_IMAGE: ${{ steps.image.outputs.image }}
         run: |
           {
             echo "## RunPod image"
             echo ""
-            echo "- Image: \`${{ steps.image.outputs.image }}\`"
+            echo "- Image: \`${RESOLVED_IMAGE}\`"
+            echo "- Repository visibility: \`${INPUT_EXPECTED_VISIBILITY}\`"
             echo "- Dockerfile: \`Dockerfile.runpod\`"
             echo "- Platform: \`linux/amd64\`"
-            echo "- Base image: \`${{ inputs.base_image }}\`"
+            echo "- Base image: \`${INPUT_BASE_IMAGE}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
