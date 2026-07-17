@@ -55,8 +55,8 @@
 - [x] D1/KVの日次quotaを48時間、auditを90日、累計quotaを公開デモ運用中とする保持期間を決める。
 - [x] Google署名cookieの有効期間を30日とし、ログアウト時に削除する。
 - [x] D1の日次quota・auditを日次Cronで削除し、KV fallbackへTTLを設定する処理と単体テストを追加する。
-- [x] 問い合わせ・削除依頼はGitHubのPrivate vulnerability reportingを使い、対象特定にGoogleログインemailを確認する運用とする。
-- [x] 外部処理事業者と送信データを示す正式なプライバシーポリシーを作り、公開画面の `/privacy` とSpeakLoopフッターから到達可能にする。
+- [x] private repositoryでは利用できないPrivate vulnerability reportingのリンクを公開画面へ載せず、public化時の有効化と実確認をGitHub設定の公開条件として分離する。
+- [x] 外部サービスへ送るデータと保存期間を簡潔に示すプライバシーポリシーを作り、公開画面の `/privacy` とSpeakLoopフッターから到達可能にする。
 
 ## P1: GitHubの公開設定
 

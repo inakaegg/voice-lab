@@ -2,11 +2,9 @@
 
 ## 報告方法
 
-脆弱性や秘密情報の露出を発見した場合は、公開Issueへ詳細を書かず、GitHub repositoryの `Security` タブにある `Report a vulnerability` からPrivate vulnerability reportingを利用してください。repositoryをpublicへ切り替える前に、この機能を有効にして導線を実画面確認することを公開条件とします。
+現在このrepositoryはprivateのため、GitHubのPrivate vulnerability reportingを外部から利用できません。repositoryをpublicへ切り替える際にこの機能を有効にし、実際に利用できることを確認してから公開します。
 
-`Report a vulnerability` が表示されない場合は、公開Issueへ再現情報を書かず、repository ownerのGitHub profileに掲載された連絡手段からprivateな報告経路を確認してください。
-
-公開デモの保存情報に関する問い合わせ・削除依頼も、個人情報を公開Issueへ書かず、同じPrivate vulnerability reportingから連絡してください。
+Private vulnerability reportingを有効にするまでは、公開Issueへ秘密情報、個人情報、未修正の脆弱性の詳細を投稿しないでください。
 
 報告には、影響するrouteまたはcomponent、再現条件、想定される影響、確認したrevisionを含めてください。API key、token、個人情報、第三者の音声データは添付しないでください。
 

@@ -23,7 +23,7 @@
 - Google emailはquotaと監査の識別に使う前にSHA-256 hash化する。D1と現在のKV fallbackは、quota keyとaudit eventへ平文emailを新規保存しない。
 - 2026-07-16より前のlegacy KVには、quota keyまたはaudit eventへ平文emailが残っている可能性がある。現在の実装は利用時にhash key／`email_hash`へ移行するが、公開環境で旧keyと旧eventを検索・削除した証拠は別途必要である。
 - Googleログイン後のブラウザには、email、発行時刻、有効期限を含む署名cookieを `HttpOnly`、`Secure`、`SameSite=Lax` で保存する。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
-- D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。日次quotaは48時間、audit eventは90日で削除し、累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
+- D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
 - R2は管理者が公開用として登録したサンプル音声だけを保存する。
 - 既存SkitVoice sampleは由来・許諾・生成model・AI生成表示を確認できないため、一般向けsample APIから返さない。外部R2 objectはこのローカル変更では削除せず、管理者経路でのみ確認・管理する。
 - KVは短期job snapshot、ready状態、設定、bindingがない環境のfallbackに使う。短期job snapshotは1時間、fallbackの日次quotaは48時間、audit eventは90日で失効する。fallbackの累計quotaは公開デモの運用中に限り保持する。管理設定の `admin_google_emails` には運営者の平文emailを保存し、`/fun` のuser settingsには管理者が入力した設定・本文を保存できる。一般利用者のquota・audit識別子とは用途を分ける。
@@ -41,6 +41,6 @@ Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの
 
 期限のあるD1の日次quotaとaudit eventは、Cloudflare WorkerのCron Triggerで1日1回削除する。KVの短期job、日次quota、audit fallbackにはTTLを設定する。累計quotaは利用上限を維持するデータなので公開デモ運用中は自動削除せず、デモ終了時に削除する。
 
-利用者向けの問い合わせはGitHub repositoryのPrivate vulnerability reportingを非公開連絡経路として使う。削除依頼では対象を特定するためGoogleログインに使ったemailの確認を求める場合がある。公開Issueへ個人情報を書かせない。
+GitHubのPrivate vulnerability reportingはpublic repositoryでのみ外部から利用できるため、private状態の公開画面から未設定の導線を案内しない。repositoryをpublicへ切り替える際の有効化と実画面確認は、公開前チェックリストで扱う。
 
 公開再開前の外部作業として、productionへ新Workerを反映した後にlegacy KVの平文email keyを削除し、残存0件を再確認する。

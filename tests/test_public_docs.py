@@ -126,17 +126,23 @@ def test_public_privacy_policy_and_retention_are_fixed() -> None:
     storage = read_text("docs/deployment/STORAGE.md")
     wrangler = read_text("wrangler.toml")
 
+    assert "最大3日" in policy
+    assert "最大91日" in policy
+    assert "48時間" in privacy
+    assert "90日" in privacy
+    assert "48時間" in storage
+    assert "90日" in storage
     for document in (policy, privacy, storage):
-        assert "48時間" in document
-        assert "90日" in document
         assert "公開デモの運用中" in document
     for document in (policy, privacy):
         assert "30日" in document
 
-    for provider in ("Cloudflare", "Google", "OpenAI", "RunPod"):
+    for provider in ("Cloudflare", "OpenAI", "RunPod"):
         assert provider in policy
 
-    assert "Report a vulnerability" in policy
+    assert "外部処理事業者" not in policy
+    assert "Report a vulnerability" not in policy
+    assert "security/advisories/new" not in policy
     assert 'crons = ["17 3 * * *"]' in wrangler
 
 

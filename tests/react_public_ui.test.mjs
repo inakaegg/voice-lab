@@ -67,16 +67,16 @@ test("SpeakLoop places the shared privacy notice after its main workflow", () =>
   assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
 });
 
-test("privacy policy discloses processors, retention, and a private inquiry path", () => {
-  for (const provider of ["Cloudflare", "Google", "OpenAI", "RunPod"]) {
+test("privacy policy explains external audio processing and actual maximum retention", () => {
+  for (const provider of ["Cloudflare", "OpenAI", "RunPod"]) {
     assert.match(privacy, new RegExp(provider));
   }
   assert.match(privacy, /音声と生成音声[\s\S]*履歴として保存しません/);
   assert.match(privacy, /処理結果の短期データ[\s\S]*1時間/);
-  assert.match(privacy, /1日ごとの利用回数[\s\S]*48時間/);
-  assert.match(privacy, /監査ログ[\s\S]*90日/);
+  assert.match(privacy, /1日ごとの利用回数[\s\S]*最大3日/);
+  assert.match(privacy, /操作ログ[\s\S]*最大91日/);
   assert.match(privacy, /累計利用回数[\s\S]*公開デモの運用中/);
-  assert.match(privacy, /GitHub[\s\S]*Report a vulnerability/);
+  assert.doesNotMatch(privacy, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
   assert.match(viteConfig, /privacy:\s*resolve\(rootDir,\s*"privacy\.html"\)/);
   assert.match(privacyHtml, /\/src\/privacy\/main\.tsx/);
 });

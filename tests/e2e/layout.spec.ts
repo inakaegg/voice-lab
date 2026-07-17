@@ -76,7 +76,8 @@ test("privacy policy stays readable and links back to Voice Lab", async ({ page 
   await expect(page.getByRole("heading", { name: "プライバシーポリシー", level: 1 })).toBeVisible();
   await expect(page.getByRole("link", { name: /Voice Lab/ })).toHaveAttribute("href", "/");
   await expect(page.getByRole("heading", { name: "保持期間" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Report a vulnerability" })).toBeVisible();
+  await expect(page.getByText(/1日ごとの利用回数: 最大3日/)).toBeVisible();
+  await expect(page.locator('a[href*="security/advisories/new"]')).toHaveCount(0);
   await assertNoHorizontalOverflow(page);
   await assertVisibleControlsInsideViewport(page);
 });

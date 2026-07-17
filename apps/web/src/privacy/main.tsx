@@ -5,8 +5,6 @@ import { activateCompactLayout, ThemeSettings } from "../shared/components";
 
 activateCompactLayout();
 
-const externalLinkProps = { target: "_blank", rel: "noreferrer" } as const;
-
 function PrivacyPolicy() {
   return <main className="min-h-svh bg-background text-foreground">
     <header className="mx-auto flex h-16 w-full max-w-4xl items-center justify-between px-5 sm:h-[4.5rem] sm:px-8">
@@ -27,14 +25,14 @@ function PrivacyPolicy() {
           <h2 className="text-xl font-bold tracking-[-0.02em]">扱う情報と目的</h2>
           <ul className="mt-4 list-disc space-y-2 pl-6">
             <li>Googleログインのメールアドレスを、ログイン確認と利用回数の制限に使います。</li>
-            <li>利用回数の記録と監査ログには、メールアドレスそのものではなくSHA-256で変換した識別子を保存します。</li>
+            <li>利用回数の記録と操作ログには、メールアドレスそのものではなくSHA-256で変換した識別子を保存します。</li>
             <li>入力した音声・テキストと生成音声を、翻訳、音声生成、発音評価のために処理します。</li>
           </ul>
         </section>
 
         <section>
-          <h2 className="text-xl font-bold tracking-[-0.02em]">音声の保存</h2>
-          <p className="mt-4">Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しません。処理結果を受け渡す短期データには生成音声が含まれる場合があり、1時間で失効します。外部処理事業者側の保持は各社の条件に従います。</p>
+          <h2 className="text-xl font-bold tracking-[-0.02em]">音声の取り扱い</h2>
+          <p className="mt-4">Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しません。処理のため、入力音声・テキストはCloudflareを経由してOpenAIまたはRunPodへ送られます。処理結果を受け渡す短期データには生成音声が含まれる場合があり、1時間で失効します。</p>
         </section>
 
         <section>
@@ -42,26 +40,11 @@ function PrivacyPolicy() {
           <ul className="mt-4 list-disc space-y-2 pl-6">
             <li>Googleログイン用cookie: 30日。ログアウト時は直ちに削除します。</li>
             <li>処理結果の短期データ: 1時間。</li>
-            <li>1日ごとの利用回数: 48時間。</li>
-            <li>監査ログ: 90日。</li>
+            <li>1日ごとの利用回数: 最大3日。</li>
+            <li>操作ログ: 最大91日。</li>
             <li>累計利用回数と対応する識別子: 利用上限を維持するため公開デモの運用中。公開デモ終了時に削除します。</li>
           </ul>
-          <p className="mt-4">期限のある1日ごとの利用回数と監査ログは、Cloudflare Workerの日次処理で削除します。</p>
-        </section>
-
-        <section>
-          <h2 className="text-xl font-bold tracking-[-0.02em]">外部処理事業者</h2>
-          <ul className="mt-4 space-y-3">
-            <li><strong>Cloudflare</strong>: Web配信、認証中継、利用回数の記録、短期データ、監査ログ。<a className="underline underline-offset-4" href="https://www.cloudflare.com/privacypolicy/" {...externalLinkProps}>プライバシーポリシー</a></li>
-            <li><strong>Google</strong>: Google OAuthログイン。<a className="underline underline-offset-4" href="https://policies.google.com/privacy?hl=ja" {...externalLinkProps}>プライバシーポリシー</a></li>
-            <li><strong>OpenAI</strong>: 音声認識、翻訳、テキスト加工、音声生成。<a className="underline underline-offset-4" href="https://platform.openai.com/docs/models/default-usage-policies-by-endpoint" {...externalLinkProps}>APIデータ管理</a></li>
-            <li><strong>RunPod</strong>: 中国語音声認識と、利用者が選んだ場合の声質変換。<a className="underline underline-offset-4" href="https://www.runpod.io/legal/privacy-policy" {...externalLinkProps}>プライバシーポリシー</a></li>
-          </ul>
-        </section>
-
-        <section>
-          <h2 className="text-xl font-bold tracking-[-0.02em]">問い合わせ</h2>
-          <p className="mt-4">保存情報についての問い合わせは、GitHub repositoryのSecurity画面にある <a className="underline underline-offset-4" href="https://github.com/inakaegg/voice-lab/security/advisories/new" {...externalLinkProps}>Report a vulnerability</a> から非公開で連絡してください。削除依頼では、Googleログインに使ったメールアドレスの確認をお願いする場合があります。公開Issueへ個人情報を投稿しないでください。</p>
+          <p className="mt-4">1日ごとの利用回数と操作ログは、Cloudflare Workerの日次処理で期限切れを削除します。</p>
         </section>
       </div>
     </article>
