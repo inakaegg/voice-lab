@@ -126,8 +126,12 @@ def test_public_privacy_policy_and_retention_are_fixed() -> None:
     storage = read_text("docs/deployment/STORAGE.md")
     wrangler = read_text("wrangler.toml")
 
-    assert "最大3日" in policy
-    assert "最大91日" in policy
+    assert "利用上限を管理するため、利用者ごとの利用回数を記録します" in policy
+    assert "音声や入力内容はこの記録に含まれません" in policy
+    assert "日ごとの利用回数は、利用日から3日以内に削除します" in policy
+    assert "操作ログは、約90日間保存します" in policy
+    assert "最大3日" not in policy
+    assert "最大91日" not in policy
     assert "48時間" in privacy
     assert "90日" in privacy
     assert "48時間" in storage

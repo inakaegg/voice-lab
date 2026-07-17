@@ -25,6 +25,7 @@ function PrivacyPolicy() {
           <h2 className="text-xl font-bold tracking-[-0.02em]">扱う情報と目的</h2>
           <ul className="mt-4 list-disc space-y-2 pl-6">
             <li>Googleログインのメールアドレスを、ログイン確認と利用回数の制限に使います。</li>
+            <li>利用上限を管理するため、利用者ごとの利用回数を記録します。音声や入力内容はこの記録に含まれません。</li>
             <li>利用回数の記録と操作ログには、メールアドレスそのものではなくSHA-256で変換した識別子を保存します。</li>
             <li>入力した音声・テキストと生成音声を、翻訳、音声生成、発音評価のために処理します。</li>
           </ul>
@@ -40,11 +41,10 @@ function PrivacyPolicy() {
           <ul className="mt-4 list-disc space-y-2 pl-6">
             <li>Googleログイン用cookie: 30日。ログアウト時は直ちに削除します。</li>
             <li>処理結果の短期データ: 1時間。</li>
-            <li>1日ごとの利用回数: 最大3日。</li>
-            <li>操作ログ: 最大91日。</li>
+            <li>日ごとの利用回数は、利用日から3日以内に削除します。</li>
+            <li>操作ログは、約90日間保存します。</li>
             <li>累計利用回数と対応する識別子: 利用上限を維持するため公開デモの運用中。公開デモ終了時に削除します。</li>
           </ul>
-          <p className="mt-4">1日ごとの利用回数と操作ログは、Cloudflare Workerの日次処理で期限切れを削除します。</p>
         </section>
       </div>
     </article>

@@ -76,29 +76,31 @@ test("privacy policy stays readable and links back to Voice Lab", async ({ page 
   await expect(page.getByRole("heading", { name: "プライバシーポリシー", level: 1 })).toBeVisible();
   await expect(page.getByRole("link", { name: /Voice Lab/ })).toHaveAttribute("href", "/");
   await expect(page.getByRole("heading", { name: "保持期間" })).toBeVisible();
-  await expect(page.getByText(/1日ごとの利用回数: 最大3日/)).toBeVisible();
+  await expect(page.getByText(/日ごとの利用回数は、利用日から3日以内に削除/)).toBeVisible();
+  await expect(page.getByText(/操作ログは、約90日間保存/)).toBeVisible();
   await expect(page.locator('a[href*="security/advisories/new"]')).toHaveCount(0);
   await assertNoHorizontalOverflow(page);
   await assertVisibleControlsInsideViewport(page);
 });
 
-test("SpeakLoop shows own-voice details on hover, focus, and click without shifting the workflow", async ({ page }, testInfo) => {
+test("SpeakLoop shows own-voice details from the control hover and focus without duplicate disclosure", async ({ page }, testInfo) => {
   await page.goto("/speakloop");
-  const help = page.locator("#practice-own-voice-help > button");
+  const setting = page.locator(".practice-own-voice-setting");
+  const toggle = page.locator("#practice-own-voice-toggle");
   const tooltip = page.locator("#practice-own-voice-tooltip");
-  const disclosure = page.locator(".practice-own-voice-disclosure");
   const workflowBoxBefore = await page.locator(".react-practice-flow").boundingBox();
 
   await expect(tooltip).toBeHidden();
-  await expect(disclosure).toBeHidden();
+  await expect(page.locator(".practice-own-voice-disclosure")).toHaveCount(0);
+  await expect(page.getByText(/外部サービスで処理され、Voice Labの履歴には保存されません/)).toHaveCount(1);
   if (testInfo.project.name !== "mobile") {
-    await help.hover();
+    await setting.hover();
     await expect(tooltip).toBeVisible();
     await page.locator(".practice-card-copy").first().hover();
     await expect(tooltip).toBeHidden();
   }
 
-  await help.click();
+  await toggle.focus();
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toHaveText("「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。");
   await assertNoHorizontalOverflow(page);
@@ -111,25 +113,12 @@ test("SpeakLoop shows own-voice details on hover, focus, and click without shift
     await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "light"));
   }
 
-  await help.click();
-  await page.mouse.move(0, 0);
+  await page.getByRole("heading", { name: "言いたいことで発音練習" }).click();
   await expect(tooltip).toBeHidden();
-  await page.keyboard.press("Shift+Tab");
-  await page.keyboard.press("Tab");
-  await expect(help).toBeFocused();
+  await toggle.focus();
   await expect(tooltip).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(tooltip).toBeHidden();
-
-  await page.locator("#practice-own-voice-toggle").check();
-  await expect(disclosure).toBeVisible();
-  await expect(disclosure).toHaveText("録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。");
-  await assertNoHorizontalOverflow(page);
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-disclosure.png`, fullPage: true });
-    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "dark"));
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-disclosure.png`, fullPage: true });
-  }
 });
 
 test("portal keeps the SpeakLoop action within the initial viewport", async ({ page }) => {
@@ -161,6 +150,28 @@ test("public theme menu is keyboard reachable and persists dark mode", async ({ 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
+test("public theme menu closes on outside click and Escape", async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem("mo-speech-theme", "light"));
+  await page.goto("/speakloop");
+  const settings = page.locator(".react-theme-settings");
+  const summary = page.getByLabel("配色設定");
+
+  await summary.click();
+  await expect(settings).toHaveAttribute("open", "");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-theme-menu-open.png`, fullPage: true });
+  }
+  await page.getByRole("heading", { name: "言いたいことで発音練習" }).click();
+  await expect(settings).not.toHaveAttribute("open", "");
+
+  await summary.click();
+  await expect(settings).toHaveAttribute("open", "");
+  await page.keyboard.press("Escape");
+  await expect(settings).not.toHaveAttribute("open", "");
+  await expect(summary).toBeFocused();
 });
 
 test("system theme follows the browser color scheme on every public route", async ({ page }) => {

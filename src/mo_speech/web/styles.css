@@ -1856,60 +1856,7 @@ audio {
 .practice-own-voice-setting {
   align-items: center;
   display: inline-flex;
-  gap: 5px;
-}
-
-.practice-own-voice-disclosure {
-  color: var(--react-muted);
-  display: none;
-  flex: 1 0 100%;
-  font-size: 0.78rem;
-  font-weight: 550;
-  line-height: 1.5;
-  margin: -2px 0 0;
-}
-
-.practice-quick-settings:has(#practice-own-voice-toggle:checked) .practice-own-voice-disclosure {
-  display: block;
-}
-
-.practice-own-voice-help {
   position: relative;
-}
-
-.practice-own-voice-help-button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 50%;
-  color: var(--react-accent-hover);
-  cursor: help;
-  display: inline-flex;
-  height: 38px;
-  justify-content: center;
-  list-style: none;
-  padding: 0;
-  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
-  width: 38px;
-}
-
-.practice-own-voice-help-button:hover,
-.practice-own-voice-help[data-open="true"] .practice-own-voice-help-button {
-  background: var(--react-accent-soft);
-  border-color: color-mix(in srgb, var(--react-accent) 38%, transparent);
-  color: var(--react-accent-hover);
-}
-
-.practice-own-voice-help-button:focus-visible {
-  outline: 2px solid var(--react-focus);
-  outline-offset: 2px;
-}
-
-.practice-own-voice-help-button svg {
-  fill: none;
-  height: 24px;
-  stroke: currentColor;
-  width: 24px;
 }
 
 .practice-own-voice-tooltip {
@@ -1925,15 +1872,15 @@ audio {
   margin: 0;
   padding: 11px 12px;
   position: absolute;
-  right: -8px;
+  pointer-events: none;
+  right: 0;
   top: calc(100% + 8px);
   width: min(360px, calc(100vw - 32px));
   z-index: 40;
 }
 
-.practice-own-voice-help[data-open="true"] .practice-own-voice-tooltip,
-.practice-own-voice-help:hover .practice-own-voice-tooltip,
-.practice-own-voice-help-button:focus-visible + .practice-own-voice-tooltip {
+.practice-own-voice-setting:hover .practice-own-voice-tooltip,
+.practice-own-voice-setting:focus-within .practice-own-voice-tooltip {
   display: block;
 }
 
@@ -4697,8 +4644,7 @@ html[data-tab-audio-available="false"] .react-public-body[data-layout="compact"]
   .react-public-body[data-layout="compact"] .practice-language-select select { font-size: 14px; min-width: 7.5em; }
   .react-public-body[data-layout="compact"] .practice-script-toggle button { min-height: 36px; padding-inline: 10px; }
   .react-public-body[data-layout="compact"] .practice-own-voice-control { min-height: 42px; }
-  .react-public-body[data-layout="compact"] .practice-own-voice-help-button { height: 42px; width: 42px; }
-  .react-public-body[data-layout="compact"] .practice-own-voice-tooltip { right: -18px; }
+  .react-public-body[data-layout="compact"] .practice-own-voice-tooltip { width: min(300px, calc(100vw - 32px)); }
   .react-public-body[data-layout="compact"] .react-flow-card { padding: 12px; }
   .react-public-body[data-layout="compact"] .practice-step-number { height: 22px; width: 22px; }
   .react-public-body[data-layout="compact"] .practice-record-orb { height: 78px; width: 78px; }
@@ -4820,16 +4766,6 @@ html[data-theme="dark"] .react-public-body .practice-own-voice-control {
 }
 html[data-theme="dark"] .react-public-body .practice-own-voice-switch { background: #526078; }
 html[data-theme="dark"] .react-public-body .practice-own-voice-control input:checked + .practice-own-voice-switch { background: #5e9ff0; }
-html[data-theme="dark"] .react-public-body .practice-own-voice-help-button {
-  background: transparent;
-  color: #b7d6ff;
-}
-html[data-theme="dark"] .react-public-body .practice-own-voice-help-button:hover,
-html[data-theme="dark"] .react-public-body .practice-own-voice-help[data-open="true"] .practice-own-voice-help-button {
-  background: rgba(94, 159, 240, 0.16);
-  border-color: rgba(126, 174, 236, 0.38);
-  color: #9bc5ff;
-}
 html[data-theme="dark"] .react-public-body .practice-own-voice-tooltip {
   background: #20293a;
   border-color: var(--react-border);

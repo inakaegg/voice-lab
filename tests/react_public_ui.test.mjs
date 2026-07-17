@@ -62,20 +62,24 @@ test("React layouts include responsive product and workflow structure", () => {
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {
   assert.match(shared, /export function PrivacyNotice[\s\S]*<footer className="react-workflow-privacy-note" data-public-privacy-notice>/);
+  assert.match(shared, /音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。/);
   assert.match(shared, /href="\/privacy"[\s\S]*プライバシーポリシー/);
   assert.equal((speakloop.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
   assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
+  assert.doesNotMatch(speakloop, /外部の音声処理サービスで一時処理/);
 });
 
-test("privacy policy explains external audio processing and actual maximum retention", () => {
+test("privacy policy explains external audio processing and retention in plain language", () => {
   for (const provider of ["Cloudflare", "OpenAI", "RunPod"]) {
     assert.match(privacy, new RegExp(provider));
   }
   assert.match(privacy, /音声と生成音声[\s\S]*履歴として保存しません/);
   assert.match(privacy, /処理結果の短期データ[\s\S]*1時間/);
-  assert.match(privacy, /1日ごとの利用回数[\s\S]*最大3日/);
-  assert.match(privacy, /操作ログ[\s\S]*最大91日/);
+  assert.match(privacy, /利用上限を管理するため、利用者ごとの利用回数を記録します。音声や入力内容はこの記録に含まれません。/);
+  assert.match(privacy, /日ごとの利用回数[\s\S]*3日以内に削除/);
+  assert.match(privacy, /操作ログ[\s\S]*約90日間保存/);
   assert.match(privacy, /累計利用回数[\s\S]*公開デモの運用中/);
+  assert.doesNotMatch(privacy, /最大3日|最大91日|72時間未満|91日未満/);
   assert.doesNotMatch(privacy, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
   assert.match(viteConfig, /privacy:\s*resolve\(rootDir,\s*"privacy\.html"\)/);
   assert.match(privacyHtml, /\/src\/privacy\/main\.tsx/);
@@ -100,23 +104,17 @@ test("SpeakLoop provides a Chinese script segmented control backed by OpenCC", (
   assert.match(styles, /prefers-reduced-motion/);
 });
 
-test("SpeakLoop exposes an opt-in Seed-VC model voice control with on-demand help", () => {
+test("SpeakLoop exposes an opt-in Seed-VC model voice control with hover and focus help", () => {
   assert.match(speakloop, /id="practice-own-voice-toggle"/);
   assert.match(speakloop, /自分の声/);
   assert.match(speakloop, /practice-own-voice-control/);
-  assert.match(speakloop, /id="practice-own-voice-help"/);
-  assert.match(speakloop, /aria-label="自分の声について"/);
   assert.match(speakloop, /role="tooltip"/);
   assert.match(speakloop, /「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。/);
-  assert.match(speakloop, /className="practice-own-voice-disclosure"/);
-  assert.match(speakloop, /録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。/);
-  assert.match(speakloop, /import \{ CircleHelp \} from "lucide-react"/);
-  assert.match(speakloop, /<CircleHelp[^>]+strokeWidth=\{2\.25\}/);
+  assert.doesNotMatch(speakloop, /practice-own-voice-help-button|practice-own-voice-disclosure/);
+  assert.doesNotMatch(speakloop, /CircleHelp|useState/);
   assert.doesNotMatch(speakloop, /通常のお手本音声で練習を続けられます/);
-  assert.match(styles, /\.practice-quick-settings:has\(#practice-own-voice-toggle:checked\)[\s\S]*\.practice-own-voice-disclosure/);
-  assert.match(styles, /\.practice-own-voice-help\[data-open="true"\][\s\S]*\.practice-own-voice-tooltip/);
-  assert.match(styles, /\.practice-own-voice-help:hover[\s\S]*\.practice-own-voice-tooltip/);
-  assert.match(styles, /\.practice-own-voice-help-button svg[\s\S]*height: 24px[\s\S]*width: 24px/);
+  assert.match(styles, /\.practice-own-voice-setting:hover[\s\S]*\.practice-own-voice-tooltip/);
+  assert.match(styles, /\.practice-own-voice-setting:focus-within[\s\S]*\.practice-own-voice-tooltip/);
 });
 
 test("SkitVoice public page exposes no interactive generation or samples", () => {

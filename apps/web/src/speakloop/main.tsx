@@ -1,7 +1,5 @@
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
-import { CircleHelp } from "lucide-react";
-import { useState } from "react";
 
 activateCompactLayout();
 
@@ -30,16 +28,6 @@ function CancelRecordingButton({ id }: { id: string }) {
   return <button id={id} className="practice-record-cancel-button" type="button" aria-label="録音をキャンセル" title="録音をキャンセル" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>;
 }
 
-function OwnVoiceHelp() {
-  const [open, setOpen] = useState(false);
-  return <div id="practice-own-voice-help" className="practice-own-voice-help" data-open={open}>
-    <button className="practice-own-voice-help-button" type="button" aria-label="自分の声について" aria-describedby="practice-own-voice-tooltip" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
-      <CircleHelp aria-hidden="true" strokeWidth={2.25}/>
-    </button>
-    <p id="practice-own-voice-tooltip" className="practice-own-voice-tooltip" role="tooltip">「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。</p>
-  </div>;
-}
-
 function SpeakLoop() {
   return <PageShell className="practice-shell react-practice-shell">
     <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" />
@@ -50,8 +38,7 @@ function SpeakLoop() {
       <label className="practice-current-language practice-language-select"><span>学習言語</span><select id="practice-target-language-select" aria-label="学習する言語" defaultValue="en-US"><option value="en-US">🇺🇸 English</option><option value="zh-CN">🇨🇳 中文</option></select></label>
       <fieldset id="practice-chinese-script-setting" className="practice-script-setting" hidden><legend>字形</legend><div className="practice-script-toggle" role="group" aria-label="中国語の字形" data-script="simplified"><span className="practice-script-indicator" aria-hidden="true"/><button id="practice-script-simplified" type="button" aria-pressed="true">简体</button><button id="practice-script-traditional" type="button" aria-pressed="false">繁體</button></div></fieldset>
       <label id="practice-pinyin-setting" className="practice-inline-setting" hidden><input id="practice-pinyin-toggle" type="checkbox" defaultChecked/><span>ピンイン</span></label>
-      <div className="practice-own-voice-setting"><label className="practice-own-voice-control"><input id="practice-own-voice-toggle" type="checkbox" aria-describedby="practice-own-voice-disclosure"/><span className="practice-own-voice-switch" aria-hidden="true"/><span>自分の声</span></label><OwnVoiceHelp /></div>
-      <p id="practice-own-voice-disclosure" className="practice-own-voice-disclosure" aria-live="polite">録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。</p>
+      <div className="practice-own-voice-setting"><label className="practice-own-voice-control"><input id="practice-own-voice-toggle" type="checkbox" aria-describedby="practice-own-voice-tooltip"/><span className="practice-own-voice-switch" aria-hidden="true"/><span>自分の声</span></label><p id="practice-own-voice-tooltip" className="practice-own-voice-tooltip" role="tooltip">「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。</p></div>
     </section>
     <section className="practice-flow react-practice-flow" aria-label="れんしゅう">
       <article id="practice-native-panel" className="practice-card practice-card-primary react-flow-card" data-practice-record-slot="native"><div className="practice-step-number">1</div><div className="practice-card-copy"><p className="react-step-label">YOUR IDEA</p><h2 id="practice-record-title">言いたいことを話す</h2><p>いつもの言葉で、短く話してください。</p></div><div className="react-record-control"><RecordButton id="practice-native-record-button" levelId="practice-native-level" label="言いたいことを録音"/><span>タップして話す</span><CancelRecordingButton id="practice-native-cancel-button"/></div><div id="practice-native-transcript-panel" className="practice-native-transcript-panel" hidden><p id="practice-native-transcript-label" className="practice-mini-label">言ったこと</p><p id="practice-native-transcript" className="practice-native-transcript"/></div></article>
