@@ -97,9 +97,6 @@
     if (!target || !Number.isInteger(offset) || offset < 0 || !phrases.length || !playableRanges.length) {
       return null;
     }
-    const comparableOffset = comparableTargetText(
-      Array.from(String(targetText || "")).slice(0, offset).join(""),
-    ).length;
 
     let cursor = 0;
     let selectedIndex = null;
@@ -109,7 +106,7 @@
       const start = target.indexOf(phraseText, cursor);
       if (start < 0) continue;
       const end = start + phraseText.length;
-      if (comparableOffset < end) {
+      if (offset < end) {
         selectedIndex = Number(phrase.index);
         break;
       }
