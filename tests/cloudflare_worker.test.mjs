@@ -101,6 +101,67 @@ test("Cloudflare worker protects directly addressed admin HTML assets", async ()
   }
 });
 
+test("Cloudflare worker protects every VibeVoice API with the common admin boundary", async () => {
+  const env = adminAuthEnv(async () => json({}));
+  const anonymousRequests = [
+    new Request("https://example.com/api/vibevoice/status"),
+    new Request("https://example.com/api/vibevoice/reference-audio-from-url", { method: "POST" }),
+    new Request("https://example.com/api/vibevoice/scripts", { method: "POST" }),
+    new Request("https://example.com/api/vibevoice/jobs", { method: "POST" }),
+    new Request("https://example.com/api/vibevoice/jobs/job-1"),
+    new Request("https://example.com/api/vibevoice/jobs/job-1/cancel", { method: "POST" }),
+  ];
+
+  for (const request of anonymousRequests) {
+    const response = await handleRequest(request, env);
+    assert.equal(response.status, 401, new URL(request.url).pathname);
+  }
+
+  const regularEnv = adminAuthEnv(async () => json({}), {
+    adminGoogleEmails: "admin@example.com",
+    googleEmail: "person@example.com",
+  });
+  const regularCookie = await publicCookie(regularEnv, "/skitvoice");
+  const regularResponse = await handleRequest(
+    new Request("https://example.com/api/vibevoice/status", { headers: { cookie: regularCookie } }),
+    regularEnv,
+  );
+  assert.equal(regularResponse.status, 403);
+
+  const adminCookieValue = await adminCookie(env, "/skitvoice/admin");
+  const adminResponse = await handleRequest(
+    new Request("https://example.com/api/vibevoice/status", { headers: { cookie: adminCookieValue } }),
+    env,
+  );
+  assert.equal(adminResponse.status, 200);
+});
+
+test("Cloudflare worker hides research features and SkitVoice samples from non-admin payloads", async () => {
+  const sample = {
+    title: "unverified sample",
+    filename: "sample.wav",
+    audio_mime_type: "audio/wav",
+    audio_base64: btoa("sample-bytes"),
+  };
+  const env = adminAuthEnv(async () => json({}));
+  env.PUBLIC_SAMPLE_AUDIOS_JSON = JSON.stringify({ features: { skitvoice: { samples: { "ja-JP": sample } } } });
+
+  const publicSession = await (await handleRequest(new Request("https://example.com/api/public-session"), env)).json();
+  const publicSamples = await (await handleRequest(new Request("https://example.com/api/public-sample-audios"), env)).json();
+  assert.deepEqual(Object.keys(publicSession.features), ["speakloop"]);
+  assert.equal(publicSamples.features.skitvoice, null);
+
+  const cookie = await adminCookie(env);
+  const adminSession = await (await handleRequest(
+    new Request("https://example.com/api/public-session", { headers: { cookie } }), env,
+  )).json();
+  const adminSamples = await (await handleRequest(
+    new Request("https://example.com/api/public-sample-audios", { headers: { cookie } }), env,
+  )).json();
+  assert.ok(adminSession.features.skitvoice);
+  assert.equal(adminSamples.features.skitvoice.samples["ja-JP"].title, "unverified sample");
+});
+
 test("Cloudflare worker protects admin pages with an allowlisted Google session", async () => {
   const requestedPaths = [];
   const env = adminAuthEnv(async () => {
@@ -242,7 +303,7 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
   assert.equal(audit[0].next, "/speakloop");
 });
 
-test("Cloudflare worker requires public Google login before costly generation APIs", async () => {
+test("Cloudflare worker refuses VibeVoice when admin authentication is not configured", async () => {
   const env = publicAuthEnv(async () => {
     throw new Error("unexpected fetch");
   }, { kv: fakeKv() });
@@ -252,8 +313,8 @@ test("Cloudflare worker requires public Google login before costly generation AP
   form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
   const response = await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", body: form }), env);
 
-  assert.equal(response.status, 401);
-  assert.deepEqual(await response.json(), { detail: "Google login is required" });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { detail: "admin authentication is not configured" });
 });
 
 test("Cloudflare worker lets a Google admin use fun generation APIs without consuming quota", async () => {
@@ -394,7 +455,7 @@ test("Cloudflare worker protects fun job status endpoints with Google admin auth
   assert.deepEqual(calls, []);
 });
 
-test("Cloudflare worker stores public quota in KV and blocks non-admin overage", async () => {
+test("Cloudflare worker blocks a normal Google user before SkitVoice quota or RunPod", async () => {
   const kv = fakeKv();
   const today = new Date().toISOString().slice(0, 10);
   await kv.put(`public-usage:skitvoice:viewer@example.com:${today}`, "1");
@@ -418,7 +479,7 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
       return json({ id: "quota-job", status: "IN_QUEUE" });
     }
     throw new Error(`unexpected url: ${url}`);
-  }, { kv });
+  }, { kv, adminGoogleEmails: "admin@example.com" });
   const cookie = await publicCookie(env);
 
   const request = () => {
@@ -430,28 +491,17 @@ test("Cloudflare worker stores public quota in KV and blocks non-admin overage",
   const first = await handleRequest(request(), env);
   const second = await handleRequest(request(), env);
 
-  assert.equal(first.status, 200);
-  assert.equal(second.status, 429);
-  assert.deepEqual(await second.json(), { detail: "public quota exceeded" });
-  assert.equal(calls.filter((call) => call.url.endsWith("/run")).length, 1);
+  assert.equal(first.status, 403);
+  assert.equal(second.status, 403);
+  assert.deepEqual(await second.json(), { detail: "admin access is forbidden" });
+  assert.equal(calls.filter((call) => call.url.endsWith("/run")).length, 0);
   const audit = JSON.parse(await kv.get("public-audit-log"));
-  assert.deepEqual(
-    audit.map((event) => event.action),
-    ["google_login_success", "public_quota_consumed", "public_quota_blocked"],
-  );
-  assert.equal(audit[1].feature, "skitvoice");
-  assert.equal(audit[1].email, undefined);
-  const viewerEmailHash = await publicIdentityHashForTest("viewer@example.com");
-  assert.equal(audit[1].email_hash, viewerEmailHash);
-  assert.equal(audit[1].daily_used, 2);
-  assert.equal(audit[2].limit_type, "daily");
-  assert.equal(await kv.get(`public-usage:skitvoice:${viewerEmailHash}:${today}`), "2");
-  assert.equal(await kv.get(`public-usage:skitvoice:${viewerEmailHash}:total`), "2");
-  assert.equal(await kv.get(`public-usage:skitvoice:viewer@example.com:${today}`), null);
-  assert.equal(await kv.get("public-usage:skitvoice:viewer@example.com:total"), null);
+  assert.deepEqual(audit.map((event) => event.action), ["google_login_success"]);
+  assert.equal(await kv.get(`public-usage:skitvoice:viewer@example.com:${today}`), "1");
+  assert.equal(await kv.get("public-usage:skitvoice:viewer@example.com:total"), "1");
 });
 
-test("Cloudflare worker stores quota and audit in D1 when bound", async () => {
+test("Cloudflare worker does not write D1 SkitVoice quota for a normal Google user", async () => {
   const kv = fakeKv();
   const db = fakeD1();
   await kv.put("public-access-settings", JSON.stringify({ google_login_required: true, features: { skitvoice: { daily_limit: 1, total_limit: 1, script_max_chars: 80, audio_max_bytes: 1000 } } }));
@@ -460,7 +510,7 @@ test("Cloudflare worker stores quota and audit in D1 when bound", async () => {
     if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
     if (url.endsWith("/run")) return json({ id: "quota-job", status: "IN_QUEUE" });
     throw new Error(`unexpected url: ${url}`);
-  }, { kv, db });
+  }, { kv, db, adminGoogleEmails: "admin@example.com" });
   const cookie = await publicCookie(env);
   const request = () => {
     const form = new FormData();
@@ -469,11 +519,10 @@ test("Cloudflare worker stores quota and audit in D1 when bound", async () => {
     return new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form });
   };
 
-  assert.equal((await handleRequest(request(), env)).status, 200);
-  assert.equal((await handleRequest(request(), env)).status, 429);
-  assert.equal(db.__tables.daily.size, 1);
-  assert.equal([...db.__tables.daily.values()][0].usage_count, 1);
-  assert.deepEqual(db.__tables.audit.map((event) => event.action), ["google_login_success", "public_quota_consumed", "public_quota_blocked"]);
+  assert.equal((await handleRequest(request(), env)).status, 403);
+  assert.equal((await handleRequest(request(), env)).status, 403);
+  assert.equal(db.__tables.daily.size, 0);
+  assert.deepEqual(db.__tables.audit.map((event) => event.action), ["google_login_success"]);
   assert.equal(await kv.get("public-audit-log"), null);
 });
 
@@ -729,7 +778,7 @@ test("Cloudflare worker does not recurse while migrating an empty legacy sample 
   const response = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
 
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).features.skitvoice.samples["ja-JP"], null);
+  assert.equal((await response.json()).features.skitvoice, null);
 });
 
 test("Cloudflare worker rejects oversized admin input before calling an external API", async () => {
@@ -779,7 +828,7 @@ test("Cloudflare worker rejects oversized admin input before calling an external
   assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
 });
 
-test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", async () => {
+test("Cloudflare worker lets an admin run and inspect a SkitVoice research job", async () => {
   const kv = fakeKv();
   await kv.put("public-access-settings", JSON.stringify({
     google_login_required: true,
@@ -789,7 +838,7 @@ test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", as
   }));
   const calls = [];
   let statusCalls = 0;
-  const env = publicAuthEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://oauth2.googleapis.com/token") {
       return json({ access_token: "google-access-token" });
@@ -834,7 +883,7 @@ test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", as
     }
     throw new Error(`unexpected url: ${url}`);
   }, { kv });
-  const cookie = await publicCookie(env, "/skitvoice");
+  const cookie = await adminCookie(env, "/skitvoice/admin");
   const form = new FormData();
   form.append("script", "1 こんにちは");
   form.append("model_id", "vibevoice-large-aoi-pinned");
@@ -846,13 +895,13 @@ test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", as
     await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }), env)
   ).json();
   const running = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job"), env)
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job", { headers: { cookie } }), env)
   ).json();
   const completed = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job"), env)
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job", { headers: { cookie } }), env)
   ).json();
   const cancelled = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job/cancel", { method: "POST" }), env)
+    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job/cancel", { method: "POST", headers: { cookie } }), env)
   ).json();
   const runCall = calls.find((call) => call.url.endsWith("/run"));
 
@@ -869,6 +918,7 @@ test("Cloudflare worker forwards SkitVoice jobs to RunPod with public quota", as
   assert.equal(completed.result.normalized_script, "Speaker 1: こんにちは");
   assert.equal(cancelled.status, "failed");
   assert.equal(runCall.body.input.operation_mode, "vibevoice");
+  assert.deepEqual(runCall.body.policy, { ttl: 600_000, executionTimeout: 300_000 });
   assert.equal(runCall.body.input.script, "1 こんにちは");
   assert.equal(runCall.body.input.generation.model_id, "vibevoice-large-aoi-pinned");
   assert.equal(runCall.body.input.generation.cfg_scale, 1.2);
@@ -886,7 +936,7 @@ test("Cloudflare worker translates SkitVoice script before RunPod generation", a
     },
   }));
   const calls = [];
-  const env = publicAuthEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://oauth2.googleapis.com/token") {
       return json({ access_token: "google-access-token" });
@@ -903,7 +953,7 @@ test("Cloudflare worker translates SkitVoice script before RunPod generation", a
     throw new Error(`unexpected url: ${url}`);
   }, { kv });
   env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL = "test-vv-translation-model";
-  const cookie = await publicCookie(env, "/skitvoice");
+  const cookie = await adminCookie(env, "/skitvoice/admin");
   const form = new FormData();
   form.append("script", "1 こんにちは\n2 元気ですか");
   form.append("output_language", "en-US");
@@ -940,7 +990,7 @@ test("Cloudflare worker generates a five-line two-speaker SkitVoice script witho
     features: { skitvoice: { daily_limit: 2, total_limit: 2 } },
   }));
   let scriptGenerationInput = "";
-  const env = publicAuthEnv(async (url, init = {}) => {
+  const env = adminAuthEnv(async (url, init = {}) => {
     if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
     if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
     if (url === "https://api.openai.com/v1/responses") {
@@ -949,7 +999,7 @@ test("Cloudflare worker generates a five-line two-speaker SkitVoice script witho
     }
     throw new Error(`unexpected url: ${url}`);
   }, { kv });
-  const cookie = await publicCookie(env, "/skitvoice");
+  const cookie = await adminCookie(env, "/skitvoice/admin");
 
   const response = await handleRequest(new Request("https://example.com/api/vibevoice/scripts", {
     method: "POST",
@@ -977,7 +1027,7 @@ test("Cloudflare worker rejects SkitVoice URL references before RunPod", async (
     },
   }));
   const calls = [];
-  const env = publicAuthEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     if (url === "https://oauth2.googleapis.com/token") {
       return json({ access_token: "google-access-token" });
@@ -987,7 +1037,7 @@ test("Cloudflare worker rejects SkitVoice URL references before RunPod", async (
     }
     throw new Error(`unexpected url: ${url}`);
   }, { kv });
-  const cookie = await publicCookie(env, "/skitvoice");
+  const cookie = await adminCookie(env, "/skitvoice/admin");
   const form = new FormData();
   form.append("script", "1 こんにちは");
   form.append("voice_url_1", "https://youtu.be/zDZvAmCJJaY?t=2129");
@@ -1007,16 +1057,18 @@ test("Cloudflare worker rejects SkitVoice URL references before RunPod", async (
 
 test("Cloudflare worker does not expose URL reference audio extraction", async () => {
   const calls = [];
-  const env = fakeEnv(async (url, init) => {
+  const env = adminAuthEnv(async (url, init) => {
     calls.push({ url, init, body: parseJsonBody(init.body) });
     throw new Error(`unexpected url: ${url}`);
   }, { kv: fakeKv() });
   const form = new FormData();
   form.append("url", "https://youtu.be/zDZvAmCJJaY?t=2129");
   form.append("duration_seconds", "5");
+  const cookie = await adminCookie(env, "/skitvoice/admin");
   const response = await handleRequest(
     new Request("https://example.com/api/vibevoice/reference-audio-from-url", {
       method: "POST",
+      headers: { cookie },
       body: form,
     }),
     env,
@@ -1323,6 +1375,7 @@ test("Cloudflare worker creates and polls a SpeakLoop Seed-VC model voice job wi
   assert.equal(runCall.body.input.source_audio_base64, Buffer.from([21, 22, 23]).toString("base64"));
   assert.equal(runCall.body.input.reference_audio_base64, Buffer.from("my reference voice").toString("base64"));
   assert.equal(runCall.body.input.seed_vc_reference_auto_select, true);
+  assert.deepEqual(runCall.body.policy, { ttl: 120_000, executionTimeout: 60_000 });
 
   const running = await handleRequest(
     new Request("https://example.com/api/practice/voice-jobs/practice-vc-job"),
@@ -1342,6 +1395,36 @@ test("Cloudflare worker creates and polls a SpeakLoop Seed-VC model voice job wi
   assert.equal(completed.status, 200);
   assert.equal(snapshot.status, "succeeded");
   assert.equal(snapshot.result.audio_base64, "UklGRg==");
+});
+
+test("Cloudflare worker rejects separate reference sources for SpeakLoop own voice", async () => {
+  for (const [field, value] of [
+    ["reference_audio", new Blob(["third-party-file"], { type: "audio/wav" })],
+    ["reference_audio_base64", "dGhpcmQtcGFydHk="],
+    ["reference_url", "https://example.com/voice.wav"],
+    ["tab_audio", new Blob(["captured-tab"], { type: "audio/webm" })],
+  ]) {
+    const env = fakeEnv(async () => {
+      throw new Error("external processing must not start");
+    });
+    const form = new FormData();
+    form.append("audio", new Blob(["same-session recording"], { type: "audio/webm" }), "recording.webm");
+    form.append("target_language", "en-US");
+    form.append("recording_intent", "prompt");
+    form.append("use_own_voice", "true");
+    if (value instanceof Blob) {
+      form.append(field, value, `${field}.wav`);
+    } else {
+      form.append(field, value);
+    }
+
+    const response = await handleRequest(
+      new Request("https://example.com/api/practice/recordings", { method: "POST", body: form }),
+      env,
+    );
+    assert.equal(response.status, 400, field);
+    assert.match(await response.text(), /same-session SpeakLoop recording/);
+  }
 });
 
 test("Cloudflare worker rejects a practice recording without explicit intent", async () => {
@@ -1849,7 +1932,7 @@ test("Cloudflare worker reports an empty reference ASR as a typed failed job", a
   });
 });
 
-test("Cloudflare worker surfaces RunPod practice progress and explicit balance failures", async () => {
+test("Cloudflare worker surfaces RunPod practice progress without echoing provider failure text", async () => {
   let responseBody = {
     id: "practice-job-2",
     status: "IN_PROGRESS",
@@ -1886,8 +1969,8 @@ test("Cloudflare worker surfaces RunPod practice progress and explicit balance f
   );
   const failed = await failedResponse.json();
   assert.equal(failed.status, "failed");
-  assert.match(failed.error, /残高不足/);
-  assert.match(failed.error, /Insufficient balance/);
+  assert.equal(failed.error, "RunPod job failed with status FAILED");
+  assert.doesNotMatch(failed.error, /Insufficient balance/);
 });
 
 test("Cloudflare worker does not silently fall back when Chinese FunASR fails", async () => {
@@ -1911,7 +1994,9 @@ test("Cloudflare worker does not silently fall back when Chinese FunASR fails", 
 
   assert.equal(response.status, 503);
   assert.deepEqual(calls, ["https://api.runpod.ai/v2/endpoint/runsync"]);
-  assert.match(await response.text(), /FunASR unavailable/);
+  const body = await response.text();
+  assert.match(body, /RunPod request failed with HTTP 503/);
+  assert.doesNotMatch(body, /FunASR unavailable/);
 });
 
 test("Cloudflare worker strips audio MIME parameters for voice conversion files", async () => {
@@ -2421,6 +2506,58 @@ test("Cloudflare worker stores Seed-VC ready state when voice conversion run com
   assert.equal(seedVc.settings.warmup.source, "voice_conversion");
 });
 
+test("Cloudflare worker does not echo RunPod raw payloads from failure responses", async () => {
+  const marker = "RAW_AUDIO_AND_SCRIPT_MUST_NOT_LEAK";
+  const env = adminAuthEnv(async (url) => {
+    if (url.endsWith("/run")) {
+      return json({ error: { message: marker, audio_base64: marker, script: marker } }, { status: 502 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const cookie = await adminCookie(env, "/skitvoice/admin");
+  const form = new FormData();
+  form.append("script", `Speaker 1: ${marker}`);
+  form.append("voice_file_1", new Blob([marker], { type: "audio/wav" }), "voice.wav");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
+    env,
+  );
+  const body = await response.text();
+
+  assert.equal(response.status, 502);
+  assert.doesNotMatch(body, new RegExp(marker));
+  assert.match(body, /RunPod request failed/);
+});
+
+test("Cloudflare worker safely stops before RunPod when operation policy is missing or not integer JSON", async () => {
+  for (const rawPolicies of [
+    "",
+    JSON.stringify({ vibevoice: { ttl: "600000", executionTimeout: "300000" } }),
+  ]) {
+    let runpodCalls = 0;
+    const env = adminAuthEnv(async (url) => {
+      if (url.includes("api.runpod.ai")) runpodCalls += 1;
+      throw new Error(`unexpected external request: ${url}`);
+    });
+    env.RUNPOD_OPERATION_POLICIES_JSON = rawPolicies;
+    const cookie = await adminCookie(env, "/skitvoice/admin");
+    const form = new FormData();
+    form.append("script", "Speaker 1: safe stop");
+    form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+
+    const response = await handleRequest(
+      new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
+      env,
+    );
+    const body = await response.text();
+
+    assert.equal(response.status, 503);
+    assert.match(body, /RunPod operation policy|RUNPOD_OPERATION_POLICIES_JSON/);
+    assert.equal(runpodCalls, 0);
+  }
+});
+
 test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async () => {
   const kv = fakeKv();
   const fetchImpl = async (url) => {
@@ -2460,6 +2597,15 @@ function fakeEnv(fetchImpl, options = {}) {
     RUNPOD_API_KEY: "runpod-secret",
     RUNPOD_API_BASE_URL: "https://api.runpod.ai/v2",
     RUNPOD_SERVERLESS_TRANSLATION_BACKEND: "openai",
+    RUNPOD_OPERATION_POLICIES_JSON: JSON.stringify({
+      translation: { ttl: 30_000, executionTimeout: 10_000 },
+      text_tts: { ttl: 40_000, executionTimeout: 15_000 },
+      voice_conversion: { ttl: 120_000, executionTimeout: 60_000 },
+      practice_asr: { ttl: 180_000, executionTimeout: 90_000 },
+      vibevoice: { ttl: 600_000, executionTimeout: 300_000 },
+      warmup: { ttl: 300_000, executionTimeout: 180_000 },
+      diagnostics: { ttl: 30_000, executionTimeout: 10_000 },
+    }),
     OPENAI_API_KEY: "openai-secret",
     OPENAI_TRANSLATION_MODEL: "gpt-5.5",
     OPENAI_TEXT_TRANSFORM_MODEL: "gpt-5.5",

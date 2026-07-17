@@ -1853,6 +1853,14 @@ audio {
   opacity: 0.58;
 }
 
+.practice-own-voice-disclosure {
+  color: var(--react-muted);
+  font-size: 0.78rem;
+  line-height: 1.65;
+  margin: -2px 2px 14px;
+  max-width: 76rem;
+}
+
 .voice-lab-toast-viewport {
   display: grid;
   gap: 10px;

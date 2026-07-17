@@ -1,10 +1,10 @@
 # SpeakLoop / SkitVoice分割判断
 
-更新日: 2026-07-14
+更新日: 2026-07-17
 
 ## 現在の判断
 
-公開版は単一の`voice-lab` Workerを正とする。ポータル、2つの公開アプリ、3つの管理画面、実験画面を同じWorkerから配信し、共通のOAuth、quota、D1、R2、KVを使う。
+現在は単一の`voice-lab` Workerを正とする。一般公開はSpeakLoopと `/skitvoice` の非生成案内、研究機能は3つの管理画面と実験画面として同じWorkerから配信し、共通のOAuth、quota、D1、R2、KVを使う。SkitVoice/VibeVoiceの生成は一般公開しない。この変更はローカル実装で未deployである。
 
 構成を分割すること自体をロードマップ上の未完了タスクにはしない。
 
@@ -12,7 +12,7 @@
 
 次のいずれかが実際の問題になった場合に限り、別Worker化を検討する。
 
-- SpeakLoopとSkitVoiceで公開範囲や利用者が異なる
+- SpeakLoopと管理者研究用SkitVoiceを、secret、障害、デプロイ権限まで物理的に分離する必要が生じる
 - SpeakLoop中国語ASRとSkitVoice生成でRunPod endpointやsecretを分ける必要がある
 - 一方の障害やデプロイを他方から分離する必要がある
 - quota、費用、監査を製品単位で独立管理する必要がある

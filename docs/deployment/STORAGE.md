@@ -11,10 +11,12 @@
 | ユーザー設定、公開アクセス設定 | Workers KV | 実装済み |
 | 短期job snapshot、warmup ready | Workers KV | 実装済み。TTL付き |
 | ユーザー音声履歴 | Cloudflare公開版では保存しない | ローカルFastAPI版だけで利用 |
-| 公開サンプル音声metadata/blob | D1 / R2（bindingなしではKV fallback） | 日本語・中国語・英語を含む複数サンプルへ対応 |
+| 研究用SkitVoice sample metadata/blob | D1 / R2（bindingなしではKV fallback） | dataは削除せず管理者経路だけで扱い、一般向けAPIから除外 |
 | quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存 |
 
 `MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは翻訳、VC、SpeakLoop、SkitVoice、TTSの入力・生成音声を履歴indexやblobとして書き込まない。
+
+既存SkitVoice sampleは由来・許諾・生成model・AI生成表示を確認できないため、一般向け `GET /api/public-sample-audios` から返さない。外部R2 objectはこのローカル変更で削除せず、管理者認証済みの同APIと管理画面だけで確認・管理する。これはdata削除完了を意味しない。
 
 ## R2 binding
 

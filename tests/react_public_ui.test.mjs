@@ -11,7 +11,7 @@ const [portal, speakloop, skitvoice, shared, styles, worker, pkg, viteConfig, po
   read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/skitvoice.html"),
 ]);
 
-test("public portal SpeakLoop and SkitVoice are React TypeScript entries", () => {
+test("public portal, SpeakLoop, and the SkitVoice closed page are React TypeScript entries", () => {
   assert.match(portal, /mountPublicPage\(<Portal/);
   assert.match(speakloop, /mountPublicPage\(<SpeakLoop/);
   assert.match(skitvoice, /mountPublicPage\(<SkitVoice/);
@@ -21,12 +21,10 @@ test("public portal SpeakLoop and SkitVoice are React TypeScript entries", () =>
   assert.match(pkg, /"check:web"/);
 });
 
-test("React public UI preserves legacy controller and storage contracts", () => {
+test("React public UI preserves SpeakLoop controller while the SkitVoice public page has no generation controller", () => {
   assert.match(speakloop, /app_practice\.js/);
-  assert.match(skitvoice, /app_vibevoice\.js/);
-  assert.match(skitvoice, /id="vibevoice-form"/);
-  assert.match(skitvoice, /name={`voice_file_\$\{slot\}`}/);
-  assert.match(skitvoice, /id="vibevoice-job-progress"/);
+  assert.doesNotMatch(skitvoice, /app_vibevoice\.js/);
+  assert.doesNotMatch(skitvoice, /id="vibevoice-form"|voice_file_|vibevoice-job-progress/);
   assert.match(worker, /assetUrl\.pathname = "\/react\/portal\.html"/);
   assert.match(worker, /assetUrl\.pathname = "\/react\/speakloop\.html"/);
   assert.match(worker, /assetUrl\.pathname = "\/react\/skitvoice\.html"/);
@@ -36,9 +34,7 @@ test("React pages expose the DOM ids required by legacy controllers", () => {
   for (const id of ["practice-target-language-select", "practice-chinese-script-setting", "practice-script-simplified", "practice-script-traditional", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-status", "practice-error"]) {
     assert.match(speakloop, new RegExp(`id=["']${id}["']`));
   }
-  for (const id of ["vibevoice-form", "vibevoice-script", "vibevoice-generate-button", "vibevoice-job-progress", "vibevoice-result", "vibevoice-diagnostics"]) {
-    assert.match(skitvoice, new RegExp(`id=["']${id}["']`));
-  }
+  assert.doesNotMatch(skitvoice, /vibevoice-form|vibevoice-script|vibevoice-generate-button|vibevoice-result|vibevoice-diagnostics/);
 });
 
 test("SpeakLoop uses a contained microphone icon instead of oversized legacy pseudo-elements", () => {
@@ -51,28 +47,21 @@ test("SpeakLoop uses a contained microphone icon instead of oversized legacy pse
 test("React layouts include responsive product and workflow structure", () => {
   assert.match(portal, /aria-label="Voice Lab"/);
   assert.match(portal, /声から、[\s\S]*ことばの体験を[\s\S]*つくる。/);
-  assert.match(portal, /href:\s*"\/skitvoice"/);
+  assert.doesNotMatch(portal, /href:\s*"\/skitvoice"|SkitVoice|VibeVoice/);
   assert.match(portal, /href:\s*"\/speakloop"/);
   assert.match(speakloop, /react-practice-flow/);
-  assert.match(skitvoice, /react-skit-grid/);
-  assert.match(skitvoice, /出力音声サンプル/);
-  assert.match(skitvoice, /fixedTitle/);
-  assert.match(skitvoice, /customControls/);
-  assert.match(skitvoice, /app_sample_audio_controls\.js/);
-  assert.ok(skitvoice.indexOf('label="英語"') < skitvoice.indexOf('label="中国語"'));
-  assert.ok(skitvoice.indexOf('label="中国語"') < skitvoice.indexOf('label="日本語"'));
-  assert.ok(skitvoice.indexOf("react-output-samples") < skitvoice.indexOf("vibevoice-form"));
+  assert.match(skitvoice, /研究機能は一般公開していません/);
+  assert.match(skitvoice, /href="\/speakloop"[\s\S]*SpeakLoopで練習する/);
+  assert.doesNotMatch(skitvoice, /出力音声サンプル|SampleAudio|app_sample_audio_controls\.js/);
   assert.doesNotMatch(speakloop, /<SampleAudio/);
   assert.doesNotMatch(speakloop, /音声履歴を保存/);
   assert.doesNotMatch(skitvoice, /履歴を保存/);
 });
 
-test("SpeakLoop and SkitVoice place the shared privacy notice after their main workflow", () => {
+test("SpeakLoop places the shared privacy notice after its main workflow", () => {
   assert.match(shared, /export function PrivacyNotice[\s\S]*<footer className="react-workflow-privacy-note" data-public-privacy-notice>/);
   assert.equal((speakloop.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
-  assert.equal((skitvoice.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
   assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
-  assert.ok(skitvoice.indexOf("<ResultPanel") < skitvoice.indexOf("<PrivacyNotice"));
 });
 
 test("SpeakLoop only exposes Chinese and English as learning languages", () => {
@@ -98,13 +87,17 @@ test("SpeakLoop exposes an opt-in Seed-VC model voice control", () => {
   assert.match(speakloop, /id="practice-own-voice-toggle"/);
   assert.match(speakloop, /自分の声/);
   assert.match(speakloop, /practice-own-voice-control/);
+  assert.match(speakloop, /同じセッションであなたが最初に録音した音声だけ/);
+  assert.match(speakloop, /外部の音声処理サービスへ一時的に送信/);
+  assert.match(speakloop, /声質に近づけたAI生成音声/);
+  assert.match(speakloop, /Voice Labの履歴には保存しません/);
+  assert.match(speakloop, /通常のお手本音声で練習を続けられます/);
 });
 
-test("SkitVoice exposes a shared toast viewport outside the generation settings", () => {
-  assert.match(shared, /export function ToastViewport/);
-  assert.match(skitvoice, /<ToastViewport\s*\/>/);
-  assert.ok(skitvoice.indexOf("<ToastViewport") > skitvoice.indexOf("</form>"));
-  assert.match(styles, /\.voice-lab-toast-viewport/);
+test("SkitVoice public page exposes no interactive generation or samples", () => {
+  assert.doesNotMatch(skitvoice, /<form|<input|<textarea|<audio|fetch\(|RunPod|aoi-ot|vibevoice-large/);
+  assert.match(skitvoice, /一般公開していません/);
+  assert.match(skitvoice, /bg-foreground[\s\S]*text-background/);
 });
 
 test("SpeakLoop keeps comparison playback simple without an auto-play preference control", () => {
@@ -153,19 +146,6 @@ test("Voice Lab gives each product a distinct accent and keeps recording red", (
   assert.match(styles, /\.record-orb\s*\{[^}]*background:\s*var\(--user-record-ready\)/s);
   assert.match(styles, /--user-record-ready:\s*#e65a43/);
   assert.match(styles, /--user-recording:\s*#c7372f/);
-});
-
-test("SkitVoice output languages include flags", () => {
-  assert.match(skitvoice, /id="vibevoice-output-language" defaultValue="en-US"/);
-  assert.match(skitvoice, /🇺🇸 English/);
-  assert.match(skitvoice, /🇨🇳 中文/);
-  assert.match(skitvoice, /🇯🇵 日本語（低品質）/);
-});
-
-test("SkitVoice uses the Voice Lab player for references and generated audio", () => {
-  assert.match(skitvoice, /data-voice-lab-audio-label={`Speaker \$\{slot\} 参照音声`}/);
-  assert.match(skitvoice, /data-voice-lab-audio-label="生成結果"/);
-  assert.doesNotMatch(skitvoice, /id="vibevoice-audio" controls/);
 });
 
 test("public workbench keeps settings at the mobile top right and avoids cramped columns", () => {

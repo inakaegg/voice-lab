@@ -18,6 +18,8 @@ def test_readme_describes_current_public_apps_and_architecture() -> None:
     assert "```mermaid" in readme
     assert "npm test" in readme
     assert "python3 -m pytest" in readme
+    assert "一般公開製品ではなくprivateまたは管理者専用" in readme
+    assert "未deploy" in readme
 
 
 def test_project_agent_guide_contains_current_validation_commands() -> None:
@@ -138,6 +140,25 @@ def test_privacy_boundary_records_unresolved_retention_before_publication() -> N
     assert "保持期間" in privacy
     assert "削除" in privacy
     assert "公開再開" in privacy
+    assert "RUNPOD_OPERATION_POLICIES_JSON" not in privacy
+    assert "policy.ttl" in privacy
+    assert "policy.executionTimeout" in privacy
+    assert "実測" in privacy
+
+
+def test_public_docs_keep_skitvoice_closed_and_distinguish_local_changes_from_deploy() -> None:
+    readme = read_text("README.md")
+    task = read_text("TASK.md")
+    spec = read_text("docs/speech-translation/SPEC.md")
+    vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
+    checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
+
+    for document in (readme, task, spec, vibevoice):
+        assert "管理者" in document
+    assert "生成フォームやsampleを含まない" in spec
+    assert "public sample APIはSkitVoice sampleを返さない" in vibevoice
+    assert "現時点の公開環境で停止済みとは扱わない" in checklist
+    assert "aoi-ot/VibeVoice-LargeをMicrosoft公式配布と表現しない" in read_text("THIRD_PARTY_NOTICES.md")
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:

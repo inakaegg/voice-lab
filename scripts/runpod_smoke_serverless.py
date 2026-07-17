@@ -13,6 +13,9 @@ from typing import Any
 
 
 PRACTICE_ASR_CONTRACT_VERSION = 2
+RUNPOD_POLICY_MIN_TTL_MS = 10_000
+RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS = 5_000
+RUNPOD_POLICY_MAX_MS = 7 * 24 * 60 * 60 * 1000
 
 
 def _optional_float_env(name: str) -> float | None:
@@ -246,7 +249,10 @@ def main() -> int:
     if args.text_transform_suffix:
         input_payload["text_transform_suffix"] = args.text_transform_suffix
 
-    payload: dict[str, Any] = {"input": input_payload}
+    payload: dict[str, Any] = {
+        "input": input_payload,
+        "policy": _operation_policy(args.operation_mode),
+    }
 
     try:
         if args.request_mode == "async":
@@ -266,8 +272,7 @@ def main() -> int:
                 timeout=args.timeout,
             )
     except urllib.error.HTTPError as exc:
-        sys.stderr.write(exc.read().decode("utf-8", errors="replace"))
-        sys.stderr.write("\n")
+        sys.stderr.write(f"RunPod request failed with HTTP {exc.code}\n")
         return 1
 
     printable_body = body if args.print_audio_base64 else _redact_audio_base64(body)
@@ -362,6 +367,32 @@ def _vibevoice_voice_payload(spec: str, fallback_speaker: int) -> dict[str, Any]
         "audio_mime_type": mime_type,
         "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
     }
+
+
+def _operation_policy(operation_mode: str) -> dict[str, int]:
+    raw_policies = os.getenv("RUNPOD_OPERATION_POLICIES_JSON", "")
+    try:
+        policies = json.loads(raw_policies)
+    except json.JSONDecodeError as exc:
+        raise SystemExit("RUNPOD_OPERATION_POLICIES_JSON must be valid JSON") from exc
+    if not isinstance(policies, dict):
+        raise SystemExit("RUNPOD_OPERATION_POLICIES_JSON must be a JSON object")
+    policy = policies.get(operation_mode)
+    if not isinstance(policy, dict):
+        raise SystemExit(f"RunPod policy is not configured for operation {operation_mode}")
+    ttl = policy.get("ttl")
+    execution_timeout = policy.get("executionTimeout")
+    if (
+        type(ttl) is not int
+        or ttl < RUNPOD_POLICY_MIN_TTL_MS
+        or ttl > RUNPOD_POLICY_MAX_MS
+        or type(execution_timeout) is not int
+        or execution_timeout < RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS
+        or execution_timeout > RUNPOD_POLICY_MAX_MS
+        or ttl < execution_timeout
+    ):
+        raise SystemExit(f"RunPod policy is invalid for operation {operation_mode}")
+    return {"ttl": ttl, "executionTimeout": execution_timeout}
 
 
 def _monotonic_seconds() -> float:

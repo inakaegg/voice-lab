@@ -4,6 +4,18 @@ import { Converter } from "opencc-js/t2cn";
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
+const RUNPOD_OPERATION_ALIASES = {
+  translate: "translation",
+  text_to_speech: "text_tts",
+  "practice-asr": "practice_asr",
+  vibe_voice: "vibevoice",
+  diagnostic: "diagnostics",
+  diag: "diagnostics",
+  preload: "warmup",
+};
+const RUNPOD_POLICY_MIN_TTL_MS = 10_000;
+const RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS = 5_000;
+const RUNPOD_POLICY_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 const USER_SETTINGS_KV_KEY = "user-settings";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
@@ -232,6 +244,9 @@ function isProtectedAdminPagePath(pathname) {
 function isProtectedAdminApiRequest(method, pathname) {
   if (method === "OPTIONS") {
     return false;
+  }
+  if (pathname === "/api/vibevoice" || pathname.startsWith("/api/vibevoice/")) {
+    return true;
   }
   if (method === "PUT" && pathname === "/api/user-settings") {
     return true;
@@ -639,7 +654,7 @@ async function handleApiRequest(request, env, ctx, url) {
       return jsonResponse(await publicSessionPayload(request, env));
     }
     if (request.method === "GET" && url.pathname === "/api/public-sample-audios") {
-      return jsonResponse(await readPublicSampleAudios(env));
+      return jsonResponse(await publicSampleAudiosPayload(request, env));
     }
     if (request.method === "GET" && url.pathname === "/api/public-access-settings") {
       return jsonResponse(await readPublicAccessSettings(env));
@@ -1096,6 +1111,18 @@ async function readPublicSampleAudios(env) {
   return coercePublicSampleAudios(stored || DEFAULT_PUBLIC_SAMPLE_AUDIOS);
 }
 
+async function publicSampleAudiosPayload(request, env) {
+  const samples = await readPublicSampleAudios(env);
+  const settings = await readPublicAccessSettings(env);
+  const session = await readPublicSession(request, env);
+  if (session && isPublicAdminEmail(session.email, settings)) {
+    return samples;
+  }
+  const publicSamples = structuredClone(samples);
+  publicSamples.features.skitvoice = null;
+  return publicSamples;
+}
+
 async function writePublicSampleAudios(payload, env) {
   const samples = coercePublicSampleAudios(payload);
   if (env.MO_SPEECH_DB && env.MO_SPEECH_AUDIO_R2) {
@@ -1282,7 +1309,7 @@ async function publicSessionPayload(request, env) {
     is_admin: isAdmin,
     login_url: `/auth/google/login?next=${encodeURIComponent(new URL(request.url).pathname)}`,
     logout_url: "/auth/logout",
-    features: settings.features,
+    features: isAdmin ? settings.features : { speakloop: settings.features.speakloop },
   };
 }
 
@@ -2420,6 +2447,22 @@ async function createPracticeRecording(request, env) {
   }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
   const useOwnVoice = recordingIntent === "prompt" && optionEnabled(stringFormValue(form, "use_own_voice", "false"));
+  if (useOwnVoice) {
+    const separateReferenceFields = [
+      "reference_audio",
+      "reference_audio_base64",
+      "reference_audio_file",
+      "reference_audio_url",
+      "reference_url",
+      "reference_tab_audio",
+      "tab_audio",
+      "voice_file",
+      "voice_url",
+    ];
+    if (separateReferenceFields.some((field) => form.has(field))) {
+      throw httpError(400, "own voice only accepts the same-session SpeakLoop recording");
+    }
+  }
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0),
     textChars: currentTargetText.trim().length,
@@ -3681,15 +3724,47 @@ async function transformUserText(text, targetLanguage, options, env) {
 async function submitRunpodJob(env, inputPayload) {
   return runpodRequest(env, "/run", {
     method: "POST",
-    payload: { input: inputPayload },
+    payload: runpodRequestPayload(env, inputPayload),
   });
 }
 
 async function submitRunpodSyncJob(env, inputPayload) {
   return runpodRequest(env, "/runsync", {
     method: "POST",
-    payload: { input: inputPayload },
+    payload: runpodRequestPayload(env, inputPayload),
   });
+}
+
+function runpodRequestPayload(env, inputPayload) {
+  return {
+    input: inputPayload,
+    policy: runpodOperationPolicy(env, inputPayload?.operation_mode),
+  };
+}
+
+function runpodOperationPolicy(env, operationMode) {
+  const rawOperation = String(operationMode || "").trim();
+  const operation = RUNPOD_OPERATION_ALIASES[rawOperation] || rawOperation;
+  if (!operation) {
+    throw httpError(503, "RunPod operation policy cannot be resolved without operation_mode");
+  }
+  let policies;
+  try {
+    policies = JSON.parse(String(env.RUNPOD_OPERATION_POLICIES_JSON || ""));
+  } catch (_error) {
+    throw httpError(503, "RUNPOD_OPERATION_POLICIES_JSON must be valid JSON");
+  }
+  const policy = policies && typeof policies === "object" ? policies[operation] : null;
+  const ttl = policy?.ttl;
+  const executionTimeout = policy?.executionTimeout;
+  if (
+    !Number.isInteger(ttl) || ttl < RUNPOD_POLICY_MIN_TTL_MS || ttl > RUNPOD_POLICY_MAX_MS ||
+    !Number.isInteger(executionTimeout) || executionTimeout < RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS ||
+    executionTimeout > RUNPOD_POLICY_MAX_MS || ttl < executionTimeout
+  ) {
+    throw httpError(503, `RunPod operation policy is not configured for ${operation}`);
+  }
+  return { ttl, executionTimeout };
 }
 
 function runpodSyncOutput(body, label) {
@@ -3723,7 +3798,7 @@ async function runpodRequest(env, path, { method = "GET", payload = null, timeou
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw httpError(response.status, body.error || body.message || `RunPod request failed: ${response.status}`);
+      throw httpError(response.status, `RunPod request failed with HTTP ${response.status}`);
     }
     return body;
   } finally {
@@ -3939,7 +4014,8 @@ function requireEnv(env, key) {
 }
 
 function runpodErrorMessage(body) {
-  return String(body.error || body.message || "RunPod job failed");
+  const status = String(body?.status || "").toUpperCase();
+  return status ? `RunPod job failed with status ${status}` : "RunPod job failed";
 }
 
 function jsonResponse(payload, init = {}) {

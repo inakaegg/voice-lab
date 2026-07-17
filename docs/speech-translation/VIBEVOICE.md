@@ -1,10 +1,21 @@
 # VibeVoiceスキット生成
 
-更新日: 2026-07-15
+更新日: 2026-07-17
 
 ## 現在の位置づけ
 
-`/skitvoice` は、指定台詞向け生成のユーザー向け通常画面である。台本、最大4つの参照音声、生成ボタン、結果確認に絞り、backend/model/サンプリング、実行環境、診断JSONなどの技術情報は通常表示しない。`/skitvoice/admin` は、`zhskit` のスキット生成機能をこのアプリへ移すための検証・管理画面であり、生成パラメータや診断を直接確認できる。旧routeの互換エイリアスは提供しない。
+SkitVoice/VibeVoiceは一般公開製品ではなく、privateまたは管理者専用の研究機能である。Cloudflareの `/skitvoice` は生成フォーム、参照音声、サンプル、model情報を含まない非公開案内だけを表示する。`/skitvoice/admin` は、`zhskit` のスキット生成機能をこのアプリへ移すための検証・管理画面であり、生成パラメータや診断を直接確認できる。ローカルFastAPIは信頼済みの開発環境として研究画面とAPIを維持する。旧routeの互換エイリアスは提供しない。
+
+Cloudflareでは次のVibeVoice APIを既存Google管理者セッションによる共通guardで保護し、匿名利用者と通常のGoogleログイン利用者を拒否する。
+
+- `GET /api/vibevoice/status`
+- `POST /api/vibevoice/reference-audio-from-url`
+- `POST /api/vibevoice/scripts`
+- `POST /api/vibevoice/jobs`
+- `GET /api/vibevoice/jobs/{id}`
+- `POST /api/vibevoice/jobs/{id}/cancel`
+
+Cloudflare版にはsync `POST /api/vibevoice/generate` は存在しない。ローカルFastAPIは上記に加えてsync生成を維持する。Cloudflareの非admin向け `public-session` にはSkitVoice feature/quotaを含めず、public sample APIはSkitVoice sampleを返さない。外部R2 dataの削除は別の外部操作であり、このローカル実装では行わない。管理者専用化は一般公開可の証明ではなく、暫定的な封じ込めとして扱う。
 
 初期実装では、ローカル実行とRunPod Serverless実行を選べる。ローカル実行は開発機上のVibeVoice CLIを呼ぶ。RunPod実行はFastAPIがRunPod jobを作り、RunPod handlerが `operation_mode=vibevoice` として同じ処理を実行する。
 
@@ -12,7 +23,9 @@
 
 2026-07-16時点で [Microsoft公式VibeVoice repository](https://github.com/microsoft/VibeVoice) は、意図に反する利用事例を確認したとしてTTSコードを削除している。現在のVoice Labは、固定した `microsoft/VibeVoice-1.5B` model revisionと、commit固定した第三者のComfyUI-VibeVoice実装を使う。この構成をMicrosoftの現在の公式TTS実装であるかのように説明しない。
 
-過去にコードへMIT licenseが付与されていたことだけでは、model利用条件、第三者実装の由来、音声クローンの悪用リスク、公開デモとしての妥当性は確定しない。public repositoryまたはpublic container imageを再開する前に、[第三者コンポーネント一覧](../../THIRD_PARTY_NOTICES.md)と[公開前チェックリスト](../deployment/PUBLICATION_CHECKLIST.md)に従い、継続可否、権利表示、利用制限、悪用防止策を明示的に判断する。
+過去にコードへMIT licenseが付与されていたことだけでは、model利用条件、第三者実装の由来、音声クローンの悪用リスク、公開デモとしての妥当性は確定しない。GitHub source、Cloudflare demo、Docker Hub、RunPod imageは別々の公開面として判定し、VibeVoice runtimeとRunPod imageはprivate維持を前提にする。public repositoryまたはpublic container imageを再開する前に、[第三者コンポーネント一覧](../../THIRD_PARTY_NOTICES.md)と[公開前チェックリスト](../deployment/PUBLICATION_CHECKLIST.md)に従い、継続可否、権利表示、利用制限、悪用防止策を明示的に判断する。
+
+VibeVoice固有の未確認事項は、製品共通の同意・保存方針と分ける。Microsoft公式repoで旧TTSコードが削除されDisabled状態であること、model cardのresearch目的、`aoi-ot/VibeVoice-Large` mirrorのprovenance、`wildminder/ComfyUI-VibeVoice` forkの由来を確認する。audible disclaimerは実音声で聴取確認するもの、watermarkは対応detectorで検証するもの、hashed inference loggingはself-hosted RunPodへ自動継承されない運用機構であり、同じmitigationとして扱わない。いずれも現時点で実装・検証済みとは記載しない。
 
 ## 生成オプション
 
@@ -33,14 +46,14 @@
 
 参照音声はブラウザのIndexedDBへ保存し、次回以降は同じSpeaker枠の既定音声として再利用する。ブラウザの制約によりfile inputへ前回ファイルを直接セットすることはできないため、保存済みファイル名をSpeaker枠内に表示し、保存済みBlobをaudioコントロールで再生確認できるようにする。生成時は台本から必要なSpeaker枠を判定し、不要な保存済み音声を送らない。APIからVibeVoice CLIへ渡す時もSpeaker枠番号を保持し、`Speaker 2` の参照音声が `Speaker 1` として詰め直されないようにする。
 
-参照音声は、ローカルファイル、ブラウザのマイク録音、ローカル/詳細画面向けの動画・音声URLから指定できる。Cloudflare公開UIでは、YouTubeなどの動画URL取得がdatacenter IPからbot確認、地域制限、ログイン要求を受けやすいため、URL入力を公開デモの標準機能にしない。公開ユーザー画面では各Speaker枠にファイル選択と録音ボタンを置き、録音した音声は保存済み参照音声としてIndexedDBへ保存して生成時に送信する。Cloudflare WorkerのVibeVoice生成APIも `voice_url_1` から `voice_url_4` を受け取った場合はRunPodへ送らず拒否する。URL切り出しはローカルFastAPI版または管理者の事前素材作成用に残し、`yt-dlp --download-sections` と `ffmpeg` で指定区間を24kHz mono PCM WAVへ切り出してから通常の参照音声として生成リクエストへ渡す。RunPod handlerはURLを受け取らず、`audio_base64` の参照音声だけを扱う。YouTubeなどの `t=`, `start=`, `time_continue=`, `#t=` に含まれる再生開始時刻を開始秒として扱い、UIで開始秒を明示した場合はその値を優先する。参照音声用途では長尺全体の無駄なDLを避けるため、section取得に失敗しても同じURLの全体DLへはフォールバックしない。
+参照音声は、ローカルFastAPIとCloudflare管理者研究画面で、ローカルファイルまたはブラウザのマイク録音から指定できる。Cloudflare管理者研究画面ではタブ音声録音も利用できるが、URL入力は表示せず、Worker APIも `voice_url_1` から `voice_url_4` を受け取った場合はRunPodへ送らず拒否する。公開 `/skitvoice` には参照音声入力も生成フォームもない。URL切り出しはローカルFastAPI版またはローカルでの事前素材作成用に残し、`yt-dlp --download-sections` と `ffmpeg` で指定区間を24kHz mono PCM WAVへ切り出してから通常の参照音声として生成リクエストへ渡す。RunPod handlerはURLを受け取らず、`audio_base64` の参照音声だけを扱う。YouTubeなどの `t=`, `start=`, `time_continue=`, `#t=` に含まれる再生開始時刻を開始秒として扱い、UIで開始秒を明示した場合はその値を優先する。参照音声用途では長尺全体の無駄なDLを避けるため、section取得に失敗しても同じURLの全体DLへはフォールバックしない。
 
 URL参照音声の実行境界は次のとおりとする。「管理者の事前素材作成」も、ローカルFastAPIへ接続している画面またはローカル処理を指し、クラウド上の管理画面でURL取得を許可する意味ではない。
 
 | 接続先・実行環境 | ファイル | マイク録音 | タブ音声録音 | URL入力 | URL取得処理 | RunPodへ渡すもの |
 | --- | --- | --- | --- | --- | --- | --- |
 | ローカルFastAPI | 可 | 可 | 可 | 可 | 同じFastAPIプロセスの実行環境で `yt-dlp` / `ffmpeg` を実行 | 選択・録音・切り出し済み音声bytes |
-| Cloudflare公開版 | 可 | 可 | 可 | 不可。Worker APIでも拒否 | 実行しない | 選択または録音した音声bytes |
+| Cloudflare管理者研究版 | 可 | 可 | 可 | 不可。Worker APIでも拒否 | 実行しない | 選択または録音した音声bytes |
 | RunPod handler | 音声bytesのみ | 音声bytesのみ | 音声bytesのみ | URLを受け付けない | 実行しない | `audio_base64` の音声のみ |
 
 FastAPIのURL参照APIは、既定ではリクエストURLのhostが `localhost`、`127.0.0.1`、`::1` の場合だけ許可する。`MO_VIBEVOICE_URL_REFERENCE_ENABLED=1` で非loopback接続でも明示許可でき、`0` でloopbackを含めて明示禁止できる。公開環境では許可しない。`GET /api/vibevoice/status` の `url_reference_audio` は、現在のリクエストでの有効状態と `yt-dlp` / `ffmpeg` の検出情報を返し、詳細画面ではyt-dlpのバージョンと90日超の状態を確認できる。
@@ -49,7 +62,7 @@ YouTubeのJavaScript challengeを解決するため、ローカルFastAPIのyt-d
 
 ローカルFastAPIでURL取得に失敗した時点では、後続のRunPod生成は開始されていない。エラー表示では、外部ツールの取得失敗を先に、更新警告などを別の警告として後に表示し、観測事実と推測上の原因候補を分ける。RunPodやdatacenter制限を確認済みの原因として表示しない。URL参照を設定したSpeaker枠には有効状態を表示し、ダイアログの「URL参照を解除」でブラウザ保存状態と生成フォームの送信対象から明示的に外せる。ファイル選択または録音を行った場合も、同じSpeaker枠のURL参照を解除する。
 
-タブ音声録音はブラウザの `getDisplayMedia()` を使い、ユーザーが共有対象として選択したタブの音声trackだけをMediaRecorderへ渡す。開始時はブラウザの共有ダイアログで対象タブを選び、「タブの音声を共有」を有効にする必要がある。音声trackがない画面・ウインドウ共有は参照音声として受け付けない。録音中にボタンを再度押すか、ブラウザ側で共有を停止すると録音を終了し、通常の参照音声BlobとしてIndexedDBへ保存する。タブ映像は保存・送信しない。タブ音声録音はCloudflare公開版でもブラウザ内だけで完結し、URLやcookieをWorkerまたはRunPodへ送らない。
+タブ音声録音は管理者研究画面でブラウザの `getDisplayMedia()` を使い、管理者が共有対象として選択したタブの音声trackだけをMediaRecorderへ渡す。開始時はブラウザの共有ダイアログで対象タブを選び、「タブの音声を共有」を有効にする必要がある。音声trackがない画面・ウインドウ共有は参照音声として受け付けない。録音中にボタンを再度押すか、ブラウザ側で共有を停止すると録音を終了し、通常の参照音声BlobとしてIndexedDBへ保存する。タブ映像、URL、cookieは保存・送信しない。この入力方式を公開利用の安全性の根拠にはしない。
 
 ブラウザの共有許可は、画面・音声を技術的に取得する権限であって、コンテンツの利用許諾ではない。タブ音声録音を開始する前にこの区別を表示し、自分の音声、本人から許諾を得た音声、またはライセンス上この用途で利用できる音声であることをユーザーが確認した場合だけ共有ダイアログへ進む。生成前の権利確認もタブ音声を明示的に含める。一般公開動画や配信サービスをブラウザで再生できることだけでは、参照音声として利用できる根拠にならない。
 
@@ -340,6 +353,6 @@ RunPod Serverlessでは、初回起動、モデル未キャッシュ時のダウ
 - 翻訳処理を行った場合は、生成結果に「翻訳後の台本」を表示する。
 - タブ音声録音の開始時に、権利確認ダイアログや必須チェックを毎回要求しない。
 - タブ音声録音は `getDisplayMedia` と `MediaRecorder` を利用できるブラウザだけに表示する。初期判定で非対応なら操作と「タブ音声」の案内を隠し、利用開始時に非対応と判明した場合だけtoastでファイルまたはマイク録音を案内し、そのセッション中は操作を隠す。権限ダイアログを利用者がキャンセルしただけの場合は操作を隠さない。
-- 公開画面の主要な生成ステータスとエラーは、GPUサーバーの準備、音声生成の準備、生成、仕上げのように処理目的で表現し、RunPod、VibeVoice、Seed-VCなどの固有名詞を含めない。provider、モデル、raw stage、詳細エラーは進捗ログ、管理画面、サーバーログへ残す。
+- 管理者研究画面の主要な生成ステータスとエラーは、GPUサーバーの準備、音声生成の準備、生成、仕上げのように処理目的で表現する。provider、モデル、raw stage、詳細エラーは弱い技術詳細、進捗ログ、サーバーログへ分離する。公開 `/skitvoice` は生成状態を持たない。
 - 画面には「個人・家庭内の私的利用を超えて公開・共有する場合は、音声の利用条件を確認してください。」と常設表示する。
 - 自動翻訳の診断には、モデルが判定した入力台本の言語コードを残す。

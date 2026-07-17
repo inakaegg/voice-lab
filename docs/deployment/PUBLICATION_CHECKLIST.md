@@ -1,6 +1,6 @@
 # Repository・公開デモの公開前チェックリスト
 
-更新日: 2026-07-16
+更新日: 2026-07-17
 
 ## 現在の判定
 
@@ -26,6 +26,7 @@
 - [x] RunPod image workflowから既定の配布先を削除し、毎回 `image_name` と `expected_visibility` を明示する。
 - [x] workflowがDocker Hub APIで実際の公開状態を確認し、不一致ならbuild/push前に停止する。
 - [ ] Cloudflare公開デモを継続するか停止するかを決め、repository再監査とデモ公開を別の判断として記録する。
+- [ ] このローカル差分をdeployする前に、公開ポータル、`/skitvoice`、全VibeVoice API、public session/sample APIの一般ユーザー閉鎖をpreviewで確認する。現時点の公開環境で停止済みとは扱わない。
 
 ## P0: 権利・第三者依存
 
@@ -35,6 +36,8 @@
 - [ ] Seed-VCのGPL-3.0と、Voice Lab本体・Python subprocess・配布Docker imageの境界を確認し、必要なsource・license・notice提供方法を決める。
 - [ ] Microsoft公式がVibeVoice TTSコードを削除した現在の状態を踏まえ、固定modelと第三者実装の由来、モデル条件、悪用防止策、公開デモ継続可否を決める。
 - [ ] public container imageを配布する場合、実imageからSBOMとtransitive license一覧を生成して保存する。
+- [ ] VibeVoice runtime、第三者Large mirror、ComfyUI fork、RunPod imageをprivate維持し、GitHub source／Cloudflare demo／Docker Hub／RunPod imageの公開可否を別々に記録する。
+- [ ] audible disclaimer、watermark、対応detector、hashed inference loggingを別項目として確認し、self-hosted runtimeへ未継承の仕組みを実装済みと表示しない。
 
 ## P0: プライバシー
 
@@ -46,6 +49,8 @@
 - [ ] 期限切れデータの削除処理と検証を実装する。
 - [ ] 削除依頼先、連絡先、本人確認方法を決める。
 - [ ] 外部処理事業者と送信データを示す正式なプライバシーポリシーを作り、公開画面から到達可能にする。
+- [ ] RunPodの全operationをowner logで実測し、operation別の `policy.ttl` と `policy.executionTimeout` を決める。未設定時に個人音声requestが安全停止することを確認する。
+- [ ] RunPodのjob input/result/log保持、cancel／failure／timeout後の残存、問い合わせ先を確認して正式policyへ記載する。
 
 ## P1: GitHubの公開設定
 
@@ -62,8 +67,9 @@
 
 - [ ] READMEへPC・スマートフォンのスクリーンショットを追加する。
 - [ ] READMEの最初の画面だけで、価値、主要機能、技術構成、試し方、制限が分かることを確認する。
-- [ ] 公開URLでトップ、SpeakLoop、SkitVoice、Googleログイン、許可・不許可アカウント、管理routeをsmoke確認する。
-- [ ] VibeVoice・Seed-VCの責任ある利用と制限がREADME、利用画面、仕様で一致することを確認する。
+- [ ] 公開URLでトップ、SpeakLoop、SkitVoice非公開案内、Googleログイン、許可・不許可アカウント、管理routeをsmoke確認する。
+- [ ] 匿名・通常GoogleユーザーがVibeVoice status/script/job/status/cancelを直接呼んでも拒否され、adminだけが研究経路を使えることを確認する。
+- [ ] SpeakLoop自己音声の本人録音限定、外部一時送信、AI生成表示、Voice Lab履歴へ非保存、通常TTS fallbackがREADME、利用画面、仕様で一致することを確認する。
 
 ## 検証ゲート
 

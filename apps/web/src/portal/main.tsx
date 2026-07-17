@@ -1,4 +1,4 @@
-import { ArrowUpRight, AudioWaveform, MessagesSquare, Mic2 } from "lucide-react";
+import { ArrowUpRight, AudioWaveform, Mic2 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { mountPublicPage } from "../shared/bootstrap";
@@ -11,16 +11,6 @@ activateCompactLayout();
 const products = [
   {
     number: "01",
-    name: "SkitVoice",
-    title: "かんたんスキット生成",
-    description: "台本と参照音声から、複数話者のセリフ音声を生成します。",
-    action: "スキットをつくる",
-    href: "/skitvoice",
-    icon: MessagesSquare,
-    tone: "portal-product-link-skit",
-  },
-  {
-    number: "02",
     name: "SpeakLoop",
     title: "言いたいことで発音練習",
     description: "母国語で話し、模範音声を聞いて、学習対象言語で復唱します。",
@@ -50,14 +40,14 @@ function Portal() {
           <span className="block">ことばの体験を</span>
           <span className="block">つくる。</span>
         </h1>
-        <p className="mt-5 max-w-[31rem] text-[0.95rem] leading-7 text-muted-foreground sm:mt-6 sm:text-base sm:leading-8">話す、聞く、演じる。AI音声を使った2つの実験を、すぐに試せます。</p>
+        <p className="mt-5 max-w-[31rem] text-[0.95rem] leading-7 text-muted-foreground sm:mt-6 sm:text-base sm:leading-8">自分が言いたいことを、学びたい言語の発音練習へ。話して、聞いて、まねして、比べられます。</p>
       </header>
 
       <nav className="min-w-0" aria-label="アプリを選ぶ">
         <Card className="gap-0 overflow-hidden rounded-[1.75rem] border-border/75 bg-card/85 py-0 shadow-[0_28px_80px_rgba(31,38,50,0.11)] backdrop-blur-xl dark:shadow-[0_28px_80px_rgba(0,0,0,0.28)]">
           <CardContent className="p-0">
-            {products.map(({ number, name, title, description, action, href, icon: Icon, tone }, index) => <a
-              className={`portal-product-link group relative grid min-h-[10.2rem] min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_2.5rem] items-center gap-3 px-[1.125rem] py-5 text-foreground no-underline transition-colors duration-200 before:absolute before:inset-y-5 before:left-0 before:w-1 before:rounded-r-full before:bg-[var(--product-accent)] hover:bg-muted/45 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/45 motion-reduce:transition-none sm:min-h-[10.6rem] sm:grid-cols-[3rem_minmax(0,1fr)_2.75rem] sm:gap-4 sm:px-6 sm:py-6 ${index > 0 ? "border-t border-border/70" : ""} ${tone}`}
+            {products.map(({ number, name, title, description, action, href, icon: Icon, tone }) => <a
+              className={`portal-product-link group relative grid min-h-[10.2rem] min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_2.5rem] items-center gap-3 px-[1.125rem] py-5 text-foreground no-underline transition-colors duration-200 before:absolute before:inset-y-5 before:left-0 before:w-1 before:rounded-r-full before:bg-[var(--product-accent)] hover:bg-muted/45 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/45 motion-reduce:transition-none sm:min-h-[10.6rem] sm:grid-cols-[3rem_minmax(0,1fr)_2.75rem] sm:gap-4 sm:px-6 sm:py-6 ${tone}`}
               href={href}
               key={href}
             >

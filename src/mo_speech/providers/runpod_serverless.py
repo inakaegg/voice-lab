@@ -33,11 +33,40 @@ from .voice import SeedVcRuntimeSettings, VoiceConversionBackendInfo
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMED_OUT"}
 RUNPOD_IN_PROGRESS_STATES = {"IN_QUEUE", "IN_PROGRESS", "RUNNING"}
+RUNPOD_OPERATION_ALIASES = {
+    "translate": "translation",
+    "text_to_speech": "text_tts",
+    "practice-asr": "practice_asr",
+    "vibe_voice": "vibevoice",
+    "diagnostic": "diagnostics",
+    "diag": "diagnostics",
+    "preload": "warmup",
+}
+RUNPOD_POLICY_MIN_TTL_MS = 10_000
+RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS = 5_000
+RUNPOD_POLICY_MAX_MS = 7 * 24 * 60 * 60 * 1000
 
 
 def _runpod_env(name: str, default: str = "") -> str:
     load_runpod_gateway_env()
     return os.getenv(name, default)
+
+
+def _runpod_operation_policies_from_env() -> dict[str, dict[str, int]]:
+    raw = _runpod_env("RUNPOD_OPERATION_POLICIES_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("RUNPOD_OPERATION_POLICIES_JSON must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("RUNPOD_OPERATION_POLICIES_JSON must be a JSON object")
+    return {
+        str(operation): dict(policy)
+        for operation, policy in parsed.items()
+        if isinstance(policy, dict)
+    }
 
 
 @dataclass
@@ -52,6 +81,7 @@ class RunpodServerlessClient:
         default_factory=lambda: float(_runpod_env("RUNPOD_SERVERLESS_POLL_INTERVAL_SECONDS", "1.0"))
     )
     base_url: str = field(default_factory=lambda: _runpod_env("RUNPOD_API_BASE_URL", RUNPOD_API_BASE_URL))
+    operation_policies: dict[str, dict[str, int]] = field(default_factory=_runpod_operation_policies_from_env)
 
     @classmethod
     def from_env(cls) -> "RunpodServerlessClient":
@@ -73,7 +103,7 @@ class RunpodServerlessClient:
             body = self._request_json(
                     "/runsync",
                     method="POST",
-                    payload={"input": input_payload},
+                    payload=self._request_payload(input_payload),
                     timeout_seconds=self.timeout_seconds,
                 )
             _notify_runpod_status(progress_callback, body)
@@ -81,7 +111,7 @@ class RunpodServerlessClient:
         body = self._request_json(
             "/run",
             method="POST",
-            payload={"input": input_payload},
+            payload=self._request_payload(input_payload),
             timeout_seconds=self.timeout_seconds,
         )
         _notify_runpod_status(progress_callback, body)
@@ -94,7 +124,7 @@ class RunpodServerlessClient:
             self._request_json(
                 "/runsync",
                 method="POST",
-                payload={"input": input_payload},
+                payload=self._request_payload(input_payload),
                 timeout_seconds=self.timeout_seconds,
             )
         )
@@ -106,7 +136,7 @@ class RunpodServerlessClient:
         return self._request_json(
             "/run",
             method="POST",
-            payload={"input": input_payload},
+            payload=self._request_payload(input_payload),
             timeout_seconds=self.timeout_seconds,
         )
 
@@ -131,6 +161,36 @@ class RunpodServerlessClient:
             "/health",
             timeout_seconds=float(os.getenv("RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS", "3")),
         )
+
+    def _request_payload(self, input_payload: dict[str, object]) -> dict[str, object]:
+        return {
+            "input": input_payload,
+            "policy": self._operation_policy(input_payload.get("operation_mode")),
+        }
+
+    def _operation_policy(self, operation_mode: object) -> dict[str, int]:
+        raw_operation = str(operation_mode or "").strip()
+        operation = RUNPOD_OPERATION_ALIASES.get(raw_operation, raw_operation)
+        if not operation:
+            raise RuntimeError("RunPod operation policy cannot be resolved without operation_mode")
+        policy = self.operation_policies.get(operation)
+        ttl = policy.get("ttl") if isinstance(policy, dict) else None
+        execution_timeout = policy.get("executionTimeout") if isinstance(policy, dict) else None
+        if (
+            not isinstance(ttl, int)
+            or isinstance(ttl, bool)
+            or ttl < RUNPOD_POLICY_MIN_TTL_MS
+            or ttl > RUNPOD_POLICY_MAX_MS
+            or not isinstance(execution_timeout, int)
+            or isinstance(execution_timeout, bool)
+            or execution_timeout < RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS
+            or execution_timeout > RUNPOD_POLICY_MAX_MS
+            or ttl < execution_timeout
+        ):
+            raise RuntimeError(
+                f"RUNPOD_OPERATION_POLICIES_JSON does not contain a valid policy for {operation}"
+            )
+        return {"ttl": ttl, "executionTimeout": execution_timeout}
 
     def _poll_output(
         self,
@@ -171,9 +231,9 @@ class RunpodServerlessClient:
                 raise RuntimeError(
                     "RunPod job completed but did not return an output object. "
                     "The worker may have failed to return job results, often because the response payload was too large. "
-                    f"Check worker logs for 'Failed to return job results'. Response: {body}"
+                    "Check worker logs for 'Failed to return job results'."
                 )
-            raise RuntimeError(f"RunPod response did not include an object output: {body}")
+            raise RuntimeError("RunPod response did not include an object output")
         return output
 
     def _request_json(
@@ -199,11 +259,17 @@ class RunpodServerlessClient:
             with urllib.request.urlopen(request, timeout=timeout_seconds or self.timeout_seconds) as response:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"RunPod request failed: {detail}") from exc
+            exc.read()
+            raise RuntimeError(f"RunPod request failed with HTTP {exc.code}") from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"RunPod request failed: {exc}") from exc
-        return json.loads(body)
+            raise RuntimeError("RunPod request failed before receiving a response") from exc
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("RunPod response was not valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("RunPod response was not a JSON object")
+        return parsed
 
 
 class RunpodServerlessSpeechTranslationPipeline(SpeechTranslationPipeline):
@@ -584,8 +650,8 @@ def _asr_timing_rows(value: object) -> list[dict[str, object]]:
 
 
 def _runpod_error_message(body: dict[str, object]) -> str:
-    error = body.get("error") or body.get("message") or body
-    return f"RunPod job failed: {error}"
+    status = str(body.get("status") or "").upper()
+    return f"RunPod job failed with status {status}" if status else "RunPod job failed"
 
 
 def _runpod_voice_conversion_progress(body: dict[str, object]) -> PipelineProgress | None:
