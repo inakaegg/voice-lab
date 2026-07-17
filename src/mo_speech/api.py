@@ -1719,11 +1719,14 @@ def create_app(
                 "normalized_recognized": "",
                 "global_similarity": None,
                 "phrase_similarity": None,
+                "phrase_macro_similarity": None,
+                "lowest_phrase_similarity": None,
                 "similarity": None,
                 "grade": None,
                 "grade_label": "",
                 "diff": [],
                 "phrase_matches": [],
+                "unconsumed_recognized": [],
             }
             if no_speech
             else {
