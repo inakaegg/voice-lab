@@ -66,6 +66,18 @@ def test_pre_push_scans_full_local_history_before_upload(tmp_path: Path) -> None
     ]
 
 
+def test_secret_scan_workflow_can_read_pull_request_commits() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "secret-scan.yml").read_text(
+        encoding="utf-8"
+    )
+    permissions = workflow.split("permissions:", maxsplit=1)[1].split(
+        "\njobs:", maxsplit=1
+    )[0]
+
+    assert "  contents: read\n" in permissions
+    assert "  pull-requests: read\n" in permissions
+
+
 @pytest.mark.parametrize("name", ["pre-commit", "pre-push"])
 def test_hook_blocks_when_gitleaks_is_missing(tmp_path: Path, name: str) -> None:
     result = subprocess.run(
