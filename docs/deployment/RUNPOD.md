@@ -20,32 +20,17 @@ SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り 
 
 SkitVoiceも同じ非同期job経路で進捗を返す。handlerは `loading_vibevoice_model`、`vibevoice_generation`、`directed_asr`、`loading_seed_vc_model`、`voice_conversion`、`reconstruct`、`finalizing` をモデル名付きで送る。SpeakLoopで `自分の声` を選んだ場合も、通常TTSを変換元、最初の録音をSeed-VC参照音声として同じvoice conversion jobへ送り、GPU待機、Seed-VCモデル読込、声質変換を表示する。Cloudflare WorkerとローカルFastAPIは途中結果を履歴保存せず、RunPod job statusをpollingして既存進捗欄へ表示する。失敗時はRunPodが返した原因を保持し、残高不足を文言から明確に判別できる場合だけBillingの確認を案内する。
 
-## operation別policyとprivacy停止条件
+## requestと保存境界
 
-RunPodへ送るcanonical operationとpersonal dataは次のとおりである。handlerの互換aliasはcanonical名へ正規化して同じpolicyを使う。
-
-| operation | 主な送信データ | 主な呼出元 | 2026-07-17の実測状態 |
-| --- | --- | --- | --- |
-| `translation` | 入力音声、変換設定、翻訳途中結果 | ローカルFastAPI | operation別実測なし |
-| `text_tts` | 読み上げテキスト | ローカルFastAPI | operation別実測なし |
-| `voice_conversion` | 変換元音声、本人参照録音 | SpeakLoop自己音声、管理者VC | operation別実測なし |
-| `practice_asr` | 復唱音声、お手本音声、target text | SpeakLoop中国語比較 | operation別実測なし |
-| `vibevoice` | 管理者の台本、参照音声、生成設定、翻訳結果 | SkitVoice管理者研究 | operation別実測なし |
-| `warmup` | preload指定。利用者音声なし | 管理者準備 | operation別実測なし |
-| `diagnostics` | 診断指定。利用者音声なし | 管理者診断 | operation別実測なし |
-
-既存の `RUNPOD_SERVERLESS_TIMEOUT_SECONDS=1800` はclient全体のpolling上限、`MO_VIBEVOICE_TIMEOUT_SECONDS=1800` は同期VibeVoice呼出し上限であり、operation別の実処理時間ではない。repository内に実jobのcold/warm、queue、cancel、timeoutを分けた計測結果がなく、この作業では課金を伴うjobを送信しない。そのため値を推測せず、`RUNPOD_OPERATION_POLICIES_JSON` にcanonical operationごとの正の整数ミリ秒 `ttl` と `executionTimeout` が揃うまでRunPod submitを送信前に停止する。Cloudflare WorkerとPython clientの双方が同じ契約を使い、送信時は次のtop-level形にする。
+Cloudflare Worker、ローカルFastAPI、smoke scriptは、RunPodへ `input` だけを送る。jobの保持期間と実行上限はRunPodの既定を使い、application側でoperation別policyを重複管理しない。
 
 ```json
 {
-  "input": { "operation_mode": "voice_conversion" },
-  "policy": { "ttl": 0, "executionTimeout": 0 }
+  "input": { "operation_mode": "voice_conversion" }
 }
 ```
 
-上例の `0` はschema説明用であり有効値ではない。実設定はRunPodの許容範囲内の正の整数とし、`ttl >= executionTimeout` を満たす。各operationを同じ値で一括設定せず、ownerがRunPod logsの `delayTime`、`executionTime`、cold/warm、入力上限を確認して決める。設定不足・未知operation・不正値は外部request前に失敗させる。これにより、値が未決定の状態をRunPod既定保持期間へfallbackさせない。
-
-application logと利用者向けerrorにはraw音声base64、台本、翻訳結果、request/response全体を含めない。cancel、failure、timeout、JSON parse failureでもjob ID、HTTP status、正規化したstageのような非payload metadataだけを使う。RunPod platform側のjob input/result/log保持とcancel後の残存は別境界であり、owner認証で実ログを確認するまで未確認とする。正式な値と保持条件、問い合わせ先を確定するまでは公開deployのblocking項目である。
+application logと利用者向けerrorにはraw音声base64、台本、翻訳結果、request/response全体を含めない。cancel、failure、timeout、JSON parse failureでもjob ID、HTTP status、正規化したstageのような非payload metadataだけを使う。RunPod platform側の一時処理・保持は同社のサービス条件に従うため、公開時はRunPodを外部送信先として案内する。
 
 ## Podで確認する場合
 
@@ -111,7 +96,6 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
-| `RUNPOD_OPERATION_POLICIES_JSON` | canonical operationごとの明示的な `ttl` / `executionTimeout`（ミリ秒）。未設定・不完全ならsubmitを安全停止する。 |
 | `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `300`。 |
 | `RUNPOD_FLASH_BOOT` | Serverless endpoint作成時にFlashBootを有効にする。デモ用途では `1` を既定にする。 |
 | `RUNPOD_WORKERS_MIN` | 最小worker数。デモ用途では待機課金を避けるため `0` を既定にする。 |

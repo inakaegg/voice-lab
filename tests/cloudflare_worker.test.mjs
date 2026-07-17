@@ -918,7 +918,7 @@ test("Cloudflare worker lets an admin run and inspect a SkitVoice research job",
   assert.equal(completed.result.normalized_script, "Speaker 1: こんにちは");
   assert.equal(cancelled.status, "failed");
   assert.equal(runCall.body.input.operation_mode, "vibevoice");
-  assert.deepEqual(runCall.body.policy, { ttl: 600_000, executionTimeout: 300_000 });
+  assert.equal("policy" in runCall.body, false);
   assert.equal(runCall.body.input.script, "1 こんにちは");
   assert.equal(runCall.body.input.generation.model_id, "vibevoice-large-aoi-pinned");
   assert.equal(runCall.body.input.generation.cfg_scale, 1.2);
@@ -1375,7 +1375,7 @@ test("Cloudflare worker creates and polls a SpeakLoop Seed-VC model voice job wi
   assert.equal(runCall.body.input.source_audio_base64, Buffer.from([21, 22, 23]).toString("base64"));
   assert.equal(runCall.body.input.reference_audio_base64, Buffer.from("my reference voice").toString("base64"));
   assert.equal(runCall.body.input.seed_vc_reference_auto_select, true);
-  assert.deepEqual(runCall.body.policy, { ttl: 120_000, executionTimeout: 60_000 });
+  assert.equal("policy" in runCall.body, false);
 
   const running = await handleRequest(
     new Request("https://example.com/api/practice/voice-jobs/practice-vc-job"),
@@ -2530,32 +2530,29 @@ test("Cloudflare worker does not echo RunPod raw payloads from failure responses
   assert.match(body, /RunPod request failed/);
 });
 
-test("Cloudflare worker safely stops before RunPod when operation policy is missing or not integer JSON", async () => {
-  for (const rawPolicies of [
-    "",
-    JSON.stringify({ vibevoice: { ttl: "600000", executionTimeout: "300000" } }),
-  ]) {
-    let runpodCalls = 0;
-    const env = adminAuthEnv(async (url) => {
-      if (url.includes("api.runpod.ai")) runpodCalls += 1;
-      throw new Error(`unexpected external request: ${url}`);
-    });
-    env.RUNPOD_OPERATION_POLICIES_JSON = rawPolicies;
-    const cookie = await adminCookie(env, "/skitvoice/admin");
-    const form = new FormData();
-    form.append("script", "Speaker 1: safe stop");
-    form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+test("Cloudflare worker submits RunPod jobs without an application policy override", async () => {
+  let submittedPayload = null;
+  const env = adminAuthEnv(async (url, options = {}) => {
+    if (url.endsWith("/run")) {
+      submittedPayload = JSON.parse(options.body);
+      return json({ id: "job-1", status: "IN_QUEUE" });
+    }
+    throw new Error(`unexpected external request: ${url}`);
+  });
+  delete env.RUNPOD_OPERATION_POLICIES_JSON;
+  const cookie = await adminCookie(env, "/skitvoice/admin");
+  const form = new FormData();
+  form.append("script", "Speaker 1: simple request");
+  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
 
-    const response = await handleRequest(
-      new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
-      env,
-    );
-    const body = await response.text();
+  const response = await handleRequest(
+    new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
+    env,
+  );
 
-    assert.equal(response.status, 503);
-    assert.match(body, /RunPod operation policy|RUNPOD_OPERATION_POLICIES_JSON/);
-    assert.equal(runpodCalls, 0);
-  }
+  assert.equal(response.status, 200);
+  assert.equal(submittedPayload.input.operation_mode, "vibevoice");
+  assert.equal("policy" in submittedPayload, false);
 });
 
 test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async () => {
@@ -2597,15 +2594,6 @@ function fakeEnv(fetchImpl, options = {}) {
     RUNPOD_API_KEY: "runpod-secret",
     RUNPOD_API_BASE_URL: "https://api.runpod.ai/v2",
     RUNPOD_SERVERLESS_TRANSLATION_BACKEND: "openai",
-    RUNPOD_OPERATION_POLICIES_JSON: JSON.stringify({
-      translation: { ttl: 30_000, executionTimeout: 10_000 },
-      text_tts: { ttl: 40_000, executionTimeout: 15_000 },
-      voice_conversion: { ttl: 120_000, executionTimeout: 60_000 },
-      practice_asr: { ttl: 180_000, executionTimeout: 90_000 },
-      vibevoice: { ttl: 600_000, executionTimeout: 300_000 },
-      warmup: { ttl: 300_000, executionTimeout: 180_000 },
-      diagnostics: { ttl: 30_000, executionTimeout: 10_000 },
-    }),
     OPENAI_API_KEY: "openai-secret",
     OPENAI_TRANSLATION_MODEL: "gpt-5.5",
     OPENAI_TEXT_TRANSFORM_MODEL: "gpt-5.5",

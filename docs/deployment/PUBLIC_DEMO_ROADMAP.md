@@ -25,7 +25,6 @@
 3. audit・quotaの保持期間、削除手段、連絡先を含む正式なプライバシーポリシーの確定。
 4. Private vulnerability reporting、Secret scanning、GitHub Push Protection、Dependabot alerts、branch protection等のGitHub公開設定。
 5. 到達不能なGitHub Homepageの修正、不要remote branch整理、READMEスクリーンショット。
-6. RunPod operation別の実行時間、policy値、platform側job/result/log保持のowner確認。
 
 Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオとして閲覧可能にする方針を維持する。第三者コンポーネントにはそれぞれのライセンスが適用されるため、本体の権利表示と混同しない。
 

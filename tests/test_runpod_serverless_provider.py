@@ -22,20 +22,6 @@ from mo_speech.providers.voice import SeedVcRuntimeSettings
 @pytest.fixture(autouse=True)
 def isolate_runpod_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
-    monkeypatch.setenv(
-        "RUNPOD_OPERATION_POLICIES_JSON",
-        json.dumps(
-            {
-                "translation": {"ttl": 30_000, "executionTimeout": 10_000},
-                "text_tts": {"ttl": 40_000, "executionTimeout": 15_000},
-                "voice_conversion": {"ttl": 120_000, "executionTimeout": 60_000},
-                "practice_asr": {"ttl": 180_000, "executionTimeout": 90_000},
-                "vibevoice": {"ttl": 600_000, "executionTimeout": 300_000},
-                "warmup": {"ttl": 300_000, "executionTimeout": 180_000},
-                "diagnostics": {"ttl": 30_000, "executionTimeout": 10_000},
-            }
-        ),
-    )
 
 
 def test_runpod_client_reads_connection_keys_from_runpod_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,10 +211,7 @@ def test_runpod_client_submit_sync_always_uses_runsync() -> None:
         (
             "POST",
             "/runsync",
-            {
-                "input": {"operation_mode": "practice_asr"},
-                "policy": {"ttl": 180_000, "executionTimeout": 90_000},
-            },
+            {"input": {"operation_mode": "practice_asr"}},
         ),
     ]
 
@@ -249,10 +232,7 @@ def test_runpod_client_exposes_async_submit_and_status_without_polling() -> None
         (
             "POST",
             "/run",
-            {
-                "input": {"operation_mode": "practice_asr"},
-                "policy": {"ttl": 180_000, "executionTimeout": 90_000},
-            },
+            {"input": {"operation_mode": "practice_asr"}},
         ),
         ("GET", "/status/job-1", None),
     ]
@@ -365,10 +345,7 @@ def test_runpod_client_polls_async_job_until_completed() -> None:
         (
             "POST",
             "/run",
-            {
-                "input": {"operation_mode": "warmup"},
-                "policy": {"ttl": 300_000, "executionTimeout": 180_000},
-            },
+            {"input": {"operation_mode": "warmup"}},
         ),
         ("GET", "/status/job-1", None),
         ("GET", "/status/job-1", None),
@@ -390,12 +367,26 @@ def test_runpod_client_explains_completed_job_without_output() -> None:
         )
 
 
-def test_runpod_client_requires_explicit_operation_policy_before_submit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RUNPOD_OPERATION_POLICIES_JSON")
+def test_runpod_client_submits_without_operation_policy() -> None:
     client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret")
+    calls: list[tuple[str, str, object | None]] = []
 
-    with pytest.raises(RuntimeError, match="RUNPOD_OPERATION_POLICIES_JSON"):
-        client.submit_job({"operation_mode": "voice_conversion", "reference_audio_base64": "secret"})
+    def fake_request_json(path: str, *, method: str = "GET", payload: object | None = None, timeout_seconds: float | None = None):
+        calls.append((method, path, payload))
+        return {"id": "job-1", "status": "IN_QUEUE"}
+
+    client._request_json = fake_request_json  # type: ignore[method-assign]
+
+    result = client.submit_job({"operation_mode": "voice_conversion", "reference_audio_base64": "secret"})
+
+    assert result["status"] == "IN_QUEUE"
+    assert calls == [
+        (
+            "POST",
+            "/run",
+            {"input": {"operation_mode": "voice_conversion", "reference_audio_base64": "secret"}},
+        )
+    ]
 
 
 def test_runpod_client_does_not_echo_raw_payloads_from_http_or_completed_errors(monkeypatch: pytest.MonkeyPatch) -> None:

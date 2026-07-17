@@ -33,40 +33,11 @@ from .voice import SeedVcRuntimeSettings, VoiceConversionBackendInfo
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMED_OUT"}
 RUNPOD_IN_PROGRESS_STATES = {"IN_QUEUE", "IN_PROGRESS", "RUNNING"}
-RUNPOD_OPERATION_ALIASES = {
-    "translate": "translation",
-    "text_to_speech": "text_tts",
-    "practice-asr": "practice_asr",
-    "vibe_voice": "vibevoice",
-    "diagnostic": "diagnostics",
-    "diag": "diagnostics",
-    "preload": "warmup",
-}
-RUNPOD_POLICY_MIN_TTL_MS = 10_000
-RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS = 5_000
-RUNPOD_POLICY_MAX_MS = 7 * 24 * 60 * 60 * 1000
 
 
 def _runpod_env(name: str, default: str = "") -> str:
     load_runpod_gateway_env()
     return os.getenv(name, default)
-
-
-def _runpod_operation_policies_from_env() -> dict[str, dict[str, int]]:
-    raw = _runpod_env("RUNPOD_OPERATION_POLICIES_JSON", "").strip()
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("RUNPOD_OPERATION_POLICIES_JSON must be valid JSON") from exc
-    if not isinstance(parsed, dict):
-        raise RuntimeError("RUNPOD_OPERATION_POLICIES_JSON must be a JSON object")
-    return {
-        str(operation): dict(policy)
-        for operation, policy in parsed.items()
-        if isinstance(policy, dict)
-    }
 
 
 @dataclass
@@ -81,7 +52,6 @@ class RunpodServerlessClient:
         default_factory=lambda: float(_runpod_env("RUNPOD_SERVERLESS_POLL_INTERVAL_SECONDS", "1.0"))
     )
     base_url: str = field(default_factory=lambda: _runpod_env("RUNPOD_API_BASE_URL", RUNPOD_API_BASE_URL))
-    operation_policies: dict[str, dict[str, int]] = field(default_factory=_runpod_operation_policies_from_env)
 
     @classmethod
     def from_env(cls) -> "RunpodServerlessClient":
@@ -163,34 +133,7 @@ class RunpodServerlessClient:
         )
 
     def _request_payload(self, input_payload: dict[str, object]) -> dict[str, object]:
-        return {
-            "input": input_payload,
-            "policy": self._operation_policy(input_payload.get("operation_mode")),
-        }
-
-    def _operation_policy(self, operation_mode: object) -> dict[str, int]:
-        raw_operation = str(operation_mode or "").strip()
-        operation = RUNPOD_OPERATION_ALIASES.get(raw_operation, raw_operation)
-        if not operation:
-            raise RuntimeError("RunPod operation policy cannot be resolved without operation_mode")
-        policy = self.operation_policies.get(operation)
-        ttl = policy.get("ttl") if isinstance(policy, dict) else None
-        execution_timeout = policy.get("executionTimeout") if isinstance(policy, dict) else None
-        if (
-            not isinstance(ttl, int)
-            or isinstance(ttl, bool)
-            or ttl < RUNPOD_POLICY_MIN_TTL_MS
-            or ttl > RUNPOD_POLICY_MAX_MS
-            or not isinstance(execution_timeout, int)
-            or isinstance(execution_timeout, bool)
-            or execution_timeout < RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS
-            or execution_timeout > RUNPOD_POLICY_MAX_MS
-            or ttl < execution_timeout
-        ):
-            raise RuntimeError(
-                f"RUNPOD_OPERATION_POLICIES_JSON does not contain a valid policy for {operation}"
-            )
-        return {"ttl": ttl, "executionTimeout": execution_timeout}
+        return {"input": input_payload}
 
     def _poll_output(
         self,

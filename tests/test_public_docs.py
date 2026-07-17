@@ -174,7 +174,7 @@ def test_container_images_include_repository_rights_notices() -> None:
         assert "COPY LICENSE THIRD_PARTY_NOTICES.md /app/" in dockerfile
 
 
-def test_privacy_boundary_records_unresolved_retention_before_publication() -> None:
+def test_privacy_boundary_explains_external_processing_without_blocking_runpod() -> None:
     privacy = read_text("docs/deployment/PRIVACY.md")
 
     assert "完全なプライバシーポリシーではない" in privacy
@@ -188,9 +188,9 @@ def test_privacy_boundary_records_unresolved_retention_before_publication() -> N
     assert "削除" in privacy
     assert "公開再開" in privacy
     assert "RUNPOD_OPERATION_POLICIES_JSON" not in privacy
-    assert "policy.ttl" in privacy
-    assert "policy.executionTimeout" in privacy
-    assert "実測" in privacy
+    assert "policy.ttl" not in privacy
+    assert "policy.executionTimeout" not in privacy
+    assert "RunPodの既定" in privacy
 
 
 def test_public_docs_keep_skitvoice_closed_and_distinguish_local_changes_from_deploy() -> None:

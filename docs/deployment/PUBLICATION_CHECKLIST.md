@@ -57,8 +57,6 @@
 - [ ] 期限切れデータの削除処理と検証を実装する。
 - [ ] 削除依頼先、連絡先、本人確認方法を決める。
 - [ ] 外部処理事業者と送信データを示す正式なプライバシーポリシーを作り、公開画面から到達可能にする。
-- [ ] RunPodの全operationをowner logで実測し、operation別の `policy.ttl` と `policy.executionTimeout` を決める。未設定時に個人音声requestが安全停止することを確認する。
-- [ ] RunPodのjob input/result/log保持、cancel／failure／timeout後の残存、問い合わせ先を確認して正式policyへ記載する。
 
 ## P1: GitHubの公開設定
 

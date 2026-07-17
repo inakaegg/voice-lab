@@ -35,9 +35,7 @@
 
 RunPod requestは入力音声base64、台本、翻訳結果をapplication logやerrorへ含めない。cancel、failure、timeout、malformed responseでもraw payloadを文字列化しない。これはVoice Lab application logの契約であり、RunPod platform側のjob input/result/log保持を削除する保証ではない。
 
-2026-07-17のローカル監査では、operation別の実job処理時間とowner権限で見えるRunPod logを確認できていない。したがって個人音声を含む `translation`、`text_tts`、`voice_conversion`、`practice_asr`、`vibevoice` は、実測に基づく明示的な `policy.ttl` と `policy.executionTimeout` が設定されるまで送信を安全停止する。`warmup` と `diagnostics` は個人音声を含めないが、同じpolicy解決経路を使う。既存のclient待機上限1800秒、VibeVoice同期上限1800秒、RunPod既定値だけからoperation別の値を推測しない。
-
-正式policyでは、RunPodへ送る情報と目的、job input/result/logの保持条件、Voice Labの連絡先と削除依頼方法を明記する。RunPod実ログ、cancel後、timeout後の残存状態はowner認証で確認し、結果を公開前チェックリストへ記録する。
+Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの既定でjobを実行する。Cloudflare公開版は音声をVoice Labの履歴へ保存しない。RunPod側の一時処理・保持は同社のサービス条件に従うため、Voice Labが保持ゼロを保証する表現はしない。これは外部送信の説明事項であり、operation別policyの設定を公開停止条件にはしない。
 
 ## 公開再開前に決める事項
 
@@ -49,6 +47,4 @@ RunPod requestは入力音声base64、台本、翻訳結果をapplication logや
 6. 外部処理事業者、処理目的、送信データ、各社policyへのリンク。
 7. Googleログイン前と音声送信前に提示する同意・注意文と、正式policyへの導線。
 8. 公開サンプル音声の権利確認記録と削除依頼への対応方法。
-9. RunPod operation別の実行時間、`policy.ttl`、`policy.executionTimeout`、cancel／timeout後のjob・result・log残存確認。
-
 保持期間や連絡先を未決定のまま推測で本文へ入れない。決定後は [SPEC.md](../speech-translation/SPEC.md)、[STORAGE.md](STORAGE.md)、README、公開画面を同時に更新する。

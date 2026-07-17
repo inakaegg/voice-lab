@@ -297,12 +297,11 @@ def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
     assert '"line_gap": args.vibevoice_line_gap' in script
 
 
-def test_runpod_smoke_script_requires_explicit_request_policy_without_logging_raw_errors() -> None:
+def test_runpod_smoke_script_uses_runpod_default_policy_without_logging_raw_errors() -> None:
     script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
 
-    assert '"policy": _operation_policy(args.operation_mode)' in script
-    assert "RUNPOD_OPERATION_POLICIES_JSON" in script
-    assert "ttl < execution_timeout" in script
+    assert 'payload: dict[str, Any] = {"input": input_payload}' in script
+    assert "RUNPOD_OPERATION_POLICIES_JSON" not in script
     assert "exc.read()" not in script
     assert "RunPod request failed with HTTP" in script
 
