@@ -253,6 +253,7 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/deployment/APP_SPLIT.md",
+        "docs/speech-translation/SPEC.md",
     ):
         document = read_text(relative_path)
         assert "production" in document, relative_path
