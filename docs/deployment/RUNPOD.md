@@ -20,32 +20,17 @@ SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り 
 
 SkitVoiceも同じ非同期job経路で進捗を返す。handlerは `loading_vibevoice_model`、`vibevoice_generation`、`directed_asr`、`loading_seed_vc_model`、`voice_conversion`、`reconstruct`、`finalizing` をモデル名付きで送る。SpeakLoopで `自分の声` を選んだ場合も、通常TTSを変換元、最初の録音をSeed-VC参照音声として同じvoice conversion jobへ送り、GPU待機、Seed-VCモデル読込、声質変換を表示する。Cloudflare WorkerとローカルFastAPIは途中結果を履歴保存せず、RunPod job statusをpollingして既存進捗欄へ表示する。失敗時はRunPodが返した原因を保持し、残高不足を文言から明確に判別できる場合だけBillingの確認を案内する。
 
-## operation別policyとprivacy停止条件
+## requestと保存境界
 
-RunPodへ送るcanonical operationとpersonal dataは次のとおりである。handlerの互換aliasはcanonical名へ正規化して同じpolicyを使う。
-
-| operation | 主な送信データ | 主な呼出元 | 2026-07-17の実測状態 |
-| --- | --- | --- | --- |
-| `translation` | 入力音声、変換設定、翻訳途中結果 | ローカルFastAPI | operation別実測なし |
-| `text_tts` | 読み上げテキスト | ローカルFastAPI | operation別実測なし |
-| `voice_conversion` | 変換元音声、本人参照録音 | SpeakLoop自己音声、管理者VC | operation別実測なし |
-| `practice_asr` | 復唱音声、お手本音声、target text | SpeakLoop中国語比較 | operation別実測なし |
-| `vibevoice` | 管理者の台本、参照音声、生成設定、翻訳結果 | SkitVoice管理者研究 | operation別実測なし |
-| `warmup` | preload指定。利用者音声なし | 管理者準備 | operation別実測なし |
-| `diagnostics` | 診断指定。利用者音声なし | 管理者診断 | operation別実測なし |
-
-既存の `RUNPOD_SERVERLESS_TIMEOUT_SECONDS=1800` はclient全体のpolling上限、`MO_VIBEVOICE_TIMEOUT_SECONDS=1800` は同期VibeVoice呼出し上限であり、operation別の実処理時間ではない。repository内に実jobのcold/warm、queue、cancel、timeoutを分けた計測結果がなく、この作業では課金を伴うjobを送信しない。そのため値を推測せず、`RUNPOD_OPERATION_POLICIES_JSON` にcanonical operationごとの正の整数ミリ秒 `ttl` と `executionTimeout` が揃うまでRunPod submitを送信前に停止する。Cloudflare WorkerとPython clientの双方が同じ契約を使い、送信時は次のtop-level形にする。
+Cloudflare Worker、ローカルFastAPI、smoke scriptは、RunPodへ `input` だけを送る。jobの保持期間と実行上限はRunPodの既定を使い、application側でoperation別policyを重複管理しない。
 
 ```json
 {
-  "input": { "operation_mode": "voice_conversion" },
-  "policy": { "ttl": 0, "executionTimeout": 0 }
+  "input": { "operation_mode": "voice_conversion" }
 }
 ```
 
-上例の `0` はschema説明用であり有効値ではない。実設定はRunPodの許容範囲内の正の整数とし、`ttl >= executionTimeout` を満たす。各operationを同じ値で一括設定せず、ownerがRunPod logsの `delayTime`、`executionTime`、cold/warm、入力上限を確認して決める。設定不足・未知operation・不正値は外部request前に失敗させる。これにより、値が未決定の状態をRunPod既定保持期間へfallbackさせない。
-
-application logと利用者向けerrorにはraw音声base64、台本、翻訳結果、request/response全体を含めない。cancel、failure、timeout、JSON parse failureでもjob ID、HTTP status、正規化したstageのような非payload metadataだけを使う。RunPod platform側のjob input/result/log保持とcancel後の残存は別境界であり、owner認証で実ログを確認するまで未確認とする。正式な値と保持条件、問い合わせ先を確定するまでは公開deployのblocking項目である。
+application logと利用者向けerrorにはraw音声base64、台本、翻訳結果、request/response全体を含めない。cancel、failure、timeout、JSON parse failureでもjob ID、HTTP status、正規化したstageのような非payload metadataだけを使う。RunPod platform側の一時処理・保持は同社のサービス条件に従うため、公開時はRunPodを外部送信先として案内する。
 
 ## Podで確認する場合
 
@@ -97,6 +82,8 @@ cp scripts/runpod.env.example .runpod.env
 | 変数 | 用途 |
 | --- | --- |
 | `RUNPOD_IMAGE` | Docker registryへpushするimage名 |
+| `RUNPOD_IMAGE_VISIBILITY` | image repositoryの実際の可視性。既定は `private`。 |
+| `RUNPOD_REGISTRY_AUTH_ID` | RunPodへ登録したpull専用container registry credentialのID。credentialのtoken自体は保存しない。private imageでは必須。 |
 | `RUNPOD_GPU_ID` | 例: `NVIDIA A40`、`NVIDIA GeForce RTX 4090` |
 | `RUNPOD_DATA_CENTER_ID` | Network Volume作成先 |
 | `RUNPOD_DATA_CENTER_IDS` | Pod/Serverless配置先候補 |
@@ -109,7 +96,6 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
-| `RUNPOD_OPERATION_POLICIES_JSON` | canonical operationごとの明示的な `ttl` / `executionTimeout`（ミリ秒）。未設定・不完全ならsubmitを安全停止する。 |
 | `RUNPOD_IDLE_TIMEOUT_SECONDS` | Serverless workerをidle後に落とすまでの秒数。デモ用途の既定は `300`。 |
 | `RUNPOD_FLASH_BOOT` | Serverless endpoint作成時にFlashBootを有効にする。デモ用途では `1` を既定にする。 |
 | `RUNPOD_WORKERS_MIN` | 最小worker数。デモ用途では待機課金を避けるため `0` を既定にする。 |
@@ -148,6 +134,16 @@ RUNPOD_DRY_RUN=1 scripts/runpod_create_gpu_pod.sh
 RunPod imageはprivate repositoryを既定とする。imageには `/app/src` と実行環境が含まれるため、GitHub repositoryをprivateにしてもcontainer repositoryがpublicなら実装を取得できる。Docker Hub側でrepositoryを先にprivateとして作成し、RunPodへregistry認証を設定してから使う。
 
 GHCRはGitHub Container Registryのこと。GitHub repositoryとimageの権限を合わせたい場合に向く。Docker Hub、GHCRのどちらでもprivate imageにはRunPod側のregistry auth設定が必要である。手順が増えることを理由にpublicへ切り替えず、public配布は [公開前チェックリスト](PUBLICATION_CHECKLIST.md) の権利・プライバシー・外部設定を完了した場合だけ明示的に選ぶ。
+
+Docker HubではRunPod専用のread-only Personal Access Tokenを作る。通常のpush用tokenやアカウントパスワードをRunPodへ渡さない。既定手順はRunPod ConsoleのRegistry Credentialsから登録し、返されたIDだけをgit管理外の `.runpod.env` へ保存する。REST APIを使う場合もtokenをcommand line引数やshell履歴へ残さず、保護された秘密値入力から `POST /v1/containerregistryauth` のrequest bodyへ渡す。
+
+```bash
+# credential登録後、secretではないIDだけを保存する
+RUNPOD_IMAGE_VISIBILITY=private
+RUNPOD_REGISTRY_AUTH_ID=<RunPod registry credential ID>
+```
+
+Serverless templateのcreate/updateは `scripts/runpod_template_api.py` を通じてRunPod REST APIを使い、`containerRegistryAuthId` を明示する。`runpodctl template create/update` にはこのIDを渡すoptionがないため使用しない。private imageなのに `RUNPOD_REGISTRY_AUTH_ID` が空の場合、deploy、create、updateの各スクリプトは外部変更前に安全停止する。Docker Hub tokenはRunPod側credentialだけに保存し、`.runpod.env`、GitHub Secrets、template envへ複製しない。
 
 RunPodのGitHub連携は、GitHub repositoryからRunPod側でimageをbuildし、RunPodのregistryに保存してServerless endpointへdeployする用途に向く。ローカルMacのDocker build容量を避けられるのが利点。ただし初回のWeb UI込みPod検証では、明示的なDocker imageをregistryへpushしてPodからpullする方が手順を追いやすい。
 
@@ -199,15 +195,15 @@ push後にRunPod Serverlessへ反映する通常手順では、まず `scripts/r
 
 | スクリプト | 使う場面 | 主な処理 |
 | --- | --- | --- |
-| `scripts/runpod_deploy_serverless_image.sh` | 通常のdeploy。push済みの現在HEADをRunPod Serverlessへ反映したい時 | GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作り、endpointの `templateId` を切り替え、`.runpod.env` を更新し、diagnostics smokeを実行する |
-| `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` と `RUNPOD_IMAGE` を使い、既存templateを更新する。endpoint切替やworker入れ替えは行わない |
-| `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` の `RUNPOD_IMAGE` から新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
+| `scripts/runpod_deploy_serverless_image.sh` | 通常のdeploy。push済みの現在HEADをRunPod Serverlessへ反映したい時 | GitHub Actionsでimageをbuild/pushし、registry credential付きの新しいServerless templateを作り、endpointの `templateId` を切り替え、`.runpod.env` を更新し、diagnostics smokeを実行する |
+| `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` のtemplate/image/registry credentialを使い、RunPod REST APIで既存templateを更新する。endpoint切替やworker入れ替えは行わない |
+| `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` のimageとregistry credentialからRunPod REST APIで新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
 | `scripts/runpod_build_push.sh` | ローカルDockerで直接build/pushしたい時 | `Dockerfile.runpod` をローカルでbuildx buildしてregistryへpushする。Actions運用では通常使わない |
 | `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、中国語練習ASR、VibeVoiceなどのjobを直接投げる |
 
 判断に迷う場合は、`RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh` で実行予定のtag、template名、workflow起動内容を確認してからdry-runなしで実行する。
 
-通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
+通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、`.runpod.env` の `RUNPOD_REGISTRY_AUTH_ID` を引き継いだ新しいServerless templateをRunPod REST APIで作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
 
 ```bash
 scripts/runpod_deploy_serverless_image.sh
@@ -215,7 +211,7 @@ scripts/runpod_deploy_serverless_image.sh
 
 既定のimage tagは `runpod-vibevoice-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
 
-同じcommitでdeployを再実行した場合、template名も同じになる。前回実行でtemplate作成後にendpoint更新、worker起動、diagnostics、残高不足などで失敗した場合でも、deployスクリプトは同名の自分のtemplateを検索し、既存templateを `runpodctl template update` して再利用する。RunPod側の `Template name must be unique` が出た場合は、まず最新のdeployスクリプトで同じcommitのまま再実行する。
+同じcommitでdeployを再実行した場合、template名も同じになる。前回実行でtemplate作成後にendpoint更新、worker起動、diagnostics、残高不足などで失敗した場合でも、deployスクリプトは同名の自分のtemplateを検索し、RunPod REST APIのtemplate PATCHでimage、env、registry credentialを更新して再利用する。RunPod側の `Template name must be unique` が出た場合は、まず最新のdeployスクリプトで同じcommitのまま再実行する。
 
 スクリプトは、現在のHEADがupstreamへpush済みであることを確認する。push前のローカルcommitを指定してActionsを起動してもGitHub側ではそのcommitをcheckoutできないため、通常は先にpushする。確認だけしたい場合はdry-runを使う。
 
@@ -243,6 +239,7 @@ Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh
 # .runpod.env
 RUNPOD_IMAGE=docker.io/<user>/<private-repository>:runpod-vibevoice-<short-sha>
 RUNPOD_IMAGE_VISIBILITY=private
+RUNPOD_REGISTRY_AUTH_ID=<RunPod registry credential ID>
 ```
 
 既存templateへ反映する場合:
@@ -251,7 +248,7 @@ RUNPOD_IMAGE_VISIBILITY=private
 scripts/runpod_update_serverless_template.sh
 ```
 
-このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimageと環境変数を更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のimageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
+このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimage、環境変数、`containerRegistryAuthId` をRunPod REST APIで更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のcredentialでprivate imageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
 
 新しいtemplateとして切り替える場合:
 

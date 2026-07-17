@@ -4,18 +4,6 @@ import { Converter } from "opencc-js/t2cn";
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
-const RUNPOD_OPERATION_ALIASES = {
-  translate: "translation",
-  text_to_speech: "text_tts",
-  "practice-asr": "practice_asr",
-  vibe_voice: "vibevoice",
-  diagnostic: "diagnostics",
-  diag: "diagnostics",
-  preload: "warmup",
-};
-const RUNPOD_POLICY_MIN_TTL_MS = 10_000;
-const RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS = 5_000;
-const RUNPOD_POLICY_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 const USER_SETTINGS_KV_KEY = "user-settings";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
@@ -3727,47 +3715,19 @@ async function transformUserText(text, targetLanguage, options, env) {
 async function submitRunpodJob(env, inputPayload) {
   return runpodRequest(env, "/run", {
     method: "POST",
-    payload: runpodRequestPayload(env, inputPayload),
+    payload: runpodRequestPayload(inputPayload),
   });
 }
 
 async function submitRunpodSyncJob(env, inputPayload) {
   return runpodRequest(env, "/runsync", {
     method: "POST",
-    payload: runpodRequestPayload(env, inputPayload),
+    payload: runpodRequestPayload(inputPayload),
   });
 }
 
-function runpodRequestPayload(env, inputPayload) {
-  return {
-    input: inputPayload,
-    policy: runpodOperationPolicy(env, inputPayload?.operation_mode),
-  };
-}
-
-function runpodOperationPolicy(env, operationMode) {
-  const rawOperation = String(operationMode || "").trim();
-  const operation = RUNPOD_OPERATION_ALIASES[rawOperation] || rawOperation;
-  if (!operation) {
-    throw httpError(503, "RunPod operation policy cannot be resolved without operation_mode");
-  }
-  let policies;
-  try {
-    policies = JSON.parse(String(env.RUNPOD_OPERATION_POLICIES_JSON || ""));
-  } catch (_error) {
-    throw httpError(503, "RUNPOD_OPERATION_POLICIES_JSON must be valid JSON");
-  }
-  const policy = policies && typeof policies === "object" ? policies[operation] : null;
-  const ttl = policy?.ttl;
-  const executionTimeout = policy?.executionTimeout;
-  if (
-    !Number.isInteger(ttl) || ttl < RUNPOD_POLICY_MIN_TTL_MS || ttl > RUNPOD_POLICY_MAX_MS ||
-    !Number.isInteger(executionTimeout) || executionTimeout < RUNPOD_POLICY_MIN_EXECUTION_TIMEOUT_MS ||
-    executionTimeout > RUNPOD_POLICY_MAX_MS || ttl < executionTimeout
-  ) {
-    throw httpError(503, `RunPod operation policy is not configured for ${operation}`);
-  }
-  return { ttl, executionTimeout };
+function runpodRequestPayload(inputPayload) {
+  return { input: inputPayload };
 }
 
 function runpodSyncOutput(body, label) {

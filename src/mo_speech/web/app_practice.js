@@ -14,6 +14,7 @@ const targetText = document.querySelector("#practice-target-text");
 const targetSubtext = document.querySelector("#practice-target-subtext");
 const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
+const playModelOnlyButton = document.querySelector("#practice-play-model-only-button");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
 const gradeBadge = document.querySelector("#practice-grade-badge");
@@ -133,6 +134,7 @@ nativePanel.addEventListener("focusin", () => setActiveRecordSlot("native"));
 promptPanel.addEventListener("pointerenter", () => setActiveRecordSlot("repeat"));
 promptPanel.addEventListener("focusin", () => setActiveRecordSlot("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
+playModelOnlyButton.addEventListener("click", toggleModelOnlyAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
 ownVoiceToggle.addEventListener("change", savePracticeSettings);
@@ -577,6 +579,7 @@ function renderAttemptResult(payload) {
   resultSummary.hidden = noSpeech;
   scoreBar.hidden = noSpeech;
   gradeGuide.hidden = noSpeech;
+  resultPanel.hidden = false;
   if (noSpeech) {
     gradeBadge.textContent = "";
     gradeBadge.removeAttribute("data-grade");
@@ -593,7 +596,6 @@ function renderAttemptResult(payload) {
     renderRecognizedDiff(payload);
   }
   nativePanel.hidden = false;
-  resultPanel.hidden = false;
   setActiveRecordSlot("repeat");
   syncPracticeRecordMode();
   syncPlayButton();
@@ -650,6 +652,7 @@ function setModelAudio(audioBase64, mimeType) {
   modelAudio.load();
   syncModelAudioSpeed();
   playModelButton.disabled = isBusy;
+  playModelOnlyButton.disabled = isBusy;
 }
 
 function setRepeatAudio(blob) {
@@ -680,6 +683,21 @@ function toggleModelAudio() {
   }
 }
 
+function toggleModelOnlyAudio() {
+  if (!modelAudio.src) {
+    return;
+  }
+  if (isComparisonPlaying) {
+    stopComparisonPlayback();
+  }
+  repeatAudio.pause();
+  if (modelAudio.paused) {
+    playAudioWithCurrentSpeed(modelAudio).catch((error) => showError(error.message));
+  } else {
+    modelAudio.pause();
+  }
+}
+
 function stopModelAudio() {
   stopComparisonPlayback();
   if (modelAudioUrl) {
@@ -691,6 +709,7 @@ function stopModelAudio() {
   modelAudio.load();
   currentModelAudioBlob = null;
   playModelButton.disabled = true;
+  playModelOnlyButton.disabled = true;
   syncPlayButton();
 }
 
@@ -706,11 +725,17 @@ function stopRepeatAudio() {
 
 function syncPlayButton() {
   const isModelOnlyPlaying = !modelAudio.paused && !isComparisonPlaying;
-  const isPlaying = isComparisonPlaying || isModelOnlyPlaying;
-  playModelButton.classList.toggle("is-playing", isPlaying);
-  playModelButton.querySelector("span:last-child").textContent = isPlaying
+  const comparisonPlan = currentComparisonPlaybackPlan();
+  const primaryButtonIsPlaying = isComparisonPlaying || (comparisonPlan.mode === "model" && isModelOnlyPlaying);
+  playModelButton.classList.toggle("is-playing", primaryButtonIsPlaying);
+  playModelButton.querySelector("span:last-child").textContent = primaryButtonIsPlaying
     ? "停止"
-    : playbackButtonLabel();
+    : comparisonPlan.label;
+  playModelOnlyButton.hidden = !["whole", "phrase", "partial_phrase"].includes(comparisonPlan.mode);
+  playModelOnlyButton.classList.toggle("is-playing", isModelOnlyPlaying);
+  playModelOnlyButton.querySelector("span:last-child").textContent = isModelOnlyPlaying
+    ? "停止"
+    : "お手本だけ再生";
   syncComparisonNote();
 }
 
@@ -719,10 +744,6 @@ function syncComparisonNote() {
   comparisonNote.textContent = plan.description;
   comparisonNote.dataset.mode = plan.mode;
   comparisonNote.hidden = !plan.description;
-}
-
-function playbackButtonLabel() {
-  return currentComparisonPlaybackPlan().label;
 }
 
 function audioDurationOrAlignmentEnd(audio, alignment) {
@@ -897,7 +918,7 @@ function isActiveComparisonPlayback(token) {
   return isComparisonPlaying && comparisonPlaybackToken === token;
 }
 
-async function playComparisonAudios() {
+async function playComparisonAudios({ targetOffset = null } = {}) {
   if (isComparisonPlaying) {
     stopComparisonPlayback();
     return;
@@ -927,6 +948,17 @@ async function playComparisonAudios() {
       return;
     }
     const plan = currentComparisonPlaybackPlan();
+    const requestedRange = Number.isInteger(targetOffset)
+      ? playbackContract.comparisonRangeForTargetOffset({
+        targetText: currentAttemptPayload?.target_text || currentTargetText,
+        targetOffset,
+        alignment: currentAttemptComparisonAlignment,
+        ranges: plan.ranges,
+      })
+      : null;
+    if (Number.isInteger(targetOffset) && !requestedRange) {
+      return;
+    }
     if (plan.mode === "model") {
       await playAudioElementToEnd(modelAudio, token);
       return;
@@ -939,7 +971,8 @@ async function playComparisonAudios() {
       await playAudioElementToEnd(repeatAudio, token);
       return;
     }
-    for (const range of plan.ranges) {
+    const ranges = requestedRange ? [requestedRange] : plan.ranges;
+    for (const range of ranges) {
       if (!isActiveComparisonPlayback(token)) {
         return;
       }
@@ -1099,6 +1132,7 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
   repeatRecordButton.disabled = busy || !currentTargetText;
   ownVoiceToggle.disabled = busy;
   playModelButton.disabled = busy || !modelAudio.src;
+  playModelOnlyButton.disabled = busy || !modelAudio.src;
   const processingButton = buttonForRecordSlot(kind || activeRecordSlot);
   progress.hidden = !busy;
   if (busy) {
@@ -1477,11 +1511,22 @@ function practiceDisplayComparableText(value) {
 }
 
 function renderPracticeDiffCell(cell) {
-  const element = document.createElement(cell.type === "equal" ? "span" : "button");
+  const plan = currentComparisonPlaybackPlan();
+  const comparisonRange = cell.type === "equal"
+    ? null
+    : playbackContract.comparisonRangeForTargetOffset({
+      targetText: currentAttemptPayload?.target_text || currentTargetText,
+      targetOffset: cell.targetOffset,
+      alignment: currentAttemptComparisonAlignment,
+      ranges: plan.ranges,
+    });
+  const element = document.createElement(comparisonRange ? "button" : "span");
   if (element instanceof HTMLButtonElement) {
     element.type = "button";
-    element.title = cell.type === "delete" ? "抜けた部分を比較再生" : "この違いを比較再生";
-    element.addEventListener("click", playComparisonAudios);
+    element.title = cell.type === "delete" ? "抜けたフレーズを比較再生" : "このフレーズを比較再生";
+    element.addEventListener("click", () => {
+      playComparisonAudios({ targetOffset: cell.targetOffset }).catch((error) => showError(error.message));
+    });
   }
   element.className = `practice-diff-cell is-${cell.type}`;
   const correction = document.createElement("span");
@@ -1531,7 +1576,7 @@ function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
       recognizedIndex < recognizedChars.length &&
       practiceDisplayCharsEqual(targetChar, recognizedChar)
     ) {
-      cells.push({ type: "equal", correction: "", heard: recognizedChar });
+      cells.push({ type: "equal", correction: "", heard: recognizedChar, targetOffset: targetIndex });
       targetIndex += 1;
       recognizedIndex += 1;
       continue;
@@ -1542,7 +1587,7 @@ function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
       recognizedIndex < recognizedChars.length &&
       currentDistance === 1 + distance[targetIndex + 1][recognizedIndex + 1]
     ) {
-      cells.push({ type: "substitute", correction: targetChar, heard: recognizedChar });
+      cells.push({ type: "substitute", correction: targetChar, heard: recognizedChar, targetOffset: targetIndex });
       targetIndex += 1;
       recognizedIndex += 1;
       continue;
@@ -1551,11 +1596,11 @@ function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
       targetIndex < targetChars.length &&
       currentDistance === 1 + distance[targetIndex + 1][recognizedIndex]
     ) {
-      cells.push({ type: "delete", correction: targetChar, heard: "_" });
+      cells.push({ type: "delete", correction: targetChar, heard: "_", targetOffset: targetIndex });
       targetIndex += 1;
       continue;
     }
-    cells.push({ type: "insert", correction: "", heard: recognizedChar || "_" });
+    cells.push({ type: "insert", correction: "", heard: recognizedChar || "_", targetOffset: targetIndex });
     recognizedIndex += 1;
   }
   return cells.length ? cells : [{ type: "insert", correction: "", heard: "（聞き取れませんでした）" }];

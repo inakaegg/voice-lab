@@ -8,7 +8,7 @@
 
 公開Worker名は `voice-lab`、公開URLは `https://voice-lab.inakaegg.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
 
-この文書は現在のCloudflareデモ構成と、未deployの公開境界変更を説明する。公開ポートフォリオの主機能はSpeakLoopとし、SkitVoice/VibeVoiceは既存Google管理者セッションで保護する研究機能へ閉じる。発音練習アプリと研究機能を物理的に分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすい公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
+この文書は現在のCloudflareデモ構成と、merge済みmainのpreviewで検証済みだが本番未deployの公開境界変更を説明する。公開ポートフォリオの主機能はSpeakLoopとし、SkitVoice/VibeVoiceは既存Google管理者セッションで保護する研究機能へ閉じる。発音練習アプリと研究機能を物理的に分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
 データフロー、保存範囲、保持期間と削除に関する未決定事項は [PRIVACY.md](PRIVACY.md) を参照する。正式なプライバシーポリシーと公開画面からの導線が完成するまで公開再開を完了扱いにしない。
 
@@ -26,7 +26,7 @@ Cloudflare版は `/` にSpeakLoopだけを主製品として表示し、`/skitvo
 
 VibeVoiceのstatus、URL参照、script、job submit、job status、cancelは、既存Google管理者セッションを使う共通API guardで保護する。匿名利用者は401、通常Googleユーザーは403とし、routeごとのUI条件をsecurity boundaryにしない。Cloudflare版にはsync generation APIを持たせず、ローカルFastAPIだけが `POST /api/vibevoice/generate` を維持する。
 
-非admin向け `GET /api/public-session` はSkitVoiceのfeature/quotaを含めない。非admin向け `GET /api/public-sample-audios` は既存SkitVoice sampleを返さない。管理者は同じsample APIで研究dataを管理でき、外部R2 objectの削除はこのローカル変更に含めない。これらは未deployであり、現在の公開URLで閉鎖済みとは扱わない。
+非admin向け `GET /api/public-session` はSkitVoiceのfeature/quotaを含めない。非admin向け `GET /api/public-sample-audios` は既存SkitVoice sampleを返さない。管理者は同じsample APIで研究dataを管理でき、外部R2 objectの削除はこの変更に含めない。これらはpreviewで検証済みだが本番未deployであり、現在のproduction公開URLで閉鎖済みとは扱わない。
 
 ## 秘密情報
 

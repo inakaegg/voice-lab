@@ -109,11 +109,15 @@ def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
     assert "GPL-3.0" in checklist
     assert "VibeVoice" in checklist
     assert "外部状態スナップショット" in checklist
-    assert "is_private=false" in checklist
+    assert "is_private=true" in checklist
     assert "Secret scanningは無効" in checklist
     assert "Dependabot alertsは無効" in checklist
     assert "Code scanningは未導入" in checklist
     assert "branch protectionとrulesetのAPIは403" in checklist
+    assert "legacy累計quota keyが2件" in checklist
+    assert "D1 audit 97件" in checklist
+    assert "registry credentialは1件" in checklist
+    assert "強制scale-to-zero後の新しいworker" in checklist
 
 
 def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
@@ -129,11 +133,21 @@ def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
     assert "GPL-3.0" in notices
     assert "ComfyUI-VibeVoice" in notices
     assert "bundled dependency licenses" in notices
+    assert "public container imageを配布しない" in notices
+    assert "self-hosted runtimeへ実装済みとは表示しない" in notices
 
     browser_bundle = notices.split("## ブラウザbundle", 1)[1].split("## Cloudflare Worker", 1)[0]
     worker_bundle = notices.split("## Cloudflare Worker", 1)[1].split("## Python・GPU image", 1)[0]
     assert "pinyin-pro" not in browser_bundle
     assert "pinyin-pro" in worker_bundle
+
+
+def test_runpod_registry_docs_do_not_put_pull_tokens_on_command_lines() -> None:
+    runpod = read_text("docs/deployment/RUNPOD.md")
+
+    assert "read-only Personal Access Token" in runpod
+    assert "RUNPOD_REGISTRY_AUTH_ID" in runpod
+    assert "--password" not in runpod
 
 
 def test_frontend_build_emits_and_packages_bundled_dependency_licenses() -> None:
@@ -160,7 +174,7 @@ def test_container_images_include_repository_rights_notices() -> None:
         assert "COPY LICENSE THIRD_PARTY_NOTICES.md /app/" in dockerfile
 
 
-def test_privacy_boundary_records_unresolved_retention_before_publication() -> None:
+def test_privacy_boundary_explains_external_processing_without_blocking_runpod() -> None:
     privacy = read_text("docs/deployment/PRIVACY.md")
 
     assert "完全なプライバシーポリシーではない" in privacy
@@ -174,9 +188,9 @@ def test_privacy_boundary_records_unresolved_retention_before_publication() -> N
     assert "削除" in privacy
     assert "公開再開" in privacy
     assert "RUNPOD_OPERATION_POLICIES_JSON" not in privacy
-    assert "policy.ttl" in privacy
-    assert "policy.executionTimeout" in privacy
-    assert "実測" in privacy
+    assert "policy.ttl" not in privacy
+    assert "policy.executionTimeout" not in privacy
+    assert "RunPodの既定" in privacy
 
 
 def test_public_docs_keep_skitvoice_closed_and_distinguish_local_changes_from_deploy() -> None:
@@ -192,6 +206,21 @@ def test_public_docs_keep_skitvoice_closed_and_distinguish_local_changes_from_de
     assert "public sample APIはSkitVoice sampleを返さない" in vibevoice
     assert "現時点の公開環境で停止済みとは扱わない" in checklist
     assert "aoi-ot/VibeVoice-LargeをMicrosoft公式配布と表現しない" in read_text("THIRD_PARTY_NOTICES.md")
+
+
+def test_current_state_docs_distinguish_preview_verification_from_production_deploy() -> None:
+    for relative_path in (
+        "README.md",
+        "TASK.md",
+        "docs/deployment/CLOUDFLARE.md",
+        "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
+        "docs/deployment/ARCHITECTURE.md",
+        "docs/deployment/APP_SPLIT.md",
+    ):
+        document = read_text(relative_path)
+        assert "preview" in document, relative_path
+        assert "production" in document, relative_path
+        assert "本番未deploy" in document, relative_path
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:

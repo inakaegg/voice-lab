@@ -83,15 +83,23 @@ test("SpeakLoop provides a Chinese script segmented control backed by OpenCC", (
   assert.match(styles, /prefers-reduced-motion/);
 });
 
-test("SpeakLoop exposes an opt-in Seed-VC model voice control", () => {
+test("SpeakLoop exposes an opt-in Seed-VC model voice control with on-demand help", () => {
   assert.match(speakloop, /id="practice-own-voice-toggle"/);
   assert.match(speakloop, /自分の声/);
   assert.match(speakloop, /practice-own-voice-control/);
-  assert.match(speakloop, /同じセッションであなたが最初に録音した音声だけ/);
-  assert.match(speakloop, /外部の音声処理サービスへ一時的に送信/);
-  assert.match(speakloop, /声質に近づけたAI生成音声/);
-  assert.match(speakloop, /Voice Labの履歴には保存しません/);
-  assert.match(speakloop, /通常のお手本音声で練習を続けられます/);
+  assert.match(speakloop, /id="practice-own-voice-help"/);
+  assert.match(speakloop, /aria-label="自分の声について"/);
+  assert.match(speakloop, /role="tooltip"/);
+  assert.match(speakloop, /「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。/);
+  assert.match(speakloop, /className="practice-own-voice-disclosure"/);
+  assert.match(speakloop, /録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。/);
+  assert.match(speakloop, /import \{ CircleHelp \} from "lucide-react"/);
+  assert.match(speakloop, /<CircleHelp[^>]+strokeWidth=\{2\.25\}/);
+  assert.doesNotMatch(speakloop, /通常のお手本音声で練習を続けられます/);
+  assert.match(styles, /\.practice-quick-settings:has\(#practice-own-voice-toggle:checked\)[\s\S]*\.practice-own-voice-disclosure/);
+  assert.match(styles, /\.practice-own-voice-help\[data-open="true"\][\s\S]*\.practice-own-voice-tooltip/);
+  assert.match(styles, /\.practice-own-voice-help:hover[\s\S]*\.practice-own-voice-tooltip/);
+  assert.match(styles, /\.practice-own-voice-help-button svg[\s\S]*height: 24px[\s\S]*width: 24px/);
 });
 
 test("SkitVoice public page exposes no interactive generation or samples", () => {
@@ -103,6 +111,8 @@ test("SkitVoice public page exposes no interactive generation or samples", () =>
 test("SpeakLoop keeps comparison playback simple without an auto-play preference control", () => {
   assert.doesNotMatch(speakloop, /practice-auto-play-comparison|練習終了後すぐ再生/);
   assert.match(speakloop, /practice-play-model-button/);
+  assert.match(speakloop, /practice-play-model-only-button/);
+  assert.match(speakloop, /お手本だけ再生/);
   assert.match(speakloop, /practice-speed-slider/);
 });
 

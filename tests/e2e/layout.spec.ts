@@ -71,6 +71,56 @@ test("SpeakLoop keeps the shared privacy notice at the workflow bottom left", as
   }
 });
 
+test("SpeakLoop shows own-voice details on hover, focus, and click without shifting the workflow", async ({ page }, testInfo) => {
+  await page.goto("/speakloop");
+  const help = page.locator("#practice-own-voice-help > button");
+  const tooltip = page.locator("#practice-own-voice-tooltip");
+  const disclosure = page.locator(".practice-own-voice-disclosure");
+  const workflowBoxBefore = await page.locator(".react-practice-flow").boundingBox();
+
+  await expect(tooltip).toBeHidden();
+  await expect(disclosure).toBeHidden();
+  if (testInfo.project.name !== "mobile") {
+    await help.hover();
+    await expect(tooltip).toBeVisible();
+    await page.locator(".practice-card-copy").first().hover();
+    await expect(tooltip).toBeHidden();
+  }
+
+  await help.click();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveText("「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。");
+  await assertNoHorizontalOverflow(page);
+  expect(await page.locator(".react-practice-flow").boundingBox()).toEqual(workflowBoxBefore);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-help.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "dark"));
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-help.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "light"));
+  }
+
+  await help.click();
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toBeHidden();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(help).toBeFocused();
+  await expect(tooltip).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(tooltip).toBeHidden();
+
+  await page.locator("#practice-own-voice-toggle").check();
+  await expect(disclosure).toBeVisible();
+  await expect(disclosure).toHaveText("録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。");
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-disclosure.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "dark"));
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-disclosure.png`, fullPage: true });
+  }
+});
+
 test("portal keeps the SpeakLoop action within the initial viewport", async ({ page }) => {
   await page.goto("/");
   const viewportHeight = await page.evaluate(() => innerHeight);
@@ -147,6 +197,18 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
       value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
       configurable: true,
     });
+    Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+      configurable: true,
+      get: () => 2.2,
+    });
+    HTMLMediaElement.prototype.play = function play() {
+      const starts = ((window as any).__practicePlayStarts ||= []);
+      starts.push({ id: this.id, currentTime: this.currentTime });
+      this.currentTime = 2.2;
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    };
+    HTMLMediaElement.prototype.pause = function pause() {};
   });
   let recordingRequests = 0;
   await page.route("**/api/practice/recordings", async (route) => {
@@ -190,12 +252,16 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
           comparison_alignment: {
             available: true,
             complete: true,
-            phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.8 }],
+            target_phrase_count: 1,
+            all_phrases_playable: true,
+            phrases: [{ index: 0, target_text: "软件开发者很受欢迎。", available: true, audio_start: 0.1, audio_end: 1.8 }],
           },
           model_comparison_alignment: {
             available: true,
             complete: true,
-            phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.9 }],
+            target_phrase_count: 1,
+            all_phrases_playable: true,
+            phrases: [{ index: 0, target_text: "软件开发者很受欢迎。", available: true, audio_start: 0.1, audio_end: 1.9 }],
           },
         },
       }),
@@ -226,6 +292,12 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   await expect(page.locator("#practice-recognized-text .practice-diff-correction", { hasText: "件" })).toHaveCount(1);
   await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
   await expect(page.locator("#practice-comparison-note")).toHaveText("1/1フレーズを順番に比較できます。");
+  await page.evaluate(() => { (window as any).__practicePlayStarts = []; });
+  await page.locator("#practice-recognized-text button.practice-diff-cell").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__practicePlayStarts)).toEqual([
+    { id: "practice-model-audio", currentTime: 0.1 },
+    { id: "practice-repeat-audio", currentTime: 0.1 },
+  ]);
   expect(recordingRequests).toBe(2);
 
   const scriptIndicator = page.locator(".practice-script-indicator");
@@ -604,6 +676,13 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
       value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
       configurable: true,
     });
+    const playbackWindow = window as typeof window & { __modelPlayCalls?: number };
+    playbackWindow.__modelPlayCalls = 0;
+    HTMLMediaElement.prototype.play = function () {
+      if (this.id === "practice-model-audio") playbackWindow.__modelPlayCalls = (playbackWindow.__modelPlayCalls || 0) + 1;
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    };
   });
   let ownVoiceRequested = false;
   await page.route("**/api/practice/recordings", async (route) => {
@@ -653,6 +732,29 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
       }),
     });
   });
+  await page.route("**/api/practice/attempt-jobs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "practice-own-voice-attempt-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "比較準備が完了しました" },
+        result: {
+          recording_kind: "attempt",
+          target_language: "en-US",
+          target_text: "What are you doing today?",
+          recognized_text: "What are you doing today?",
+          model_recognized_text: "What are you doing today?",
+          similarity: 1,
+          grade: "perfect",
+          diff: [],
+          comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
+          model_comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
+        },
+      }),
+    });
+  });
 
   await page.goto("/speakloop");
   const ownVoice = page.locator("#practice-own-voice-toggle");
@@ -687,6 +789,18 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-progress.png`, fullPage: true });
   }
   await expect(page.locator("#practice-play-model-button")).toBeEnabled({ timeout: 10_000 });
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  await repeatRecord.click();
+  await repeatRecord.click();
+  await expect(page.locator("#practice-result-panel")).toBeVisible();
+  const modelOnlyButton = page.locator("#practice-play-model-only-button");
+  await expect(modelOnlyButton).toBeVisible();
+  await expect(modelOnlyButton).toBeEnabled();
+  await expect(modelOnlyButton).toContainText("お手本だけ再生");
+  const modelPlayCallsBefore = await page.evaluate(() => (window as typeof window & { __modelPlayCalls?: number }).__modelPlayCalls || 0);
+  await modelOnlyButton.click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __modelPlayCalls?: number }).__modelPlayCalls || 0))
+    .toBeGreaterThan(modelPlayCallsBefore);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await page.locator("html").evaluate((element) => {
       element.setAttribute("data-theme", "dark");

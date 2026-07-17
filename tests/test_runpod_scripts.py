@@ -1,6 +1,8 @@
+import importlib.util
 import json
 import os
 import subprocess
+import tomllib
 from pathlib import Path
 
 
@@ -230,11 +232,22 @@ def test_runpod_image_workflow_embeds_source_revision() -> None:
 
 def test_runpod_image_does_not_install_url_reference_download_tools() -> None:
     dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    optional_dependencies = pyproject["project"]["optional-dependencies"]
 
     assert "ARG DENO_VERSION=" not in dockerfile
     assert "deno-x86_64-unknown-linux-gnu.zip" not in dockerfile
     assert "deno --version" not in dockerfile
     assert "yt-dlp" not in dockerfile
+    assert not any(
+        dependency.startswith("yt-dlp")
+        for dependency in optional_dependencies["vibevoice"]
+    )
+    assert any(
+        dependency.startswith("yt-dlp")
+        for dependency in optional_dependencies["url-reference"]
+    )
+    assert "url-reference" not in dockerfile
 
 
 def test_runpod_smoke_script_supports_diagnostics_operation() -> None:
@@ -284,12 +297,11 @@ def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
     assert '"line_gap": args.vibevoice_line_gap' in script
 
 
-def test_runpod_smoke_script_requires_explicit_request_policy_without_logging_raw_errors() -> None:
+def test_runpod_smoke_script_uses_runpod_default_policy_without_logging_raw_errors() -> None:
     script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
 
-    assert '"policy": _operation_policy(args.operation_mode)' in script
-    assert "RUNPOD_OPERATION_POLICIES_JSON" in script
-    assert "ttl < execution_timeout" in script
+    assert 'payload: dict[str, Any] = {"input": input_payload}' in script
+    assert "RUNPOD_OPERATION_POLICIES_JSON" not in script
     assert "exc.read()" not in script
     assert "RunPod request failed with HTTP" in script
 
@@ -301,6 +313,7 @@ def test_runpod_update_serverless_template_redacts_env_json(tmp_path: Path) -> N
             [
                 "RUNPOD_SERVERLESS_TEMPLATE_ID=template-id",
                 "RUNPOD_IMAGE=docker.io/example/mo-speech:new",
+                "RUNPOD_REGISTRY_AUTH_ID=registry-id",
                 "OPENAI_API_KEY=secret-value",
             ]
         ),
@@ -318,56 +331,108 @@ def test_runpod_update_serverless_template_redacts_env_json(tmp_path: Path) -> N
         text=True,
     )
 
-    assert "runpodctl template update template-id" in result.stdout
-    assert "--image docker.io/example/mo-speech:new" in result.stdout
+    assert "PATCH https://rest.runpod.io/v1/templates/template-id" in result.stdout
+    assert "image=docker.io/example/mo-speech:new" in result.stdout
+    assert "containerRegistryAuthId=registry-id" in result.stdout
     assert "env-json-redacted" in result.stdout
     assert "secret-value" not in result.stdout
 
 
-def test_runpod_update_serverless_template_redacts_runpodctl_output(tmp_path: Path) -> None:
+def test_runpod_template_api_builds_private_serverless_payload_and_redacts_secrets() -> None:
+    module_path = Path("scripts/runpod_template_api.py")
+    spec = importlib.util.spec_from_file_location("runpod_template_api", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    payload = module.build_template_payload(
+        action="create",
+        environ={
+            "RUNPOD_IMAGE": "docker.io/example/mo-speech:new",
+            "RUNPOD_SERVERLESS_TEMPLATE_NAME": "private-template",
+            "RUNPOD_CONTAINER_DISK_GB": "60",
+            "RUNPOD_VOLUME_MOUNT_PATH": "/workspace",
+            "RUNPOD_REGISTRY_AUTH_ID": "registry-id",
+        },
+        template_env={
+            "OPENAI_API_KEY": "secret-value",
+            "HF_TOKEN": "token-value",
+            "MO_PROVIDER_MODE": "local",
+        },
+    )
+
+    assert payload == {
+        "imageName": "docker.io/example/mo-speech:new",
+        "name": "private-template",
+        "containerDiskInGb": 60,
+        "containerRegistryAuthId": "registry-id",
+        "dockerStartCmd": ["python", "-m", "mo_speech.runpod_handler"],
+        "env": {
+            "OPENAI_API_KEY": "secret-value",
+            "HF_TOKEN": "token-value",
+            "MO_PROVIDER_MODE": "local",
+        },
+        "isPublic": False,
+        "isServerless": True,
+        "volumeMountPath": "/workspace",
+    }
+    assert module.redact_secrets(payload)["env"] == {
+        "OPENAI_API_KEY": "<redacted>",
+        "HF_TOKEN": "<redacted>",
+        "MO_PROVIDER_MODE": "local",
+    }
+
+
+def test_runpod_update_serverless_template_requires_registry_auth_for_private_image(
+    tmp_path: Path,
+) -> None:
     env_file = tmp_path / ".runpod.env"
     env_file.write_text(
         "\n".join(
             [
                 "RUNPOD_SERVERLESS_TEMPLATE_ID=template-id",
                 "RUNPOD_IMAGE=docker.io/example/mo-speech:new",
-                "OPENAI_API_KEY=secret-value",
-                "HF_TOKEN=token-value",
             ]
         ),
         encoding="utf-8",
     )
-
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake_runpodctl = bin_dir / "runpodctl"
-    fake_runpodctl.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' '{\"env\":{\"OPENAI_API_KEY\":\"secret-value\",\"HF_TOKEN\":\"token-value\"}}'\n",
-        encoding="utf-8",
-    )
-    fake_runpodctl.chmod(0o755)
-
     env = os.environ.copy()
-    env.update(
-        {
-            "PATH": f"{bin_dir}:{env['PATH']}",
-            "RUNPOD_ENV_FILE": str(env_file),
-        }
-    )
+    env.update({"RUNPOD_DRY_RUN": "1", "RUNPOD_ENV_FILE": str(env_file)})
 
     result = subprocess.run(
         ["bash", "scripts/runpod_update_serverless_template.sh"],
-        check=True,
+        check=False,
         capture_output=True,
         env=env,
         text=True,
     )
 
-    assert '"OPENAI_API_KEY": "<redacted>"' in result.stdout
-    assert '"HF_TOKEN": "<redacted>"' in result.stdout
-    assert "secret-value" not in result.stdout
-    assert "token-value" not in result.stdout
+    assert result.returncode != 0
+    assert "RUNPOD_REGISTRY_AUTH_ID" in result.stderr
+
+
+def test_runpod_create_serverless_template_requires_registry_auth_for_private_image(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".runpod.env"
+    env_file.write_text(
+        "RUNPOD_IMAGE=docker.io/example/mo-speech:new\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"RUNPOD_DRY_RUN": "1", "RUNPOD_ENV_FILE": str(env_file)})
+
+    result = subprocess.run(
+        ["bash", "scripts/runpod_create_serverless_template.sh"],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "RUNPOD_REGISTRY_AUTH_ID" in result.stderr
 
 
 def test_runpod_deploy_serverless_image_dry_run_orchestrates_unique_tag(tmp_path: Path) -> None:
@@ -380,6 +445,7 @@ def test_runpod_deploy_serverless_image_dry_run_orchestrates_unique_tag(tmp_path
                 "RUNPOD_SERVERLESS_TEMPLATE_ID=old-template",
                 "RUNPOD_ENDPOINT_ID=endpoint-id",
                 "RUNPOD_API_KEY=secret-key",
+                "RUNPOD_REGISTRY_AUTH_ID=registry-id",
                 "OPENAI_API_KEY=secret-openai",
             ]
         ),
@@ -410,8 +476,9 @@ def test_runpod_deploy_serverless_image_dry_run_orchestrates_unique_tag(tmp_path
     assert "-f image_name=docker.io/example/mo-speech" in output
     assert "-f expected_visibility=private" in output
     assert "-f image_tag=runpod-vibevoice-abcdef1" in output
-    assert "runpodctl template create" in output
-    assert "--image docker.io/example/mo-speech:runpod-vibevoice-abcdef1" in output
+    assert "POST https://rest.runpod.io/v1/templates" in output
+    assert "image=docker.io/example/mo-speech:runpod-vibevoice-abcdef1" in output
+    assert "containerRegistryAuthId=registry-id" in output
     assert "/v1/endpoints/endpoint-id/update" in output
     assert "python scripts/runpod_smoke_serverless.py --operation-mode diagnostics" in output
     assert "secret-key" not in output
@@ -425,5 +492,5 @@ def test_runpod_deploy_serverless_image_reuses_existing_template_name() -> None:
     assert "find_existing_template_id" in script
     assert "runpodctl template list --type user" in script
     assert "template already exists; reusing" in script
-    assert "runpodctl template update" in script
+    assert "runpod_template_api.py" in script
     assert 'template_id="$(create_or_update_template)"' in script

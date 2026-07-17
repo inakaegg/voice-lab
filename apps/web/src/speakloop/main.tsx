@@ -1,5 +1,7 @@
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
+import { CircleHelp } from "lucide-react";
+import { useState } from "react";
 
 activateCompactLayout();
 
@@ -28,19 +30,34 @@ function CancelRecordingButton({ id }: { id: string }) {
   return <button id={id} className="practice-record-cancel-button" type="button" aria-label="録音をキャンセル" title="録音をキャンセル" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>;
 }
 
+function OwnVoiceHelp() {
+  const [open, setOpen] = useState(false);
+  return <div id="practice-own-voice-help" className="practice-own-voice-help" data-open={open}>
+    <button className="practice-own-voice-help-button" type="button" aria-label="自分の声について" aria-describedby="practice-own-voice-tooltip" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      <CircleHelp aria-hidden="true" strokeWidth={2.25}/>
+    </button>
+    <p id="practice-own-voice-tooltip" className="practice-own-voice-tooltip" role="tooltip">「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。</p>
+  </div>;
+}
+
 function SpeakLoop() {
   return <PageShell className="practice-shell react-practice-shell">
     <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" />
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>自分が言いたい文章だから、練習が続く。</h2><p>母国語で話すと、学習言語のお手本を生成します。聞いて、まねして、発音を比較できます。</p></div>
     </section>
-    <section className="practice-quick-settings react-toolbar" aria-label="練習設定"><label className="practice-current-language practice-language-select"><span>学習言語</span><select id="practice-target-language-select" aria-label="学習する言語" defaultValue="en-US"><option value="en-US">🇺🇸 English</option><option value="zh-CN">🇨🇳 中文</option></select></label><fieldset id="practice-chinese-script-setting" className="practice-script-setting" hidden><legend>字形</legend><div className="practice-script-toggle" role="group" aria-label="中国語の字形" data-script="simplified"><span className="practice-script-indicator" aria-hidden="true"/><button id="practice-script-simplified" type="button" aria-pressed="true">简体</button><button id="practice-script-traditional" type="button" aria-pressed="false">繁體</button></div></fieldset><label id="practice-pinyin-setting" className="practice-inline-setting" hidden><input id="practice-pinyin-toggle" type="checkbox" defaultChecked/><span>ピンイン</span></label><label className="practice-own-voice-control" title="同じセッションの最初の録音を使って、AI生成のお手本を自分の声質に近づけます"><input id="practice-own-voice-toggle" type="checkbox"/><span className="practice-own-voice-switch" aria-hidden="true"/><span>自分の声</span></label></section>
-    <p className="practice-own-voice-disclosure">「自分の声」は、同じセッションであなたが最初に録音した音声だけを使います。録音とお手本音声は外部の音声処理サービスへ一時的に送信され、声質に近づけたAI生成音声を作ります。Voice Labの履歴には保存しません。変換できない場合も、通常のお手本音声で練習を続けられます。</p>
+    <section className="practice-quick-settings react-toolbar" aria-label="練習設定">
+      <label className="practice-current-language practice-language-select"><span>学習言語</span><select id="practice-target-language-select" aria-label="学習する言語" defaultValue="en-US"><option value="en-US">🇺🇸 English</option><option value="zh-CN">🇨🇳 中文</option></select></label>
+      <fieldset id="practice-chinese-script-setting" className="practice-script-setting" hidden><legend>字形</legend><div className="practice-script-toggle" role="group" aria-label="中国語の字形" data-script="simplified"><span className="practice-script-indicator" aria-hidden="true"/><button id="practice-script-simplified" type="button" aria-pressed="true">简体</button><button id="practice-script-traditional" type="button" aria-pressed="false">繁體</button></div></fieldset>
+      <label id="practice-pinyin-setting" className="practice-inline-setting" hidden><input id="practice-pinyin-toggle" type="checkbox" defaultChecked/><span>ピンイン</span></label>
+      <div className="practice-own-voice-setting"><label className="practice-own-voice-control"><input id="practice-own-voice-toggle" type="checkbox" aria-describedby="practice-own-voice-disclosure"/><span className="practice-own-voice-switch" aria-hidden="true"/><span>自分の声</span></label><OwnVoiceHelp /></div>
+      <p id="practice-own-voice-disclosure" className="practice-own-voice-disclosure" aria-live="polite">録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。</p>
+    </section>
     <section className="practice-flow react-practice-flow" aria-label="れんしゅう">
       <article id="practice-native-panel" className="practice-card practice-card-primary react-flow-card" data-practice-record-slot="native"><div className="practice-step-number">1</div><div className="practice-card-copy"><p className="react-step-label">YOUR IDEA</p><h2 id="practice-record-title">言いたいことを話す</h2><p>いつもの言葉で、短く話してください。</p></div><div className="react-record-control"><RecordButton id="practice-native-record-button" levelId="practice-native-level" label="言いたいことを録音"/><span>タップして話す</span><CancelRecordingButton id="practice-native-cancel-button"/></div><div id="practice-native-transcript-panel" className="practice-native-transcript-panel" hidden><p id="practice-native-transcript-label" className="practice-mini-label">言ったこと</p><p id="practice-native-transcript" className="practice-native-transcript"/></div></article>
       <article id="practice-prompt-panel" className="practice-card practice-prompt-card react-flow-card" data-practice-record-slot="repeat" hidden><div className="practice-step-number">2</div><div className="practice-card-copy"><p className="react-step-label">LISTEN & REPEAT</p><h2>聞いて、まねする</h2><p id="practice-target-label">お手本</p></div><div className="practice-target-practice-row"><div className="practice-target-text-box"><p id="practice-target-text" className="practice-target-text"/><p id="practice-target-subtext" className="practice-target-subtext" hidden/></div><div className="react-record-control react-repeat-control"><RecordButton id="practice-repeat-record-button" levelId="practice-repeat-level" label="練習を録音" className="practice-repeat-record-button"/><span>録音して比べる</span><CancelRecordingButton id="practice-repeat-cancel-button"/></div></div>
         <div id="practice-result-panel" className="practice-result-inline react-result-panel" hidden><p id="practice-recognized-label" className="practice-section-label">聞こえた言葉</p><p id="practice-recognized-text" className="practice-recognized-text"/><div className="practice-result-summary"><div id="practice-grade-badge" className="practice-grade-badge">--</div><p id="practice-score" className="practice-score"/></div><div className="practice-score-bar" aria-hidden="true"><span id="practice-score-fill"/></div><p id="practice-comparison-note" className="practice-comparison-note" role="status" aria-live="polite" hidden/><audio id="practice-repeat-audio" hidden/></div>
-        <div className="practice-model-controls"><button id="practice-play-model-button" className="practice-play-button" type="button" disabled><span aria-hidden="true">▶</span><span>再生</span></button><label className="practice-speed-control"><span>速度</span><input id="practice-speed-slider" type="range" min="0.5" max="2" step="0.1" defaultValue="1"/><output id="practice-speed-value" htmlFor="practice-speed-slider">1.0x</output></label></div><p className="practice-grade-guide">判定: 99.5%以上: できました / 95%以上: いいかんじ / 90%以上: まあまあ / 90%未満: もう一回</p><audio id="practice-model-audio" hidden/>
+        <div className="practice-model-controls"><button id="practice-play-model-button" className="practice-play-button" type="button" disabled><span aria-hidden="true">▶</span><span>お手本を再生</span></button><button id="practice-play-model-only-button" className="practice-play-button practice-play-model-only-button" type="button" disabled hidden><span aria-hidden="true">▶</span><span>お手本だけ再生</span></button><label className="practice-speed-control"><span>速度</span><input id="practice-speed-slider" type="range" min="0.5" max="2" step="0.1" defaultValue="1"/><output id="practice-speed-value" htmlFor="practice-speed-slider">1.0x</output></label></div><p className="practice-grade-guide">判定: 99.5%以上: できました / 95%以上: いいかんじ / 90%以上: まあまあ / 90%未満: もう一回</p><audio id="practice-model-audio" hidden/>
       </article>
     </section>
     <section id="practice-job-status" className="practice-job-status" data-state="idle" role="status" aria-live="polite" hidden>

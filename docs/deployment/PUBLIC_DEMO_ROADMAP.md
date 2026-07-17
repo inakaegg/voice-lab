@@ -4,7 +4,7 @@
 
 ## 現在地
 
-- Voice LabポータルとSpeakLoopを一般公開の中心とし、SkitVoice/VibeVoiceを管理者専用研究機能へ閉じるローカル変更を進めている。未deployのため公開環境へ反映済みとは扱わない。
+- Voice LabポータルとSpeakLoopを一般公開の中心とし、SkitVoice/VibeVoiceを管理者専用研究機能へ閉じる変更はmerge済みmainのpreviewで検証済み。本番未deployのためproduction公開環境へ反映済みとは扱わない。
 - Google OAuth、feature別quota、入力上限、管理者認証、簡易監査ログを実装済み。
 - quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存し、ユーザー音声履歴はCloudflare版で保存しない。
 - Seed-VCと管理者専用VibeVoiceはprivateなRunPod Serverlessへ分離する前提である。
@@ -25,13 +25,12 @@
 3. audit・quotaの保持期間、削除手段、連絡先を含む正式なプライバシーポリシーの確定。
 4. Private vulnerability reporting、Secret scanning、GitHub Push Protection、Dependabot alerts、branch protection等のGitHub公開設定。
 5. 到達不能なGitHub Homepageの修正、不要remote branch整理、READMEスクリーンショット。
-6. RunPod operation別の実行時間、policy値、platform側job/result/log保持のowner確認。
 
 Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオとして閲覧可能にする方針を維持する。第三者コンポーネントにはそれぞれのライセンスが適用されるため、本体の権利表示と混同しない。
 
 ## 完了済みの技術確認
 
-1. 旧公開Workerでトップ、OAuth開始、SpeakLoop、SkitVoiceをsmoke確認した。今回のSkitVoice閉鎖は未deployであり、再確認が必要である。
+1. 旧production Workerでトップ、OAuth開始、SpeakLoop、SkitVoiceをsmoke確認した。今回のSkitVoice閉鎖はpreviewで確認済みだが本番未deployであり、公開URLでの再確認が必要である。
 2. 管理route、旧route・旧HTML直指定、公開サンプル配信、OpenAI／RunPod接続を確認した。
 3. Cloudflare版の旧音声履歴KV／R2データを削除した。
 4. Git履歴全体をGitleaksで検査し、2026-07-16の監査時点で検出0件を確認した。
