@@ -1865,17 +1865,18 @@ audio {
 
 .practice-own-voice-help-button {
   align-items: center;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid #dbe8f7;
+  background: transparent;
+  border: 0;
   border-radius: 50%;
-  color: #52677f;
+  color: var(--react-accent-hover);
   cursor: help;
   display: inline-flex;
-  height: 34px;
+  height: 38px;
   justify-content: center;
   list-style: none;
+  padding: 0;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
-  width: 34px;
+  width: 38px;
 }
 
 .practice-own-voice-help-button:hover,
@@ -1892,9 +1893,9 @@ audio {
 
 .practice-own-voice-help-button svg {
   fill: none;
-  height: 18px;
+  height: 24px;
   stroke: currentColor;
-  width: 18px;
+  width: 24px;
 }
 
 .practice-own-voice-tooltip {
@@ -4792,9 +4793,8 @@ html[data-theme="dark"] .react-public-body .practice-own-voice-control {
 html[data-theme="dark"] .react-public-body .practice-own-voice-switch { background: #526078; }
 html[data-theme="dark"] .react-public-body .practice-own-voice-control input:checked + .practice-own-voice-switch { background: #5e9ff0; }
 html[data-theme="dark"] .react-public-body .practice-own-voice-help-button {
-  background: var(--react-paper);
-  border-color: var(--react-border);
-  color: #c6d1e3;
+  background: transparent;
+  color: #b7d6ff;
 }
 html[data-theme="dark"] .react-public-body .practice-own-voice-help-button:hover,
 html[data-theme="dark"] .react-public-body .practice-own-voice-help[data-open="true"] .practice-own-voice-help-button {

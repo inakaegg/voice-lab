@@ -579,6 +579,7 @@ function renderAttemptResult(payload) {
   resultSummary.hidden = noSpeech;
   scoreBar.hidden = noSpeech;
   gradeGuide.hidden = noSpeech;
+  resultPanel.hidden = false;
   if (noSpeech) {
     gradeBadge.textContent = "";
     gradeBadge.removeAttribute("data-grade");
@@ -595,7 +596,6 @@ function renderAttemptResult(payload) {
     renderRecognizedDiff(payload);
   }
   nativePanel.hidden = false;
-  resultPanel.hidden = false;
   setActiveRecordSlot("repeat");
   syncPracticeRecordMode();
   syncPlayButton();
@@ -918,7 +918,7 @@ function isActiveComparisonPlayback(token) {
   return isComparisonPlaying && comparisonPlaybackToken === token;
 }
 
-async function playComparisonAudios() {
+async function playComparisonAudios({ targetOffset = null } = {}) {
   if (isComparisonPlaying) {
     stopComparisonPlayback();
     return;
@@ -948,6 +948,17 @@ async function playComparisonAudios() {
       return;
     }
     const plan = currentComparisonPlaybackPlan();
+    const requestedRange = Number.isInteger(targetOffset)
+      ? playbackContract.comparisonRangeForTargetOffset({
+        targetText: currentAttemptPayload?.target_text || currentTargetText,
+        targetOffset,
+        alignment: currentAttemptComparisonAlignment,
+        ranges: plan.ranges,
+      })
+      : null;
+    if (Number.isInteger(targetOffset) && !requestedRange) {
+      return;
+    }
     if (plan.mode === "model") {
       await playAudioElementToEnd(modelAudio, token);
       return;
@@ -960,7 +971,8 @@ async function playComparisonAudios() {
       await playAudioElementToEnd(repeatAudio, token);
       return;
     }
-    for (const range of plan.ranges) {
+    const ranges = requestedRange ? [requestedRange] : plan.ranges;
+    for (const range of ranges) {
       if (!isActiveComparisonPlayback(token)) {
         return;
       }
@@ -1499,11 +1511,22 @@ function practiceDisplayComparableText(value) {
 }
 
 function renderPracticeDiffCell(cell) {
-  const element = document.createElement(cell.type === "equal" ? "span" : "button");
+  const plan = currentComparisonPlaybackPlan();
+  const comparisonRange = cell.type === "equal"
+    ? null
+    : playbackContract.comparisonRangeForTargetOffset({
+      targetText: currentAttemptPayload?.target_text || currentTargetText,
+      targetOffset: cell.targetOffset,
+      alignment: currentAttemptComparisonAlignment,
+      ranges: plan.ranges,
+    });
+  const element = document.createElement(comparisonRange ? "button" : "span");
   if (element instanceof HTMLButtonElement) {
     element.type = "button";
-    element.title = cell.type === "delete" ? "抜けた部分を比較再生" : "この違いを比較再生";
-    element.addEventListener("click", playComparisonAudios);
+    element.title = cell.type === "delete" ? "抜けたフレーズを比較再生" : "このフレーズを比較再生";
+    element.addEventListener("click", () => {
+      playComparisonAudios({ targetOffset: cell.targetOffset }).catch((error) => showError(error.message));
+    });
   }
   element.className = `practice-diff-cell is-${cell.type}`;
   const correction = document.createElement("span");
@@ -1553,7 +1576,7 @@ function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
       recognizedIndex < recognizedChars.length &&
       practiceDisplayCharsEqual(targetChar, recognizedChar)
     ) {
-      cells.push({ type: "equal", correction: "", heard: recognizedChar });
+      cells.push({ type: "equal", correction: "", heard: recognizedChar, targetOffset: targetIndex });
       targetIndex += 1;
       recognizedIndex += 1;
       continue;
@@ -1564,7 +1587,7 @@ function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
       recognizedIndex < recognizedChars.length &&
       currentDistance === 1 + distance[targetIndex + 1][recognizedIndex + 1]
     ) {
-      cells.push({ type: "substitute", correction: targetChar, heard: recognizedChar });
+      cells.push({ type: "substitute", correction: targetChar, heard: recognizedChar, targetOffset: targetIndex });
       targetIndex += 1;
       recognizedIndex += 1;
       continue;
@@ -1573,11 +1596,11 @@ function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
       targetIndex < targetChars.length &&
       currentDistance === 1 + distance[targetIndex + 1][recognizedIndex]
     ) {
-      cells.push({ type: "delete", correction: targetChar, heard: "_" });
+      cells.push({ type: "delete", correction: targetChar, heard: "_", targetOffset: targetIndex });
       targetIndex += 1;
       continue;
     }
-    cells.push({ type: "insert", correction: "", heard: recognizedChar || "_" });
+    cells.push({ type: "insert", correction: "", heard: recognizedChar || "_", targetOffset: targetIndex });
     recognizedIndex += 1;
   }
   return cells.length ? cells : [{ type: "insert", correction: "", heard: "（聞き取れませんでした）" }];

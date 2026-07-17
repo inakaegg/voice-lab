@@ -81,9 +81,51 @@
     };
   }
 
+  function comparableTargetText(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .replace(/[\p{P}\p{S}]+/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+  }
+
+  function comparisonRangeForTargetOffset({ targetText, targetOffset, alignment, ranges }) {
+    const offset = Number(targetOffset);
+    const target = comparableTargetText(targetText);
+    const phrases = Array.isArray(alignment?.phrases) ? alignment.phrases : [];
+    const playableRanges = Array.isArray(ranges) ? ranges : [];
+    if (!target || !Number.isInteger(offset) || offset < 0 || !phrases.length || !playableRanges.length) {
+      return null;
+    }
+
+    let cursor = 0;
+    let selectedIndex = null;
+    for (const phrase of phrases) {
+      const phraseText = comparableTargetText(phrase?.target_text);
+      if (!phraseText) continue;
+      const start = target.indexOf(phraseText, cursor);
+      if (start < 0) continue;
+      const end = start + phraseText.length;
+      if (offset < end) {
+        selectedIndex = Number(phrase.index);
+        break;
+      }
+      selectedIndex = Number(phrase.index);
+      cursor = end;
+    }
+    if (!Number.isInteger(selectedIndex)) {
+      return null;
+    }
+    return playableRanges.find((range) => Number(range?.index) === selectedIndex) || null;
+  }
+
   function shouldStopAudioSegment({ active, ended, currentTime, segmentEnd }) {
     return !active || ended || Number(currentTime) >= Number(segmentEnd);
   }
 
-  global.voiceLabPracticePlayback = { comparisonPlaybackPlan, shouldStopAudioSegment };
+  global.voiceLabPracticePlayback = {
+    comparisonPlaybackPlan,
+    comparisonRangeForTargetOffset,
+    shouldStopAudioSegment,
+  };
 })(globalThis);

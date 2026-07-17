@@ -3,7 +3,11 @@ import test from "node:test";
 
 await import("../src/mo_speech/web/practice_playback.js");
 
-const { comparisonPlaybackPlan, shouldStopAudioSegment } = globalThis.voiceLabPracticePlayback;
+const {
+  comparisonPlaybackPlan,
+  comparisonRangeForTargetOffset,
+  shouldStopAudioSegment,
+} = globalThis.voiceLabPracticePlayback;
 
 const completeModel = {
   available: true,
@@ -122,4 +126,57 @@ test("segment playback stops at the exact end instead of 30ms early", () => {
   assert.equal(shouldStopAudioSegment({ active: true, ended: false, currentTime: 0.969, segmentEnd: 1.0 }), false);
   assert.equal(shouldStopAudioSegment({ active: true, ended: false, currentTime: 1.0, segmentEnd: 1.0 }), true);
   assert.equal(shouldStopAudioSegment({ active: false, ended: false, currentTime: 0.5, segmentEnd: 1.0 }), true);
+});
+
+test("a heard-word difference selects the paired range for its target phrase", () => {
+  const alignment = {
+    ...completeModel,
+    phrases: [
+      { ...completeModel.phrases[0], target_text: "Please open the window." },
+      { ...completeModel.phrases[1], target_text: "Then sit down." },
+    ],
+  };
+  const plan = comparisonPlaybackPlan({
+    modelReady: true,
+    repeatReady: true,
+    resultVisible: true,
+    outcome: "scored",
+    recognizedLanguageMatches: true,
+    attemptAlignment: alignment,
+    modelAlignment: alignment,
+    modelDuration: 2.2,
+    repeatDuration: 2.2,
+  });
+
+  const selected = comparisonRangeForTargetOffset({
+    targetText: "Please open the window. Then sit down.",
+    targetOffset: 24,
+    alignment,
+    ranges: plan.ranges,
+  });
+
+  assert.equal(selected?.index, 1);
+  assert.deepEqual(selected?.model, { start: 1, end: 2 });
+  assert.deepEqual(selected?.repeat, { start: 1, end: 2 });
+});
+
+test("a heard-word difference does not fall back to the whole recording without a paired phrase", () => {
+  const alignment = {
+    available: true,
+    complete: false,
+    target_phrase_count: 2,
+    phrases: [
+      { index: 0, target_text: "First.", available: true, audio_start: 0.1, audio_end: 0.9 },
+      { index: 1, target_text: "Second.", available: false, audio_start: null, audio_end: null },
+    ],
+  };
+
+  const selected = comparisonRangeForTargetOffset({
+    targetText: "First. Second.",
+    targetOffset: 6,
+    alignment,
+    ranges: [{ index: 0, model: { start: 0.1, end: 0.9 }, repeat: { start: 0.1, end: 0.9 } }],
+  });
+
+  assert.equal(selected, null);
 });

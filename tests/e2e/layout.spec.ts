@@ -87,8 +87,7 @@ test("SpeakLoop shows own-voice details on hover, focus, and click without shift
 
   await help.click();
   await expect(tooltip).toBeVisible();
-  await expect(tooltip).toContainText("同じセッションであなたが最初に録音した音声だけ");
-  await expect(tooltip).toContainText("Voice Labの履歴には保存しません");
+  await expect(tooltip).toHaveText("「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。");
   await assertNoHorizontalOverflow(page);
   expect(await page.locator(".react-practice-flow").boundingBox()).toEqual(workflowBoxBefore);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
@@ -186,6 +185,18 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
       value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
       configurable: true,
     });
+    Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+      configurable: true,
+      get: () => 2.2,
+    });
+    HTMLMediaElement.prototype.play = function play() {
+      const starts = ((window as any).__practicePlayStarts ||= []);
+      starts.push({ id: this.id, currentTime: this.currentTime });
+      this.currentTime = 2.2;
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    };
+    HTMLMediaElement.prototype.pause = function pause() {};
   });
   let recordingRequests = 0;
   await page.route("**/api/practice/recordings", async (route) => {
@@ -229,12 +240,16 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
           comparison_alignment: {
             available: true,
             complete: true,
-            phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.8 }],
+            target_phrase_count: 1,
+            all_phrases_playable: true,
+            phrases: [{ index: 0, target_text: "软件开发者很受欢迎。", available: true, audio_start: 0.1, audio_end: 1.8 }],
           },
           model_comparison_alignment: {
             available: true,
             complete: true,
-            phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 1.9 }],
+            target_phrase_count: 1,
+            all_phrases_playable: true,
+            phrases: [{ index: 0, target_text: "软件开发者很受欢迎。", available: true, audio_start: 0.1, audio_end: 1.9 }],
           },
         },
       }),
@@ -265,6 +280,12 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   await expect(page.locator("#practice-recognized-text .practice-diff-correction", { hasText: "件" })).toHaveCount(1);
   await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
   await expect(page.locator("#practice-comparison-note")).toHaveText("1/1フレーズを順番に比較できます。");
+  await page.evaluate(() => { (window as any).__practicePlayStarts = []; });
+  await page.locator("#practice-recognized-text button.practice-diff-cell").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__practicePlayStarts)).toEqual([
+    { id: "practice-model-audio", currentTime: 0.1 },
+    { id: "practice-repeat-audio", currentTime: 0.1 },
+  ]);
   expect(recordingRequests).toBe(2);
 
   const scriptIndicator = page.locator(".practice-script-indicator");

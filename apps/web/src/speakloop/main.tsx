@@ -1,5 +1,6 @@
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
+import { CircleHelp } from "lucide-react";
 import { useState } from "react";
 
 activateCompactLayout();
@@ -33,9 +34,9 @@ function OwnVoiceHelp() {
   const [open, setOpen] = useState(false);
   return <div id="practice-own-voice-help" className="practice-own-voice-help" data-open={open}>
     <button className="practice-own-voice-help-button" type="button" aria-label="自分の声について" aria-describedby="practice-own-voice-tooltip" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 1 1 3.8 1.95c-.94.65-1.5 1.1-1.5 2.05"/><path d="M12 17h.01"/></svg>
+      <CircleHelp aria-hidden="true" strokeWidth={2.25}/>
     </button>
-    <p id="practice-own-voice-tooltip" className="practice-own-voice-tooltip" role="tooltip">「自分の声」は、同じセッションであなたが最初に録音した音声だけを使います。録音とお手本音声は外部の音声処理サービスへ一時的に送信され、声質に近づけたAI生成音声を作ります。Voice Labの履歴には保存しません。変換できない場合も、通常のお手本音声で練習を続けられます。</p>
+    <p id="practice-own-voice-tooltip" className="practice-own-voice-tooltip" role="tooltip">「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。</p>
   </div>;
 }
 

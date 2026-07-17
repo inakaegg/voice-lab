@@ -90,14 +90,15 @@ test("SpeakLoop exposes an opt-in Seed-VC model voice control with on-demand hel
   assert.match(speakloop, /id="practice-own-voice-help"/);
   assert.match(speakloop, /aria-label="自分の声について"/);
   assert.match(speakloop, /role="tooltip"/);
+  assert.match(speakloop, /「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。/);
+  assert.match(speakloop, /import \{ CircleHelp \} from "lucide-react"/);
+  assert.match(speakloop, /<CircleHelp[^>]+strokeWidth=\{2\.25\}/);
   assert.doesNotMatch(speakloop, /className="practice-own-voice-disclosure"/);
-  assert.match(speakloop, /同じセッションであなたが最初に録音した音声だけ/);
-  assert.match(speakloop, /外部の音声処理サービスへ一時的に送信/);
-  assert.match(speakloop, /声質に近づけたAI生成音声/);
-  assert.match(speakloop, /Voice Labの履歴には保存しません/);
-  assert.match(speakloop, /通常のお手本音声で練習を続けられます/);
+  assert.doesNotMatch(speakloop, /Voice Labの履歴には保存しません/);
+  assert.doesNotMatch(speakloop, /通常のお手本音声で練習を続けられます/);
   assert.match(styles, /\.practice-own-voice-help\[data-open="true"\][\s\S]*\.practice-own-voice-tooltip/);
   assert.match(styles, /\.practice-own-voice-help:hover[\s\S]*\.practice-own-voice-tooltip/);
+  assert.match(styles, /\.practice-own-voice-help-button svg[\s\S]*height: 24px[\s\S]*width: 24px/);
 });
 
 test("SkitVoice public page exposes no interactive generation or samples", () => {
