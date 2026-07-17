@@ -8,9 +8,11 @@
 
 公開Worker名は `voice-lab`、公開URLは `https://voice-lab.inakaegg.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
 
+日次quotaと監査ログの期限切れ削除は、`wrangler.toml` のCron Triggerで毎日03:17 UTCに実行する。48時間を超えた日次quotaと90日を超えた監査ログを削除するため、日次実行の間隔を含む実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaは利用上限維持のため公開デモの運用中に保持する。
+
 この文書は現在のCloudflareデモ構成と、merge済みmainのpreviewで検証済みだが本番未deployの公開境界変更を説明する。公開ポートフォリオの主機能はSpeakLoopとし、SkitVoice/VibeVoiceは既存Google管理者セッションで保護する研究機能へ閉じる。発音練習アプリと研究機能を物理的に分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
-データフロー、保存範囲、保持期間と削除に関する未決定事項は [PRIVACY.md](PRIVACY.md) を参照する。正式なプライバシーポリシーと公開画面からの導線が完成するまで公開再開を完了扱いにしない。
+データフロー、保存範囲、保持期間と削除処理は [PRIVACY.md](PRIVACY.md)、利用者向けの説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を参照する。公開画面では `/privacy` とSpeakLoopフッターから確認できる。
 
 ```text
 Browser

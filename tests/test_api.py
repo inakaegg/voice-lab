@@ -119,6 +119,16 @@ def test_root_serves_voice_lab_portal() -> None:
     assert "へんな へんかん アプリ" not in response.text
 
 
+def test_privacy_policy_route_serves_public_policy() -> None:
+    client = TestClient(create_app())
+
+    for path in ("/privacy", "/privacy/"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert "プライバシーポリシー" in response.text
+        assert "/react/assets/privacy.js" in response.text
+
+
 def test_fun_serves_operator_only_experimental_ui_locally() -> None:
     client = TestClient(create_app())
 

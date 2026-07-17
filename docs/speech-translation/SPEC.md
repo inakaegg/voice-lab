@@ -96,7 +96,7 @@ RunPod handlerはURL、cookie、ブラウザ認証情報を受け取らず、音
 
 ## 保存とプライバシー
 
-- 実装済みのデータフローと未決定事項は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。D1/KVの保持期間、削除手段、連絡先、正式な利用者向けpolicyを確定するまで公開再開を完了扱いにしない。
+- 実装上のデータフローと保持境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md)、利用者向け説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とする。D1は48時間を超えた日次quotaと90日を超えた監査ログを日次削除し、利用者向けには実際の最大保持期間である3日未満、91日未満と案内する。署名cookieは30日、短期job snapshotは1時間、累計quotaは公開デモの運用中に保持する。
 - API key、OAuth token、モデル、生成音声、録音サンプルをgit管理しない。
 - 公開デモのquota・audit識別子はGoogle emailをSHA-256 hash化してD1またはKV fallbackへ保存し、平文emailを新規のquota・audit履歴へ保存しない。署名cookieと管理者allowlist、legacy KVの扱いはデータ取扱い境界を正とする。
 - 音声履歴はローカルFastAPI版だけで保存する。Cloudflare公開版は入力音声と生成音声を履歴として保存しない。

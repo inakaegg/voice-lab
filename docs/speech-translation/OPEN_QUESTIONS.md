@@ -14,13 +14,6 @@
 
 - Chromium系以外の録音形式を正式対応範囲へ含めるか。タブ音声共有は管理者研究画面だけの検討対象とする。
 
-## 公開デモのデータ保持
-
-- D1のaudit event、日次・累計quota、KV fallbackをそれぞれ何日保持するか。
-- 期限切れデータの自動削除、削除依頼、本人確認、連絡先をどう運用するか。
-- Google署名cookieの既定30日を維持するか、短縮するか。
-- legacy KVに残り得る平文email key／eventを、公開環境でいつ確認・削除するか。
-
 ## VibeVoice・Seed-VCの配布境界
 
 - Microsoft公式によるVibeVoice TTSコード削除後も、固定modelと第三者実装をprivate/admin-only研究で継続するか。一般向けinteractive generationを再開する判断とは分ける。

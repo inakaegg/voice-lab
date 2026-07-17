@@ -35,3 +35,6 @@ OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
 USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
+
+[triggers]
+crons = ["17 3 * * *"]

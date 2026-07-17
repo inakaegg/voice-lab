@@ -6,13 +6,13 @@
 
 - Voice LabポータルとSpeakLoopを一般公開の中心とし、SkitVoice/VibeVoiceを管理者専用研究機能へ閉じる変更はmerge済みmainのpreviewで検証済み。本番未deployのためproduction公開環境へ反映済みとは扱わない。
 - Google OAuth、feature別quota、入力上限、管理者認証、簡易監査ログを実装済み。
-- quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存し、ユーザー音声履歴はCloudflare版で保存しない。
+- 利用回数・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存し、ユーザー音声履歴はCloudflare版で保存しない。保持期間と削除処理を実装し、利用者向けプライバシーポリシーを追加した。
 - Seed-VCと管理者専用VibeVoiceはprivateなRunPod Serverlessへ分離する前提である。
 - Python/Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
 - Git履歴の手動Gitleaks検査、commit前・push前のGit hook、Security policy、Dependabot設定に加え、全branchへのpush・pull requestでGitleaksを再実行するCI jobを追加した。GitHub Push Protectionの有効化と実確認は外部作業として残っている。
 - frontend bundleの依存ライセンス本文をbuild時に生成し、wheelへ同梱する。
 - GitHub repositoryは誤ってpublicにした状態から、公開前再監査のためprivateへ戻した。
-- Docker HubのRunPod image repositoryは公開状態の解消が外部作業として残っている。
+- Docker HubのRunPod image repositoryはprivate化済みで、RunPodから認証してcold startできることを確認済み。
 
 ## 公開判断
 
@@ -20,11 +20,9 @@
 
 主なblocking項目は次のとおり。
 
-1. Docker Hub imageのprivate化または不要tag削除と、認証なしpull拒否の確認。
-2. Seed-VC GPL-3.0、VibeVoiceの現在のupstream状態、public container imageの権利・配布条件の確認。
-3. audit・quotaの保持期間、削除手段、連絡先を含む正式なプライバシーポリシーの確定。
-4. Private vulnerability reporting、Secret scanning、GitHub Push Protection、Dependabot alerts、branch protection等のGitHub公開設定。
-5. 到達不能なGitHub Homepageの修正、不要remote branch整理、READMEスクリーンショット。
+1. preview確認済みの公開境界とprivacy保持処理をproductionへ反映し、legacy KVの平文email keyを削除する。
+2. public化と同時にPrivate vulnerability reporting、Secret scanning、GitHub Push Protection、Dependabot alerts、branch protectionを有効にする。
+3. GitHub Homepageを現行公開デモURLへ修正する。
 
 Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオとして閲覧可能にする方針を維持する。第三者コンポーネントにはそれぞれのライセンスが適用されるため、本体の権利表示と混同しない。
 

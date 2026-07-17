@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handleRequest } from "../cloudflare/worker.mjs";
+import { handleRequest, runPublicDataRetention } from "../cloudflare/worker.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
@@ -18,12 +18,48 @@ test("Cloudflare worker routes only the current public app pages", async () => {
   await handleRequest(new Request("https://example.com/"), env);
   await handleRequest(new Request("https://example.com/speakloop"), env);
   await handleRequest(new Request("https://example.com/skitvoice"), env);
+  await handleRequest(new Request("https://example.com/privacy"), env);
+  await handleRequest(new Request("https://example.com/privacy/"), env);
 
   assert.deepEqual(requestedPaths, [
     "/react/portal.html",
     "/react/speakloop.html",
     "/react/skitvoice.html",
+    "/react/privacy.html",
+    "/react/privacy.html",
   ]);
+});
+
+test("Cloudflare worker deletes expired daily quota and audit data without resetting total quota", async () => {
+  const db = fakeD1();
+  db.__tables.daily.set("old", { usage_count: 1, updated_at: "2026-07-14T00:00:00.000Z" });
+  db.__tables.daily.set("current", { usage_count: 1, updated_at: "2026-07-16T12:00:00.000Z" });
+  db.__tables.total.set("total", { usage_count: 8, updated_at: "2026-01-01T00:00:00.000Z" });
+  db.__tables.audit.push(
+    { id: "old", occurred_at: "2026-04-01T00:00:00.000Z" },
+    { id: "current", occurred_at: "2026-07-16T12:00:00.000Z" },
+  );
+
+  await runPublicDataRetention({ MO_SPEECH_DB: db }, new Date("2026-07-17T00:00:00.000Z"));
+
+  assert.deepEqual([...db.__tables.daily.keys()], ["current"]);
+  assert.deepEqual(db.__tables.audit.map((event) => event.id), ["current"]);
+  assert.equal(db.__tables.total.get("total").usage_count, 8);
+});
+
+test("Cloudflare worker expires old KV audit fallback data without deleting total quota", async () => {
+  const kv = fakeKv();
+  await kv.put("public-audit-log", JSON.stringify([
+    { id: "old", created_at: "2026-04-01T00:00:00.000Z", action: "old" },
+    { id: "current", created_at: "2026-07-16T12:00:00.000Z", action: "current" },
+  ]));
+  await kv.put("public-usage:speakloop:hash:total", "8");
+
+  await runPublicDataRetention({ MO_SPEECH_KV: kv }, new Date("2026-07-17T00:00:00.000Z"));
+
+  const events = JSON.parse(await kv.get("public-audit-log"));
+  assert.deepEqual(events.map((event) => event.id), ["current"]);
+  assert.equal(await kv.get("public-usage:speakloop:hash:total"), "8");
 });
 
 test("Cloudflare worker exposes fun only to an allowlisted Google account", async () => {
@@ -2753,7 +2789,13 @@ function fakeD1Statement(db, sql, args) {
       return null;
     },
     async run() {
-      if (sql.startsWith("DELETE FROM public_sample_audios")) {
+      if (sql.startsWith("DELETE FROM quota_usage_daily")) {
+        for (const [key, row] of db.__tables.daily) {
+          if (row.updated_at < args[0]) db.__tables.daily.delete(key);
+        }
+      } else if (sql.startsWith("DELETE FROM audit_events")) {
+        db.__tables.audit = db.__tables.audit.filter((row) => row.occurred_at >= args[0]);
+      } else if (sql.startsWith("DELETE FROM public_sample_audios")) {
         db.__tables.samples.delete(`${args[0]}:${args[1]}`);
       } else if (sql.startsWith("INSERT INTO public_sample_audios")) {
         db.__tables.samples.set(`${args[0]}:${args[1]}`, {

@@ -1022,6 +1022,11 @@ def create_app(
     def practice() -> FileResponse:
         return FileResponse(WEB_DIR / "react" / "speakloop.html")
 
+    @app.get("/privacy")
+    @app.get("/privacy/")
+    def privacy() -> FileResponse:
+        return FileResponse(WEB_DIR / "react" / "privacy.html")
+
     @app.get("/speakloop/admin")
     @app.get("/speakloop/admin/")
     def practice_admin() -> FileResponse:

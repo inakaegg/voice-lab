@@ -8,6 +8,7 @@ const routes = [
   { path: "/", slug: "portal" },
   { path: "/speakloop", slug: "speakloop" },
   { path: "/skitvoice", slug: "skitvoice" },
+  { path: "/privacy", slug: "privacy" },
   { path: "/admin", slug: "admin" },
   { path: "/speakloop/admin", slug: "speakloop-admin" },
   { path: "/skitvoice/admin", slug: "skitvoice-admin" },
