@@ -1,0 +1,145 @@
+{
+  "fixture_contract_version": 1,
+  "evaluation_role": "real_audio_challenge_regression",
+  "alignment_cases": [
+    {
+      "name": "skipped_target_slots_keep_intervening_words_unassigned",
+      "target_language": "en-US",
+      "target_text": "Open the door. Set the alarm. Check the oven. Close the window.",
+      "recognized_text": "Open the door quantum zebra Close the window",
+      "asr_timestamps": {
+        "available": true,
+        "words": [
+          {"text": "Open", "start": 0.0, "end": 0.2},
+          {"text": "the", "start": 0.2, "end": 0.3},
+          {"text": "door", "start": 0.3, "end": 0.5},
+          {"text": "quantum", "start": 0.7, "end": 0.9},
+          {"text": "zebra", "start": 0.9, "end": 1.1},
+          {"text": "Close", "start": 1.3, "end": 1.5},
+          {"text": "the", "start": 1.5, "end": 1.6},
+          {"text": "window", "start": 1.6, "end": 1.9}
+        ],
+        "segments": []
+      },
+      "expected": {
+        "playable_phrase_indexes": [0, 3],
+        "matched_text_by_phrase": ["Open the door", "", "", "Close the window"],
+        "unassigned_word_indexes": [3, 4]
+      }
+    },
+    {
+      "name": "zero_duration_bridge_keeps_safe_same_phrase_ranges",
+      "target_language": "en-US",
+      "target_text": "Take a break tomorrow. Stay home.",
+      "recognized_text": "Take a break tomorrow Stay home",
+      "asr_timestamps": {
+        "available": true,
+        "words": [
+          {"text": "Take", "start": 0.0, "end": 0.2},
+          {"text": "a", "start": 0.2, "end": 0.4},
+          {"text": "break", "start": 0.4, "end": 0.4},
+          {"text": "tomorrow", "start": 0.35, "end": 0.7},
+          {"text": "Stay", "start": 1.0, "end": 1.2},
+          {"text": "home", "start": 1.2, "end": 1.4}
+        ],
+        "segments": []
+      },
+      "expected": {
+        "playable_phrase_indexes": [0, 1],
+        "matched_text_by_phrase": ["Take a break tomorrow", "Stay home"],
+        "audio_ranges": [[0.0, 0.7], [1.0, 1.4]],
+        "diagnostic_flags": ["zero_duration_overlap_bridge"]
+      }
+    },
+    {
+      "name": "zero_duration_bridge_never_creates_overlapping_phrase_playback",
+      "target_language": "en-US",
+      "target_text": "Take a break. Tomorrow stay home.",
+      "recognized_text": "Take a break Tomorrow stay home",
+      "asr_timestamps": {
+        "available": true,
+        "words": [
+          {"text": "Take", "start": 0.0, "end": 0.2},
+          {"text": "a", "start": 0.2, "end": 0.4},
+          {"text": "break", "start": 0.4, "end": 0.4},
+          {"text": "Tomorrow", "start": 0.35, "end": 0.7},
+          {"text": "stay", "start": 1.0, "end": 1.2},
+          {"text": "home", "start": 1.2, "end": 1.4}
+        ],
+        "segments": []
+      },
+      "expected": {
+        "playable_phrase_indexes": [],
+        "assignment_statuses": ["text_only", "text_only"],
+        "matched_text_by_phrase": ["Take a break", "Tomorrow stay home"],
+        "diagnostic_flags": ["overlapping_phrase_ranges", "zero_duration_overlap_bridge"]
+      }
+    },
+    {
+      "name": "chinese_temperature_spoken_form_preserves_phrase_boundary",
+      "target_language": "zh-CN",
+      "target_text": "今天很热。气温是30℃。记得喝水。",
+      "recognized_text": "今天很热气温是三十度记得喝水",
+      "asr_timestamps": {
+        "available": true,
+        "words": [
+          {"text": "今天很热", "start": 0.0, "end": 0.6},
+          {"text": "气温是", "start": 0.8, "end": 1.2},
+          {"text": "三十度", "start": 1.2, "end": 1.6},
+          {"text": "记得喝水", "start": 1.8, "end": 2.4}
+        ],
+        "segments": []
+      },
+      "expected": {
+        "playable_phrase_indexes": [0, 1, 2],
+        "matched_text_by_phrase": ["今天很热", "气温是三十度", "记得喝水"],
+        "content_matched_by_phrase": [true, true, true]
+      }
+    }
+  ],
+  "spoken_form_cases": [
+    {"name": "temperature_celsius_symbol", "target": "气温是30℃", "recognized": "气温是三十度", "expected": true},
+    {"name": "temperature_celsius_letters", "target": "设置为18°C", "recognized": "设置为十八度", "expected": true},
+    {"name": "percentage", "target": "完成25%", "recognized": "完成百分之二十五", "expected": true},
+    {"name": "decimal", "target": "长度3.5米", "recognized": "长度三点五米", "expected": true},
+    {"name": "calendar_date", "target": "7月16日", "recognized": "七月十六日", "expected": true},
+    {"name": "calendar_year", "target": "2026年", "recognized": "二零二六年", "expected": true},
+    {"name": "clock_time", "target": "3:30开会", "recognized": "三点三十开会", "expected": true},
+    {"name": "version", "target": "升级到v2.1", "recognized": "升级到v二点一", "expected": true},
+    {"name": "compact_identifier", "target": "代码A17", "recognized": "代码A一七", "expected": true},
+    {"name": "temperature_quantity_mismatch", "target": "气温是30℃", "recognized": "气温是十三度", "expected": false},
+    {"name": "percentage_unit_is_not_dropped", "target": "完成25%", "recognized": "完成二十五", "expected": false},
+    {"name": "decimal_is_not_integer", "target": "长度3.5米", "recognized": "长度三十五米", "expected": false},
+    {"name": "ordinary_number_is_not_digit_spelling", "target": "一共30个", "recognized": "一共三零个", "expected": false}
+  ],
+  "score_cases": [
+    {
+      "name": "extra_sentence_cannot_be_hidden_by_phrase_search",
+      "target_language": "en-US",
+      "target_text": "The report is ready. Please send it now.",
+      "recognized_text": "The report is ready. This is a separate sentence. Please send it now.",
+      "expected_unconsumed": ["thisisaseparatesentence"]
+    },
+    {
+      "name": "short_phrase_major_difference_affects_final_score",
+      "target_language": "en-US",
+      "target_text": "Please review the full report carefully before lunch. Stop.",
+      "recognized_text": "Please review the full report carefully before lunch. Go.",
+      "expected_unconsumed": ["go"]
+    },
+    {
+      "name": "unmatched_phrase_candidate_does_not_consume_extra_speech",
+      "target_language": "en-US",
+      "target_text": "Alpha. Quantum zebra.",
+      "recognized_text": "Alpha extra.",
+      "expected_unconsumed": ["extra"]
+    },
+    {
+      "name": "exact_text_remains_perfect",
+      "target_language": "zh-CN",
+      "target_text": "今天很热。记得喝水。",
+      "recognized_text": "今天很热。记得喝水。",
+      "expected_unconsumed": []
+    }
+  ]
+}

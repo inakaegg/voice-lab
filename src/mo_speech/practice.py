@@ -81,6 +81,8 @@ _ENGLISH_SMALL_NUMBERS = (
     "nineteen",
 )
 _ENGLISH_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+_CHINESE_DIGITS = ("零", "一", "二", "三", "四", "五", "六", "七", "八", "九")
+_CHINESE_SMALL_NUMBER_UNITS = ("", "十", "百", "千")
 
 
 class PracticeAlignmentError(ValueError):
@@ -136,6 +138,7 @@ def normalize_practice_text(text: str, target_language: str) -> str:
     if target_language == "ja-JP":
         normalized = _katakana_to_hiragana(normalized)
     if target_language == "zh-CN":
+        normalized = _normalize_chinese_spoken_forms(normalized)
         normalized = simplify_chinese_text(normalized)
     return "".join(
         char
@@ -151,18 +154,31 @@ def evaluate_practice_attempt(target_text: str, recognized_text: str, target_lan
     global_similarity = practice_similarity(normalized_target, normalized_recognized)
     phrase_matches = practice_phrase_matches(target_text, recognized_text, language)
     phrase_similarity = practice_phrase_similarity(phrase_matches)
-    similarity = max(global_similarity, phrase_similarity)
+    phrase_macro_similarity = practice_phrase_macro_similarity(phrase_matches)
+    lowest_phrase_similarity = min(
+        (float(match.get("similarity") or 0.0) for match in phrase_matches),
+        default=global_similarity,
+    )
+    similarity = min(global_similarity, phrase_macro_similarity)
     grade = practice_grade(similarity)
     return {
         "normalized_target": normalized_target,
         "normalized_recognized": normalized_recognized,
         "global_similarity": _round_score(global_similarity),
         "phrase_similarity": _round_score(phrase_similarity),
+        "phrase_macro_similarity": _round_score(phrase_macro_similarity),
+        "lowest_phrase_similarity": _round_score(lowest_phrase_similarity),
         "similarity": _round_score(similarity),
         "grade": grade,
         "grade_label": PRACTICE_GRADE_LABELS[grade],
         "diff": practice_diff(normalized_target, normalized_recognized),
         "phrase_matches": phrase_matches,
+        "unconsumed_recognized": _practice_unconsumed_recognized(
+            normalized_recognized,
+            phrase_matches,
+            language,
+            recognized_text,
+        ),
     }
 
 
@@ -305,6 +321,7 @@ def practice_content_matches(target_text: str, matched_text: str, target_languag
 def _normalize_practice_content_text(text: str, target_language: str) -> str:
     normalized = unicodedata.normalize("NFKC", str(text or "")).strip().lower()
     if target_language == "zh-CN":
+        normalized = _normalize_chinese_spoken_forms(normalized)
         normalized = simplify_chinese_text(normalized)
     return "".join(
         char
@@ -362,6 +379,101 @@ def _english_integer_words(value: int) -> str | None:
     return f"{prefix} thousand" + (f" {suffix}" if suffix else "")
 
 
+def _normalize_chinese_spoken_forms(text: str) -> str:
+    source = str(text or "")
+    protected: list[str] = []
+
+    def protect(pattern: str, replacement) -> None:
+        nonlocal source
+
+        def store(match: re.Match[str]) -> str:
+            protected.append(str(replacement(match)))
+            return chr(0xE000 + len(protected) - 1)
+
+        source = re.sub(pattern, store, source, flags=re.IGNORECASE)
+
+    protect(
+        r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(?:°\s*c|℃)",
+        lambda match: f"{_chinese_decimal_words(match.group(1))}度",
+    )
+    protect(
+        r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*%",
+        lambda match: f"百分之{_chinese_decimal_words(match.group(1))}",
+    )
+    protect(
+        r"(?<![a-z0-9])([01]?\d|2[0-3]):([0-5]\d)(?!\d)",
+        lambda match: (
+            f"{_chinese_integer_words(match.group(1))}点"
+            f"{'' if int(match.group(2)) == 0 else _chinese_integer_words(match.group(2))}"
+        ),
+    )
+    protect(
+        r"(?<![a-z0-9])(\d{4})(?=年)",
+        lambda match: _chinese_digit_words(match.group(1)),
+    )
+    protect(
+        r"(?<![a-z0-9])(v)(\d+(?:\.\d+)+)(?![a-z0-9])",
+        lambda match: f"{match.group(1).lower()}{_chinese_decimal_words(match.group(2))}",
+    )
+    protect(
+        r"(?<![a-z0-9])([a-z]+)(\d+)(?![a-z0-9])",
+        lambda match: f"{match.group(1).lower()}{_chinese_digit_words(match.group(2))}",
+    )
+    source = re.sub(
+        r"(?<![a-z0-9.])(\d+)\.(\d+)(?![a-z0-9.])",
+        lambda match: f"{_chinese_integer_words(match.group(1))}点{_chinese_digit_words(match.group(2))}",
+        source,
+    )
+    source = re.sub(
+        r"(?<![a-z0-9])(\d+)(?![a-z0-9])",
+        lambda match: _chinese_integer_words(match.group(1)),
+        source,
+    )
+    for index, value in enumerate(protected):
+        source = source.replace(chr(0xE000 + index), value)
+    return source
+
+
+def _chinese_decimal_words(value: str) -> str:
+    integer, separator, fraction = str(value).partition(".")
+    result = _chinese_integer_words(integer)
+    if separator:
+        result += f"点{_chinese_digit_words(fraction)}"
+    return result
+
+
+def _chinese_digit_words(value: str) -> str:
+    return "".join(_CHINESE_DIGITS[int(digit)] for digit in str(value))
+
+
+def _chinese_integer_words(value: str) -> str:
+    digits = str(value)
+    if not digits:
+        return ""
+    if len(digits) > 1 and digits.startswith("0"):
+        return _chinese_digit_words(digits)
+    number = int(digits)
+    if number == 0:
+        return _CHINESE_DIGITS[0]
+    if number > 9_999:
+        return _chinese_digit_words(digits)
+    output: list[str] = []
+    zero_pending = False
+    for position, digit_text in enumerate(digits):
+        digit = int(digit_text)
+        unit_index = len(digits) - position - 1
+        if digit == 0:
+            if output and any(int(item) for item in digits[position + 1 :]):
+                zero_pending = True
+            continue
+        if zero_pending:
+            output.append(_CHINESE_DIGITS[0])
+            zero_pending = False
+        output.append(f"{_CHINESE_DIGITS[digit]}{_CHINESE_SMALL_NUMBER_UNITS[unit_index]}")
+    result = "".join(output)
+    return result[1:] if result.startswith("一十") else result
+
+
 def practice_phrase_matches(target_text: str, recognized_text: str, target_language: str) -> list[dict[str, object]]:
     language = supported_practice_target_language(target_language)
     recognized_normalized = normalize_practice_text(recognized_text, language)
@@ -403,6 +515,82 @@ def practice_phrase_similarity(matches: list[dict[str, object]]) -> float:
     if weight_sum == 0:
         return 0.0
     return max(0.0, min(1.0, weighted_total / weight_sum))
+
+
+def practice_phrase_macro_similarity(matches: list[dict[str, object]]) -> float:
+    if not matches:
+        return 0.0
+    return max(
+        0.0,
+        min(
+            1.0,
+            sum(float(match.get("similarity") or 0.0) for match in matches) / len(matches),
+        ),
+    )
+
+
+def _practice_unconsumed_recognized(
+    recognized_normalized: str,
+    matches: list[dict[str, object]],
+    target_language: str,
+    recognized_text: str,
+) -> list[dict[str, object]]:
+    intervals = [
+        (
+            max(0, int(match.get("recognized_start") or 0)),
+            min(len(recognized_normalized), int(match.get("recognized_end") or 0)),
+        )
+        for match in matches
+        if match.get("matched")
+        if int(match.get("recognized_end") or 0) > int(match.get("recognized_start") or 0)
+    ]
+    if target_language == "en-US":
+        token_ranges = _english_normalized_token_ranges(recognized_text)
+        intervals = [
+            (
+                min((token_start for token_start, token_end in token_ranges if token_end > start and token_start < end), default=start),
+                max((token_end for token_start, token_end in token_ranges if token_end > start and token_start < end), default=end),
+            )
+            for start, end in intervals
+        ]
+    intervals.sort()
+    merged: list[list[int]] = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    gaps: list[dict[str, object]] = []
+    cursor = 0
+    for start, end in [*merged, [len(recognized_normalized), len(recognized_normalized)]]:
+        if start > cursor:
+            text = recognized_normalized[cursor:start]
+            if not _is_normalized_scoring_filler(text, target_language):
+                gaps.append({"start": cursor, "end": start, "normalized_text": text})
+        cursor = max(cursor, end)
+    return gaps
+
+
+def _english_normalized_token_ranges(text: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    cursor = 0
+    for match in re.finditer(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*", str(text or "")):
+        normalized = normalize_practice_text(match.group(0), "en-US")
+        if not normalized:
+            continue
+        ranges.append((cursor, cursor + len(normalized)))
+        cursor += len(normalized)
+    return ranges
+
+
+def _is_normalized_scoring_filler(text: str, target_language: str) -> bool:
+    if not text:
+        return True
+    fillers = {
+        *(_EDGE_FILLERS.get(target_language, set())),
+        *(_BOUNDARY_FILLER_SEQUENCES.get(target_language, set())),
+    }
+    return text in fillers
 
 
 def practice_comparison_alignment(
@@ -1019,9 +1207,13 @@ def _asr_word_spans(
             }
         )
         cursor = span_end
-    for previous, current in zip(spans, spans[1:]):
+    for index, (previous, current) in enumerate(zip(spans, spans[1:]), start=1):
+        zero_duration_bridge = _is_zero_duration_overlap_bridge(spans, index)
         if float(current["audio_start"]) < float(previous["audio_start"]):
-            flags.add("non_monotonic_timestamp_source")
+            if zero_duration_bridge:
+                flags.add("zero_duration_overlap_bridge")
+            else:
+                flags.add("non_monotonic_timestamp_source")
         if (
             current["text"] == previous["text"]
             and current["audio_start"] == previous["audio_start"]
@@ -1071,6 +1263,33 @@ def _asr_word_spans(
         "flags": sorted(flags),
         "invalid_units": invalid_units,
     }
+
+
+def _is_zero_duration_overlap_bridge(
+    spans: list[dict[str, object]],
+    current_index: int,
+) -> bool:
+    current = spans[current_index]
+    if float(current["audio_end"]) <= float(current["audio_start"]):
+        return False
+    zero_index = current_index - 1
+    zero_points: list[float] = []
+    while zero_index >= 0 and bool(spans[zero_index].get("zero_duration")):
+        zero_points.append(float(spans[zero_index]["audio_start"]))
+        zero_index -= 1
+    if not zero_points or zero_index < 0:
+        return False
+    previous_positive = spans[zero_index]
+    previous_start = float(previous_positive["audio_start"])
+    previous_end = float(previous_positive["audio_end"])
+    current_start = float(current["audio_start"])
+    current_end = float(current["audio_end"])
+    return (
+        previous_end > previous_start
+        and all(abs(point - previous_end) <= 1e-9 for point in zero_points)
+        and previous_start <= current_start < previous_end
+        and current_end > previous_end
+    )
 
 
 def _transcription_only_alignment_result(
@@ -1773,6 +1992,7 @@ def _align_phrases_to_word_spans(
                 "token_end_index": end_word,
             }
         )
+    ranges = _demote_overlapping_phrase_ranges(ranges)
     return ranges, {
         "candidate_count": sum(len(candidates) for candidates in candidates_by_phrase),
         "score_computation_count": score_computation_count,
@@ -2134,6 +2354,17 @@ def _apply_pause_partition_ranges(
         for item, (start_word, end_word) in zip(selected, expected_bounds, strict=True)
     ):
         return selected
+    has_zero_duration_overlap_bridge = any(
+        _is_zero_duration_overlap_bridge(word_spans, index)
+        for index in range(1, len(word_spans))
+    )
+    if has_zero_duration_overlap_bridge and any(
+        item is not None
+        and float(item.get("similarity") or 0.0) >= 0.95
+        and float(item.get("coverage") or 0.0) >= 0.95
+        for item in selected
+    ):
+        return selected
 
     similarities: list[float] = []
     coverages: list[float] = []
@@ -2227,6 +2458,8 @@ def _assign_unassigned_word_gaps(
         )
 
     for left_index, right_index in zip(available_indexes, available_indexes[1:]):
+        if right_index != left_index + 1:
+            continue
         left = resolved[left_index]
         right = resolved[right_index]
         assert left is not None and right is not None
@@ -2551,9 +2784,35 @@ def _safe_alignment_audio_bounds(
     if not timed:
         return None, None
     return (
-        min(float(selected_spans[0]["audio_start"]), float(timed[0]["audio_start"])),
-        max(float(selected_spans[-1]["audio_end"]), float(timed[-1]["audio_end"])),
+        min(float(span["audio_start"]) for span in timed),
+        max(float(span["audio_end"]) for span in timed),
     )
+
+
+def _demote_overlapping_phrase_ranges(
+    ranges: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    conflict_indexes: set[int] = set()
+    previous_index: int | None = None
+    for index, entry in enumerate(ranges):
+        if not entry.get("available"):
+            continue
+        if previous_index is not None:
+            previous = ranges[previous_index]
+            if float(entry["audio_start"]) < float(previous["audio_end"]):
+                conflict_indexes.update({previous_index, index})
+        previous_index = index
+    for index in conflict_indexes:
+        entry = ranges[index]
+        entry["available"] = False
+        entry["source"] = "none"
+        entry["audio_start"] = None
+        entry["audio_end"] = None
+        entry["boundary_source"] = (
+            f"{entry.get('boundary_source') or 'lexical_anchor'}+overlapping_phrase_range_guard"
+        )
+        entry["diagnostic_flags"] = ["overlapping_phrase_ranges"]
+    return ranges
 
 
 def _text_only_alignment_range(
@@ -2811,6 +3070,11 @@ def _alignment_diagnostics(
             {
                 *(str(flag) for flag in source["flags"]),
                 *(str(flag) for flag in segment_source["flags"]),
+                *(
+                    str(flag)
+                    for entry in ranges
+                    for flag in entry.get("diagnostic_flags", [])
+                ),
             }
         ),
         "invalid_timestamp_units": [

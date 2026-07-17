@@ -133,7 +133,7 @@
       {"text": "door", "start": 0.8, "end": 0.8}
     ]},
     "expected": {"available": true, "complete": true, "ranges": [
-      {"index": 0, "source": "words", "available": true, "matched_text": "Open the door", "audio_start": 0.1, "audio_end": 0.8}
+      {"index": 0, "source": "words", "available": true, "matched_text": "Open the door", "audio_start": 0.1, "audio_end": 0.55}
     ]}
   },
   {
@@ -149,7 +149,7 @@
       {"text": "锁好", "start": 1.2, "end": 1.6}
     ]},
     "expected": {"available": true, "complete": true, "ranges": [
-      {"index": 0, "source": "words", "available": true, "matched_text": "请关灯", "audio_start": 0.1, "audio_end": 0.6},
+      {"index": 0, "source": "words", "available": true, "matched_text": "请关灯", "audio_start": 0.1, "audio_end": 0.45},
       {"index": 1, "source": "words", "available": true, "matched_text": "门也锁好", "audio_start": 0.9, "audio_end": 1.6}
     ]}
   },

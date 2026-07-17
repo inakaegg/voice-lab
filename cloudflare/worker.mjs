@@ -106,6 +106,8 @@ const ENGLISH_SMALL_NUMBERS = [
   "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
 ];
 const ENGLISH_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+const CHINESE_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+const CHINESE_SMALL_NUMBER_UNITS = ["", "十", "百", "千"];
 const traditionalChineseToSimplified = Converter({ from: "t", to: "cn" });
 
 export class PracticeAlignmentError extends Error {
@@ -4057,24 +4059,36 @@ function supportedPracticeAsrModel(value) {
   return model;
 }
 
-function evaluatePracticeAttempt(targetText, recognizedText, targetLanguage) {
+export function evaluatePracticeAttempt(targetText, recognizedText, targetLanguage) {
   const normalizedTarget = normalizePracticeText(targetText, targetLanguage);
   const normalizedRecognized = normalizePracticeText(recognizedText, targetLanguage);
   const globalSimilarity = practiceSimilarity(normalizedTarget, normalizedRecognized);
   const phraseMatches = practicePhraseMatches(targetText, recognizedText, targetLanguage);
   const phraseSimilarity = practicePhraseSimilarity(phraseMatches);
-  const similarity = Math.max(globalSimilarity, phraseSimilarity);
+  const phraseMacroSimilarity = practicePhraseMacroSimilarity(phraseMatches);
+  const lowestPhraseSimilarity = phraseMatches.length
+    ? Math.min(...phraseMatches.map((match) => Number(match.similarity) || 0))
+    : globalSimilarity;
+  const similarity = Math.min(globalSimilarity, phraseMacroSimilarity);
   const grade = practiceGrade(similarity);
   return {
     normalized_target: normalizedTarget,
     normalized_recognized: normalizedRecognized,
     global_similarity: Math.round(globalSimilarity * 1000) / 1000,
     phrase_similarity: Math.round(phraseSimilarity * 1000) / 1000,
+    phrase_macro_similarity: Math.round(phraseMacroSimilarity * 1000) / 1000,
+    lowest_phrase_similarity: Math.round(lowestPhraseSimilarity * 1000) / 1000,
     similarity: Math.round(similarity * 1000) / 1000,
     grade,
     grade_label: PRACTICE_GRADE_LABELS[grade],
     diff: practiceDiff(normalizedTarget, normalizedRecognized),
     phrase_matches: phraseMatches,
+    unconsumed_recognized: practiceUnconsumedRecognized(
+      normalizedRecognized,
+      phraseMatches,
+      targetLanguage,
+      recognizedText,
+    ),
   };
 }
 
@@ -4091,11 +4105,14 @@ function practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguag
       normalized_recognized: "",
       global_similarity: null,
       phrase_similarity: null,
+      phrase_macro_similarity: null,
+      lowest_phrase_similarity: null,
       similarity: null,
       grade: null,
       grade_label: "",
       diff: [],
       phrase_matches: [],
+      unconsumed_recognized: [],
     };
   }
   return {
@@ -4209,6 +4226,7 @@ function rawTimestampCount(value, rows) {
 function normalizePracticeContentText(text, targetLanguage) {
   let normalized = String(text || "").normalize("NFKC").trim().toLowerCase();
   if (targetLanguage === "zh-CN") {
+    normalized = normalizeChineseSpokenForms(normalized);
     normalized = traditionalChineseToSimplified(normalized);
   }
   return [...normalized]
@@ -4259,6 +4277,91 @@ function englishIntegerWords(value) {
   return `${englishIntegerWords(thousands)} thousand` + (remainder ? ` ${englishIntegerWords(remainder)}` : "");
 }
 
+function normalizeChineseSpokenForms(text) {
+  let source = String(text || "");
+  const protectedValues = [];
+  const protect = (pattern, replacement) => {
+    source = source.replace(pattern, (...args) => {
+      protectedValues.push(String(replacement(...args)));
+      return String.fromCodePoint(0xE000 + protectedValues.length - 1);
+    });
+  };
+
+  protect(
+    /(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(?:°\s*c|℃)/giu,
+    (_match, value) => `${chineseDecimalWords(value)}度`,
+  );
+  protect(
+    /(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*%/gu,
+    (_match, value) => `百分之${chineseDecimalWords(value)}`,
+  );
+  protect(
+    /(?<![a-z0-9])([01]?\d|2[0-3]):([0-5]\d)(?!\d)/gu,
+    (_match, hour, minute) => `${chineseIntegerWords(hour)}点${Number(minute) === 0 ? "" : chineseIntegerWords(minute)}`,
+  );
+  protect(
+    /(?<![a-z0-9])(\d{4})(?=年)/gu,
+    (_match, value) => chineseDigitWords(value),
+  );
+  protect(
+    /(?<![a-z0-9])(v)(\d+(?:\.\d+)+)(?![a-z0-9])/giu,
+    (_match, prefix, value) => `${prefix.toLowerCase()}${chineseDecimalWords(value)}`,
+  );
+  protect(
+    /(?<![a-z0-9])([a-z]+)(\d+)(?![a-z0-9])/giu,
+    (_match, prefix, value) => `${prefix.toLowerCase()}${chineseDigitWords(value)}`,
+  );
+  source = source.replace(
+    /(?<![a-z0-9.])(\d+)\.(\d+)(?![a-z0-9.])/gu,
+    (_match, integer, fraction) => `${chineseIntegerWords(integer)}点${chineseDigitWords(fraction)}`,
+  );
+  source = source.replace(
+    /(?<![a-z0-9])(\d+)(?![a-z0-9])/gu,
+    (_match, value) => chineseIntegerWords(value),
+  );
+  protectedValues.forEach((value, index) => {
+    source = source.replace(String.fromCodePoint(0xE000 + index), value);
+  });
+  return source;
+}
+
+function chineseDecimalWords(value) {
+  const [integer, fraction] = String(value).split(".", 2);
+  return chineseIntegerWords(integer) + (fraction === undefined ? "" : `点${chineseDigitWords(fraction)}`);
+}
+
+function chineseDigitWords(value) {
+  return [...String(value)].map((digit) => CHINESE_DIGITS[Number(digit)]).join("");
+}
+
+function chineseIntegerWords(value) {
+  const digits = String(value);
+  if (!digits) return "";
+  if (digits.length > 1 && digits.startsWith("0")) return chineseDigitWords(digits);
+  const number = Number(digits);
+  if (number === 0) return CHINESE_DIGITS[0];
+  if (number > 9999) return chineseDigitWords(digits);
+  const output = [];
+  let zeroPending = false;
+  for (const [position, digitText] of [...digits].entries()) {
+    const digit = Number(digitText);
+    const unitIndex = digits.length - position - 1;
+    if (digit === 0) {
+      if (output.length && [...digits.slice(position + 1)].some((item) => Number(item))) {
+        zeroPending = true;
+      }
+      continue;
+    }
+    if (zeroPending) {
+      output.push(CHINESE_DIGITS[0]);
+      zeroPending = false;
+    }
+    output.push(`${CHINESE_DIGITS[digit]}${CHINESE_SMALL_NUMBER_UNITS[unitIndex]}`);
+  }
+  const result = output.join("");
+  return result.startsWith("一十") ? result.slice(1) : result;
+}
+
 function practicePhraseMatches(targetText, recognizedText, targetLanguage) {
   const phrases = splitPracticePhrases(targetText);
   const recognized = normalizePracticeText(recognizedText, targetLanguage);
@@ -4298,6 +4401,73 @@ function practicePhraseSimilarity(matches) {
     return 0;
   }
   return Math.max(0, Math.min(1, weightedTotal / weightSum));
+}
+
+function practicePhraseMacroSimilarity(matches) {
+  if (!matches.length) return 0;
+  const total = matches.reduce((sum, match) => sum + (Number(match.similarity) || 0), 0);
+  return Math.max(0, Math.min(1, total / matches.length));
+}
+
+function practiceUnconsumedRecognized(recognizedNormalized, matches, targetLanguage, recognizedText) {
+  let intervals = matches
+    .filter((match) => match.matched)
+    .map((match) => [
+      Math.max(0, Number(match.recognized_start) || 0),
+      Math.min(recognizedNormalized.length, Number(match.recognized_end) || 0),
+    ])
+    .filter(([start, end]) => end > start);
+  if (targetLanguage === "en-US") {
+    const tokenRanges = englishNormalizedTokenRanges(recognizedText);
+    intervals = intervals.map(([start, end]) => {
+      const overlaps = tokenRanges.filter(([tokenStart, tokenEnd]) => tokenEnd > start && tokenStart < end);
+      if (!overlaps.length) return [start, end];
+      return [
+        Math.min(...overlaps.map(([tokenStart]) => tokenStart)),
+        Math.max(...overlaps.map(([, tokenEnd]) => tokenEnd)),
+      ];
+    });
+  }
+  intervals.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  const merged = [];
+  for (const [start, end] of intervals) {
+    const previous = merged[merged.length - 1];
+    if (previous && start <= previous[1]) {
+      previous[1] = Math.max(previous[1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+  const gaps = [];
+  let cursor = 0;
+  for (const [start, end] of [...merged, [recognizedNormalized.length, recognizedNormalized.length]]) {
+    if (start > cursor) {
+      const text = recognizedNormalized.slice(cursor, start);
+      if (!isNormalizedScoringFiller(text, targetLanguage)) {
+        gaps.push({ start: cursor, end: start, normalized_text: text });
+      }
+    }
+    cursor = Math.max(cursor, end);
+  }
+  return gaps;
+}
+
+function englishNormalizedTokenRanges(text) {
+  const ranges = [];
+  let cursor = 0;
+  for (const match of String(text || "").matchAll(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/gu)) {
+    const normalized = normalizePracticeText(match[0], "en-US");
+    if (!normalized) continue;
+    ranges.push([cursor, cursor + normalized.length]);
+    cursor += normalized.length;
+  }
+  return ranges;
+}
+
+function isNormalizedScoringFiller(text, targetLanguage) {
+  if (!text) return true;
+  return (PRACTICE_EDGE_FILLERS[targetLanguage] || new Set()).has(text)
+    || (PRACTICE_BOUNDARY_FILLER_SEQUENCES[targetLanguage] || new Set()).has(text);
 }
 
 export function practiceComparisonAlignment({ targetText, recognizedText, targetLanguage, asrTimestamps }) {
@@ -4784,7 +4954,10 @@ function asrWordSpans(words, targetLanguage) {
   for (let index = 1; index < spans.length; index += 1) {
     const previous = spans[index - 1];
     const current = spans[index];
-    if (current.audio_start < previous.audio_start) flags.add("non_monotonic_timestamp_source");
+    const zeroDurationBridge = isZeroDurationOverlapBridge(spans, index);
+    if (current.audio_start < previous.audio_start) {
+      flags.add(zeroDurationBridge ? "zero_duration_overlap_bridge" : "non_monotonic_timestamp_source");
+    }
     if (
       current.text === previous.text
       && current.audio_start === previous.audio_start
@@ -4826,6 +4999,28 @@ function asrWordSpans(words, targetLanguage) {
     flags: [...flags].sort(),
     invalid_units: invalidUnits,
   };
+}
+
+function isZeroDurationOverlapBridge(spans, currentIndex) {
+  const current = spans[currentIndex];
+  if (current.audio_end <= current.audio_start) return false;
+  let zeroIndex = currentIndex - 1;
+  const zeroPoints = [];
+  while (zeroIndex >= 0 && spans[zeroIndex].zero_duration) {
+    zeroPoints.push(Number(spans[zeroIndex].audio_start));
+    zeroIndex -= 1;
+  }
+  if (!zeroPoints.length || zeroIndex < 0) return false;
+  const previousPositive = spans[zeroIndex];
+  const previousStart = Number(previousPositive.audio_start);
+  const previousEnd = Number(previousPositive.audio_end);
+  const currentStart = Number(current.audio_start);
+  const currentEnd = Number(current.audio_end);
+  return previousEnd > previousStart
+    && zeroPoints.every((point) => Math.abs(point - previousEnd) <= 1e-9)
+    && previousStart <= currentStart
+    && currentStart < previousEnd
+    && currentEnd > previousEnd;
 }
 
 function transcriptionOnlyAlignmentResult(phrases, recognizedText, targetLanguage, options) {
@@ -5342,7 +5537,7 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
   );
   selected = rejectWeakOneSidedAssignments(phrases, selected, wordSpans, targetLanguage);
 
-  const ranges = phrases.map((phrase, index) => {
+  let ranges = phrases.map((phrase, index) => {
     const normalizedTarget = String(phrase.normalized_target || "");
     const selection = selected[index];
     if (!selection) {
@@ -5395,6 +5590,7 @@ function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage)
       token_end_index: selection.end_word,
     };
   });
+  ranges = demoteOverlappingPhraseRanges(ranges);
   return {
     ranges,
     metrics: {
@@ -5667,6 +5863,15 @@ function applyPausePartitionRanges(phrases, selected, wordSpans, recognized, tar
   if (alreadyAligned) {
     return selected;
   }
+  const hasZeroDurationOverlapBridge = wordSpans.some(
+    (_span, index) => index > 0 && isZeroDurationOverlapBridge(wordSpans, index),
+  );
+  if (
+    hasZeroDurationOverlapBridge
+    && selected.some((item) => item && Number(item.similarity || 0) >= 0.95 && Number(item.coverage || 0) >= 0.95)
+  ) {
+    return selected;
+  }
 
   const similarities = [];
   const coverages = [];
@@ -5757,6 +5962,9 @@ function assignUnassignedWordGaps(phrases, selected, wordSpans, recognized, targ
   for (let pairIndex = 0; pairIndex < availableIndexes.length - 1; pairIndex += 1) {
     const leftIndex = availableIndexes[pairIndex];
     const rightIndex = availableIndexes[pairIndex + 1];
+    if (rightIndex !== leftIndex + 1) {
+      continue;
+    }
     const left = resolved[leftIndex];
     const right = resolved[rightIndex];
     const gapStart = left.end_word;
@@ -6014,9 +6222,32 @@ function safeAlignmentAudioBounds(selectedSpans) {
     return [null, null];
   }
   return [
-    Math.min(selectedSpans[0].audio_start, timed[0].audio_start),
-    Math.max(selectedSpans[selectedSpans.length - 1].audio_end, timed[timed.length - 1].audio_end),
+    Math.min(...timed.map((span) => Number(span.audio_start))),
+    Math.max(...timed.map((span) => Number(span.audio_end))),
   ];
+}
+
+function demoteOverlappingPhraseRanges(ranges) {
+  const conflictIndexes = new Set();
+  let previousIndex = null;
+  for (const [index, entry] of ranges.entries()) {
+    if (!entry.available) continue;
+    if (previousIndex !== null && Number(entry.audio_start) < Number(ranges[previousIndex].audio_end)) {
+      conflictIndexes.add(previousIndex);
+      conflictIndexes.add(index);
+    }
+    previousIndex = index;
+  }
+  for (const index of conflictIndexes) {
+    const entry = ranges[index];
+    entry.available = false;
+    entry.source = "none";
+    entry.audio_start = null;
+    entry.audio_end = null;
+    entry.boundary_source = `${entry.boundary_source || "lexical_anchor"}+overlapping_phrase_range_guard`;
+    entry.diagnostic_flags = ["overlapping_phrase_ranges"];
+  }
+  return ranges;
 }
 
 function textOnlyAlignmentRange(
@@ -6241,7 +6472,11 @@ function alignmentDiagnostics(ranges, phrases, wordSpans, targetLanguage, metric
     unassigned_non_filler_count: unassignedTokens.filter(
       (token) => token.reason !== "edge_or_boundary_filler"
     ).length,
-    diagnostic_flags: [...new Set([...source.flags, ...segmentSource.flags])].sort(),
+    diagnostic_flags: [...new Set([
+      ...source.flags,
+      ...segmentSource.flags,
+      ...ranges.flatMap((entry) => entry.diagnostic_flags || []),
+    ])].sort(),
     invalid_timestamp_units: [...source.invalid_units, ...segmentSource.invalid_units],
     raw_timestamp_word_count: source.raw_count,
     raw_timestamp_segment_count: segmentSource.raw_count,
@@ -6666,6 +6901,7 @@ function normalizePracticeText(text, targetLanguage) {
     );
   }
   if (targetLanguage === "zh-CN") {
+    normalized = normalizeChineseSpokenForms(normalized);
     normalized = normalizeChineseVariants(normalized);
   }
   return Array.from(normalized)
