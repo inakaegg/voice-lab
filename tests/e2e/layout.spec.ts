@@ -740,6 +740,70 @@ test("admin SkitVoice hides tab-audio capture when the browser does not support 
   await assertNoHorizontalOverflow(page);
 });
 
+test("admin SkitVoice requires reference-audio rights confirmation before tab capture", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__tabAudioRequestCount", { value: 0, writable: true });
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        getDisplayMedia: async () => {
+          (window as typeof window & { __tabAudioRequestCount: number }).__tabAudioRequestCount += 1;
+          throw new DOMException("capture is not supported", "NotSupportedError");
+        },
+      },
+      configurable: true,
+    });
+  });
+
+  await page.goto("/skitvoice/admin");
+  const confirmation = page.locator("#vibevoice-rights-confirmed");
+  const confirmationPanel = page.locator(".vibevoice-rights-confirmation");
+  const actions = page.locator(".vibevoice-actions");
+  const generateButton = page.locator("#vibevoice-generate-button");
+  await expect(confirmation).not.toBeChecked();
+  const [actionsBox, confirmationBox, generateBox] = await Promise.all([
+    actions.boundingBox(),
+    confirmationPanel.boundingBox(),
+    generateButton.boundingBox(),
+  ]);
+  if ((page.viewportSize()?.width || 0) > 820) {
+    expect((confirmationBox?.width || 0)).toBeGreaterThanOrEqual(
+      (actionsBox?.width || 0) - (generateBox?.width || 0) - 40,
+    );
+    expect((generateBox?.x || 0)).toBeGreaterThanOrEqual(
+      (confirmationBox?.x || 0) + (confirmationBox?.width || 0) - 2,
+    );
+    expect(Math.abs(
+      ((confirmationBox?.y || 0) + (confirmationBox?.height || 0) / 2) -
+      ((generateBox?.y || 0) + (generateBox?.height || 0) / 2),
+    )).toBeLessThanOrEqual(8);
+  } else {
+    expect((confirmationBox?.width || 0)).toBeGreaterThanOrEqual((actionsBox?.width || 0) - 24);
+    expect((generateBox?.y || 0)).toBeGreaterThanOrEqual(
+      (confirmationBox?.y || 0) + (confirmationBox?.height || 0) - 2,
+    );
+  }
+  await confirmation.check();
+  await page.reload();
+  await expect(confirmation).not.toBeChecked();
+
+  await page.locator('[data-tab-audio-slot="1"]').click();
+  await expect(confirmation).toBeFocused();
+  await expect(page.locator("#vibevoice-message")).toContainText("本人から許諾");
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __tabAudioRequestCount: number }
+  ).__tabAudioRequestCount)).toBe(0);
+
+  await confirmation.check();
+  await page.locator('[data-tab-audio-slot="1"]').click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __tabAudioRequestCount: number }
+  ).__tabAudioRequestCount)).toBe(1);
+});
+
 test("admin SkitVoice explains a runtime tab-audio incompatibility once and then hides the controls", async ({ page }) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {
@@ -757,6 +821,7 @@ test("admin SkitVoice explains a runtime tab-audio incompatibility once and then
   });
   await page.goto("/skitvoice/admin");
   await expect(page.locator('[data-tab-audio-slot="1"]')).toBeVisible();
+  await page.locator("#vibevoice-rights-confirmed").check();
   await page.locator('[data-tab-audio-slot="1"]').click();
   const unsupportedToast = page.locator(".voice-lab-toast", { hasText: "このブラウザではタブ音声録音を使えません" });
   await expect(unsupportedToast).toBeVisible();
@@ -1204,6 +1269,7 @@ test("admin SkitVoice keeps progress readable while retaining technical progress
     mimeType: "audio/wav",
     buffer: Buffer.from("RIFF voice"),
   });
+  await page.locator("#vibevoice-rights-confirmed").check();
   await page.locator("#vibevoice-generate-button").click();
 
   await expect(page.locator("#vibevoice-message")).toContainText(/VibeVoice|Seed-VC|音声生成/);

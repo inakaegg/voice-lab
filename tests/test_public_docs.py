@@ -55,17 +55,39 @@ def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
     vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
     assert "ブラウザの共有許可" in vibevoice
     assert "コンテンツの利用許諾" in vibevoice
+    assert "タブ音声録音の開始前に権利確認を必須とする" in vibevoice
+    assert "必須チェックを毎回要求しない" not in vibevoice
 
 
 def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     workflow = read_text(".github/workflows/ci.yml")
+    secret_workflow = read_text(".github/workflows/secret-scan.yml")
 
     assert "python3 -m pytest" in workflow
     assert "npm test" in workflow
     assert "npm run check:js" in workflow
     assert "Dockerfile.runpod" in workflow
-    assert "gitleaks/gitleaks-action@v2" in workflow
-    assert "fetch-depth: 0" in workflow
+    assert "branches: [main]" in workflow
+    assert "gitleaks/gitleaks-action@v2" not in workflow
+    assert "gitleaks/gitleaks-action@v2" in secret_workflow
+    assert "fetch-depth: 0" in secret_workflow
+    assert "branches: [main]" not in secret_workflow
+    assert "on:\n  push:\n  pull_request:" in secret_workflow
+
+
+def test_secret_scanning_layers_are_documented() -> None:
+    readme = read_text("README.md")
+    checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
+    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
+    task = read_text("TASK.md")
+
+    assert "scripts/install_git_hooks.sh" in readme
+    assert "pre-commit" in checklist
+    assert "pre-push" in checklist
+    assert "GitHub Push Protection" in checklist
+    assert "全branchへのpush" in roadmap
+    assert "commit前" in task
+    assert "push前" in task
 
 
 def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
@@ -108,16 +130,27 @@ def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
     assert "ComfyUI-VibeVoice" in notices
     assert "bundled dependency licenses" in notices
 
+    browser_bundle = notices.split("## ブラウザbundle", 1)[1].split("## Cloudflare Worker", 1)[0]
+    worker_bundle = notices.split("## Cloudflare Worker", 1)[1].split("## Python・GPU image", 1)[0]
+    assert "pinyin-pro" not in browser_bundle
+    assert "pinyin-pro" in worker_bundle
+
 
 def test_frontend_build_emits_and_packages_bundled_dependency_licenses() -> None:
     vite_config = read_text("apps/web/vite.config.ts")
+    package_json = read_text("package.json")
     pyproject = read_text("pyproject.toml")
     wheel_verifier = read_text("scripts/verify_wheel_assets.py")
+    generated_licenses = read_text("src/mo_speech/web/react/assets/licenses.md")
 
     assert 'fileName: "assets/licenses.md"' in vite_config
     assert "postBanner" in vite_config
+    assert "ensure_frontend_license_notices.mjs" in package_json
     assert '"web/react/assets/*.md"' in pyproject
     assert '"mo_speech/web/react/assets/licenses.md"' in wheel_verifier
+    assert "opencc-js - 1.4.1 (MIT AND Apache-2.0)" in generated_licenses
+    assert "opencc-data" in generated_licenses
+    assert "Apache License" in generated_licenses
 
 
 def test_container_images_include_repository_rights_notices() -> None:

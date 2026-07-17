@@ -63,6 +63,15 @@ PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 
 ブラウザで `http://127.0.0.1:8000/` を開きます。fake providerはUI/API検証用で、入力内容に依存しない固定応答を返します。
 
+commitやpushで秘密情報をGitHubへ送る前に停止できるよう、各worktreeでGitleaksのGit hookを有効にします。macOSでは次を実行します。
+
+```sh
+brew install gitleaks
+./scripts/install_git_hooks.sh
+```
+
+`pre-commit`はstaged差分、`pre-push`はGit履歴全体を検査します。hookはローカルで省略・解除できるため、全branchへのpushとpull requestでもGitHub Actionsが独立して再検査します。GitHub側ではPush Protectionも別途有効にし、remoteがpushを受理する前の防止層として使います。
+
 ローカル版では `/skitvoice/admin` から研究用サンプル音声を管理できます。保存先は既定でgit管理外の `tmp/public-sample-audios.json`、変更する場合は `MO_PUBLIC_SAMPLE_AUDIO_PATH` を指定します。由来・許諾・生成model・AI生成表示を確認できない既存SkitVoiceサンプルは、Cloudflareの一般向けsample APIから返しません。外部R2 objectの削除はこのローカル変更に含みません。SpeakLoopにはサンプル音声を表示しません。
 
 音声履歴はローカルFastAPI版だけで利用できます。Cloudflare公開版は、ユーザーが入力した音声と生成音声を履歴として保存しません。公開サンプル音声、quota、監査情報は別用途のデータとしてD1/R2/KVへ保存します。
@@ -85,9 +94,10 @@ python3 -m pip install -e ".[dev,vibevoice]"
 
 ## 検証
 
-通常CIと同じ主要検証:
+ローカルの主要検証:
 
 ```sh
+gitleaks git --redact --log-opts='--all' .
 python3 -m pytest
 npm test
 npm run check:js

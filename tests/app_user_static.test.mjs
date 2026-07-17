@@ -246,6 +246,11 @@ test("vibevoice page provides local skit generation controls", () => {
   assert.match(vibevoiceHtml, /一般画面には表示しません/);
   assert.match(vibevoiceHtml, /data-reference-source-help/);
   assert.match(vibevoiceHtml, /id="voice-lab-toast-viewport"/);
+  assert.match(vibevoiceHtml, /name="rights_confirmed"[^>]*required/);
+  assert.match(vibevoiceHtml, /ファイル、マイク、タブ音声、URL/);
+  assert.match(vibevoiceSource, /function ensureVibeVoiceReferenceRightsConfirmed\(\)/);
+  assert.match(vibevoiceSource, /handleGenerate[\s\S]*ensureVibeVoiceReferenceRightsConfirmed\(\)/);
+  assert.match(vibevoiceSource, /startTabAudioRecording[\s\S]*ensureVibeVoiceReferenceRightsConfirmed\(\)[\s\S]*getDisplayMedia/);
   assert.match(vibevoiceHtml, /skitvoice-samples-admin/);
   assert.doesNotMatch(vibevoiceHtml, /<label>タイトル/);
   assert.doesNotMatch(vibevoiceHtml, /data-public-sample-details/);

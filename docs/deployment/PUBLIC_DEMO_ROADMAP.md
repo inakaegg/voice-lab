@@ -9,7 +9,7 @@
 - quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存し、ユーザー音声履歴はCloudflare版で保存しない。
 - Seed-VCと管理者専用VibeVoiceはprivateなRunPod Serverlessへ分離する前提である。
 - Python/Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
-- Git履歴の手動Gitleaks検査、Security policy、Dependabot設定に加え、push・pull requestでGitleaksを実行するCI jobを追加した。
+- Git履歴の手動Gitleaks検査、commit前・push前のGit hook、Security policy、Dependabot設定に加え、全branchへのpush・pull requestでGitleaksを再実行するCI jobを追加した。GitHub Push Protectionの有効化と実確認は外部作業として残っている。
 - frontend bundleの依存ライセンス本文をbuild時に生成し、wheelへ同梱する。
 - GitHub repositoryは誤ってpublicにした状態から、公開前再監査のためprivateへ戻した。
 - Docker HubのRunPod image repositoryは公開状態の解消が外部作業として残っている。
@@ -23,7 +23,7 @@
 1. Docker Hub imageのprivate化または不要tag削除と、認証なしpull拒否の確認。
 2. Seed-VC GPL-3.0、VibeVoiceの現在のupstream状態、public container imageの権利・配布条件の確認。
 3. audit・quotaの保持期間、削除手段、連絡先を含む正式なプライバシーポリシーの確定。
-4. Private vulnerability reporting、Secret scanning、Dependabot alerts、branch protection等のGitHub公開設定。
+4. Private vulnerability reporting、Secret scanning、GitHub Push Protection、Dependabot alerts、branch protection等のGitHub公開設定。
 5. 到達不能なGitHub Homepageの修正、不要remote branch整理、READMEスクリーンショット。
 6. RunPod operation別の実行時間、policy値、platform側job/result/log保持のowner確認。
 

@@ -3596,12 +3596,15 @@ button.practice-diff-cell:focus-visible {
   background: #fff8e8;
   border: 1px solid #ead39d;
   border-radius: 8px;
+  box-sizing: border-box;
   color: #5d4819;
   display: flex;
+  flex: 1 1 360px;
   font-size: 12px;
   font-weight: 800;
   gap: 8px;
   line-height: 1.5;
+  min-width: 0;
   padding: 10px 11px;
 }
 
@@ -3609,6 +3612,11 @@ button.practice-diff-cell:focus-visible {
   accent-color: #1d75dc;
   flex: 0 0 auto;
   margin-top: 2px;
+}
+
+.vibevoice-rights-confirmation input:focus-visible {
+  outline: 3px solid rgba(29, 117, 220, 0.3);
+  outline-offset: 2px;
 }
 
 .vibevoice-script-actions {

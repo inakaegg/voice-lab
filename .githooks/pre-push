@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaksが見つからないためpushを停止しました。先にgitleaksをインストールしてください。" >&2
+  exit 1
+fi
+
+exec gitleaks git --redact --log-opts='--all' .

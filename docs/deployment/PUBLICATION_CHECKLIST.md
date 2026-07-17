@@ -54,10 +54,13 @@
 
 ## P1: GitHubの公開設定
 
+- [x] staged差分をcommit前に検査するrepo管理のGitleaks `pre-commit` hookとinstallerを追加する。
+- [x] Git履歴全体をpush前に検査するrepo管理のGitleaks `pre-push` hookとinstallerを追加する。
+- [x] 全branchへのpush・pull requestでGitleaksを再実行するCI jobを追加する。
+- [ ] GitHub Secret scanningとGitHub Push Protectionを有効にし、検出したpushがremoteへ到達する前に拒否されることを確認する。
 - [ ] publicへ変更する直前にGit履歴全体をGitleaksで再走査する。
-- [x] push・pull requestでGitleaksを実行するCI jobを追加する。
 - [ ] GitHubのPrivate vulnerability reportingを有効にし、`SECURITY.md`の導線を実画面で確認する。
-- [ ] Secret scanningとDependabot alertsを有効にする。
+- [ ] Dependabot alertsを有効にする。
 - [ ] Code scanningを導入するか、導入しない理由と代替検査を記録する。
 - [ ] `main`のbranch protectionまたはrulesetで、required checks、force push禁止、削除禁止を設定する。
 - [ ] GitHubのHomepageを実際に到達できる公開デモURLへ直す。
@@ -74,6 +77,7 @@
 ## 検証ゲート
 
 ```sh
+test "$(git config --worktree --get core.hooksPath)" = ".githooks"
 gitleaks git --redact --log-opts='--all' .
 python3 -m pytest
 npm test
