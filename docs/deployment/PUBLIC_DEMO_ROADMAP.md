@@ -1,47 +1,50 @@
-# 公開デモ・ポートフォリオ準備
+# SpeakLoop公開デモ・ポートフォリオ
 
 更新日: 2026-07-17
 
 ## 現在地
 
-- Voice LabポータルとSpeakLoopを一般公開の中心とし、SkitVoice/VibeVoiceを管理者専用研究機能へ閉じる変更はmerge済みmainのpreviewで検証済み。本番未deployのためproduction公開環境へ反映済みとは扱わない。
-- Google OAuth、feature別quota、入力上限、管理者認証、簡易監査ログを実装済み。
-- 利用回数・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ保存し、ユーザー音声履歴はCloudflare版で保存しない。保持期間と削除処理を実装し、利用者向けプライバシーポリシーを追加した。
-- Seed-VCと管理者専用VibeVoiceはprivateなRunPod Serverlessへ分離する前提である。
-- Python/Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
-- Git履歴の手動Gitleaks検査、commit前・push前のGit hook、Security policy、Dependabot設定に加え、全branchへのpush・pull requestでGitleaksを再実行するCI jobを追加した。GitHub Push Protectionの有効化と実確認は外部作業として残っている。
-- frontend bundleの依存ライセンス本文をbuild時に生成し、wheelへ同梱する。
-- GitHub repositoryは誤ってpublicにした状態から、公開前再監査のためprivateへ戻した。
-- Docker HubのRunPod image repositoryはprivate化済みで、RunPodから認証してcold startできることを確認済み。
+- Voice Labの公開ポートフォリオはSpeakLoopを中心とする。
+- Cloudflareの現在版はproduction公開環境へ反映済みで、`/`、`/speakloop`、`/privacy`を公開している。
+- Google OAuth、機能別quota、入力上限、管理者認証、簡易監査ログを実装済み。
+- 利用者音声と生成音声はCloudflare版のVoice Lab履歴へ保存しない。
+- quota・監査情報はD1、短期jobとfallbackはKVを使い、平文emailを含む旧quota keyは削除済み。
+- 中国語ASRと任意の声質変換はprivateなRunPod Serverlessへ分離している。
+- Python／Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
+- Gitleaksはcommit前、push前、全branchへのpush・pull requestで独立して実行する。
+- GitHub repositoryは公開向けREADMEと状態文書の整理中のためprivate。文書PRのmergeと再監査後に再公開する。
+- Docker HubのRunPod image repositoryはprivateで、認証済みcold startを確認済み。
 
 ## 公開判断
 
-現時点では公開再開不可とする。blocking項目、外部設定、確認証拠は [Repository・公開デモの公開前チェックリスト](PUBLICATION_CHECKLIST.md) を正とする。
-
-主なblocking項目は次のとおり。
-
-1. preview確認済みの公開境界とprivacy保持処理をproductionへ反映し、legacy KVの平文email keyを削除する。
-2. public化と同時にPrivate vulnerability reporting、Secret scanning、GitHub Push Protection、Dependabot alerts、branch protectionを有効にする。
-3. GitHub Homepageを現行公開デモURLへ修正する。
+CloudflareのSpeakLoopデモは公開継続する。GitHub repositoryの再公開は、[再公開チェックリスト](PUBLICATION_CHECKLIST.md)に従い、README整理PRのmerge、全履歴Gitleaks、GitHub security設定の再確認後に行う。
 
 Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオとして閲覧可能にする方針を維持する。第三者コンポーネントにはそれぞれのライセンスが適用されるため、本体の権利表示と混同しない。
 
 ## 完了済みの技術確認
 
-1. 旧production Workerでトップ、OAuth開始、SpeakLoop、SkitVoiceをsmoke確認した。今回のSkitVoice閉鎖はpreviewで確認済みだが本番未deployであり、公開URLでの再確認が必要である。
-2. 管理route、旧route・旧HTML直指定、公開サンプル配信、OpenAI／RunPod接続を確認した。
-3. Cloudflare版の旧音声履歴KV／R2データを削除した。
-4. Git履歴全体をGitleaksで検査し、2026-07-16の監査時点で検出0件を確認した。
-5. `_ai/`、`tmp/`、`.env`、`.dev.vars`、`.runpod.env`がGit管理外で、履歴にも含まれないことを確認した。
+1. Cloudflare production公開URLでトップ、SpeakLoop、プライバシーポリシー、匿名API境界、管理者ログイン遷移をsmoke確認した。
+2. 平文emailを含むlegacy KV quota key 2件を削除し、残存0件を確認した。
+3. Docker Hub private imageをRunPodがregistry credential付きでcold startできることを確認した。
+4. Git履歴全体、commit前、push前、GitHub ActionsでGitleaksを実行する。
+5. `_ai/`、`tmp/`、`.env`、`.dev.vars`、`.runpod.env`をGit管理外にしている。
+6. GitHub Homepageを現行のCloudflare公開URLへ更新した。
 
-上記は再公開時点の外部状態を保証しない。公開直前に同じ確認を再実行する。
+## 再公開前に行うこと
+
+1. SpeakLoop中心のREADME・公開状態文書をmergeする。
+2. PRのrequired checksとCodexレビューが最新headで完了し、未解決threadが0件であることを確認する。
+3. Git履歴全体をGitleaksで再検査する。
+4. GitHub repositoryをpublicへ戻す。
+5. Secret scanning、Push Protection、Private vulnerability reporting、Dependabot alerts、`main`のbranch protectionを再確認する。
+6. 匿名状態でrepositoryトップ、脆弱性報告導線、公開デモURLを確認する。
 
 ## 公開後に検討する改善
 
-- SpeakLoopとSkitVoiceの旧controllerをreducer/hooksへ小単位で移し、compatibility CSSを縮小する。
-- Safari/Firefoxとスマートフォン実機の録音形式・共有音声対応を整理する。
-- 利用量や障害分離の必要が出た場合だけWorker分割を検討する。
-- RunPodのcold start、queue、GPU費用を実測し、必要ならwarmup運用を調整する。
+- READMEへPC・スマートフォンの代表スクリーンショットを追加する。
+- Safari、Firefox、スマートフォン実機の録音形式を継続確認する。
+- RunPodのcold start、queue、GPU費用を実測し、必要な場合だけwarmup運用を調整する。
+- 公開画面の説明、プライバシーポリシー、実装上の保存境界が一致していることを継続監査する。
 
 ## 自動検証
 
@@ -53,4 +56,4 @@ npm run check:web
 npm run test:e2e
 ```
 
-自動検証に加え、公開URLの主要導線、認証、サンプル再生、生成、モバイル表示、GitHubとDocker Hubの実設定を確認する。
+自動検証に加え、公開URLの主要導線、認証、モバイル表示、GitHub・Docker Hub・RunPodの実設定を確認する。
