@@ -4,7 +4,7 @@
 
 ## 現在の判断
 
-現在は単一の`voice-lab` Workerを正とする。一般公開はSpeakLoopと `/skitvoice` の非生成案内、研究機能は3つの管理画面と実験画面として同じWorkerから配信し、共通のOAuth、quota、D1、R2、KVを使う。SkitVoice/VibeVoiceの生成は一般公開しない。この変更はmerge済みmainのpreviewで検証済みだが、本番未deployでproduction公開環境には未反映である。
+現在は単一の`voice-lab` Workerを正とする。一般公開はSpeakLoopと `/skitvoice` の非生成案内、研究機能は3つの管理画面と実験画面として同じWorkerから配信し、共通のOAuth、quota、D1、R2、KVを使う。SkitVoice/VibeVoiceの生成は一般公開しない。この構成はproduction公開環境へ反映済みである。
 
 構成を分割すること自体をロードマップ上の未完了タスクにはしない。
 

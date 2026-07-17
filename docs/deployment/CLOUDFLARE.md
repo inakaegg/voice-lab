@@ -10,7 +10,7 @@
 
 日次quotaと監査ログの期限切れ削除は、`wrangler.toml` のCron Triggerで毎日03:17 UTCに実行する。48時間を超えた日次quotaと90日を超えた監査ログを削除するため、日次実行の間隔を含む実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaは利用上限維持のため公開デモの運用中に保持する。
 
-この文書は現在のCloudflareデモ構成と、merge済みmainのpreviewで検証済みだが本番未deployの公開境界変更を説明する。公開ポートフォリオの主機能はSpeakLoopとし、SkitVoice/VibeVoiceは既存Google管理者セッションで保護する研究機能へ閉じる。発音練習アプリと研究機能を物理的に分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
+この文書はproduction公開環境へ反映済みのCloudflareデモ構成を説明する。公開ポートフォリオの主機能はSpeakLoopとし、SkitVoice/VibeVoiceは既存Google管理者セッションで保護する研究機能へ閉じる。発音練習アプリと研究機能を物理的に分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
 データフロー、保存範囲、保持期間と削除処理は [PRIVACY.md](PRIVACY.md)、利用者向けの説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を参照する。公開画面では `/privacy` とSpeakLoopフッターから確認できる。
 
@@ -28,7 +28,7 @@ Cloudflare版は `/` にSpeakLoopだけを主製品として表示し、`/skitvo
 
 VibeVoiceのstatus、URL参照、script、job submit、job status、cancelは、既存Google管理者セッションを使う共通API guardで保護する。匿名利用者は401、通常Googleユーザーは403とし、routeごとのUI条件をsecurity boundaryにしない。Cloudflare版にはsync generation APIを持たせず、ローカルFastAPIだけが `POST /api/vibevoice/generate` を維持する。
 
-非admin向け `GET /api/public-session` はSkitVoiceのfeature/quotaを含めない。非admin向け `GET /api/public-sample-audios` は既存SkitVoice sampleを返さない。管理者は同じsample APIで研究dataを管理でき、外部R2 objectの削除はこの変更に含めない。これらはpreviewで検証済みだが本番未deployであり、現在のproduction公開URLで閉鎖済みとは扱わない。
+非admin向け `GET /api/public-session` はSkitVoiceのfeature/quotaを含めない。非admin向け `GET /api/public-sample-audios` は既存SkitVoice sampleを返さない。管理者は同じsample APIで研究dataを管理できる。これらの境界はproduction公開URLで確認済みである。
 
 ## 秘密情報
 

@@ -8,18 +8,19 @@ def read_text(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def test_readme_describes_current_public_apps_and_architecture() -> None:
+def test_readme_presents_speakloop_without_research_branding() -> None:
     readme = read_text("README.md")
 
     assert "SpeakLoop" in readme
-    assert "SkitVoice" in readme
     assert "Cloudflare Worker" in readme
     assert "RunPod Serverless" in readme
     assert "```mermaid" in readme
     assert "npm test" in readme
     assert "python3 -m pytest" in readme
-    assert "一般公開製品ではなくprivateまたは管理者専用" in readme
-    assert "未deploy" in readme
+    assert "https://voice-lab.inakaegg.workers.dev/" in readme
+    assert "SkitVoice" not in readme
+    assert "VibeVoice" not in readme
+    assert "本番未deploy" not in readme
 
 
 def test_project_agent_guide_contains_current_validation_commands() -> None:
@@ -36,7 +37,8 @@ def test_status_docs_do_not_claim_cloudflare_gateway_is_unimplemented() -> None:
     known_limits = read_text("docs/speech-translation/KNOWN_LIMITS.md")
 
     assert "SpeakLoop" in task
-    assert "SkitVoice" in task
+    assert "SkitVoice" not in task
+    assert "VibeVoice" not in task
     assert "Cloudflare Worker" in task
     assert "通常CI" in task
     assert "Cloudflare gateway、" not in known_limits
@@ -90,7 +92,7 @@ def test_secret_scanning_layers_are_documented() -> None:
     assert "push前" in task
 
 
-def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
+def test_publication_record_tracks_private_docs_remediation_and_external_controls() -> None:
     checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     task = read_text("TASK.md")
@@ -98,6 +100,7 @@ def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
     for document in (checklist, roadmap, task):
         assert "GitHub repository" in document
         assert "private" in document
+        assert "再公開" in document
 
     assert "Docker Hub" in checklist
     assert "公開状態" in checklist
@@ -110,11 +113,11 @@ def test_publication_gate_tracks_private_review_and_external_blockers() -> None:
     assert "VibeVoice" in checklist
     assert "外部状態スナップショット" in checklist
     assert "is_private=true" in checklist
-    assert "Secret scanningは無効" in checklist
-    assert "Dependabot alertsは無効" in checklist
+    assert "Secret scanningとGitHub Push Protectionはpublic化時に再確認" in checklist
+    assert "Dependabot alertsは有効" in checklist
     assert "Code scanningは未導入" in checklist
-    assert "branch protectionとrulesetのAPIは403" in checklist
-    assert "legacy累計quota keyが2件" in checklist
+    assert "private状態ではbranch protectionのAPIが403" in checklist
+    assert "legacy quota keyは0件" in checklist
     assert "D1 audit 97件" in checklist
     assert "registry credentialは1件" in checklist
     assert "強制scale-to-zero後の新しいworker" in checklist
@@ -216,29 +219,33 @@ def test_privacy_boundary_explains_external_processing_without_blocking_runpod()
     assert "legacy KV" in privacy
     assert "保持期間" in privacy
     assert "削除" in privacy
-    assert "公開再開" in privacy
+    assert "legacy KVの平文email keyは0件" in privacy
+    assert "Private vulnerability reporting" in privacy
+    assert "public化時に再確認" in privacy
     assert "RUNPOD_OPERATION_POLICIES_JSON" not in privacy
     assert "policy.ttl" not in privacy
     assert "policy.executionTimeout" not in privacy
     assert "RunPodの既定" in privacy
 
 
-def test_public_docs_keep_skitvoice_closed_and_distinguish_local_changes_from_deploy() -> None:
+def test_public_summaries_focus_on_speakloop_while_technical_boundaries_remain() -> None:
     readme = read_text("README.md")
     task = read_text("TASK.md")
+    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     spec = read_text("docs/speech-translation/SPEC.md")
     vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
-    checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
 
-    for document in (readme, task, spec, vibevoice):
-        assert "管理者" in document
+    for document in (readme, task, roadmap):
+        assert "SpeakLoop" in document
+        assert "SkitVoice" not in document
+        assert "VibeVoice" not in document
+    assert "VIBEVOICE.md" not in readme
     assert "生成フォームやsampleを含まない" in spec
     assert "public sample APIはSkitVoice sampleを返さない" in vibevoice
-    assert "現時点の公開環境で停止済みとは扱わない" in checklist
     assert "aoi-ot/VibeVoice-LargeをMicrosoft公式配布と表現しない" in read_text("THIRD_PARTY_NOTICES.md")
 
 
-def test_current_state_docs_distinguish_preview_verification_from_production_deploy() -> None:
+def test_current_state_docs_match_the_deployed_production_boundary() -> None:
     for relative_path in (
         "README.md",
         "TASK.md",
@@ -246,11 +253,12 @@ def test_current_state_docs_distinguish_preview_verification_from_production_dep
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/deployment/APP_SPLIT.md",
+        "docs/speech-translation/SPEC.md",
     ):
         document = read_text(relative_path)
-        assert "preview" in document, relative_path
         assert "production" in document, relative_path
-        assert "本番未deploy" in document, relative_path
+        assert "本番未deploy" not in document, relative_path
+        assert "production公開環境へ反映済み" in document, relative_path
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:
@@ -319,9 +327,11 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
     architecture = read_text("docs/deployment/ARCHITECTURE.md")
     cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
 
-    for document in (readme, spec, architecture, cloudflare):
+    assert "/speakloop" in readme
+    for document in (spec, architecture, cloudflare):
         assert "/speakloop" in document
         assert "/skitvoice" in document
+    assert "/skitvoice" not in readme
 
     assert "`/fun` は管理者認証済みの場合だけ" in spec
     assert "同じGoogle OAuthセッション" in spec

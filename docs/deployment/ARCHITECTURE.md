@@ -4,7 +4,7 @@
 
 ## 構成
 
-Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopとSkitVoiceの非公開案内を配信する。一般ユーザー向け製品はSpeakLoopだけで、SkitVoiceの生成・sample・statusは管理者研究境界へ閉じる。UIはWorker Static Assets、認証・quota・API中継はWorker module、GPU推論はRunPod Serverlessが担当する。この変更はmerge済みmainのpreviewで検証済みだが、本番未deployでproduction公開環境には未反映である。
+Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopとSkitVoiceの非公開案内を配信する。一般ユーザー向け製品はSpeakLoopだけで、SkitVoiceの生成・sample・statusは管理者研究境界へ閉じる。UIはWorker Static Assets、認証・quota・API中継はWorker module、GPU推論はRunPod Serverlessが担当する。この構成はproduction公開環境へ反映済みである。
 
 ```text
 Browser

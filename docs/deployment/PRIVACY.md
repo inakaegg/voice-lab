@@ -21,7 +21,7 @@
 
 - Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しない。
 - Google emailはquotaと監査の識別に使う前にSHA-256 hash化する。D1と現在のKV fallbackは、quota keyとaudit eventへ平文emailを新規保存しない。
-- 2026-07-16より前のlegacy KVには、quota keyまたはaudit eventへ平文emailが残っている可能性がある。現在の実装は利用時にhash key／`email_hash`へ移行するが、公開環境で旧keyと旧eventを検索・削除した証拠は別途必要である。
+- 2026-07-16より前に作られた平文emailを含むlegacy KV quota keyは、新Workerのproduction反映後に2件を削除した。2026-07-17の再検査で、legacy KVの平文email keyは0件である。
 - Googleログイン後のブラウザには、email、発行時刻、有効期限を含む署名cookieを `HttpOnly`、`Secure`、`SameSite=Lax` で保存する。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
 - D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
 - R2は管理者が公開用として登録したサンプル音声だけを保存する。
@@ -41,6 +41,6 @@ Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの
 
 期限のあるD1の日次quotaとaudit eventは、Cloudflare WorkerのCron Triggerで1日1回削除する。KVの短期job、日次quota、audit fallbackにはTTLを設定する。累計quotaは利用上限を維持するデータなので公開デモ運用中は自動削除せず、デモ終了時に削除する。
 
-GitHubのPrivate vulnerability reportingはpublic repositoryでのみ外部から利用できるため、private状態の公開画面から未設定の導線を案内しない。repositoryをpublicへ切り替える際の有効化と実画面確認は、公開前チェックリストで扱う。
+GitHubのPrivate vulnerability reportingはpublic repositoryでのみ外部から利用できる。現在は公開文書整理のためrepositoryをprivateにしているので、public化時に再確認する。
 
-公開再開前の外部作業として、productionへ新Workerを反映した後にlegacy KVの平文email keyを削除し、残存0件を再確認する。
+productionへの新Worker反映とlegacy KV削除は完了しており、平文email keyの残存は0件である。
