@@ -33,6 +33,7 @@ drain_seconds="${RUNPOD_DEPLOY_WORKER_DRAIN_SECONDS:-20}"
 idle_timeout="${RUNPOD_DEPLOY_IDLE_TIMEOUT_SECONDS:-${RUNPOD_IDLE_TIMEOUT_SECONDS:-300}}"
 diagnostics_timeout="${RUNPOD_DEPLOY_DIAGNOSTICS_TIMEOUT_SECONDS:-900}"
 diagnostics_poll_interval="${RUNPOD_DEPLOY_DIAGNOSTICS_POLL_INTERVAL_SECONDS:-2}"
+registry_auth_id="${RUNPOD_REGISTRY_AUTH_ID:-}"
 
 require_value() {
   local name="$1"
@@ -100,53 +101,18 @@ create_template() {
 
   local env_json
   env_json="$(runpod_env_json "${RUNPOD_APP_ENV_KEYS[@]}")"
-  local cmd=(
-    runpodctl template create
-    --name "${RUNPOD_SERVERLESS_TEMPLATE_NAME}"
-    --image "${RUNPOD_IMAGE}"
-    --serverless
-    --container-disk-in-gb "${RUNPOD_CONTAINER_DISK_GB:-60}"
-    --volume-mount-path "${RUNPOD_VOLUME_MOUNT_PATH:-/runpod-volume}"
-    --env "${env_json}"
-    --docker-start-cmd "python,-m,mo_speech.runpod_handler"
-  )
-
-  { print_command "${cmd[@]}"; } >&2
+  echo "running: POST https://rest.runpod.io/v1/templates image=${RUNPOD_IMAGE} containerRegistryAuthId=${registry_auth_id:-none} env=<env-json-redacted>" >&2
   if [[ "${DRY_RUN}" == "1" ]]; then
     printf 'dry-run-template-%s\n' "${short_sha}"
     return 0
   fi
 
   local template_json
-  template_json="$("${cmd[@]}")"
-  python3 -c '
-import json
-import re
-import sys
-
-SECRET_KEY_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
-SECRET_KEYS = {"OPENAI_API_KEY"}
-
-
-def is_secret_key(key):
-    return key in SECRET_KEYS or key.endswith(SECRET_KEY_SUFFIXES)
-
-
-def redact(value):
-    if isinstance(value, dict):
-        return {key: ("<redacted>" if is_secret_key(key) else redact(item)) for key, item in value.items()}
-    if isinstance(value, list):
-        return [redact(item) for item in value]
-    return value
-
-
-text = sys.stdin.read()
-try:
-    print(json.dumps(redact(json.loads(text)), ensure_ascii=False, indent=2), file=sys.stderr)
-except json.JSONDecodeError:
-    text = re.sub(r"([A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)[\"=:\s]+)[^\",\s]+", r"\1<redacted>", text)
-    print(text, end="", file=sys.stderr)
-' <<< "${template_json}"
+  template_json="$(
+    RUNPOD_TEMPLATE_ENV_JSON="${env_json}" \
+      python3 "${SCRIPT_DIR}/runpod_template_api.py" create
+  )"
+  python3 -m json.tool <<< "${template_json}" >&2
   python3 -c '
 import json
 import sys
@@ -208,49 +174,17 @@ update_template() {
 
   local env_json
   env_json="$(runpod_env_json "${RUNPOD_APP_ENV_KEYS[@]}")"
-  local cmd=(
-    runpodctl template update
-    "${template_id}"
-    --image "${RUNPOD_IMAGE}"
-    --container-disk-in-gb "${RUNPOD_CONTAINER_DISK_GB:-60}"
-    --env "${env_json}"
-  )
-
-  { print_command "${cmd[@]}"; } >&2
+  echo "running: PATCH https://rest.runpod.io/v1/templates/${template_id} image=${RUNPOD_IMAGE} containerRegistryAuthId=${registry_auth_id:-none} env=<env-json-redacted>" >&2
   if [[ "${DRY_RUN}" == "1" ]]; then
     return 0
   fi
 
   local template_json
-  template_json="$("${cmd[@]}")"
-  python3 -c '
-import json
-import re
-import sys
-
-SECRET_KEY_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
-SECRET_KEYS = {"OPENAI_API_KEY"}
-
-
-def is_secret_key(key):
-    return key in SECRET_KEYS or key.endswith(SECRET_KEY_SUFFIXES)
-
-
-def redact(value):
-    if isinstance(value, dict):
-        return {key: ("<redacted>" if is_secret_key(key) else redact(item)) for key, item in value.items()}
-    if isinstance(value, list):
-        return [redact(item) for item in value]
-    return value
-
-
-text = sys.stdin.read()
-try:
-    print(json.dumps(redact(json.loads(text)), ensure_ascii=False, indent=2), file=sys.stderr)
-except json.JSONDecodeError:
-    text = re.sub(r"([A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)[\"=:\s]+)[^\",\s]+", r"\1<redacted>", text)
-    print(text, end="", file=sys.stderr)
-' <<< "${template_json}"
+  template_json="$(
+    RUNPOD_TEMPLATE_ENV_JSON="${env_json}" \
+      python3 "${SCRIPT_DIR}/runpod_template_api.py" update "${template_id}"
+  )"
+  python3 -m json.tool <<< "${template_json}" >&2
 }
 
 create_or_update_template() {
@@ -387,6 +321,9 @@ PY
 
 require_value RUNPOD_IMAGE_NAME "${image_name}"
 require_value RUNPOD_ENDPOINT_ID "${endpoint_id}"
+if [[ "${image_visibility}" == "private" ]]; then
+  require_value RUNPOD_REGISTRY_AUTH_ID "${registry_auth_id}"
+fi
 if [[ "${DRY_RUN}" != "1" ]]; then
   require_cmd gh
   require_cmd runpodctl

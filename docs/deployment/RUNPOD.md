@@ -97,6 +97,8 @@ cp scripts/runpod.env.example .runpod.env
 | 変数 | 用途 |
 | --- | --- |
 | `RUNPOD_IMAGE` | Docker registryへpushするimage名 |
+| `RUNPOD_IMAGE_VISIBILITY` | image repositoryの実際の可視性。既定は `private`。 |
+| `RUNPOD_REGISTRY_AUTH_ID` | RunPodへ登録したpull専用container registry credentialのID。credentialのtoken自体は保存しない。private imageでは必須。 |
 | `RUNPOD_GPU_ID` | 例: `NVIDIA A40`、`NVIDIA GeForce RTX 4090` |
 | `RUNPOD_DATA_CENTER_ID` | Network Volume作成先 |
 | `RUNPOD_DATA_CENTER_IDS` | Pod/Serverless配置先候補 |
@@ -149,6 +151,16 @@ RunPod imageはprivate repositoryを既定とする。imageには `/app/src` と
 
 GHCRはGitHub Container Registryのこと。GitHub repositoryとimageの権限を合わせたい場合に向く。Docker Hub、GHCRのどちらでもprivate imageにはRunPod側のregistry auth設定が必要である。手順が増えることを理由にpublicへ切り替えず、public配布は [公開前チェックリスト](PUBLICATION_CHECKLIST.md) の権利・プライバシー・外部設定を完了した場合だけ明示的に選ぶ。
 
+Docker HubではRunPod専用のread-only Personal Access Tokenを作る。通常のpush用tokenやアカウントパスワードをRunPodへ渡さない。既定手順はRunPod ConsoleのRegistry Credentialsから登録し、返されたIDだけをgit管理外の `.runpod.env` へ保存する。REST APIを使う場合もtokenをcommand line引数やshell履歴へ残さず、保護された秘密値入力から `POST /v1/containerregistryauth` のrequest bodyへ渡す。
+
+```bash
+# credential登録後、secretではないIDだけを保存する
+RUNPOD_IMAGE_VISIBILITY=private
+RUNPOD_REGISTRY_AUTH_ID=<RunPod registry credential ID>
+```
+
+Serverless templateのcreate/updateは `scripts/runpod_template_api.py` を通じてRunPod REST APIを使い、`containerRegistryAuthId` を明示する。`runpodctl template create/update` にはこのIDを渡すoptionがないため使用しない。private imageなのに `RUNPOD_REGISTRY_AUTH_ID` が空の場合、deploy、create、updateの各スクリプトは外部変更前に安全停止する。Docker Hub tokenはRunPod側credentialだけに保存し、`.runpod.env`、GitHub Secrets、template envへ複製しない。
+
 RunPodのGitHub連携は、GitHub repositoryからRunPod側でimageをbuildし、RunPodのregistryに保存してServerless endpointへdeployする用途に向く。ローカルMacのDocker build容量を避けられるのが利点。ただし初回のWeb UI込みPod検証では、明示的なDocker imageをregistryへpushしてPodからpullする方が手順を追いやすい。
 
 RunPod用imageをbuildしてregistryへpushする。
@@ -199,15 +211,15 @@ push後にRunPod Serverlessへ反映する通常手順では、まず `scripts/r
 
 | スクリプト | 使う場面 | 主な処理 |
 | --- | --- | --- |
-| `scripts/runpod_deploy_serverless_image.sh` | 通常のdeploy。push済みの現在HEADをRunPod Serverlessへ反映したい時 | GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作り、endpointの `templateId` を切り替え、`.runpod.env` を更新し、diagnostics smokeを実行する |
-| `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` と `RUNPOD_IMAGE` を使い、既存templateを更新する。endpoint切替やworker入れ替えは行わない |
-| `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` の `RUNPOD_IMAGE` から新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
+| `scripts/runpod_deploy_serverless_image.sh` | 通常のdeploy。push済みの現在HEADをRunPod Serverlessへ反映したい時 | GitHub Actionsでimageをbuild/pushし、registry credential付きの新しいServerless templateを作り、endpointの `templateId` を切り替え、`.runpod.env` を更新し、diagnostics smokeを実行する |
+| `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` のtemplate/image/registry credentialを使い、RunPod REST APIで既存templateを更新する。endpoint切替やworker入れ替えは行わない |
+| `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` のimageとregistry credentialからRunPod REST APIで新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
 | `scripts/runpod_build_push.sh` | ローカルDockerで直接build/pushしたい時 | `Dockerfile.runpod` をローカルでbuildx buildしてregistryへpushする。Actions運用では通常使わない |
 | `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、中国語練習ASR、VibeVoiceなどのjobを直接投げる |
 
 判断に迷う場合は、`RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh` で実行予定のtag、template名、workflow起動内容を確認してからdry-runなしで実行する。
 
-通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、新しいServerless templateを作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
+通常は、以下のdeployスクリプトを使う。このスクリプトは現在のGit HEADから一意なimage tagを決め、GitHub Actionsでimageをbuild/pushし、`.runpod.env` の `RUNPOD_REGISTRY_AUTH_ID` を引き継いだ新しいServerless templateをRunPod REST APIで作成し、endpointの `templateId` を切り替え、`.runpod.env` の `RUNPOD_IMAGE` / `RUNPOD_SERVERLESS_TEMPLATE_NAME` / `RUNPOD_SERVERLESS_TEMPLATE_ID` を更新し、最後にdiagnostics jobでworker内のimage revisionを確認する。
 
 ```bash
 scripts/runpod_deploy_serverless_image.sh
@@ -215,7 +227,7 @@ scripts/runpod_deploy_serverless_image.sh
 
 既定のimage tagは `runpod-vibevoice-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
 
-同じcommitでdeployを再実行した場合、template名も同じになる。前回実行でtemplate作成後にendpoint更新、worker起動、diagnostics、残高不足などで失敗した場合でも、deployスクリプトは同名の自分のtemplateを検索し、既存templateを `runpodctl template update` して再利用する。RunPod側の `Template name must be unique` が出た場合は、まず最新のdeployスクリプトで同じcommitのまま再実行する。
+同じcommitでdeployを再実行した場合、template名も同じになる。前回実行でtemplate作成後にendpoint更新、worker起動、diagnostics、残高不足などで失敗した場合でも、deployスクリプトは同名の自分のtemplateを検索し、RunPod REST APIのtemplate PATCHでimage、env、registry credentialを更新して再利用する。RunPod側の `Template name must be unique` が出た場合は、まず最新のdeployスクリプトで同じcommitのまま再実行する。
 
 スクリプトは、現在のHEADがupstreamへpush済みであることを確認する。push前のローカルcommitを指定してActionsを起動してもGitHub側ではそのcommitをcheckoutできないため、通常は先にpushする。確認だけしたい場合はdry-runを使う。
 
@@ -243,6 +255,7 @@ Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh
 # .runpod.env
 RUNPOD_IMAGE=docker.io/<user>/<private-repository>:runpod-vibevoice-<short-sha>
 RUNPOD_IMAGE_VISIBILITY=private
+RUNPOD_REGISTRY_AUTH_ID=<RunPod registry credential ID>
 ```
 
 既存templateへ反映する場合:
@@ -251,7 +264,7 @@ RUNPOD_IMAGE_VISIBILITY=private
 scripts/runpod_update_serverless_template.sh
 ```
 
-このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimageと環境変数を更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のimageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
+このスクリプトは `.runpod.env` を読み、`RUNPOD_SERVERLESS_TEMPLATE_ID` のimage、環境変数、`containerRegistryAuthId` をRunPod REST APIで更新する。Serverless endpointが同じtemplate IDを参照している場合、新しく起動するworkerは更新後のcredentialでprivate imageをpullする。既に起動済みのworkerは古いimageのまま残ることがあるため、確実に新imageで確認したい場合は既存workerを落とすか、idle timeout後に再実行する。
 
 新しいtemplateとして切り替える場合:
 

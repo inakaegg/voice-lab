@@ -44,6 +44,8 @@ vibevoice = [
   "soundfile",
   "tokenizers",
   "tqdm",
+]
+url-reference = [
   "yt-dlp[curl-cffi]",
 ]
 vc-compare = [

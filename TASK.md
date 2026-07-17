@@ -5,9 +5,9 @@
 - 公開ポートフォリオの主機能はSpeakLoop。SkitVoice/VibeVoiceは一般公開製品から外し、privateまたは管理者専用の研究機能として残す。
 - ローカルFastAPI版とCloudflare Worker公開版を持ち、GPU処理はRunPod Serverlessへ分離している。
 - SpeakLoopは母語録音、翻訳、模範音声、復唱録音、ASR比較、フレーズ単位の比較再生まで実装済み。
-- SkitVoiceは最大4話者、VibeVoice生成、ASR timestampによる再配置、低スコア行再生成、Seed-VC後処理まで実装済みだが、Cloudflare一般ユーザー経路は閉じるローカル変更を実装中で未deploy。
+- SkitVoiceは最大4話者、VibeVoice生成、ASR timestampによる再配置、低スコア行再生成、Seed-VC後処理まで実装済み。Cloudflare一般ユーザー経路を閉じる変更はmerge済みmainのpreviewで検証済みだが、本番未deployでproduction公開環境には未反映。
 - 参照音声はローカル版でファイル、マイク、タブ音声、URL切り出しの4方式、Cloudflare版でURLを除く3方式を提供する。
-- Cloudflare Workerは既存のGoogle管理者セッションをVibeVoiceの共通認可境界にも使う。匿名・通常Googleユーザーには生成API、status、既存SkitVoiceサンプルを返さないローカル変更を実装中で未deploy。
+- Cloudflare Workerは既存のGoogle管理者セッションをVibeVoiceの共通認可境界にも使う。匿名・通常Googleユーザーには生成API、status、既存SkitVoiceサンプルを返さない変更はpreviewで検証済みだが、本番未deploy。
 - 公開サンプル音声はローカルFastAPIでも管理画面から永続保存でき、保存・削除時の処理中／成功／失敗をボタンと状態欄へ表示する。
 - quota・監査・公開サンプルmetadataはD1、公開サンプル音声blobはR2へ移行済みで、bindingなし環境向けのKV fallbackを維持している。ユーザー音声履歴はローカル版だけで保存する。
 - 公開ポータル、SpeakLoop、SkitVoiceはVite + React + TypeScript、共通UI生成基盤はTailwind CSS v4とrepo所有のshadcn/ui部品へ移行済み。管理・互換画面も共通Tailwind buildを使う。
