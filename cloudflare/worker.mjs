@@ -4280,6 +4280,7 @@ function englishIntegerWords(value) {
 
 function normalizeChineseSpokenForms(text) {
   let source = String(text || "");
+  source = source.replace(/(?<![a-z0-9.])[-−](?=\d)/gu, "负");
   const protectedValues = [];
   const protect = (pattern, replacement) => {
     source = source.replace(pattern, (...args) => {

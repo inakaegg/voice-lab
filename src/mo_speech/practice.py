@@ -382,6 +382,7 @@ def _english_integer_words(value: int) -> str | None:
 
 def _normalize_chinese_spoken_forms(text: str) -> str:
     source = str(text or "")
+    source = re.sub(r"(?<![a-z0-9.])[-−](?=\d)", "负", source)
     protected: list[str] = []
 
     def protect(pattern: str, replacement) -> None:
