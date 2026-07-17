@@ -75,9 +75,11 @@ test("SpeakLoop shows own-voice details on hover, focus, and click without shift
   await page.goto("/speakloop");
   const help = page.locator("#practice-own-voice-help > button");
   const tooltip = page.locator("#practice-own-voice-tooltip");
+  const disclosure = page.locator(".practice-own-voice-disclosure");
   const workflowBoxBefore = await page.locator(".react-practice-flow").boundingBox();
 
   await expect(tooltip).toBeHidden();
+  await expect(disclosure).toBeHidden();
   if (testInfo.project.name !== "mobile") {
     await help.hover();
     await expect(tooltip).toBeVisible();
@@ -107,6 +109,16 @@ test("SpeakLoop shows own-voice details on hover, focus, and click without shift
   await expect(tooltip).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(tooltip).toBeHidden();
+
+  await page.locator("#practice-own-voice-toggle").check();
+  await expect(disclosure).toBeVisible();
+  await expect(disclosure).toHaveText("録音とお手本音声は外部の音声処理サービスで一時処理され、Voice Labの履歴には保存されません。");
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-disclosure.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "dark"));
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-disclosure.png`, fullPage: true });
+  }
 });
 
 test("portal keeps the SpeakLoop action within the initial viewport", async ({ page }) => {

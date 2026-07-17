@@ -160,6 +160,31 @@ test("a heard-word difference selects the paired range for its target phrase", (
   assert.deepEqual(selected?.repeat, { start: 1, end: 2 });
 });
 
+test("a heard-word difference keeps raw punctuation offsets in the preceding phrase", () => {
+  const alignment = {
+    available: true,
+    complete: true,
+    target_phrase_count: 2,
+    phrases: [
+      { index: 0, target_text: "こんにちは、世界です。", available: true, audio_start: 0.1, audio_end: 1.2 },
+      { index: 1, target_text: "次です。", available: true, audio_start: 1.3, audio_end: 2.0 },
+    ],
+  };
+  const ranges = [
+    { index: 0, model: { start: 0.1, end: 1.2 }, repeat: { start: 0.2, end: 1.3 } },
+    { index: 1, model: { start: 1.3, end: 2.0 }, repeat: { start: 1.4, end: 2.1 } },
+  ];
+
+  const selected = comparisonRangeForTargetOffset({
+    targetText: "こんにちは、世界です。次です。",
+    targetOffset: 9,
+    alignment,
+    ranges,
+  });
+
+  assert.equal(selected?.index, 0);
+});
+
 test("a heard-word difference does not fall back to the whole recording without a paired phrase", () => {
   const alignment = {
     available: true,

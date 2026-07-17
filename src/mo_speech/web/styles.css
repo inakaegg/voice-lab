@@ -1859,6 +1859,20 @@ audio {
   gap: 5px;
 }
 
+.practice-own-voice-disclosure {
+  color: var(--react-muted);
+  display: none;
+  flex: 1 0 100%;
+  font-size: 0.78rem;
+  font-weight: 550;
+  line-height: 1.5;
+  margin: -2px 0 0;
+}
+
+.practice-quick-settings:has(#practice-own-voice-toggle:checked) .practice-own-voice-disclosure {
+  display: block;
+}
+
 .practice-own-voice-help {
   position: relative;
 }
