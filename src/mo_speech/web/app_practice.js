@@ -14,6 +14,7 @@ const targetText = document.querySelector("#practice-target-text");
 const targetSubtext = document.querySelector("#practice-target-subtext");
 const modelAudio = document.querySelector("#practice-model-audio");
 const playModelButton = document.querySelector("#practice-play-model-button");
+const playModelOnlyButton = document.querySelector("#practice-play-model-only-button");
 const speedSlider = document.querySelector("#practice-speed-slider");
 const speedValue = document.querySelector("#practice-speed-value");
 const gradeBadge = document.querySelector("#practice-grade-badge");
@@ -133,6 +134,7 @@ nativePanel.addEventListener("focusin", () => setActiveRecordSlot("native"));
 promptPanel.addEventListener("pointerenter", () => setActiveRecordSlot("repeat"));
 promptPanel.addEventListener("focusin", () => setActiveRecordSlot("repeat"));
 playModelButton.addEventListener("click", toggleModelAudio);
+playModelOnlyButton.addEventListener("click", toggleModelOnlyAudio);
 speedSlider.addEventListener("input", handleSpeedChange);
 pinyinToggle.addEventListener("change", handlePinyinSettingChange);
 ownVoiceToggle.addEventListener("change", savePracticeSettings);
@@ -650,6 +652,7 @@ function setModelAudio(audioBase64, mimeType) {
   modelAudio.load();
   syncModelAudioSpeed();
   playModelButton.disabled = isBusy;
+  playModelOnlyButton.disabled = isBusy;
 }
 
 function setRepeatAudio(blob) {
@@ -680,6 +683,21 @@ function toggleModelAudio() {
   }
 }
 
+function toggleModelOnlyAudio() {
+  if (!modelAudio.src) {
+    return;
+  }
+  if (isComparisonPlaying) {
+    stopComparisonPlayback();
+  }
+  repeatAudio.pause();
+  if (modelAudio.paused) {
+    playAudioWithCurrentSpeed(modelAudio).catch((error) => showError(error.message));
+  } else {
+    modelAudio.pause();
+  }
+}
+
 function stopModelAudio() {
   stopComparisonPlayback();
   if (modelAudioUrl) {
@@ -691,6 +709,7 @@ function stopModelAudio() {
   modelAudio.load();
   currentModelAudioBlob = null;
   playModelButton.disabled = true;
+  playModelOnlyButton.disabled = true;
   syncPlayButton();
 }
 
@@ -706,11 +725,17 @@ function stopRepeatAudio() {
 
 function syncPlayButton() {
   const isModelOnlyPlaying = !modelAudio.paused && !isComparisonPlaying;
-  const isPlaying = isComparisonPlaying || isModelOnlyPlaying;
-  playModelButton.classList.toggle("is-playing", isPlaying);
-  playModelButton.querySelector("span:last-child").textContent = isPlaying
+  const comparisonPlan = currentComparisonPlaybackPlan();
+  const primaryButtonIsPlaying = isComparisonPlaying || (comparisonPlan.mode === "model" && isModelOnlyPlaying);
+  playModelButton.classList.toggle("is-playing", primaryButtonIsPlaying);
+  playModelButton.querySelector("span:last-child").textContent = primaryButtonIsPlaying
     ? "停止"
-    : playbackButtonLabel();
+    : comparisonPlan.label;
+  playModelOnlyButton.hidden = !["whole", "phrase", "partial_phrase"].includes(comparisonPlan.mode);
+  playModelOnlyButton.classList.toggle("is-playing", isModelOnlyPlaying);
+  playModelOnlyButton.querySelector("span:last-child").textContent = isModelOnlyPlaying
+    ? "停止"
+    : "お手本だけ再生";
   syncComparisonNote();
 }
 
@@ -719,10 +744,6 @@ function syncComparisonNote() {
   comparisonNote.textContent = plan.description;
   comparisonNote.dataset.mode = plan.mode;
   comparisonNote.hidden = !plan.description;
-}
-
-function playbackButtonLabel() {
-  return currentComparisonPlaybackPlan().label;
 }
 
 function audioDurationOrAlignmentEnd(audio, alignment) {
@@ -1099,6 +1120,7 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
   repeatRecordButton.disabled = busy || !currentTargetText;
   ownVoiceToggle.disabled = busy;
   playModelButton.disabled = busy || !modelAudio.src;
+  playModelOnlyButton.disabled = busy || !modelAudio.src;
   const processingButton = buttonForRecordSlot(kind || activeRecordSlot);
   progress.hidden = !busy;
   if (busy) {

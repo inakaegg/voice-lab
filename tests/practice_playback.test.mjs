@@ -91,7 +91,7 @@ test("whole comparison and no-speech never report phrase playback", () => {
 
   assert.deepEqual({ mode: whole.mode, label: whole.label }, { mode: "whole", label: "全体比較再生" });
   assert.equal(whole.description, "フレーズの区切りを確認できなかったため、全体を比較します。");
-  assert.deepEqual({ mode: noSpeech.mode, label: noSpeech.label }, { mode: "model", label: "再生" });
+  assert.deepEqual({ mode: noSpeech.mode, label: noSpeech.label }, { mode: "model", label: "お手本を再生" });
   assert.equal(noSpeech.description, "");
 });
 

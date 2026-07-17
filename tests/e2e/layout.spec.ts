@@ -71,6 +71,45 @@ test("SpeakLoop keeps the shared privacy notice at the workflow bottom left", as
   }
 });
 
+test("SpeakLoop shows own-voice details on hover, focus, and click without shifting the workflow", async ({ page }, testInfo) => {
+  await page.goto("/speakloop");
+  const help = page.locator("#practice-own-voice-help > button");
+  const tooltip = page.locator("#practice-own-voice-tooltip");
+  const workflowBoxBefore = await page.locator(".react-practice-flow").boundingBox();
+
+  await expect(tooltip).toBeHidden();
+  if (testInfo.project.name !== "mobile") {
+    await help.hover();
+    await expect(tooltip).toBeVisible();
+    await page.locator(".practice-card-copy").first().hover();
+    await expect(tooltip).toBeHidden();
+  }
+
+  await help.click();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText("同じセッションであなたが最初に録音した音声だけ");
+  await expect(tooltip).toContainText("Voice Labの履歴には保存しません");
+  await assertNoHorizontalOverflow(page);
+  expect(await page.locator(".react-practice-flow").boundingBox()).toEqual(workflowBoxBefore);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-help.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "dark"));
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-help.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "light"));
+  }
+
+  await help.click();
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toBeHidden();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(help).toBeFocused();
+  await expect(tooltip).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(tooltip).toBeHidden();
+});
+
 test("portal keeps the SpeakLoop action within the initial viewport", async ({ page }) => {
   await page.goto("/");
   const viewportHeight = await page.evaluate(() => innerHeight);
@@ -604,6 +643,13 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
       value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
       configurable: true,
     });
+    const playbackWindow = window as typeof window & { __modelPlayCalls?: number };
+    playbackWindow.__modelPlayCalls = 0;
+    HTMLMediaElement.prototype.play = function () {
+      if (this.id === "practice-model-audio") playbackWindow.__modelPlayCalls = (playbackWindow.__modelPlayCalls || 0) + 1;
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    };
   });
   let ownVoiceRequested = false;
   await page.route("**/api/practice/recordings", async (route) => {
@@ -653,6 +699,29 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
       }),
     });
   });
+  await page.route("**/api/practice/attempt-jobs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "practice-own-voice-attempt-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "比較準備が完了しました" },
+        result: {
+          recording_kind: "attempt",
+          target_language: "en-US",
+          target_text: "What are you doing today?",
+          recognized_text: "What are you doing today?",
+          model_recognized_text: "What are you doing today?",
+          similarity: 1,
+          grade: "perfect",
+          diff: [],
+          comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
+          model_comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
+        },
+      }),
+    });
+  });
 
   await page.goto("/speakloop");
   const ownVoice = page.locator("#practice-own-voice-toggle");
@@ -687,6 +756,18 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-own-voice-progress.png`, fullPage: true });
   }
   await expect(page.locator("#practice-play-model-button")).toBeEnabled({ timeout: 10_000 });
+  const repeatRecord = page.locator("#practice-repeat-record-button");
+  await repeatRecord.click();
+  await repeatRecord.click();
+  await expect(page.locator("#practice-result-panel")).toBeVisible();
+  const modelOnlyButton = page.locator("#practice-play-model-only-button");
+  await expect(modelOnlyButton).toBeVisible();
+  await expect(modelOnlyButton).toBeEnabled();
+  await expect(modelOnlyButton).toContainText("お手本だけ再生");
+  const modelPlayCallsBefore = await page.evaluate(() => (window as typeof window & { __modelPlayCalls?: number }).__modelPlayCalls || 0);
+  await modelOnlyButton.click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __modelPlayCalls?: number }).__modelPlayCalls || 0))
+    .toBeGreaterThan(modelPlayCallsBefore);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await page.locator("html").evaluate((element) => {
       element.setAttribute("data-theme", "dark");

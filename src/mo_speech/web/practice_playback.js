@@ -31,9 +31,9 @@
   }
 
   function comparisonPlaybackPlan(options) {
-    if (!options.modelReady) return { mode: "none", label: "再生", description: "", ranges: [] };
+    if (!options.modelReady) return { mode: "none", label: "お手本を再生", description: "", ranges: [] };
     if (options.outcome === "no_speech" || !options.repeatReady || !options.resultVisible) {
-      return { mode: "model", label: "再生", description: "", ranges: [] };
+      return { mode: "model", label: "お手本を再生", description: "", ranges: [] };
     }
     const modelDuration = Number(options.modelDuration);
     const repeatDuration = Number(options.repeatDuration);
