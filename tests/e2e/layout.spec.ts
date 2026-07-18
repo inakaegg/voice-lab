@@ -676,7 +676,7 @@ test("SpeakLoop does not mark omitted English punctuation as a pronunciation err
   }
 });
 
-test("SpeakLoop converts the generated model audio to the user's voice when opted in", async ({ page }, testInfo) => {
+test("SpeakLoop plays the converted model audio but submits the original TTS for model ASR", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {
       static isTypeSupported() { return true; }
@@ -707,6 +707,8 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
     };
   });
   let ownVoiceRequested = false;
+  let submittedOriginalTts = false;
+  let submittedConvertedAudio = false;
   await page.route("**/api/practice/recordings", async (route) => {
     ownVoiceRequested = /name="use_own_voice"\r?\n\r?\ntrue/.test(route.request().postData() || "");
     await route.fulfill({
@@ -755,6 +757,9 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
     });
   });
   await page.route("**/api/practice/attempt-jobs", async (route) => {
+    const body = route.request().postDataBuffer() || Buffer.alloc(0);
+    submittedOriginalTts = body.includes(Buffer.from("BASE"));
+    submittedConvertedAudio = body.includes(Buffer.from("RIFF"));
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -831,6 +836,8 @@ test("SpeakLoop converts the generated model audio to the user's voice when opte
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-own-voice-complete.png`, fullPage: true });
   }
   expect(ownVoiceRequested).toBe(true);
+  expect(submittedOriginalTts).toBe(true);
+  expect(submittedConvertedAudio).toBe(false);
   expect(polls).toBeGreaterThanOrEqual(2);
   await assertNoHorizontalOverflow(page);
   await page.reload();
