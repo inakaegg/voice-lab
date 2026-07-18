@@ -3,13 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [pkgText, pyproject, api, viteConfig, ci, portalHtml, speakloopHtml, skitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml] = await Promise.all([
+const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speakloopHtml, skitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml] = await Promise.all([
   read("package.json"),
   read("pyproject.toml"),
   read("src/mo_speech/api.py"),
   read("apps/web/vite.config.ts"),
   read(".github/workflows/ci.yml"),
   read("apps/web/portal.html"),
+  read("apps/web/privacy.html"),
   read("apps/web/speakloop.html"),
   read("apps/web/skitvoice.html"),
   read("src/mo_speech/web/index.html"),
@@ -42,6 +43,40 @@ test("all active pages use the built Voice Lab style assets instead of direct le
   for (const html of [adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml]) {
     assert.match(html, /\/react\/assets\/app\.css/);
   }
+});
+
+test("all active pages use the shared multi-size Voice Lab favicon", async () => {
+  for (const html of [
+    portalHtml,
+    privacyHtml,
+    speakloopHtml,
+    skitvoiceHtml,
+    adminHtml,
+    practiceAdminHtml,
+    skitvoiceAdminHtml,
+    funHtml,
+  ]) {
+    assert.match(html, /<link rel="icon" href="\/react\/favicon\.ico" sizes="any" \/>/);
+  }
+
+  const favicon = await readFile(new URL("../apps/web/public/favicon.ico", import.meta.url));
+  assert.equal(favicon.readUInt16LE(0), 0);
+  assert.equal(favicon.readUInt16LE(2), 1);
+  const imageCount = favicon.readUInt16LE(4);
+  const sizes = new Set();
+  for (let index = 0; index < imageCount; index += 1) {
+    const entryOffset = 6 + index * 16;
+    const width = favicon[entryOffset] || 256;
+    const height = favicon[entryOffset + 1] || 256;
+    assert.equal(width, height);
+    sizes.add(width);
+  }
+  for (const expectedSize of [16, 32, 48, 256]) {
+    assert.ok(sizes.has(expectedSize), `favicon must include ${expectedSize}x${expectedSize}`);
+  }
+
+  const builtFavicon = await readFile(new URL("../src/mo_speech/web/react/favicon.ico", import.meta.url));
+  assert.deepEqual(builtFavicon, favicon);
 });
 
 test("all admin pages expose a consistent Voice Lab admin shell and navigation", () => {

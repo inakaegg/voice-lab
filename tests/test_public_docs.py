@@ -194,7 +194,9 @@ def test_frontend_build_emits_and_packages_bundled_dependency_licenses() -> None
     assert "postBanner" in vite_config
     assert "ensure_frontend_license_notices.mjs" in package_json
     assert '"web/react/assets/*.md"' in pyproject
+    assert '"web/react/*.ico"' in pyproject
     assert '"mo_speech/web/react/assets/licenses.md"' in wheel_verifier
+    assert '"mo_speech/web/react/favicon.ico"' in wheel_verifier
     assert "opencc-js - 1.4.1 (MIT AND Apache-2.0)" in generated_licenses
     assert "opencc-data" in generated_licenses
     assert "Apache License" in generated_licenses
