@@ -303,6 +303,9 @@ def transcribe_corpus(
     manifest = load_corpus_manifest(manifest_path)
     generation_path = output_dir / "generation.json"
     generation = json.loads(generation_path.read_text(encoding="utf-8"))
+    manifest_sha256 = _sha256(manifest_path)
+    if generation.get("manifest_sha256") != manifest_sha256:
+        raise ValueError("generation manifest hash does not match current manifest")
     generated_by_id = {
         str(case["id"]): case
         for case in generation.get("cases", [])
@@ -373,7 +376,7 @@ def transcribe_corpus(
         "schema_version": 1,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "manifest_path": str(manifest_path),
-        "manifest_sha256": _sha256(manifest_path),
+        "manifest_sha256": manifest_sha256,
         "generation_sha256": _sha256(generation_path),
         "model_cache_dir": str(model_cache_dir),
         "environment": {

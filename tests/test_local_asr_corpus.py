@@ -12,6 +12,7 @@ from mo_speech.local_asr_corpus import (
     load_corpus_manifest,
     render_markdown_report,
     summarize_results,
+    transcribe_corpus,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -178,6 +179,43 @@ def test_evaluate_transcription_does_not_claim_error_detection_for_native_case()
     assert metrics["reference_similarity"] == 1.0
     assert metrics["target_similarity"] == 1.0
     assert metrics["error_was_observable"] is None
+
+
+def test_transcribe_corpus_rejects_generation_for_another_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = _write_manifest(tmp_path / "manifest.json", [_case()])
+    output_dir = tmp_path / "generated"
+    output_dir.mkdir()
+    (output_dir / "generation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "manifest_sha256": "stale-manifest-hash",
+                "cases": [{"id": "zh-native-greeting"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_if_model_setup_starts(_: Path) -> dict[str, Path]:
+        raise AssertionError("stale generation must be rejected before model setup")
+
+    monkeypatch.setattr(
+        "mo_speech.local_asr_corpus._model_cache_paths",
+        fail_if_model_setup_starts,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="generation manifest hash does not match current manifest",
+    ):
+        transcribe_corpus(
+            manifest_path,
+            output_dir,
+            model_cache_dir=tmp_path / "models",
+        )
 
 
 def test_summarize_results_keeps_provider_case_counts_separate() -> None:

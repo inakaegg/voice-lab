@@ -103,6 +103,8 @@ tmp/asr-learning-samples/
   report.md              provider summaryとcase別比較表
 ```
 
+文字起こし時は、現在のmanifestと `generation.json` の `manifest_sha256` が一致する必要がある。manifestを変更した場合は、case IDが同じでも既存音声を評価へ流用せず、先に音声を再生成する。
+
 ## 評価面
 
 各caseは次の2つを分ける。
