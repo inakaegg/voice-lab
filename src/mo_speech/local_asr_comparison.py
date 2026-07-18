@@ -322,6 +322,7 @@ def generate_comparison_pairs(
 ) -> dict[str, object]:
     manifest = load_comparison_manifest(manifest_path)
     selected_cases = select_comparison_cases(manifest, case_limit)
+    manifest_sha256 = _sha256(manifest_path)
     runner = command_runner or _run_command
     say_path = _required_executable("say")
     ffmpeg_path = _required_executable("ffmpeg")
@@ -340,7 +341,8 @@ def generate_comparison_pairs(
             existing = {}
         if (
             isinstance(existing, Mapping)
-            and existing.get("manifest_sha256") == _sha256(manifest_path)
+            and existing.get("manifest_sha256") == manifest_sha256
+            and existing.get("generation_revision") == COMPARISON_GENERATION_REVISION
         ):
             existing_generation = existing
             existing_by_id = {
@@ -484,7 +486,7 @@ def generate_comparison_pairs(
         "generation_revision": COMPARISON_GENERATION_REVISION,
         "generated_at": run_metadata["generated_at"],
         "manifest_path": str(manifest_path),
-        "manifest_sha256": _sha256(manifest_path),
+        "manifest_sha256": manifest_sha256,
         "case_limit": len(selected_cases),
         "generator": run_metadata["generator"],
         "cases": generated_cases,
@@ -506,8 +508,13 @@ def evaluate_comparison_pairs(
     selected_cases = select_comparison_cases(manifest, case_limit)
     generation_path = output_dir / "generation.json"
     generation = json.loads(generation_path.read_text(encoding="utf-8"))
-    if generation.get("manifest_sha256") != _sha256(manifest_path):
+    manifest_sha256 = _sha256(manifest_path)
+    if generation.get("manifest_sha256") != manifest_sha256:
         raise ValueError("comparison generation manifest hash does not match current manifest")
+    if generation.get("generation_revision") != COMPARISON_GENERATION_REVISION:
+        raise ValueError(
+            "comparison generation revision does not match current generator"
+        )
     generated_by_id = {
         str(case["id"]): case
         for case in generation.get("cases", [])
@@ -603,7 +610,7 @@ def evaluate_comparison_pairs(
         "schema_version": 1,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "manifest_path": str(manifest_path),
-        "manifest_sha256": _sha256(manifest_path),
+        "manifest_sha256": manifest_sha256,
         "generation_sha256": _sha256(generation_path),
         "case_limit": len(selected_cases),
         "model_cache_dir": str(model_cache_dir),

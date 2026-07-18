@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
+import pytest
+
 from mo_speech.local_asr_comparison import (
+    COMPARISON_GENERATION_REVISION,
     _generation_run_metadata,
     _target_phrase_speech_bounds,
     comparison_provider_name,
     compute_phrase_ranges,
+    evaluate_comparison_pairs,
     load_comparison_manifest,
     run_playback_plan,
     score_comparison_result,
@@ -73,6 +79,46 @@ def test_select_comparison_cases_applies_a_cumulative_stage_limit() -> None:
         "case-5",
     ]
     assert len(select_comparison_cases(manifest, None)) == 12
+
+
+def test_evaluate_comparison_pairs_rejects_stale_generation_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = ROOT / "tests" / "fixtures" / "asr_comparison_pair_pilot.json"
+    manifest = load_comparison_manifest(manifest_path)
+    output_dir = tmp_path / "comparison"
+    output_dir.mkdir()
+    (output_dir / "generation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation_revision": COMPARISON_GENERATION_REVISION - 1,
+                "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                "cases": [{"id": manifest["cases"][0]["id"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_if_model_setup_starts(_: Path) -> dict[str, Path]:
+        raise AssertionError("stale generation must be rejected before model setup")
+
+    monkeypatch.setattr(
+        "mo_speech.local_asr_comparison._model_cache_paths",
+        fail_if_model_setup_starts,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="generation revision does not match current generator",
+    ):
+        evaluate_comparison_pairs(
+            manifest_path,
+            output_dir,
+            model_cache_dir=tmp_path / "models",
+            case_limit=1,
+        )
 
 
 def test_compute_phrase_ranges_excludes_inter_phrase_pause() -> None:

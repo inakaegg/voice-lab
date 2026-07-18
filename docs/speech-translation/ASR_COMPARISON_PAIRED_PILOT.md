@@ -115,7 +115,7 @@ report.md                 case別の比較表
 
 `comparison-results.json` のmodel metadataには、実行時に実体化されたFunASRのASR・VAD・句読点model、device、hub、batch sizeと、対応するcache revisionを記録する。
 
-同一manifest・同一音声を再利用する再生成では、最初の生成時刻とgenerator情報を保持する。音声とphrase rangeが変わらなければ `generation.json` のSHA-256も変わらず、既存評価を無関係な実行時刻だけで失効させない。
+同一manifest・同一生成revision・同一音声を再利用する再生成では、最初の生成時刻とgenerator情報を保持する。音声とphrase rangeが変わらなければ `generation.json` のSHA-256も変わらず、既存評価を無関係な実行時刻だけで失効させない。manifest hashまたは生成revisionが現在値と異なる `generation.json` は評価せず、先に音声とphrase rangeを再生成する。
 
 ## 次の検証
 
