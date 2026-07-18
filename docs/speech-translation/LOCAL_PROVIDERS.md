@@ -28,14 +28,6 @@ ASR/翻訳のローカル実プロバイダ:
 python3 -m pip install -e ".[dev,local]"
 ```
 
-Apple TTSの探索用corpusと、中国語FunASRの製品比較再生corpusを評価する環境:
-
-```sh
-python3 -m pip install -e ".[dev,local,funasr,asr-eval]"
-```
-
-生成方式、データ境界、大量化前の合格条件は [ASR_LOCAL_EVALUATION.md](ASR_LOCAL_EVALUATION.md) を参照する。
-
 声質クローンproviderを同じPython環境へ入れる場合:
 
 ```sh

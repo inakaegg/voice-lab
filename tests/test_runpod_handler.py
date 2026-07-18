@@ -140,7 +140,6 @@ def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: py
 
 def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[bytes, str]] = []
-    refinement_calls: list[tuple[bytes, str, str]] = []
     progress: list[dict[str, object]] = []
 
     class FakeFunAsrProvider:
@@ -159,19 +158,6 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
                 words=[{"text": text.rstrip("？"), "start": 0.1, "end": 0.9}],
                 timestamp_granularities=["word"],
             )
-
-        def refine_timestamps_for_target(
-            self,
-            transcription,
-            audio_path,
-            *,
-            target_text,
-            target_language,
-        ):
-            refinement_calls.append(
-                (audio_path.read_bytes(), target_text, target_language)
-            )
-            return transcription
 
     monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
     monkeypatch.setattr(runpod_handler, "_report_runpod_progress", lambda _event, value: progress.append(value))
@@ -192,10 +178,6 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
     )
 
     assert calls == [(b"model audio", "你好吗？"), (b"attempt audio", "你哈吗？")]
-    assert refinement_calls == [
-        (b"model audio", "你好吗？", "zh-CN"),
-        (b"attempt audio", "你好吗？", "zh-CN"),
-    ]
     assert payload["text"] == "你哈吗？"
     assert payload["target_text"] == "你好吗？"
     assert payload["model_transcription"]["text"] == "你好吗？"

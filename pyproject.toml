@@ -28,9 +28,6 @@ funasr = [
   "funasr==1.3.14",
   "torchaudio==2.8.0",
 ]
-asr-eval = [
-  "praat-parselmouth>=0.4.7,<0.5",
-]
 voice = [
   "qwen-tts==0.1.1",
   "seed-vc==0.4.3",
