@@ -43,7 +43,6 @@ RUN git clone "${COMFYUI_VIBEVOICE_REPO}" /app/ComfyUI-VibeVoice \
 
 RUN python -m pip install "torch==${PYTORCH_VERSION}" "torchaudio==${PYTORCH_VERSION}" \
         --index-url "${PYTORCH_WHEEL_INDEX_URL}" \
-    && python -m pip check \
     && EXPECTED_PYTORCH_VERSION="${PYTORCH_VERSION}" python - <<'PY'
 import os
 

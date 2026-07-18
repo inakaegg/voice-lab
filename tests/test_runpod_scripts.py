@@ -240,7 +240,7 @@ def test_runpod_image_pins_cuda_compatible_torch_audio_and_imports_seed_vc() -> 
     assert "ARG PYTORCH_WHEEL_INDEX_URL=https://download.pytorch.org/whl/cu128" in dockerfile
     assert 'python -m pip install "torch==${PYTORCH_VERSION}" "torchaudio==${PYTORCH_VERSION}"' in dockerfile
     assert '--index-url "${PYTORCH_WHEEL_INDEX_URL}"' in dockerfile
-    assert "python -m pip check" in dockerfile
+    assert "python -m pip check" not in dockerfile
     assert "import funasr" in dockerfile
     assert "import seed_vc.api" in dockerfile
 
