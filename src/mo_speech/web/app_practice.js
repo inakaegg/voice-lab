@@ -89,7 +89,7 @@ let recordingChunks = [];
 let recordingCancelled = false;
 let isBusy = false;
 let modelAudioUrl = "";
-let currentModelAudioBlob = null;
+let currentModelAsrAudioBlob = null;
 let repeatAudioUrl = "";
 let currentTargetText = "";
 let currentTargetDisplayText = "";
@@ -288,14 +288,14 @@ async function submitPracticeRecording(blob, kind) {
   form.append("asr_model", practiceAsrModel());
   form.append("audio", blob, `practice.${extensionForMimeType(blob.type)}`);
   if (recordingIntent === "attempt") {
-    if (!currentModelAudioBlob) {
+    if (!currentModelAsrAudioBlob) {
       setBusy(false, "");
-      throw new Error("お手本音声が見つかりません。もう一度お手本を作ってください。");
+      throw new Error("お手本の解析用音声が見つかりません。もう一度お手本を作ってください。");
     }
     form.append(
       "model_audio",
-      currentModelAudioBlob,
-      `model.${extensionForMimeType(currentModelAudioBlob.type)}`,
+      currentModelAsrAudioBlob,
+      `model.${extensionForMimeType(currentModelAsrAudioBlob.type)}`,
     );
     const submitted = await postPracticeForm("/api/practice/attempt-jobs", form);
     renderPracticeJobStatus(submitted);
@@ -326,7 +326,11 @@ async function submitPracticeRecording(blob, kind) {
       console.error("[SpeakLoop job] voice conversion failed", completed);
       throw new Error("お手本の音声処理を完了できませんでした。しばらくしてからもう一度お試しください。");
     }
-    setModelAudio(completed.result.audio_base64, completed.result.audio_mime_type || "audio/wav");
+    setModelAudio(
+      completed.result.audio_base64,
+      completed.result.audio_mime_type || "audio/wav",
+      { updateAsrSource: false },
+    );
   }
   setBusy(false, "");
   if (voiceJob) {
@@ -518,6 +522,10 @@ function renderPromptResult(payload, { deferModelAudio = false } = {}) {
   nativeTranscriptPanel.hidden = !payload.transcript;
   if (deferModelAudio) {
     stopModelAudio();
+    currentModelAsrAudioBlob = base64ToBlob(
+      payload.audio_base64,
+      payload.audio_mime_type || "audio/wav",
+    );
   } else {
     setModelAudio(payload.audio_base64, payload.audio_mime_type || "audio/wav");
   }
@@ -643,10 +651,12 @@ function resetPractice() {
   clearError();
 }
 
-function setModelAudio(audioBase64, mimeType) {
-  stopModelAudio();
+function setModelAudio(audioBase64, mimeType, { updateAsrSource = true } = {}) {
+  stopModelAudio({ clearAsrSource: updateAsrSource });
   const blob = base64ToBlob(audioBase64, mimeType);
-  currentModelAudioBlob = blob;
+  if (updateAsrSource) {
+    currentModelAsrAudioBlob = blob;
+  }
   modelAudioUrl = URL.createObjectURL(blob);
   modelAudio.src = modelAudioUrl;
   modelAudio.load();
@@ -698,7 +708,7 @@ function toggleModelOnlyAudio() {
   }
 }
 
-function stopModelAudio() {
+function stopModelAudio({ clearAsrSource = true } = {}) {
   stopComparisonPlayback();
   if (modelAudioUrl) {
     URL.revokeObjectURL(modelAudioUrl);
@@ -707,7 +717,9 @@ function stopModelAudio() {
   modelAudio.pause();
   modelAudio.removeAttribute("src");
   modelAudio.load();
-  currentModelAudioBlob = null;
+  if (clearAsrSource) {
+    currentModelAsrAudioBlob = null;
+  }
   playModelButton.disabled = true;
   playModelOnlyButton.disabled = true;
   syncPlayButton();
