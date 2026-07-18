@@ -354,6 +354,44 @@ def test_runpod_client_polls_async_job_until_completed() -> None:
     assert progress[1]["output"]["stage"] == "loading_vibevoice_model"
 
 
+def test_runpod_client_failed_job_reports_job_id_and_structured_error() -> None:
+    client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
+
+    def fake_request_json(
+        path: str,
+        *,
+        method: str = "GET",
+        payload: object | None = None,
+        timeout_seconds: float | None = None,
+    ):
+        if path == "/run":
+            return {"id": "job-1", "status": "IN_QUEUE"}
+        if path == "/status/job-1":
+            return {
+                "id": "job-1",
+                "status": "FAILED",
+                "error": json.dumps(
+                    {
+                        "error_type": "<class 'OSError'>",
+                        "error_message": "libcudart.so.13: cannot open shared object file",
+                        "error_traceback": "secret traceback",
+                    }
+                ),
+            }
+        raise AssertionError((method, path, payload, timeout_seconds))
+
+    client._request_json = fake_request_json  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError) as caught:
+        client.submit({"operation_mode": "voice_conversion"})
+
+    message = str(caught.value)
+    assert "RunPod job failed with status FAILED" in message
+    assert "job_id=job-1" in message
+    assert "libcudart.so.13: cannot open shared object file" in message
+    assert "secret traceback" not in message
+
+
 def test_runpod_client_explains_completed_job_without_output() -> None:
     client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
 

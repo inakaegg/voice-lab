@@ -21,11 +21,12 @@ dev = [
 local = [
   "accelerate>=1.0",
   "faster-whisper>=1.1",
-  "torch>=2.6",
+  "torch==2.8.0",
   "transformers>=4.57.3,<6",
 ]
 funasr = [
   "funasr==1.3.14",
+  "torchaudio==2.8.0",
 ]
 voice = [
   "qwen-tts==0.1.1",

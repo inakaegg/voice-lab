@@ -1,9 +1,13 @@
 ARG BASE_IMAGE=runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+ARG PYTORCH_VERSION=2.8.0
+ARG PYTORCH_WHEEL_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG COMFYUI_VIBEVOICE_REPO=https://github.com/wildminder/ComfyUI-VibeVoice
 ARG COMFYUI_VIBEVOICE_REF=99a98031d79e07f279a7aa6d01ce89042e8bba26
 ARG SOURCE_REVISION=unknown
 ARG IMAGE_TAG=unknown
 FROM ${BASE_IMAGE}
+ARG PYTORCH_VERSION
+ARG PYTORCH_WHEEL_INDEX_URL
 ARG COMFYUI_VIBEVOICE_REPO
 ARG COMFYUI_VIBEVOICE_REF
 ARG SOURCE_REVISION
@@ -36,6 +40,22 @@ RUN git clone "${COMFYUI_VIBEVOICE_REPO}" /app/ComfyUI-VibeVoice \
     && cd /app/ComfyUI-VibeVoice \
     && git checkout "${COMFYUI_VIBEVOICE_REF}" \
     && python -m pip install -r requirements.txt
+
+RUN python -m pip install --force-reinstall "torch==${PYTORCH_VERSION}" "torchaudio==${PYTORCH_VERSION}" \
+        --index-url "${PYTORCH_WHEEL_INDEX_URL}" \
+    && EXPECTED_PYTORCH_VERSION="${PYTORCH_VERSION}" python - <<'PY'
+import os
+
+import funasr
+import torch
+import torchaudio
+import seed_vc.api
+
+expected_version = os.environ["EXPECTED_PYTORCH_VERSION"]
+assert torch.__version__.split("+", 1)[0] == expected_version, torch.__version__
+assert torchaudio.__version__.split("+", 1)[0] == expected_version, torchaudio.__version__
+assert torch.version.cuda == "12.8", torch.version.cuda
+PY
 
 ENV MO_PROVIDER_MODE=local
 ENV MO_ASR_PROVIDER=faster-whisper
