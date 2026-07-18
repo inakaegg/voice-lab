@@ -319,6 +319,11 @@ class VoiceConversionJobStore:
                 job = self.jobs[job_id]
                 job.status = "failed"
                 job.error = str(exc)
+                job.current_stage = {
+                    "stage": "failed",
+                    "label": "処理に失敗しました",
+                    "provider": request.backend_id,
+                }
         finally:
             for audio_path in audio_paths:
                 audio_path.unlink(missing_ok=True)

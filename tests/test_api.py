@@ -3013,6 +3013,53 @@ def test_voice_conversion_job_api_runs_selected_backend() -> None:
     assert status_payload["result"]["timings_ms"]["voice_conversion"] == 1.0
 
 
+def test_voice_conversion_job_api_marks_failed_stage() -> None:
+    class FailingVoiceConversionProvider(FakeVoiceConversionProvider):
+        def convert(
+            self,
+            *,
+            source_audio_path: Path,
+            reference_audio_path: Path,
+            seed_vc_settings: SeedVcRuntimeSettings | None = None,
+            progress_callback=None,
+        ):
+            if progress_callback is not None:
+                progress_callback(PipelineProgress("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless"))
+            raise RuntimeError(
+                "RunPod job failed with status FAILED: job_id=remote-job-1: "
+                "libcudart.so.13: cannot open shared object file"
+            )
+
+    service = VoiceConversionService(providers=[FailingVoiceConversionProvider()])
+    client = TestClient(create_app(voice_conversion_service=service))
+
+    response = client.post(
+        "/api/voice-conversion-jobs",
+        data={"voice_backend": "fake-vc"},
+        files={
+            "source_audio": ("source.wav", b"source audio", "audio/wav"),
+            "reference_audio": ("reference.wav", b"reference audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    for _ in range(20):
+        status_payload = client.get(f"/api/voice-conversion-jobs/{job_id}").json()
+        if status_payload["status"] == "failed":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("voice conversion job did not fail")
+
+    assert status_payload["current_stage"] == {
+        "stage": "failed",
+        "label": "処理に失敗しました",
+        "provider": "fake-vc",
+    }
+    assert "job_id=remote-job-1" in status_payload["error"]
+
+
 def test_voice_conversion_job_api_accepts_seed_vc_settings() -> None:
     provider = FakeVoiceConversionProvider()
     client = TestClient(create_app(voice_conversion_service=VoiceConversionService(providers=[provider])))
