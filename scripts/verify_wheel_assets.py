@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 REQUIRED_WEB_ASSETS = {
     "mo_speech/web/react/app-styles.html",
+    "mo_speech/web/react/favicon.ico",
     "mo_speech/web/react/portal.html",
     "mo_speech/web/react/speakloop.html",
     "mo_speech/web/react/skitvoice.html",
