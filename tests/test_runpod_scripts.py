@@ -230,6 +230,21 @@ def test_runpod_image_workflow_embeds_source_revision() -> None:
     assert "ENV MO_IMAGE_REVISION=${SOURCE_REVISION}" in dockerfile
 
 
+def test_runpod_image_pins_cuda_compatible_torch_audio_and_imports_seed_vc() -> None:
+    dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    optional_dependencies = pyproject["project"]["optional-dependencies"]
+
+    assert "torch==2.8.0" in optional_dependencies["local"]
+    assert "torchaudio==2.8.0" in optional_dependencies["funasr"]
+    assert "ARG PYTORCH_WHEEL_INDEX_URL=https://download.pytorch.org/whl/cu128" in dockerfile
+    assert 'python -m pip install "torch==${PYTORCH_VERSION}" "torchaudio==${PYTORCH_VERSION}"' in dockerfile
+    assert '--index-url "${PYTORCH_WHEEL_INDEX_URL}"' in dockerfile
+    assert "python -m pip check" in dockerfile
+    assert "import funasr" in dockerfile
+    assert "import seed_vc.api" in dockerfile
+
+
 def test_runpod_image_does_not_install_url_reference_download_tools() -> None:
     dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))

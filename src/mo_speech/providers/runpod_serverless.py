@@ -156,7 +156,7 @@ class RunpodServerlessClient:
             if status == "COMPLETED":
                 return self._completed_output(status_body)
             if status in RUNPOD_TERMINAL_FAILURE_STATES:
-                raise RuntimeError(_runpod_error_message(status_body))
+                raise RuntimeError(_runpod_error_message(status_body, job_id=job_id))
             if status and status not in RUNPOD_IN_PROGRESS_STATES:
                 raise RuntimeError(f"unexpected RunPod job status: {status}")
             if perf_counter() >= deadline:
@@ -592,9 +592,45 @@ def _asr_timing_rows(value: object) -> list[dict[str, object]]:
     return rows
 
 
-def _runpod_error_message(body: dict[str, object]) -> str:
+def _runpod_error_message(body: dict[str, object], *, job_id: str = "") -> str:
     status = str(body.get("status") or "").upper()
-    return f"RunPod job failed with status {status}" if status else "RunPod job failed"
+    message = f"RunPod job failed with status {status}" if status else "RunPod job failed"
+    resolved_job_id = str(job_id or body.get("id") or body.get("job_id") or "").strip()
+    if resolved_job_id:
+        message = f"{message}: job_id={resolved_job_id}"
+    detail = _runpod_error_detail(body)
+    return f"{message}: {detail}" if detail else message
+
+
+def _runpod_error_detail(body: dict[str, object]) -> str:
+    candidates = [body.get("error")]
+    output = body.get("output")
+    if isinstance(output, dict):
+        candidates.extend((output.get("error"), output.get("detail"), output.get("message")))
+    for candidate in candidates:
+        detail = _runpod_error_candidate(candidate)
+        if detail:
+            return detail[:800]
+    return ""
+
+
+def _runpod_error_candidate(value: object) -> str:
+    if isinstance(value, dict):
+        for key in ("error_message", "message", "detail", "error"):
+            detail = _runpod_error_candidate(value.get(key))
+            if detail:
+                return detail
+        return ""
+    if not isinstance(value, str):
+        return ""
+    normalized = " ".join(value.split())
+    if not normalized:
+        return ""
+    try:
+        decoded = json.loads(normalized)
+    except json.JSONDecodeError:
+        return normalized
+    return _runpod_error_candidate(decoded)
 
 
 def _runpod_voice_conversion_progress(body: dict[str, object]) -> PipelineProgress | None:
