@@ -95,6 +95,147 @@ def test_practice_comparison_alignment_keeps_the_mistaken_end_of_a_phrase_on_a_s
     assert second_phrase["audio_end"] == pytest.approx(2.3)
 
 
+def test_practice_comparison_alignment_assigns_isolated_low_content_chunk_to_best_missing_neighbor() -> None:
+    recognized = list("哇哇哇妈哇下午我想去庄园")
+    words = [
+        {
+            "text": token,
+            "start": index * 0.2 if index < 5 else 2.2 + ((index - 5) * 0.2),
+            "end": (index + 1) * 0.2 if index < 5 else 2.2 + ((index - 4) * 0.2),
+        }
+        for index, token in enumerate(recognized)
+    ]
+
+    result = practice_comparison_alignment(
+        target_text="早上好，我们开始吧。妈妈骂马吗？下午我想去公园。",
+        recognized_text="哇哇哇，妈哇，下午我想去庄园。",
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [entry["available"] for entry in result["ranges"]] == [False, True, True]
+    assert result["ranges"][1]["matched_text"] == "哇哇哇妈哇"
+    assert result["ranges"][1]["audio_end"] == pytest.approx(1.0)
+    assert result["ranges"][2]["audio_start"] == pytest.approx(2.2)
+
+
+def test_practice_comparison_alignment_assigns_single_tone_sequence_before_paused_anchor() -> None:
+    recognized = list("妈妈妈妈妈今天的天气很好")
+    words = [
+        {
+            "text": token,
+            "start": index * 0.15 if index < 5 else 1.6 + ((index - 5) * 0.2),
+            "end": (index + 1) * 0.15 if index < 5 else 1.6 + ((index - 4) * 0.2),
+        }
+        for index, token in enumerate(recognized)
+    ]
+
+    result = practice_comparison_alignment(
+        target_text="妈妈骂马吗？今天的天气很好。",
+        recognized_text="妈妈妈妈妈今天的天气很好。",
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [entry["available"] for entry in result["ranges"]] == [True, True]
+    assert result["ranges"][0]["matched_text"] == "妈妈妈妈妈"
+    assert result["ranges"][0]["audio_end"] == pytest.approx(0.75)
+    assert result["ranges"][1]["audio_start"] == pytest.approx(1.6)
+
+
+def test_practice_comparison_alignment_assigns_low_content_chunk_by_anchored_pause_partition() -> None:
+    first = list("我刚刚来到这里")
+    second = list("我眼前消无三天")
+    words = [
+        {
+            "text": token,
+            "start": index * 0.18,
+            "end": (index + 1) * 0.18,
+        }
+        for index, token in enumerate(first)
+    ]
+    words.extend(
+        {
+            "text": token,
+            "start": 2.3 + (index * 0.18),
+            "end": 2.3 + ((index + 1) * 0.18),
+        }
+        for index, token in enumerate(second)
+    )
+
+    result = practice_comparison_alignment(
+        target_text="我刚刚来到这里。我今天下午三点去图书馆。",
+        recognized_text="我刚刚来到这里。我眼前消无三天。",
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [entry["available"] for entry in result["ranges"]] == [True, True]
+    assert result["ranges"][0]["audio_end"] == pytest.approx(1.26)
+    assert result["ranges"][1]["audio_start"] == pytest.approx(2.3)
+
+
+def test_practice_comparison_alignment_assigns_low_content_fourth_chunk_from_three_anchors() -> None:
+    chunks = [
+        "我的中文还不太好",
+        "有时候我听不明白",
+        "请您不要说得太快",
+        "因为我为了水",
+    ]
+    words = []
+    cursor = 0.0
+    for chunk in chunks:
+        for token in chunk:
+            words.append({"text": token, "start": cursor, "end": cursor + 0.14})
+            cursor += 0.14
+        cursor += 0.75
+
+    result = practice_comparison_alignment(
+        target_text=(
+            "我的中文还不太好。有时候我听不明白。"
+            "请您不要说得太快。请给我一杯热水。"
+        ),
+        recognized_text="。".join(chunks) + "。",
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [entry["available"] for entry in result["ranges"]] == [True, True, True, True]
+    assert result["ranges"][3]["matched_text"] == "因为我为了水"
+
+
+@pytest.mark.parametrize(
+    ("target_text", "recognized_text", "available_indexes"),
+    [
+        ("老师说四十。我正在学习中文。", "老司说辞职。", [0]),
+        ("我刚刚来到这里。请给我一杯茶。", "先给我查。", [1]),
+        ("老师说四十。我正在学习中文。", "苹果桌子天气。", []),
+    ],
+)
+def test_practice_comparison_alignment_assigns_only_unique_unanchored_chinese_chunk(
+    target_text: str,
+    recognized_text: str,
+    available_indexes: list[int],
+) -> None:
+    words = [
+        {"text": token, "start": index * 0.18, "end": (index + 1) * 0.18}
+        for index, token in enumerate(recognized_text.rstrip("。"))
+    ]
+
+    result = practice_comparison_alignment(
+        target_text=target_text,
+        recognized_text=recognized_text,
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [
+        entry["index"]
+        for entry in result["ranges"]
+        if entry["available"]
+    ] == available_indexes
+
+
 def test_long_four_phrase_alignment_reuses_candidate_scores() -> None:
     target_text = (
         "你知道吗？北海道里面也有比较热的地方，也有比较冷、比较凉快的地方。"

@@ -1,0 +1,506 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-17",
+  "purpose": "SpeakLoopの英語・中国語ASRを、正答合成音声、制御した学習者誤り、音響変種で小規模比較する。",
+  "provenance": {
+    "tts_engine": "macOS say / Apple voices",
+    "selection_basis": [
+      "SpeakLoopの2026-07-17ローカル実録音で観測した中国語誤認識",
+      "初学者が混同しやすい中国語の声調、そり舌音、脱落、重複、言い直し",
+      "英語のth置換、冠詞脱落、速度、雑音"
+    ],
+    "scope": "小規模pilot。ASRモデルのfine-tuning用training corpusではない。",
+    "limitations": [
+      "中国語voiceの正答音声はnative synthetic ceilingであり、実際の学習者発話ではない。",
+      "別の中国語字を読ませる方法は音節・声調置換を制御できるが、同じ話者が誤発音した自然さまでは再現しない。",
+      "日本語・英語voiceによる音写は非ネイティブ訛りのstress test proxyであり、特定母語話者の代表音声ではない。",
+      "Praat加工はF0 contourだけを変え、母音・子音・共調音を同時には再現しない。"
+    ]
+  },
+  "cases": [
+    {
+      "id": "zh-native-greeting",
+      "language": "zh-CN",
+      "category": "native_ceiling",
+      "source_kind": "apple_tts_native",
+      "target_text": "你好，很高兴认识你。",
+      "expected_spoken_text": "你好，很高兴认识你。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 180,
+        "segments": [
+          {
+            "text": "你好，很高兴认识你。"
+          }
+        ]
+      },
+      "tags": [
+        "canonical",
+        "short"
+      ],
+      "fidelity": "native_synthetic"
+    },
+    {
+      "id": "zh-native-recent-weather",
+      "language": "zh-CN",
+      "category": "native_ceiling",
+      "source_kind": "apple_tts_native",
+      "target_text": "今天气温也有30℃，非常热。天气非常好。今天没有骑自行车，休息了一天。那明天见，拜拜。",
+      "expected_spoken_text": "今天气温也有30℃，非常热。天气非常好。今天没有骑自行车，休息了一天。那明天见，拜拜。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 175,
+        "segments": [
+          {
+            "text": "今天气温也有30℃，非常热。天气非常好。今天没有骑自行车，休息了一天。那明天见，拜拜。"
+          }
+        ]
+      },
+      "tags": [
+        "recent-log",
+        "temperature",
+        "bicycle",
+        "multi-phrase"
+      ],
+      "fidelity": "native_synthetic"
+    },
+    {
+      "id": "zh-native-numbers",
+      "language": "zh-CN",
+      "category": "spoken_form",
+      "source_kind": "apple_tts_native",
+      "target_text": "现在是下午3点05分，温度是−3.5℃，完成了80%。",
+      "expected_spoken_text": "现在是下午3点05分，温度是−3.5℃，完成了80%。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 170,
+        "segments": [
+          {
+            "text": "现在是下午3点05分，温度是负3.5度，完成了百分之80。"
+          }
+        ]
+      },
+      "tags": [
+        "time",
+        "decimal",
+        "negative",
+        "percentage"
+      ],
+      "fidelity": "native_synthetic"
+    },
+    {
+      "id": "zh-native-phrase-boundaries",
+      "language": "zh-CN",
+      "category": "phrase_boundary",
+      "source_kind": "apple_tts_native",
+      "target_text": "你好吗？你今天去哪里？我下午三点去图书馆。",
+      "expected_spoken_text": "你好吗？你今天去哪里？我下午三点去图书馆。",
+      "synthesis": {
+        "voice": "Eddy (中国語（中国本土）)",
+        "rate_wpm": 180,
+        "segments": [
+          {
+            "text": "你好吗？你今天去哪里？我下午三点去图书馆。"
+          }
+        ]
+      },
+      "tags": [
+        "multi-phrase",
+        "question"
+      ],
+      "fidelity": "native_synthetic"
+    },
+    {
+      "id": "zh-tone-mai3-to-mai4",
+      "language": "zh-CN",
+      "category": "tone_substitution",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "我想买一杯咖啡。",
+      "expected_spoken_text": "我想卖一杯咖啡。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 165,
+        "segments": [
+          {
+            "text": "我想卖一杯咖啡。"
+          }
+        ]
+      },
+      "tags": [
+        "tone-3-to-4",
+        "mai"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "zh-tone-wen4-to-wen3",
+      "language": "zh-CN",
+      "category": "tone_substitution",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "我想问一个问题。",
+      "expected_spoken_text": "我想稳一个问题。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 165,
+        "segments": [
+          {
+            "text": "我想稳一个问题。"
+          }
+        ]
+      },
+      "tags": [
+        "tone-4-to-3",
+        "wen"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "zh-initial-zh-to-z",
+      "language": "zh-CN",
+      "category": "initial_substitution",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "我知道这件事。",
+      "expected_spoken_text": "我资道这件事。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 165,
+        "segments": [
+          {
+            "text": "我资道这件事。"
+          }
+        ]
+      },
+      "tags": [
+        "zh-to-z",
+        "retroflex"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "zh-initial-sh-to-s",
+      "language": "zh-CN",
+      "category": "initial_substitution",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "老师说四十。",
+      "expected_spoken_text": "老丝说四十。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 165,
+        "segments": [
+          {
+            "text": "老丝说四十。"
+          }
+        ]
+      },
+      "tags": [
+        "sh-to-s",
+        "retroflex",
+        "language-model-correction-risk"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "zh-omission-adjective",
+      "language": "zh-CN",
+      "category": "omission",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "请给我一杯热咖啡。",
+      "expected_spoken_text": "请给我一杯咖啡。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 165,
+        "segments": [
+          {
+            "text": "请给我一杯咖啡。"
+          }
+        ]
+      },
+      "tags": [
+        "omission",
+        "content-word"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "zh-repetition-self-correction",
+      "language": "zh-CN",
+      "category": "self_correction",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "我明天去上海。",
+      "expected_spoken_text": "我明天去北京，北京，不，是上海。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 155,
+        "segments": [
+          {
+            "text": "我明天去北京，北京，不，是上海。"
+          }
+        ]
+      },
+      "tags": [
+        "repetition",
+        "self-correction",
+        "unconsumed-text"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "zh-slow-long-pauses",
+      "language": "zh-CN",
+      "category": "fluency",
+      "source_kind": "apple_tts_acoustic_variant",
+      "target_text": "我今天骑自行车去图书馆。",
+      "expected_spoken_text": "我今天骑自行车去图书馆。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 125,
+        "tempo": 0.82,
+        "segments": [
+          {
+            "text": "我今天",
+            "pause_after_ms": 650
+          },
+          {
+            "text": "骑自行车",
+            "pause_after_ms": 800
+          },
+          {
+            "text": "去图书馆。"
+          }
+        ]
+      },
+      "tags": [
+        "slow",
+        "long-pause",
+        "segmented"
+      ],
+      "fidelity": "controlled_acoustic_proxy"
+    },
+    {
+      "id": "zh-fast-speech",
+      "language": "zh-CN",
+      "category": "fluency",
+      "source_kind": "apple_tts_acoustic_variant",
+      "target_text": "如果明天天气很好，我们就一起去公园。",
+      "expected_spoken_text": "如果明天天气很好，我们就一起去公园。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 230,
+        "tempo": 1.22,
+        "segments": [
+          {
+            "text": "如果明天天气很好，我们就一起去公园。"
+          }
+        ]
+      },
+      "tags": [
+        "fast",
+        "connected-speech"
+      ],
+      "fidelity": "controlled_acoustic_proxy"
+    },
+    {
+      "id": "zh-pitch-flat-mai3",
+      "language": "zh-CN",
+      "category": "tone_contour",
+      "source_kind": "apple_tts_pitch_manipulated",
+      "target_text": "我想买一杯咖啡。",
+      "expected_spoken_text": "我想买一杯咖啡。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 160,
+        "segments": [
+          {
+            "text": "我想"
+          },
+          {
+            "text": "买",
+            "pitch_contour": "flat"
+          },
+          {
+            "text": "一杯咖啡。"
+          }
+        ]
+      },
+      "tags": [
+        "tone-3",
+        "flat-f0",
+        "praat"
+      ],
+      "fidelity": "controlled_acoustic_proxy"
+    },
+    {
+      "id": "zh-pitch-rising-wen4",
+      "language": "zh-CN",
+      "category": "tone_contour",
+      "source_kind": "apple_tts_pitch_manipulated",
+      "target_text": "我想问一个问题。",
+      "expected_spoken_text": "我想问一个问题。",
+      "synthesis": {
+        "voice": "Tingting",
+        "rate_wpm": 160,
+        "segments": [
+          {
+            "text": "我想"
+          },
+          {
+            "text": "问",
+            "pitch_contour": "rising"
+          },
+          {
+            "text": "一个问题。"
+          }
+        ]
+      },
+      "tags": [
+        "tone-4",
+        "rising-f0",
+        "praat"
+      ],
+      "fidelity": "controlled_acoustic_proxy"
+    },
+    {
+      "id": "zh-japanese-voice-proxy",
+      "language": "zh-CN",
+      "category": "cross_language_accent_proxy",
+      "source_kind": "apple_tts_cross_language_phonetic",
+      "target_text": "你好，我想买一杯咖啡。",
+      "expected_spoken_text": "你好，我想买一杯咖啡。",
+      "synthesis": {
+        "voice": "Kyoko",
+        "rate_wpm": 150,
+        "segments": [
+          {
+            "text": "ニーハオ。ウォー、シャン、マイ、イーベイ、カーフェイ。"
+          }
+        ]
+      },
+      "tags": [
+        "japanese-voice",
+        "phonetic-resynthesis",
+        "stress-test"
+      ],
+      "fidelity": "experimental_accent_proxy"
+    },
+    {
+      "id": "zh-english-voice-proxy",
+      "language": "zh-CN",
+      "category": "cross_language_accent_proxy",
+      "source_kind": "apple_tts_cross_language_phonetic",
+      "target_text": "你好，我想买一杯咖啡。",
+      "expected_spoken_text": "你好，我想买一杯咖啡。",
+      "synthesis": {
+        "voice": "Samantha",
+        "rate_wpm": 145,
+        "segments": [
+          {
+            "text": "nee how. waw shyang my ee bay cow fay."
+          }
+        ]
+      },
+      "tags": [
+        "english-voice",
+        "phonetic-resynthesis",
+        "stress-test"
+      ],
+      "fidelity": "experimental_accent_proxy"
+    },
+    {
+      "id": "en-native-th",
+      "language": "en-US",
+      "category": "native_ceiling",
+      "source_kind": "apple_tts_native",
+      "target_text": "I think this train leaves at three.",
+      "expected_spoken_text": "I think this train leaves at three.",
+      "synthesis": {
+        "voice": "Samantha",
+        "rate_wpm": 175,
+        "segments": [
+          {
+            "text": "I think this train leaves at three."
+          }
+        ]
+      },
+      "tags": [
+        "canonical",
+        "th"
+      ],
+      "fidelity": "native_synthetic"
+    },
+    {
+      "id": "en-th-substitution",
+      "language": "en-US",
+      "category": "initial_substitution",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "I think this train leaves at three.",
+      "expected_spoken_text": "I sink zis train leaves at free.",
+      "synthesis": {
+        "voice": "Samantha",
+        "rate_wpm": 165,
+        "segments": [
+          {
+            "text": "I sink zis train leaves at free."
+          }
+        ]
+      },
+      "tags": [
+        "th-to-s",
+        "th-to-z",
+        "th-to-f"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "en-omission-repetition",
+      "language": "en-US",
+      "category": "omission_self_correction",
+      "source_kind": "apple_tts_text_substitution",
+      "target_text": "I would like a cup of coffee.",
+      "expected_spoken_text": "I, I would like cup coffee.",
+      "synthesis": {
+        "voice": "Samantha",
+        "rate_wpm": 150,
+        "segments": [
+          {
+            "text": "I, I would like cup coffee."
+          }
+        ]
+      },
+      "tags": [
+        "repetition",
+        "article-omission",
+        "preposition-omission"
+      ],
+      "fidelity": "controlled_pronunciation_proxy"
+    },
+    {
+      "id": "en-noisy-slow",
+      "language": "en-US",
+      "category": "acoustic_channel",
+      "source_kind": "apple_tts_acoustic_variant",
+      "target_text": "Could you show me the nearest station?",
+      "expected_spoken_text": "Could you show me the nearest station?",
+      "synthesis": {
+        "voice": "Samantha",
+        "rate_wpm": 130,
+        "tempo": 0.88,
+        "noise_amplitude": 0.012,
+        "segments": [
+          {
+            "text": "Could you show me",
+            "pause_after_ms": 500
+          },
+          {
+            "text": "the nearest station?"
+          }
+        ]
+      },
+      "tags": [
+        "slow",
+        "pause",
+        "pink-noise"
+      ],
+      "fidelity": "controlled_acoustic_proxy"
+    }
+  ]
+}

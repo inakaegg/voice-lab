@@ -327,6 +327,7 @@ def _handle_practice_asr(
     source_language = str(payload.get("source_language", ""))
     if source_language != "zh-CN":
         raise ValueError("practice_asr only supports zh-CN")
+    target_text = str(payload.get("target_text") or "")
 
     model_name = str(os.getenv("MO_RUNPOD_FUNASR_MODEL", "funasr/paraformer-zh"))
     _report_runpod_progress(
@@ -384,6 +385,13 @@ def _handle_practice_asr(
                 source_language,
                 include_timestamps=True,
             )
+            model_transcription = _refine_practice_asr_timestamps(
+                provider,
+                model_transcription,
+                Path(model_temp_audio.name),
+                target_text=target_text,
+                target_language=source_language,
+            )
             model_asr_ms = _elapsed_ms(model_asr_started)
 
     _report_runpod_progress(
@@ -404,6 +412,13 @@ def _handle_practice_asr(
             Path(temp_audio.name),
             source_language,
             include_timestamps=True,
+        )
+        transcription = _refine_practice_asr_timestamps(
+            provider,
+            transcription,
+            Path(temp_audio.name),
+            target_text=target_text,
+            target_language=source_language,
         )
         asr_ms = _elapsed_ms(asr_started)
 
@@ -431,7 +446,6 @@ def _handle_practice_asr(
         "providers": {"asr": provider.name},
         "warnings": [],
     }
-    target_text = str(payload.get("target_text") or "")
     if target_text:
         response["target_text"] = target_text
     if model_transcription is not None:
@@ -457,6 +471,27 @@ def _practice_asr_transcription_payload(transcription: object) -> dict[str, obje
         "words": list(getattr(transcription, "words", []) or []),
         "segments": list(getattr(transcription, "segments", []) or []),
     }
+
+
+def _refine_practice_asr_timestamps(
+    provider: object,
+    transcription: object,
+    audio_path: Path,
+    *,
+    target_text: str,
+    target_language: str,
+) -> object:
+    if not target_text:
+        return transcription
+    refine = getattr(provider, "refine_timestamps_for_target", None)
+    if not callable(refine):
+        return transcription
+    return refine(
+        transcription,
+        audio_path,
+        target_text=target_text,
+        target_language=target_language,
+    )
 
 
 def _practice_asr_progress(stage: str, label: str, model: str) -> dict[str, object]:

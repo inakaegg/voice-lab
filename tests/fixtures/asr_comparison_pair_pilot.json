@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-17",
+  "purpose": "正しいお手本音声と誤りを含む復唱音声を、実ASRからcanonical alignmentとUI playback planまで3件だけend-to-end評価する。",
+  "evaluation_policy": {
+    "content_correction_is_failure": false,
+    "minimum_range_iou": 0.65,
+    "notes": [
+      "ASRが誤発音を目標語へ補完しても、正しいphraseへ安全な再生rangeを割り当てられれば比較処理上は成功とする。",
+      "期待するphrase所有とplayback modeは実ASR出力を見る前に固定する。",
+      "rangeは生成時に記録した各phraseのWAV上の区間と比較する。"
+    ]
+  },
+  "cases": [
+    {
+      "id": "pair-zh-middle-tone-substitution",
+      "language": "zh-CN",
+      "category": "middle_phrase_content_substitution",
+      "target_phrases": [
+        "你好，很高兴认识你。",
+        "我想买一杯咖啡。",
+        "明天我们再见。"
+      ],
+      "model": {
+        "voice": "Tingting",
+        "rate_wpm": 160,
+        "segments": [
+          {
+            "phrase_index": 0,
+            "text": "你好，很高兴认识你。",
+            "pause_after_ms": 250
+          },
+          {
+            "phrase_index": 1,
+            "text": "我想买一杯咖啡。",
+            "pause_after_ms": 250
+          },
+          {
+            "phrase_index": 2,
+            "text": "明天我们再见。"
+          }
+        ]
+      },
+      "attempt": {
+        "voice": "Tingting",
+        "rate_wpm": 160,
+        "segments": [
+          {
+            "phrase_index": 0,
+            "text": "你好，很高兴认识你。",
+            "pause_after_ms": 250
+          },
+          {
+            "phrase_index": 1,
+            "text": "我想卖一杯咖啡。",
+            "pause_after_ms": 250
+          },
+          {
+            "phrase_index": 2,
+            "text": "明天我们再见。"
+          }
+        ]
+      },
+      "expected": {
+        "model_available_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "attempt_available_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "paired_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "playback_mode": "phrase"
+      }
+    },
+    {
+      "id": "pair-zh-asr-corrects-n-to-l",
+      "language": "zh-CN",
+      "category": "provider_language_model_correction",
+      "target_phrases": [
+        "我来自南京。",
+        "现在住在上海。",
+        "周末常常去公园。"
+      ],
+      "model": {
+        "voice": "Tingting",
+        "rate_wpm": 155,
+        "segments": [
+          {
+            "phrase_index": 0,
+            "text": "我来自南京。",
+            "pause_after_ms": 280
+          },
+          {
+            "phrase_index": 1,
+            "text": "现在住在上海。",
+            "pause_after_ms": 280
+          },
+          {
+            "phrase_index": 2,
+            "text": "周末常常去公园。"
+          }
+        ]
+      },
+      "attempt": {
+        "voice": "Tingting",
+        "rate_wpm": 155,
+        "segments": [
+          {
+            "phrase_index": 0,
+            "text": "我来自蓝京。",
+            "pause_after_ms": 280
+          },
+          {
+            "phrase_index": 1,
+            "text": "现在住在上海。",
+            "pause_after_ms": 280
+          },
+          {
+            "phrase_index": 2,
+            "text": "周末常常去公园。"
+          }
+        ]
+      },
+      "expected": {
+        "model_available_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "attempt_available_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "paired_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "playback_mode": "phrase"
+      }
+    },
+    {
+      "id": "pair-zh-middle-phrase-omission",
+      "language": "zh-CN",
+      "category": "middle_phrase_omission",
+      "target_phrases": [
+        "我先去银行。",
+        "然后去图书馆。",
+        "最后回家。"
+      ],
+      "model": {
+        "voice": "Tingting",
+        "rate_wpm": 155,
+        "segments": [
+          {
+            "phrase_index": 0,
+            "text": "我先去银行。",
+            "pause_after_ms": 300
+          },
+          {
+            "phrase_index": 1,
+            "text": "然后去图书馆。",
+            "pause_after_ms": 300
+          },
+          {
+            "phrase_index": 2,
+            "text": "最后回家。"
+          }
+        ]
+      },
+      "attempt": {
+        "voice": "Tingting",
+        "rate_wpm": 150,
+        "segments": [
+          {
+            "phrase_index": 0,
+            "text": "我先去银行。",
+            "pause_after_ms": 650
+          },
+          {
+            "phrase_index": 2,
+            "text": "最后回家。"
+          }
+        ]
+      },
+      "expected": {
+        "model_available_phrase_indices": [
+          0,
+          1,
+          2
+        ],
+        "attempt_available_phrase_indices": [
+          0,
+          2
+        ],
+        "paired_phrase_indices": [
+          0,
+          2
+        ],
+        "playback_mode": "partial_phrase"
+      }
+    }
+  ]
+}

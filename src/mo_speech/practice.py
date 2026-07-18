@@ -1937,7 +1937,21 @@ def _align_phrases_to_word_spans(
         recognized_normalized,
         target_language,
     )
+    selected = _add_isolated_one_sided_missing_range(
+        phrases,
+        selected,
+        word_spans,
+        recognized_normalized,
+        target_language,
+    )
     selected = _apply_pause_partition_ranges(
+        phrases,
+        selected,
+        word_spans,
+        recognized_normalized,
+        target_language,
+    )
+    selected = _assign_unique_unanchored_spoken_chunk(
         phrases,
         selected,
         word_spans,
@@ -2079,6 +2093,8 @@ def _reject_weak_one_sided_assignments(
         return tuple(resolved)
     weak = resolved[weak_index]
     assert weak is not None
+    if weak.get("boundary_source") == "one_sided_pause_fallback":
+        return tuple(resolved)
     target = str(phrases[weak_index]["normalized_target"])
     if not _has_one_sided_target_evidence(
         target,
@@ -2375,6 +2391,122 @@ def _add_structural_fallback_ranges(
     return tuple(resolved)
 
 
+def _add_isolated_one_sided_missing_range(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+    target_language: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Assign one isolated spoken chunk within a longer one-sided omission run.
+
+    A pause and a reliable neighboring anchor establish the acoustic chunk. The
+    chunk is assigned only when one missing target has modest but uniquely
+    stronger lexical evidence; the other target slots remain omitted.
+    """
+
+    resolved = [dict(item) if item is not None else None for item in selected]
+    index = 0
+    while index < len(resolved):
+        if resolved[index] is not None:
+            index += 1
+            continue
+        run_start = index
+        while index < len(resolved) and resolved[index] is None:
+            index += 1
+        run_end = index
+        if run_end - run_start == 1 and target_language != "zh-CN":
+            continue
+        previous = resolved[run_start - 1] if run_start > 0 else None
+        following = resolved[run_end] if run_end < len(resolved) else None
+        if (previous is None) == (following is None):
+            continue
+        anchor = previous if previous is not None else following
+        assert anchor is not None
+        if (
+            float(anchor.get("similarity") or 0.0) < 0.75
+            or float(anchor.get("coverage") or 0.0) < 0.75
+        ):
+            continue
+        lower = int(previous["end_word"]) if previous is not None else 0
+        upper = int(following["start_word"]) if following is not None else len(word_spans)
+        while lower < upper and str(word_spans[lower]["normalized"]) in _EDGE_FILLERS.get(
+            target_language,
+            set(),
+        ):
+            lower += 1
+        while upper > lower and str(word_spans[upper - 1]["normalized"]) in _EDGE_FILLERS.get(
+            target_language,
+            set(),
+        ):
+            upper -= 1
+        candidate_spans = word_spans[lower:upper]
+        if not candidate_spans or _is_explicit_boundary_filler(candidate_spans, target_language):
+            continue
+        separated_from_anchor = (
+            float(word_spans[upper]["audio_start"])
+            - float(candidate_spans[-1]["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
+            if following is not None
+            else float(candidate_spans[0]["audio_start"])
+            - float(word_spans[lower - 1]["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
+        )
+        if not separated_from_anchor:
+            continue
+        if any(
+            float(current["audio_start"]) - float(prior["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
+            for prior, current in zip(candidate_spans, candidate_spans[1:])
+        ):
+            continue
+        if _strongly_matches_other_target(
+            phrases,
+            set(range(run_start, run_end)),
+            candidate_spans,
+        ):
+            continue
+        candidate = "".join(str(span["normalized"]) for span in candidate_spans)
+        scored = []
+        for phrase_index in range(run_start, run_end):
+            target = str(phrases[phrase_index]["normalized_target"])
+            similarity = practice_similarity(target, candidate)
+            coverage = _target_character_coverage(target, candidate)
+            scored.append(
+                (
+                    (similarity + coverage) / 2,
+                    similarity,
+                    coverage,
+                    phrase_index,
+                )
+            )
+        scored.sort(reverse=True)
+        best_score, similarity, coverage, phrase_index = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else None
+        target = str(phrases[phrase_index]["normalized_target"])
+        length_ratio = len(candidate) / max(1, len(target))
+        if similarity < 0.18 or coverage < 0.18 or length_ratio < 0.35:
+            continue
+        if second_score is None:
+            if similarity < 0.35 or coverage < 0.35:
+                continue
+        elif best_score - second_score < 0.15:
+            continue
+        fallback: dict[str, object] = {}
+        _update_selected_word_range(
+            fallback,
+            phrases[phrase_index],
+            lower,
+            upper,
+            word_spans,
+            recognized_normalized,
+            boundary_source="one_sided_pause_fallback",
+        )
+        fallback["alignment_confidence"] = "low"
+        resolved[phrase_index] = fallback
+    return tuple(resolved)
+
+
 def _apply_pause_partition_ranges(
     phrases: list[dict[str, object]],
     selected: tuple[dict[str, object] | None, ...],
@@ -2444,10 +2576,47 @@ def _apply_pause_partition_ranges(
         similarities.append(practice_similarity(target, candidate))
         coverages.append(_target_character_coverage(target, candidate))
 
-    if max(coverages, default=0.0) < 0.25 or sum(coverages) / len(coverages) < 0.20:
-        return selected
     selected_count = sum(item is not None for item in selected)
-    if selected_count == 0:
+    anchored_chinese_partition = (
+        target_language == "zh-CN"
+        and selected_count > 0
+        and any(
+            item is not None
+            and float(item.get("similarity") or 0.0) >= 0.75
+            and float(item.get("coverage") or 0.0) >= 0.75
+            for item in selected
+        )
+        and all(
+            item is None
+            or (
+                start_word <= int(item["start_word"])
+                and int(item["end_word"]) <= end_word
+            )
+            for item, (start_word, end_word) in zip(
+                selected,
+                expected_bounds,
+                strict=True,
+            )
+        )
+        and all(
+            0.35
+            <= (
+                (end_word - start_word)
+                / max(1, len(str(phrase["normalized_target"])))
+            )
+            <= 2.5
+            for phrase, (start_word, end_word) in zip(
+                phrases,
+                expected_bounds,
+                strict=True,
+            )
+        )
+    )
+    if anchored_chinese_partition:
+        pass
+    elif max(coverages, default=0.0) < 0.25 or sum(coverages) / len(coverages) < 0.20:
+        return selected
+    elif selected_count == 0:
         pass
     elif len(phrases) != 2:
         return selected
@@ -2478,6 +2647,70 @@ def _apply_pause_partition_ranges(
         )
         item["alignment_confidence"] = "low"
         resolved.append(item)
+    return tuple(resolved)
+
+
+def _assign_unique_unanchored_spoken_chunk(
+    phrases: list[dict[str, object]],
+    selected: tuple[dict[str, object] | None, ...],
+    word_spans: list[dict[str, object]],
+    recognized_normalized: str,
+    target_language: str,
+) -> tuple[dict[str, object] | None, ...]:
+    """Assign one Chinese chunk when it uniquely resembles one target phrase."""
+
+    if (
+        target_language != "zh-CN"
+        or any(item is not None for item in selected)
+        or len(phrases) < 2
+        or not word_spans
+        or any(
+            float(current["audio_start"]) - float(previous["audio_end"])
+            >= _PAUSE_PARTITION_GAP_SECONDS
+            for previous, current in zip(word_spans, word_spans[1:])
+        )
+        or _is_explicit_boundary_filler(word_spans, target_language)
+    ):
+        return selected
+    candidate = "".join(str(span["normalized"]) for span in word_spans)
+    scored: list[tuple[float, float, float, int]] = []
+    for phrase_index, phrase in enumerate(phrases):
+        target = str(phrase["normalized_target"])
+        similarity = practice_similarity(target, candidate)
+        coverage = _target_character_coverage(target, candidate)
+        scored.append(
+            (
+                (similarity + coverage) / 2,
+                similarity,
+                coverage,
+                phrase_index,
+            )
+        )
+    scored.sort(reverse=True)
+    best_score, similarity, coverage, phrase_index = scored[0]
+    second_score = scored[1][0]
+    target = str(phrases[phrase_index]["normalized_target"])
+    length_ratio = len(candidate) / max(1, len(target))
+    if (
+        similarity < 0.35
+        or coverage < 0.30
+        or best_score - second_score < 0.15
+        or not 0.35 <= length_ratio <= 2.0
+    ):
+        return selected
+    item: dict[str, object] = {}
+    _update_selected_word_range(
+        item,
+        phrases[phrase_index],
+        0,
+        len(word_spans),
+        word_spans,
+        recognized_normalized,
+        boundary_source="unique_unanchored_chunk",
+    )
+    item["alignment_confidence"] = "low"
+    resolved = list(selected)
+    resolved[phrase_index] = item
     return tuple(resolved)
 
 
