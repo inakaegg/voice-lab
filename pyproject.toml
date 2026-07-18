@@ -72,6 +72,7 @@ mo_speech = [
   "web/*.css",
   "web/*.js",
   "web/react/*.html",
+  "web/react/*.ico",
   "web/react/assets/*.css",
   "web/react/assets/*.js",
   "web/react/assets/*.md",

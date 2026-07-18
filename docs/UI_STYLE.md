@@ -18,6 +18,7 @@
 - 新規または移行済みのReact routeでは、Tailwind CSS v4をCSS生成基盤、shadcn/uiのrepo所有コンポーネントをUI部品の起点とする。
 - shadcn/uiは完成テーマをそのまま適用するためではなく、アクセシブルな構造とvariantをrepo内で管理するために使う。配色、余白、角丸、影は本書のVoice Lab方針へ合わせる。
 - 公開ポータル`/`は専用の軽量Tailwind entryを使う。SpeakLoop、SkitVoice、管理画面、実験画面は共通のTailwind buildと、既存controller selectorを保つcompatibility layerを使う。
+- faviconは、Voice Lab共通の青い吹き出しと音声波形の二色マークを全routeで使う。16pxでも識別できる太い形を維持し、製品ごとの別faviconを増やさない。
 - 移行済みrouteのHTMLは`/static/styles.css`を直接読まない。旧selectorが必要な間はVite build内のcompatibility layerとして取り込み、適用順と削除境界を一箇所で管理する。
 - 共通部品へ昇格するのは、利用routeが同じスタイル基盤へ移行してからとする。移行前にTailwind依存の見える部品を旧routeへ持ち込まない。
 - routeを移行する際は、先に対象状態とレスポンシブ契約を固定し、HTMLから旧stylesheetを外し、production buildで他routeへCSSが流入していないことを確認する。
