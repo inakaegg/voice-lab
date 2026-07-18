@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mo_speech.providers.funasr import (
     FunAsrPracticeProvider,
     refine_funasr_word_timestamps,
@@ -288,6 +290,372 @@ def test_refine_funasr_word_timestamps_prefers_long_phrase_pause_over_short_inte
 
     assert refined[13]["end"] == 2.28
     assert refined[14]["start"] == 2.74
+
+
+def test_refine_funasr_word_timestamps_excludes_leading_noise_before_raw_speech() -> None:
+    tokens = list("你好花了三个多小时已经完成实现了质量怎么样呢")
+    first_group_step = (1.27 - 0.969) / 2
+    middle_group_step = (4.029 - 1.27) / 16
+    final_group_step = (8.14 - 4.029) / (len(tokens) - 18)
+    words = []
+    for index, token in enumerate(tokens):
+        if index < 2:
+            start = 0.969 + (index * first_group_step)
+            end = 0.969 + ((index + 1) * first_group_step)
+        elif index < 18:
+            start = 1.27 + ((index - 2) * middle_group_step)
+            end = 1.27 + ((index - 1) * middle_group_step)
+        else:
+            start = 4.029 + ((index - 18) * final_group_step)
+            end = 4.029 + ((index - 17) * final_group_step)
+        words.append({"text": token, "start": start, "end": end})
+
+    refined = refine_funasr_word_timestamps(
+        words,
+        text="你好。花了三个多小时，已经完成实现了。质量怎么样呢？",
+        audio_duration_seconds=8.1,
+        silence_intervals=[
+            {"start": 0.0, "end": 0.16225},
+            {"start": 0.459333, "end": 0.648958},
+            {"start": 0.722542, "end": 0.936583},
+            {"start": 1.529792, "end": 1.722542},
+            {"start": 3.278792, "end": 3.856708},
+            {"start": 6.165667, "end": 6.782583},
+            {"start": 7.8245, "end": 8.1},
+        ],
+        boundary_indices=[2, 18],
+    )
+
+    assert refined[0]["start"] == pytest.approx(0.936583)
+    assert refined[1]["end"] == pytest.approx(1.529792)
+    assert refined[2]["start"] == pytest.approx(1.722542)
+    assert refined[17]["end"] == pytest.approx(6.165667)
+    assert refined[18]["start"] == pytest.approx(6.782583)
+
+
+def test_refine_funasr_word_timestamps_does_not_treat_silence_crossing_first_raw_token_as_leading_noise() -> None:
+    refined = refine_funasr_word_timestamps(
+        [
+            {"text": "嗯", "start": 0.3, "end": 0.6},
+            {"text": "你", "start": 0.6, "end": 1.0},
+            {"text": "好", "start": 1.0, "end": 1.5},
+            {"text": "吗", "start": 1.5, "end": 2.0},
+        ],
+        text="嗯，你好。吗？",
+        audio_duration_seconds=3.0,
+        silence_intervals=[
+            {"start": 0.2, "end": 0.55},
+            {"start": 1.3, "end": 1.6},
+        ],
+        boundary_indices=[2],
+    )
+
+    assert refined[0]["start"] == 0.0
+
+
+def test_refine_funasr_word_timestamps_ignores_pause_before_raw_phrase_boundary() -> None:
+    tokens = list("你好昨天我吃了三碗油肉和香贝吃香今天我打算吃猪肉和三碗油虽然这算是西藏")
+    first_group_step = (8.099 - 1.08) / 16
+    second_group_step = (15.51 - 8.099) / (len(tokens) - 16)
+    words = []
+    for index, token in enumerate(tokens):
+        if index < 16:
+            start = 1.08 + (index * first_group_step)
+            end = 1.08 + ((index + 1) * first_group_step)
+        else:
+            start = 8.099 + ((index - 16) * second_group_step)
+            end = 8.099 + ((index - 15) * second_group_step)
+        words.append({"text": token, "start": start, "end": end})
+
+    refined = refine_funasr_word_timestamps(
+        words,
+        text="你好，昨天我吃了三碗油肉和香贝吃香。今天我打算吃猪肉和三碗油，虽然这算是西藏。",
+        audio_duration_seconds=15.48,
+        silence_intervals=[
+            {"start": 0.0, "end": 0.4465},
+            {"start": 0.446542, "end": 0.868917},
+            {"start": 1.629208, "end": 1.908583},
+            {"start": 4.439458, "end": 4.623375},
+            {"start": 6.022167, "end": 7.042542},
+            {"start": 7.671125, "end": 7.817708},
+            {"start": 8.735625, "end": 9.418292},
+            {"start": 12.088833, "end": 12.639292},
+            {"start": 13.22275, "end": 13.518042},
+            {"start": 14.462083, "end": 14.635875},
+            {"start": 15.205875, "end": 15.48},
+        ],
+        boundary_indices=[16],
+        prefer_raw_timing=True,
+    )
+
+    assert refined[15]["end"] == pytest.approx(8.735625)
+    assert refined[16]["start"] == pytest.approx(9.418292)
+
+
+def test_refine_funasr_word_timestamps_accepts_raw_supported_boundary_despite_speaking_rate_change() -> None:
+    tokens = list("啊差都差不多该吃午饭了吃什么好呢希望翻过伊菲尔以及就秋季住新加拿大")
+    words = []
+    group_specs = [
+        (0, 11, 2.24, 6.499),
+        (11, 16, 6.499, 11.179),
+        (16, len(tokens), 11.179, 15.769),
+    ]
+    for start_index, end_index, group_start, group_end in group_specs:
+        step = (group_end - group_start) / (end_index - start_index)
+        for index in range(start_index, end_index):
+            words.append(
+                {
+                    "text": tokens[index],
+                    "start": group_start + ((index - start_index) * step),
+                    "end": group_start + ((index - start_index + 1) * step),
+                }
+            )
+
+    refined = refine_funasr_word_timestamps(
+        words,
+        text="啊，差都差不多该吃午饭了，吃什么好呢？希望翻过伊菲尔以及就秋季住新加拿大。",
+        audio_duration_seconds=15.72,
+        silence_intervals=[
+            {"start": 0.0, "end": 0.77},
+            {"start": 1.727, "end": 2.035},
+            {"start": 2.819, "end": 2.978},
+            {"start": 3.82, "end": 3.955},
+            {"start": 5.241, "end": 6.238},
+            {"start": 7.147, "end": 8.246},
+            {"start": 8.894, "end": 9.74},
+            {"start": 11.526, "end": 12.257},
+            {"start": 12.771, "end": 13.352},
+            {"start": 13.555, "end": 13.737},
+            {"start": 15.337, "end": 15.72},
+        ],
+        boundary_indices=[11, 16],
+        prefer_raw_timing=True,
+    )
+
+    assert refined[10]["end"] == pytest.approx(5.241)
+    assert refined[11]["start"] == pytest.approx(6.238)
+    assert refined[15]["end"] == pytest.approx(11.526)
+    assert refined[16]["start"] == pytest.approx(12.257)
+
+
+def test_funasr_provider_uses_raw_support_when_incomplete_alignment_leaves_unassigned_speech(
+    tmp_path: Path,
+) -> None:
+    tokens = list("啊差都差不多该吃午饭了吃什么好呢希望翻过伊菲尔以及就秋季住新加拿大")
+    group_specs = [
+        (0, 11, 2.24, 6.499),
+        (11, 16, 6.499, 11.179),
+        (16, len(tokens), 11.179, 15.769),
+    ]
+    timestamps = []
+    for start_index, end_index, group_start, group_end in group_specs:
+        step = (group_end - group_start) / (end_index - start_index)
+        timestamps.extend(
+            [
+                [
+                    (group_start + ((index - start_index) * step)) * 1000,
+                    (group_start + ((index - start_index + 1) * step)) * 1000,
+                ]
+                for index in range(start_index, end_index)
+            ]
+        )
+    transcription = transcription_from_funasr_result(
+        {
+            "text": "啊，差都差不多该吃午饭了，吃什么好呢？希望翻过伊菲尔以及就秋季住新加拿大。",
+            "raw_text": " ".join(tokens),
+            "timestamp": timestamps,
+        },
+        model="funasr/paraformer-zh",
+    )
+    provider = FunAsrPracticeProvider(
+        audio_boundary_detector=lambda _path: (
+            15.72,
+            [
+                {"start": 0.0, "end": 0.77},
+                {"start": 1.727, "end": 2.035},
+                {"start": 2.819, "end": 2.978},
+                {"start": 3.82, "end": 3.955},
+                {"start": 5.241, "end": 6.238},
+                {"start": 7.147, "end": 8.246},
+                {"start": 8.894, "end": 9.74},
+                {"start": 11.526, "end": 12.257},
+                {"start": 12.771, "end": 13.352},
+                {"start": 13.555, "end": 13.737},
+                {"start": 15.337, "end": 15.72},
+            ],
+        )
+    )
+
+    refined = provider.refine_timestamps_for_target(
+        transcription,
+        tmp_path / "attempt.wav",
+        target_text=(
+            "啊，差不多该吃午饭了。"
+            "吃什么好呢？"
+            "吃完饭过一会儿就去骑自行车吧。"
+        ),
+        target_language="zh-CN",
+    )
+    alignment = practice_comparison_alignment_canonical(
+        target_text=(
+            "啊，差不多该吃午饭了。"
+            "吃什么好呢？"
+            "吃完饭过一会儿就去骑自行车吧。"
+        ),
+        recognized_text=refined.text,
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": refined.words},
+    )
+
+    assert alignment["playable_phrase_count"] == 3
+    assert alignment["phrases"][1]["audio_start"] == pytest.approx(6.238)
+    assert alignment["phrases"][1]["audio_end"] == pytest.approx(11.526)
+
+
+def test_refine_funasr_word_timestamps_prefers_long_pause_when_short_pause_is_nearer_raw_boundary() -> None:
+    tokens = list("你好昨天我吃了三碗油肉和香贝吃香今天我打算吃猪肉和三碗油虽然这算是西藏")
+    first_group_step = (8.099 - 1.08) / 16
+    second_group_step = (15.51 - 8.099) / (len(tokens) - 16)
+    words = []
+    for index, token in enumerate(tokens):
+        if index < 16:
+            start = 1.08 + (index * first_group_step)
+            end = 1.08 + ((index + 1) * first_group_step)
+        else:
+            start = 8.099 + ((index - 16) * second_group_step)
+            end = 8.099 + ((index - 15) * second_group_step)
+        words.append({"text": token, "start": start, "end": end})
+
+    refined = refine_funasr_word_timestamps(
+        words,
+        text="你好，昨天我吃了三碗油肉和香贝吃香。今天我打算吃猪肉和三碗油，虽然这算是西藏。",
+        audio_duration_seconds=15.48,
+        silence_intervals=[
+            {"start": 0.0, "end": 0.868917},
+            {"start": 6.022167, "end": 7.042542},
+            {"start": 7.671125, "end": 7.817708},
+            {"start": 8.735625, "end": 9.418292},
+            {"start": 15.205875, "end": 15.48},
+        ],
+        boundary_indices=[16],
+        prefer_raw_timing=True,
+    )
+
+    assert refined[15]["end"] == pytest.approx(8.735625)
+    assert refined[16]["start"] == pytest.approx(9.418292)
+
+
+def test_refine_funasr_word_timestamps_falls_back_when_raw_boundaries_are_globally_drifted() -> None:
+    tokens = list("我来自南京现在住在上海周末常常去公园")
+    raw_ranges = [
+        (0.03, 0.21),
+        (0.21, 0.27),
+        (0.27, 0.75),
+        (0.75, 1.47),
+        (1.65, 2.009),
+        (2.009, 2.55),
+        (2.55, 3.27),
+        (3.389, 3.449),
+        (3.449, 3.929),
+        (3.929, 4.47),
+        (4.47, 4.53),
+        (4.53, 4.59),
+        (4.59, 4.649),
+        (4.649, 4.71),
+        (4.71, 4.83),
+        (4.83, 4.95),
+        (4.95, 5.01),
+        (5.01, 5.22),
+    ]
+
+    refined = refine_funasr_word_timestamps(
+        [
+            {"text": token, "start": start, "end": end}
+            for token, (start, end) in zip(tokens, raw_ranges, strict=True)
+        ],
+        text="我来自南京。现在住在上海。周末常常去公园。",
+        audio_duration_seconds=5.162,
+        silence_intervals=[
+            {"start": 1.188, "end": 1.468},
+            {"start": 3.072875, "end": 3.353},
+        ],
+        boundary_indices=[5, 11],
+    )
+
+    assert refined[4]["end"] == pytest.approx(1.188)
+    assert refined[5]["start"] == pytest.approx(1.468)
+    assert refined[10]["end"] == pytest.approx(3.072875)
+    assert refined[11]["start"] == pytest.approx(3.353)
+
+
+def test_funasr_provider_uses_nearby_sentence_punctuation_to_correct_lexical_boundary(
+    tmp_path: Path,
+) -> None:
+    tokens = list("你好昨天我吃了三碗油肉和香贝吃香今天我打算吃猪肉和三碗油虽然这算是西藏")
+    first_group_step = (8.099 - 1.08) / 16
+    second_group_step = (15.51 - 8.099) / (len(tokens) - 16)
+    timestamps = []
+    for index in range(len(tokens)):
+        if index < 16:
+            start = 1.08 + (index * first_group_step)
+            end = 1.08 + ((index + 1) * first_group_step)
+        else:
+            start = 8.099 + ((index - 16) * second_group_step)
+            end = 8.099 + ((index - 15) * second_group_step)
+        timestamps.append([start * 1000, end * 1000])
+    transcription = transcription_from_funasr_result(
+        {
+            "text": (
+                "你好，昨天我吃了三碗油肉和香贝吃香。"
+                "今天我打算吃猪肉和三碗油，虽然这算是西藏。"
+            ),
+            "raw_text": " ".join(tokens),
+            "timestamp": timestamps,
+        },
+        model="funasr/paraformer-zh",
+    )
+    provider = FunAsrPracticeProvider(
+        audio_boundary_detector=lambda _path: (
+            15.48,
+            [
+                {"start": 0.0, "end": 0.4465},
+                {"start": 0.446542, "end": 0.868917},
+                {"start": 1.629208, "end": 1.908583},
+                {"start": 4.439458, "end": 4.623375},
+                {"start": 6.022167, "end": 7.042542},
+                {"start": 7.671125, "end": 7.817708},
+                {"start": 8.735625, "end": 9.418292},
+                {"start": 12.088833, "end": 12.639292},
+                {"start": 13.22275, "end": 13.518042},
+                {"start": 14.462083, "end": 14.635875},
+                {"start": 15.205875, "end": 15.48},
+            ],
+        )
+    )
+
+    refined = provider.refine_timestamps_for_target(
+        transcription,
+        tmp_path / "attempt.wav",
+        target_text=(
+            "你好，昨天我吃了三文鱼和扇贝刺身。"
+            "今天我打算吃猪肉和三文鱼，虽然这算是西餐。"
+        ),
+        target_language="zh-CN",
+    )
+    alignment = practice_comparison_alignment_canonical(
+        target_text=(
+            "你好，昨天我吃了三文鱼和扇贝刺身。"
+            "今天我打算吃猪肉和三文鱼，虽然这算是西餐。"
+        ),
+        recognized_text=refined.text,
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": refined.words},
+    )
+
+    assert alignment["phrases"][0]["word_end_index"] == 16
+    assert alignment["phrases"][1]["word_start_index"] == 16
+    assert alignment["phrases"][0]["audio_end"] == pytest.approx(8.735625)
+    assert alignment["phrases"][1]["audio_start"] == pytest.approx(9.418292)
 
 
 def test_funasr_provider_refines_with_target_phrase_boundaries_when_punctuation_is_missing(

@@ -53,6 +53,7 @@ _MAX_ALIGNMENT_CANDIDATES_PER_PHRASE = 4096
 _MAX_CANONICAL_TARGET_PHRASES = 16
 _MAX_CANONICAL_TIMESTAMP_UNITS = 256
 _MAX_CANONICAL_ALIGNMENT_COMPLEXITY = 1024
+_COMPLETE_LEXICAL_PARTITION_ADVANTAGE = 0.12
 _PRACTICE_HARD_BOUNDARIES = frozenset("。！？!?；;\n")
 _PRACTICE_CLOSING_PUNCTUATION = frozenset("\"'”’」』】）》）)]}")
 _PRACTICE_PROTECTED_ABBREVIATIONS = frozenset(
@@ -2537,9 +2538,23 @@ def _apply_pause_partition_ranges(
     expected_bounds = list(zip(boundaries[:-1], boundaries[1:], strict=True))
     fillers = _EDGE_FILLERS.get(target_language, set())
     if any(
-        str(word_spans[start_word]["normalized"]) in fillers
-        or str(word_spans[end_word - 1]["normalized"]) in fillers
-        for start_word, end_word in expected_bounds
+        (
+            str(word_spans[start_word]["normalized"]) in fillers
+            and not str(phrase["normalized_target"]).startswith(
+                str(word_spans[start_word]["normalized"])
+            )
+        )
+        or (
+            str(word_spans[end_word - 1]["normalized"]) in fillers
+            and not str(phrase["normalized_target"]).endswith(
+                str(word_spans[end_word - 1]["normalized"])
+            )
+        )
+        for phrase, (start_word, end_word) in zip(
+            phrases,
+            expected_bounds,
+            strict=True,
+        )
     ):
         return selected
     if all(
@@ -2618,6 +2633,21 @@ def _apply_pause_partition_ranges(
         return selected
     elif selected_count == 0:
         pass
+    elif target_language == "zh-CN" and selected_count == len(phrases):
+        selected_evidence = sum(
+            float(item.get("similarity") or 0.0)
+            + float(item.get("coverage") or 0.0)
+            for item in selected
+            if item is not None
+        ) / len(phrases)
+        partition_evidence = (
+            sum(similarities) + sum(coverages)
+        ) / len(phrases)
+        if (
+            selected_evidence - partition_evidence
+            >= _COMPLETE_LEXICAL_PARTITION_ADVANTAGE
+        ):
+            return selected
     elif len(phrases) != 2:
         return selected
     elif selected_count == 1:

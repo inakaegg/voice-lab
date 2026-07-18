@@ -17,9 +17,16 @@ DEFAULT_FUNASR_PUNC_MODEL = "funasr/ct-punc"
 _SILENCE_START_PATTERN = re.compile(r"silence_start:\s*(-?\d+(?:\.\d+)?)")
 _SILENCE_END_PATTERN = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
 _BOUNDARY_PUNCTUATION = frozenset("，,、；;。！？!?：:")
+_STRONG_BOUNDARY_PUNCTUATION = frozenset("；;。！？!?")
 _MINIMUM_PHRASE_SILENCE_SECONDS = 0.12
 _SILENCE_LENGTH_PREFERENCE_WEIGHT = 0.25
 _MAXIMUM_SILENCE_LENGTH_PENALTY = 0.12
+_MAXIMUM_RAW_SILENCE_LENGTH_PENALTY = 0.25
+_RAW_BOUNDARY_EARLY_TOLERANCE_SECONDS = 0.65
+_MAXIMUM_RAW_BOUNDARY_RELATIVE_ERROR = 0.12
+_RAW_SPEECH_EDGE_SEARCH_SECONDS = 0.5
+_RAW_DURATION_TOLERANCE_SECONDS = 0.25
+_NEARBY_PUNCTUATION_BOUNDARY_TOKENS = 2
 
 
 def transcription_from_funasr_result(result: object, *, model: str) -> AsrTranscription:
@@ -145,6 +152,7 @@ def refine_funasr_word_timestamps(
     audio_duration_seconds: float,
     silence_intervals: list[dict[str, float]],
     boundary_indices: Sequence[int] | None = None,
+    prefer_raw_timing: bool = False,
 ) -> list[dict[str, object]]:
     """Clamp coarse FunASR token times to independently observed silence boundaries.
 
@@ -179,11 +187,26 @@ def refine_funasr_word_timestamps(
         ],
         key=lambda value: value["start"],
     )
+    raw_timing_matches_audio = (
+        float(refined[-1]["raw_end"]) <= duration + _RAW_DURATION_TOLERANCE_SECONDS
+    )
     speech_start = (
         detected_silences[0]["end"]
         if detected_silences and detected_silences[0]["start"] <= 0.05
         else 0.0
     )
+    if raw_timing_matches_audio:
+        raw_speech_start = float(refined[0]["raw_start"])
+        leading_candidates = [
+            interval["end"]
+            for interval in detected_silences
+            if interval["start"] <= raw_speech_start
+            and interval["end"] <= raw_speech_start
+            and raw_speech_start - interval["end"]
+            <= _RAW_SPEECH_EDGE_SEARCH_SECONDS
+        ]
+        if leading_candidates:
+            speech_start = max(leading_candidates)
     speech_end = (
         detected_silences[-1]["start"]
         if detected_silences and detected_silences[-1]["end"] >= duration - 0.05
@@ -197,7 +220,7 @@ def refine_funasr_word_timestamps(
             "end": interval["end"],
         }
         for interval in detected_silences
-        if interval["start"] > 0.05
+        if interval["end"] > speech_start
         and interval["end"] < duration - 0.05
     ]
     if not internal_silences:
@@ -223,8 +246,10 @@ def refine_funasr_word_timestamps(
     assignments = _punctuation_backed_assignments(
         preferred_boundaries,
         ordered_silences,
+        words=refined,
         token_count=token_count,
         duration=duration,
+        trust_raw_timing=prefer_raw_timing and raw_timing_matches_audio,
     )
     if not assignments and not preferred_boundaries and boundary_indices is None:
         assignments = _relative_silence_assignments(
@@ -269,8 +294,47 @@ def _punctuation_backed_assignments(
     boundaries: set[int],
     silences: list[dict[str, float]],
     *,
+    words: list[dict[str, object]],
     token_count: int,
     duration: float,
+    trust_raw_timing: bool,
+) -> list[tuple[int, float, float]]:
+    legacy_assignments = _candidate_punctuation_backed_assignments(
+        boundaries,
+        silences,
+        words=words,
+        token_count=token_count,
+        duration=duration,
+        trust_raw_timing=False,
+    )
+    if not trust_raw_timing:
+        return legacy_assignments
+
+    raw_assignments = _candidate_punctuation_backed_assignments(
+        boundaries,
+        silences,
+        words=words,
+        token_count=token_count,
+        duration=duration,
+        trust_raw_timing=True,
+    )
+    if _assignments_have_consistent_raw_support(
+        raw_assignments,
+        words,
+        duration=duration,
+    ):
+        return raw_assignments
+    return legacy_assignments
+
+
+def _candidate_punctuation_backed_assignments(
+    boundaries: set[int],
+    silences: list[dict[str, float]],
+    *,
+    words: list[dict[str, object]],
+    token_count: int,
+    duration: float,
+    trust_raw_timing: bool,
 ) -> list[tuple[int, float, float]]:
     ordered_boundaries = sorted(boundary for boundary in boundaries if 0 < boundary < token_count)
     if not ordered_boundaries or not silences:
@@ -285,20 +349,45 @@ def _punctuation_backed_assignments(
                 len(ordered_boundaries) - remaining,
             )
             midpoint = (silence["start"] + silence["end"]) / 2
-            scored = [
-                (
-                    abs(
-                        (ordered_boundaries[index] / token_count)
-                        - (midpoint / duration)
-                    ),
-                    index,
+            scored: list[tuple[float, float, float | None, int]] = []
+            for index in candidates:
+                boundary = ordered_boundaries[index]
+                if not _silence_not_before_raw_boundary(
+                    words,
+                    boundary,
+                    silence,
+                    trust_raw_timing=trust_raw_timing,
+                ):
+                    continue
+                relative_error = abs(
+                    (boundary / token_count)
+                    - (midpoint / duration)
                 )
-                for index in candidates
-            ]
+                raw_error = _raw_boundary_relative_error(
+                    words,
+                    boundary,
+                    midpoint,
+                    duration=duration,
+                    trust_raw_timing=trust_raw_timing,
+                )
+                scored.append(
+                    (
+                        relative_error + ((raw_error or 0.0) * 0.2),
+                        relative_error,
+                        raw_error,
+                        index,
+                    )
+                )
             if not scored:
                 return []
-            relative_error, boundary_index = min(scored)
-            if relative_error > max(0.2, 1.5 / token_count):
+            _, relative_error, raw_error, boundary_index = min(scored)
+            if (
+                relative_error > max(0.2, 1.5 / token_count)
+                and (
+                    raw_error is None
+                    or raw_error > _MAXIMUM_RAW_BOUNDARY_RELATIVE_ERROR
+                )
+            ):
                 return []
             boundary = ordered_boundaries[boundary_index]
             assignments.append((boundary, silence["start"], silence["end"]))
@@ -317,46 +406,125 @@ def _punctuation_backed_assignments(
             previous_silence_index + 1,
             len(silences) - remaining,
         )
-        scored = [
-            (
-                abs(
-                    (boundary / token_count)
-                    - (
-                        ((silences[index]["start"] + silences[index]["end"]) / 2)
-                        / duration
-                    )
-                )
-                + min(
-                    _MAXIMUM_SILENCE_LENGTH_PENALTY,
-                    _SILENCE_LENGTH_PREFERENCE_WEIGHT
-                    * (
-                        1.0
-                        - (
-                            (silences[index]["end"] - silences[index]["start"])
-                            / longest_silence
-                        )
-                    ),
-                ),
-                abs(
-                    (boundary / token_count)
-                    - (
-                        ((silences[index]["start"] + silences[index]["end"]) / 2)
-                        / duration
-                    )
-                ),
-                index,
+        scored: list[tuple[float, float, float | None, int]] = []
+        for index in candidates:
+            silence = silences[index]
+            if not _silence_not_before_raw_boundary(
+                words,
+                boundary,
+                silence,
+                trust_raw_timing=trust_raw_timing,
+            ):
+                continue
+            midpoint = (silence["start"] + silence["end"]) / 2
+            relative_error = abs(
+                (boundary / token_count)
+                - (midpoint / duration)
             )
-            for index in candidates
-        ]
+            raw_error = _raw_boundary_relative_error(
+                words,
+                boundary,
+                midpoint,
+                duration=duration,
+                trust_raw_timing=trust_raw_timing,
+            )
+            length_penalty = min(
+                (
+                    _MAXIMUM_RAW_SILENCE_LENGTH_PENALTY
+                    if trust_raw_timing
+                    else _MAXIMUM_SILENCE_LENGTH_PENALTY
+                ),
+                _SILENCE_LENGTH_PREFERENCE_WEIGHT
+                * (
+                    1.0
+                    - (
+                        (silence["end"] - silence["start"])
+                        / longest_silence
+                    )
+                ),
+            )
+            scored.append(
+                (
+                    relative_error
+                    + length_penalty
+                    + ((raw_error or 0.0) * 0.2),
+                    relative_error,
+                    raw_error,
+                    index,
+                )
+            )
         if not scored:
             return []
-        _, relative_error, silence_index = min(scored)
-        if relative_error > max(0.2, 1.5 / token_count):
+        _, relative_error, raw_error, silence_index = min(scored)
+        if (
+            relative_error > max(0.2, 1.5 / token_count)
+            and (
+                raw_error is None
+                or raw_error > _MAXIMUM_RAW_BOUNDARY_RELATIVE_ERROR
+            )
+        ):
             return []
         silence = silences[silence_index]
         assignments.append((boundary, silence["start"], silence["end"]))
         previous_silence_index = silence_index
     return assignments
+
+
+def _assignments_have_consistent_raw_support(
+    assignments: list[tuple[int, float, float]],
+    words: list[dict[str, object]],
+    *,
+    duration: float,
+) -> bool:
+    if not assignments:
+        return False
+    for boundary, silence_start, silence_end in assignments:
+        raw_error = _raw_boundary_relative_error(
+            words,
+            boundary,
+            (silence_start + silence_end) / 2,
+            duration=duration,
+            trust_raw_timing=True,
+        )
+        if (
+            raw_error is None
+            or raw_error > _MAXIMUM_RAW_BOUNDARY_RELATIVE_ERROR
+        ):
+            return False
+    return True
+
+
+def _silence_not_before_raw_boundary(
+    words: list[dict[str, object]],
+    boundary: int,
+    silence: dict[str, float],
+    *,
+    trust_raw_timing: bool,
+) -> bool:
+    if not trust_raw_timing:
+        return True
+    raw_boundary = (
+        float(words[boundary - 1]["raw_end"])
+        + float(words[boundary]["raw_start"])
+    ) / 2
+    return silence["end"] >= raw_boundary - _RAW_BOUNDARY_EARLY_TOLERANCE_SECONDS
+
+
+def _raw_boundary_relative_error(
+    words: list[dict[str, object]],
+    boundary: int,
+    midpoint: float,
+    *,
+    duration: float,
+    trust_raw_timing: bool,
+) -> float | None:
+    if not trust_raw_timing or duration <= 0:
+        return None
+    raw_boundary = (
+        float(words[boundary - 1]["raw_end"])
+        + float(words[boundary]["raw_start"])
+    ) / 2
+    return abs(raw_boundary - midpoint) / duration
 
 
 def _relative_silence_assignments(
@@ -402,6 +570,30 @@ def _punctuation_token_boundaries(
     text: str,
     words: list[dict[str, object]],
 ) -> set[int]:
+    return _token_boundaries_for_punctuation(
+        text,
+        words,
+        punctuation=_BOUNDARY_PUNCTUATION,
+    )
+
+
+def _strong_punctuation_token_boundaries(
+    text: str,
+    words: list[dict[str, object]],
+) -> set[int]:
+    return _token_boundaries_for_punctuation(
+        text,
+        words,
+        punctuation=_STRONG_BOUNDARY_PUNCTUATION,
+    )
+
+
+def _token_boundaries_for_punctuation(
+    text: str,
+    words: list[dict[str, object]],
+    *,
+    punctuation: frozenset[str],
+) -> set[int]:
     boundaries: set[int] = set()
     cursor = 0
     for index, word in enumerate(words):
@@ -411,7 +603,7 @@ def _punctuation_token_boundaries(
         position = text.find(token, cursor)
         if position < 0:
             continue
-        if index and any(character in _BOUNDARY_PUNCTUATION for character in text[cursor:position]):
+        if index and any(character in punctuation for character in text[cursor:position]):
             boundaries.add(index)
         cursor = position + len(token)
     return boundaries
@@ -572,6 +764,11 @@ class FunAsrPracticeProvider:
                 ]
             )
             raw_playable_count = int(alignment.get("playable_phrase_count") or 0)
+            prefer_raw_timing = (
+                raw_playable_count
+                < int(alignment.get("target_phrase_count") or 0)
+                and int(alignment.get("unassigned_non_filler_count") or 0) > 0
+            )
             internal_silences = [
                 interval
                 for interval in silence_intervals
@@ -622,6 +819,7 @@ class FunAsrPracticeProvider:
             if not isinstance(phrases, list):
                 return transcription
             boundary_indices: set[int] = set()
+            protected_lexical_boundaries: set[int] = set()
             target_phrase_count = int(alignment.get("target_phrase_count") or 0)
             found_aligned_phrase = False
             for candidate_alignment in (alignment, lexical_alignment):
@@ -663,14 +861,38 @@ class FunAsrPracticeProvider:
                         boundary_indices.add(left_end)
                     if left_end < right_start < len(transcription.words):
                         boundary_indices.add(right_start)
+                    if (
+                        candidate_alignment is lexical_alignment
+                        and left_end == right_start
+                        and right.get("content_matched") is True
+                    ):
+                        protected_lexical_boundaries.add(right_start)
             if not found_aligned_phrase:
                 return transcription
+            for punctuation_boundary in _strong_punctuation_token_boundaries(
+                transcription.text,
+                transcription.words,
+            ):
+                nearby_boundaries = {
+                    boundary
+                    for boundary in boundary_indices
+                    if abs(boundary - punctuation_boundary)
+                    <= _NEARBY_PUNCTUATION_BOUNDARY_TOKENS
+                    and boundary not in protected_lexical_boundaries
+                }
+                if not nearby_boundaries:
+                    continue
+                if punctuation_boundary not in nearby_boundaries:
+                    prefer_raw_timing = True
+                boundary_indices.difference_update(nearby_boundaries)
+                boundary_indices.add(punctuation_boundary)
             words = refine_funasr_word_timestamps(
                 transcription.words,
                 text=transcription.text,
                 audio_duration_seconds=duration,
                 silence_intervals=silence_intervals,
                 boundary_indices=sorted(boundary_indices),
+                prefer_raw_timing=prefer_raw_timing,
             )
         except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
             return transcription

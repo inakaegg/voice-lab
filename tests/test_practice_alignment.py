@@ -175,6 +175,68 @@ def test_practice_comparison_alignment_assigns_low_content_chunk_by_anchored_pau
     assert result["ranges"][1]["audio_start"] == pytest.approx(2.3)
 
 
+def test_practice_comparison_alignment_does_not_replace_complete_lexical_ranges_with_internal_pause() -> None:
+    recognized = list(
+        "你好昨天我吃了三碗油肉和香贝吃香今天我打算吃猪肉和三碗油虽然这算是西藏"
+    )
+    words = []
+    cursor = 1.08
+    for index, token in enumerate(recognized):
+        if index == 5:
+            cursor += 0.54
+        words.append({"text": token, "start": cursor, "end": cursor + 0.24})
+        cursor += 0.24
+
+    result = practice_comparison_alignment(
+        target_text=(
+            "你好，昨天我吃了三文鱼和扇贝刺身。"
+            "今天我打算吃猪肉和三文鱼，虽然这算是西餐。"
+        ),
+        recognized_text=(
+            "你好，昨天我吃了三碗油肉和香贝吃香。"
+            "今天我打算吃猪肉和三碗油，虽然这算是西藏。"
+        ),
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [entry["matched_text"] for entry in result["ranges"]] == [
+        "你好昨天我吃了三碗油肉和香贝",
+        "吃香今天我打算吃猪肉和三碗油虽然这算是西藏",
+    ]
+    assert result["ranges"][0]["audio_end"] == pytest.approx(words[13]["end"])
+    assert result["ranges"][1]["audio_start"] == pytest.approx(words[14]["start"])
+
+
+def test_practice_comparison_alignment_assigns_paused_mistake_when_target_starts_with_filler_like_word() -> None:
+    chunks = [
+        "啊差不多该吃午饭了",
+        "这下不好了",
+        "吃完饭过一会儿就就去住心下吧",
+    ]
+    words = []
+    cursor = 0.37
+    for chunk in chunks:
+        for token in chunk:
+            words.append({"text": token, "start": cursor, "end": cursor + 0.2})
+            cursor += 0.2
+        cursor += 1.1
+
+    result = practice_comparison_alignment(
+        target_text=(
+            "啊，差不多该吃午饭了。"
+            "吃什么好呢？"
+            "吃完饭过一会儿就去骑自行车吧。"
+        ),
+        recognized_text="。".join(chunks) + "。",
+        target_language="zh-CN",
+        asr_timestamps={"available": True, "words": words},
+    )
+
+    assert [entry["available"] for entry in result["ranges"]] == [True, True, True]
+    assert result["ranges"][1]["matched_text"] == "这下不好了"
+
+
 def test_practice_comparison_alignment_assigns_low_content_fourth_chunk_from_three_anchors() -> None:
     chunks = [
         "我的中文还不太好",
