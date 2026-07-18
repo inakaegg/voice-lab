@@ -396,14 +396,10 @@ def transcribe_corpus(
                 "compute_type": "int8",
                 "snapshot": _find_model_snapshot(cache_paths["faster_whisper"]),
             },
-            "funasr": {
-                "model": "funasr/paraformer-zh",
-                "vad_model": "funasr/fsmn-vad",
-                "punc_model": "funasr/ct-punc",
-                "device": "cpu",
-                "hub": "hf",
-                "snapshots": _find_huggingface_snapshots(cache_paths["huggingface_hub"], "funasr"),
-            },
+            "funasr": _funasr_model_metadata(
+                funasr,
+                cache_paths["huggingface_hub"],
+            ),
         },
         "cases": rows,
         "summary": summarize_results(rows),
@@ -858,13 +854,27 @@ def _find_model_snapshot(cache_dir: Path) -> str | None:
     return revisions[-1] if revisions else None
 
 
-def _find_huggingface_snapshots(cache_dir: Path, organization: str) -> dict[str, str]:
+def _funasr_model_metadata(provider: Any, cache_dir: Path) -> dict[str, object]:
+    model_ids = (
+        str(provider.model),
+        str(provider.vad_model),
+        str(provider.punc_model),
+    )
     snapshots: dict[str, str] = {}
-    for repository in sorted(cache_dir.glob(f"models--{organization}--*")):
+    for model_id in dict.fromkeys(model_ids):
+        repository = cache_dir / f"models--{model_id.replace('/', '--')}"
         revision = _cached_huggingface_revision(repository)
         if revision:
-            snapshots[repository.name.replace("models--", "").replace("--", "/", 1)] = revision
-    return snapshots
+            snapshots[model_id] = revision
+    return {
+        "model": model_ids[0],
+        "vad_model": model_ids[1],
+        "punc_model": model_ids[2],
+        "device": str(provider.device),
+        "hub": str(provider.hub),
+        "batch_size_s": int(provider.batch_size_s),
+        "snapshots": snapshots,
+    }
 
 
 def _cached_huggingface_revision(repository: Path) -> str | None:

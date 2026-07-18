@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from mo_speech.local_asr_corpus import (
     _cached_huggingface_revision,
+    _funasr_model_metadata,
     build_synthesis_plan,
     evaluate_transcription,
     load_corpus_manifest,
@@ -265,6 +267,41 @@ def test_cached_huggingface_revision_supports_new_tree_cache_layout(tmp_path: Pa
     (repository / "refs" / "main").write_text("abc123\n", encoding="utf-8")
 
     assert _cached_huggingface_revision(repository) == "abc123"
+
+
+def test_funasr_model_metadata_records_instantiated_provider_settings(
+    tmp_path: Path,
+) -> None:
+    cache_dir = tmp_path / "huggingface" / "hub"
+    revisions = {
+        "custom/asr-model": "asr-revision",
+        "custom/vad-model": "vad-revision",
+        "another/punc-model": "punc-revision",
+    }
+    for model, revision in revisions.items():
+        repository = cache_dir / f"models--{model.replace('/', '--')}"
+        (repository / "refs").mkdir(parents=True)
+        (repository / "refs" / "main").write_text(revision, encoding="utf-8")
+    provider = SimpleNamespace(
+        model="custom/asr-model",
+        vad_model="custom/vad-model",
+        punc_model="another/punc-model",
+        device="cpu",
+        hub="hf",
+        batch_size_s=42,
+    )
+
+    metadata = _funasr_model_metadata(provider, cache_dir)
+
+    assert metadata == {
+        "model": "custom/asr-model",
+        "vad_model": "custom/vad-model",
+        "punc_model": "another/punc-model",
+        "device": "cpu",
+        "hub": "hf",
+        "batch_size_s": 42,
+        "snapshots": revisions,
+    }
 
 
 def test_checked_in_pilot_manifest_keeps_small_stage_and_chinese_priority() -> None:

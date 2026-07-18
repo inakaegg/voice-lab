@@ -56,7 +56,7 @@ export MODEL_CACHE_DIR=/path/to/models/mo-asr
 | FunASR VAD | `funasr/fsmn-vad` | macOS CPU | 発話区間 |
 | FunASR punctuation | `funasr/ct-punc` | macOS CPU | 句読点復元 |
 
-モデル取得元、package version、resolved revision、実行日時は `transcriptions.json` に記録する。FunASR toolkitとmodel weightのlicenseを混同せず、model cardのlicenseも確認する。
+モデル取得元、package version、resolved revision、実行日時は `transcriptions.json` に記録する。FunASRは環境変数から実体化されたASR・VAD・句読点model、device、hub、batch sizeを記録し、既定値として固定記録しない。FunASR toolkitとmodel weightのlicenseを混同せず、model cardのlicenseも確認する。
 
 ## 実行
 

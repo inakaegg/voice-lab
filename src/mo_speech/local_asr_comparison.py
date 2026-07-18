@@ -12,8 +12,8 @@ from typing import Any, Mapping, Sequence
 from .local_asr_corpus import (
     CommandRunner,
     _command_version,
-    _find_huggingface_snapshots,
     _find_model_snapshot,
+    _funasr_model_metadata,
     _model_cache_paths,
     _package_version,
     _required_executable,
@@ -594,17 +594,11 @@ def evaluate_comparison_pairs(
             "snapshot": _find_model_snapshot(cache_paths["faster_whisper"]),
         }
     if "zh-CN" in languages:
-        model_metadata["funasr"] = {
-            "model": "funasr/paraformer-zh",
-            "vad_model": "funasr/fsmn-vad",
-            "punc_model": "funasr/ct-punc",
-            "device": "cpu",
-            "hub": "hf",
-            "snapshots": _find_huggingface_snapshots(
-                cache_paths["huggingface_hub"],
-                "funasr",
-            ),
-        }
+        assert funasr is not None
+        model_metadata["funasr"] = _funasr_model_metadata(
+            funasr,
+            cache_paths["huggingface_hub"],
+        )
     result: dict[str, object] = {
         "schema_version": 1,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
