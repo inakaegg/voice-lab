@@ -87,6 +87,16 @@
       .trim();
   }
 
+  // targetTextの空白なしフレーズ連結が、目標文の空白除去版と一致することは
+  // practice_llm.py/worker.mjsの検証(_normalize_reconstruction_whitespace/
+  // practiceLlmWhitespaceInsensitive)が保証している。この保証は句読点を含む
+  // 非空白文字の並びには一切ずれがないことも意味するため、各フレーズの
+  // 「空白抜き文字数」を先頭から積み上げるだけでオフセット→フレーズ対応が
+  // 一意に決まる。indexOfによる文字列探索(繰り返し表現があると誤対応しうる)は不要。
+  function coreTargetText(value) {
+    return comparableTargetText(value).replace(/\s+/gu, "");
+  }
+
   function comparisonRangeForTargetOffset({ targetText, targetOffset, alignment, ranges }) {
     const offset = Number(targetOffset);
     const target = comparableTargetText(targetText);
@@ -96,15 +106,18 @@
       return null;
     }
 
+    let coreOffset = 0;
+    for (let index = 0; index < offset && index < target.length; index += 1) {
+      if (target[index] !== " ") coreOffset += 1;
+    }
+
     let cursor = 0;
     let selectedIndex = null;
     for (const phrase of phrases) {
-      const phraseText = comparableTargetText(phrase?.target_text);
-      if (!phraseText) continue;
-      const start = target.indexOf(phraseText, cursor);
-      if (start < 0) continue;
-      const end = start + phraseText.length;
-      if (offset < end) {
+      const phraseCoreLength = coreTargetText(phrase?.target_text).length;
+      if (!phraseCoreLength) continue;
+      const end = cursor + phraseCoreLength;
+      if (coreOffset < end) {
         selectedIndex = Number(phrase.index);
         break;
       }

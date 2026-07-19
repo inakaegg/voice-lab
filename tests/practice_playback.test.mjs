@@ -192,6 +192,31 @@ test("a heard-word difference does not fall back to the whole recording without 
   assert.equal(selected, null);
 });
 
+test("a repeated phrase is matched by its position, not by re-finding the same text", () => {
+  const alignment = {
+    available: true,
+    complete: true,
+    target_phrase_count: 3,
+    phrases: [
+      { index: 0, target_text: "Yes yes.", available: true, audio_start: 0.0, audio_end: 0.5 },
+      { index: 1, target_text: "No thanks.", available: true, audio_start: 0.5, audio_end: 1.2 },
+      { index: 2, target_text: "Yes yes.", available: true, audio_start: 1.2, audio_end: 1.8 },
+    ],
+  };
+  const ranges = [
+    { index: 0, model: { start: 0.0, end: 0.5 }, repeat: { start: 0.0, end: 0.5 } },
+    { index: 1, model: { start: 0.5, end: 1.2 }, repeat: { start: 0.5, end: 1.2 } },
+    { index: 2, model: { start: 1.2, end: 1.8 }, repeat: { start: 1.2, end: 1.8 } },
+  ];
+  const targetText = "Yes yes. No thanks. Yes yes.";
+
+  const firstOccurrence = comparisonRangeForTargetOffset({ targetText, targetOffset: 1, alignment, ranges });
+  const secondOccurrence = comparisonRangeForTargetOffset({ targetText, targetOffset: 22, alignment, ranges });
+
+  assert.equal(firstOccurrence?.index, 0);
+  assert.equal(secondOccurrence?.index, 2);
+});
+
 test("a plain substitution without pinyin data stays a substitute cell (no behavior change without data)", () => {
   const cells = buildPracticeDiffCells("是晚上", "洗完上");
   assert.deepEqual(cells.map((c) => c.type), ["substitute", "substitute", "equal"]);
