@@ -300,6 +300,7 @@ async function submitPracticeRecording(blob, kind) {
   form.append("asr_model", practiceAsrModel());
   form.append("comparison_model", comparisonModelSelect.value);
   form.append("playback_padding_seconds", normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2));
+  form.append("progress_mode", "job");
   form.append("audio", blob, `practice.${extensionForMimeType(blob.type)}`);
   if (recordingIntent === "attempt") {
     if (!currentModelAsrAudioBlob) {
@@ -331,7 +332,21 @@ async function submitPracticeRecording(blob, kind) {
     }
     return;
   }
-  const payload = await postPracticeForm("/api/practice/recordings", form);
+  let payload = await postPracticeForm("/api/practice/recordings", form);
+  if (payload?.status === "queued" || payload?.status === "running") {
+    renderPracticeJobStatus(payload);
+    progress.hidden = true;
+    setStatus("");
+    const completed = await waitForPracticePromptJob(payload);
+    if (completed.status !== "succeeded" || !completed.result) {
+      console.error("[SpeakLoop job] prompt failed", completed);
+      throw new Error(apiErrorMessage(
+        completed,
+        "お手本を作成できませんでした。もう一度お試しください。",
+      ));
+    }
+    payload = completed.result;
+  }
   const voiceJob = payload.voice_conversion_job || null;
   renderPromptResult(payload, { deferModelAudio: Boolean(voiceJob) });
   if (voiceJob) {
@@ -355,6 +370,46 @@ async function submitPracticeRecording(blob, kind) {
       .then(() => playAudioWithCurrentSpeed(modelAudio))
       .catch(() => {});
   }
+}
+
+async function waitForPracticePromptJob(initialSnapshot) {
+  let snapshot = initialSnapshot;
+  const deadline = Date.now() + 30 * 60 * 1000;
+  let consecutiveErrors = 0;
+  while (snapshot?.status === "queued" || snapshot?.status === "running") {
+    if (!snapshot.job_id) {
+      throw new Error("お手本の作成を開始できませんでした。");
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("お手本の作成が30分以内に完了しませんでした。");
+    }
+    await sleep(snapshot.status === "queued" ? 1200 : 850);
+    try {
+      const response = await fetch(`/api/practice/prompt-jobs/${encodeURIComponent(snapshot.job_id)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(payload, `job status failed: ${response.status}`));
+      }
+      snapshot = payload;
+      consecutiveErrors = 0;
+      renderPracticeJobStatus(snapshot);
+    } catch (error) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= 3) {
+        throw error;
+      }
+      renderPracticeJobStatus({
+        ...snapshot,
+        current_stage: {
+          ...(snapshot.current_stage || {}),
+          label: "処理状況を再確認しています",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+  renderPracticeJobStatus(snapshot);
+  return snapshot;
 }
 
 async function waitForPracticeVoiceJob(initialSnapshot) {
@@ -484,10 +539,18 @@ function publicPracticeStageLabel(stage, state) {
       return "GPUサーバーを準備しています";
     case "loading_model":
       return "音声認識を準備しています";
+    case "transcribing_prompt":
+      return "録音を文字にしています";
+    case "translating_prompt":
+      return "学習言語へ翻訳しています";
+    case "synthesizing_prompt":
+      return "お手本音声を作っています";
     case "transcribing_model":
       return "お手本音声を確認しています";
     case "transcribing_attempt":
       return "録音を確認しています";
+    case "evaluating_comparison":
+      return "比較結果を作っています";
     case "loading_seed_vc_model":
       return "お手本の声を調整する準備をしています";
     case "voice_conversion":

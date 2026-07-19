@@ -240,6 +240,101 @@ def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
     assert "unsupported practice ASR model" in response.json()["detail"]
 
 
+def test_practice_prompt_job_reports_asr_translation_and_tts_models() -> None:
+    asr_entered = Event()
+    release_asr = Event()
+    translation_entered = Event()
+    release_translation = Event()
+    tts_entered = Event()
+    release_tts = Event()
+
+    class BlockingAsr:
+        name = "test-asr"
+        model = "asr-model"
+
+        def transcribe_detail(self, *_args, **_kwargs):
+            asr_entered.set()
+            assert release_asr.wait(timeout=2)
+            return AsrTranscription(text="こんにちは", model=self.model)
+
+    class BlockingTranslator:
+        name = "test-translation"
+        model = "translation-model"
+
+        def translate(self, *_args, **_kwargs):
+            translation_entered.set()
+            assert release_translation.wait(timeout=2)
+            return "Hello."
+
+    class BlockingTts:
+        name = "test-tts"
+        model = "tts-model"
+        audio_mime_type = "audio/wav"
+
+        def synthesize(self, *_args, **_kwargs):
+            tts_entered.set()
+            assert release_tts.wait(timeout=2)
+            return b"test wav"
+
+    pipeline = SpeechTranslationPipeline(
+        asr=BlockingAsr(),
+        translator=BlockingTranslator(),
+        tts=BlockingTts(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    submitted = client.post(
+        "/api/practice/recordings",
+        data={
+            "recording_intent": "prompt",
+            "target_language": "en-US",
+            "asr_model": "whisper-1",
+            "progress_mode": "job",
+        },
+        files={"audio": ("prompt.webm", b"prompt audio", "audio/webm")},
+    )
+
+    assert submitted.status_code == 202
+    job_id = submitted.json()["job_id"]
+    assert asr_entered.wait(timeout=2)
+    asr_snapshot = client.get(f"/api/practice/prompt-jobs/{job_id}").json()
+    assert asr_snapshot["current_stage"] == {
+        "stage": "transcribing_prompt",
+        "label": "録音を文字にしています",
+        "provider": "test-asr",
+        "model": "asr-model",
+    }
+
+    release_asr.set()
+    assert translation_entered.wait(timeout=2)
+    translation_snapshot = client.get(f"/api/practice/prompt-jobs/{job_id}").json()
+    assert translation_snapshot["current_stage"] == {
+        "stage": "translating_prompt",
+        "label": "学習言語へ翻訳しています",
+        "provider": "test-translation",
+        "model": "translation-model",
+    }
+
+    release_translation.set()
+    assert tts_entered.wait(timeout=2)
+    tts_snapshot = client.get(f"/api/practice/prompt-jobs/{job_id}").json()
+    assert tts_snapshot["current_stage"] == {
+        "stage": "synthesizing_prompt",
+        "label": "お手本音声を作っています",
+        "provider": "test-tts",
+        "model": "tts-model",
+    }
+
+    release_tts.set()
+    for _ in range(100):
+        completed = client.get(f"/api/practice/prompt-jobs/{job_id}")
+        if completed.json()["status"] == "succeeded":
+            break
+        sleep(0.01)
+    assert completed.status_code == 200
+    assert completed.json()["result"]["target_text"] == "Hello."
+
+
 def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> None:
     class TimestampAsr:
         name = "timestamp-asr"
@@ -353,6 +448,283 @@ def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> 
     assert llm.calls[0]["input"]["padding_seconds"] == pytest.approx(0.15)
     assert llm.calls[0]["input"]["reference_asr"]["recognized_text"] == "Hello world"
     assert llm.calls[0]["input"]["attempt_asr"]["recognized_text"] == "Hello word"
+
+
+def test_local_practice_attempt_job_reports_both_asr_and_llm_stages(tmp_path) -> None:
+    reference_entered = Event()
+    release_reference = Event()
+    attempt_entered = Event()
+    release_attempt = Event()
+    llm_entered = Event()
+    release_llm = Event()
+
+    class BlockingTimestampAsr:
+        name = "test-asr"
+        model = "asr-model"
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def transcribe_detail(self, *_args, **_kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                reference_entered.set()
+                assert release_reference.wait(timeout=2)
+                return AsrTranscription(
+                    text="Hello world",
+                    model=self.model,
+                    words=[{"text": "Hello world", "start": 0.0, "end": 0.8}],
+                    timestamp_granularities=["word"],
+                )
+            attempt_entered.set()
+            assert release_attempt.wait(timeout=2)
+            return AsrTranscription(
+                text="Hello word",
+                model=self.model,
+                words=[{"text": "Hello word", "start": 0.1, "end": 0.9}],
+                timestamp_granularities=["word"],
+            )
+
+    class BlockingPracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            assert model == "gpt-5.6-terra"
+            llm_entered.set()
+            assert release_llm.wait(timeout=2)
+            result = {
+                "schema_version": 1,
+                "overall_score": 80,
+                "overall_comment": "最後の単語を確認しましょう。",
+                "phrases": [
+                    {
+                        "phrase_index": 0,
+                        "target_text": "Hello world.",
+                        "score": 80,
+                        "comment": "worldを確認しましょう。",
+                        "reference": {
+                            "status": "assigned",
+                            "word_start_index": 0,
+                            "word_end_index": 1,
+                            "matched_text": "Hello world",
+                            "start": 0.0,
+                            "end": 0.8,
+                            "playback_start": 0.0,
+                            "playback_end": 0.8,
+                        },
+                        "attempt": {
+                            "status": "partial",
+                            "word_start_index": 0,
+                            "word_end_index": 1,
+                            "matched_text": "Hello word",
+                            "start": 0.1,
+                            "end": 0.9,
+                            "playback_start": 0.0,
+                            "playback_end": 0.9,
+                        },
+                    }
+                ],
+            }
+            return PracticeLlmEvaluation(
+                result=result,
+                usage={"total_tokens": 123},
+                estimated_cost_usd=None,
+                elapsed_ms=10.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=BlockingTimestampAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(
+        create_app(openai_pipeline=pipeline, practice_llm_service=BlockingPracticeLlm())
+    )
+
+    submitted = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "en-US",
+            "target_text": "Hello world.",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.10",
+            "progress_mode": "job",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert submitted.status_code == 202
+    job_id = submitted.json()["job_id"]
+    assert reference_entered.wait(timeout=2)
+    reference_snapshot = client.get(f"/api/practice/attempt-jobs/{job_id}").json()
+    assert reference_snapshot["current_stage"] == {
+        "stage": "transcribing_model",
+        "label": "お手本音声を確認しています",
+        "provider": "test-asr",
+        "model": "asr-model",
+    }
+
+    release_reference.set()
+    assert attempt_entered.wait(timeout=2)
+    attempt_snapshot = client.get(f"/api/practice/attempt-jobs/{job_id}").json()
+    assert attempt_snapshot["current_stage"] == {
+        "stage": "transcribing_attempt",
+        "label": "録音を確認しています",
+        "provider": "test-asr",
+        "model": "asr-model",
+    }
+
+    release_attempt.set()
+    assert llm_entered.wait(timeout=2)
+    llm_snapshot = client.get(f"/api/practice/attempt-jobs/{job_id}").json()
+    assert llm_snapshot["current_stage"] == {
+        "stage": "evaluating_comparison",
+        "label": "比較結果を作っています",
+        "provider": "OpenAI",
+        "model": "gpt-5.6-terra",
+    }
+
+    release_llm.set()
+    for _ in range(100):
+        completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
+        if completed.json()["status"] == "succeeded":
+            break
+        sleep(0.01)
+    assert completed.json()["result"]["overall_score"] == 80
+
+
+def test_chinese_practice_attempt_job_reports_llm_stage_after_runpod_asr(tmp_path) -> None:
+    llm_entered = Event()
+    release_llm = Event()
+
+    class CompletedRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def submit_comparison_job(self, **_kwargs):
+            return {"id": "practice-job-with-llm", "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            assert job_id == "practice-job-with-llm"
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "你好。",
+                    "text": "你好",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [{"text": "你好", "start": 0.1, "end": 0.8}],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "你好",
+                        "model": "funasr/paraformer-zh",
+                        "timestamp_granularities": ["word"],
+                        "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                        "segments": [],
+                    },
+                    "providers": {"asr": "funasr-paraformer-zh"},
+                },
+            }
+
+    class BlockingPracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            assert model == "gpt-5.6-terra"
+            llm_entered.set()
+            release_llm.wait(timeout=0.5)
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 100,
+                    "overall_comment": "正確です。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "你好。",
+                            "score": 100,
+                            "comment": "正確です。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "你好",
+                                "start": 0.0,
+                                "end": 0.7,
+                                "playback_start": 0.0,
+                                "playback_end": 0.7,
+                            },
+                            "attempt": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "你好",
+                                "start": 0.1,
+                                "end": 0.8,
+                                "playback_start": 0.0,
+                                "playback_end": 0.8,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 80},
+                estimated_cost_usd=None,
+                elapsed_ms=10.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=CompletedRunpodAsr(),
+            practice_llm_service=BlockingPracticeLlm(),
+        )
+    )
+
+    submitted = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "zh-CN",
+            "target_text": "你好。",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.10",
+            "progress_mode": "job",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert submitted.status_code == 202
+    job_id = submitted.json()["job_id"]
+    llm_snapshot = client.get(f"/api/practice/attempt-jobs/{job_id}").json()
+    assert llm_entered.wait(timeout=2)
+    assert llm_snapshot["status"] == "running"
+    assert llm_snapshot["current_stage"] == {
+        "stage": "evaluating_comparison",
+        "label": "比較結果を作っています",
+        "provider": "OpenAI",
+        "model": "gpt-5.6-terra",
+    }
+
+    release_llm.set()
+    for _ in range(100):
+        completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
+        if completed.json()["status"] == "succeeded":
+            break
+        sleep(0.01)
+    assert completed.json()["job_id"] == job_id
+    assert completed.json()["result"]["overall_score"] == 100
 
 
 def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:

@@ -197,6 +197,123 @@ test("SpeakLoop defaults to English and normalizes a saved Japanese target", asy
   await expect(language).toHaveValue("en-US");
 });
 
+test("SpeakLoop shows prompt ASR, translation, and speech generation stages", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.route("**/api/practice/recordings", async (route) => {
+    const multipartBody = route.request().postDataBuffer()?.toString("latin1") || "";
+    expect(multipartBody).toContain('name="progress_mode"');
+    expect(multipartBody).toContain("job");
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "prompt-progress-job",
+        status: "queued",
+        current_stage: {
+          stage: "transcribing_prompt",
+          label: "録音を文字にしています",
+          provider: "OpenAI",
+          model: "whisper-1",
+        },
+      }),
+    });
+  });
+  let promptPolls = 0;
+  await page.route("**/api/practice/prompt-jobs/prompt-progress-job", async (route) => {
+    promptPolls += 1;
+    if (promptPolls === 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "prompt-progress-job",
+          status: "running",
+          current_stage: {
+            stage: "translating_prompt",
+            label: "学習言語へ翻訳しています",
+            provider: "OpenAI",
+            model: "gpt-5.5",
+          },
+        }),
+      });
+      return;
+    }
+    if (promptPolls === 2) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "prompt-progress-job",
+          status: "running",
+          current_stage: {
+            stage: "synthesizing_prompt",
+            label: "お手本音声を作っています",
+            provider: "OpenAI",
+            model: "gpt-4o-mini-tts",
+          },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "prompt-progress-job",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "完了しました", provider: "", model: "" },
+        result: {
+          recording_kind: "prompt",
+          transcript: "今日はどこへ行きますか",
+          target_text: "Where are you going today?",
+          target_language: "en-US",
+          display_text: { primary_text: "Where are you going today?" },
+          audio_base64: "UklGRg==",
+          audio_mime_type: "audio/wav",
+        },
+      }),
+    });
+  });
+
+  await page.goto("/speakloop");
+  const native = page.locator("#practice-native-record-button");
+  await native.click();
+  await native.click();
+  await expect(page.locator("#practice-job-status-label")).toHaveText("録音を文字にしています");
+  await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / whisper-1");
+  await expect(page.locator("#practice-job-status-label")).toHaveText("学習言語へ翻訳しています");
+  await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / gpt-5.5");
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-speakloop-prompt-translation.png`, fullPage: true });
+  }
+  await expect(page.locator("#practice-job-status-label")).toHaveText("お手本音声を作っています");
+  await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / gpt-4o-mini-tts");
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#practice-target-text")).toContainText("Where are you going today?");
+});
+
 test("SpeakLoop switches Chinese text display without resubmitting audio", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {
@@ -1095,6 +1212,19 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
       });
       return;
     }
+    if (polls === 2) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: "poll-job",
+          status: "running",
+          current_stage: { stage: "evaluating_comparison", label: "比較結果を作っています", provider: "OpenAI", model: "gpt-5.6-terra" },
+          metrics: { delay_time_ms: 105, execution_time_ms: 220 },
+        }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1166,6 +1296,8 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
   await expect(page.locator("#practice-job-status-model")).toContainText("funasr/paraformer-zh");
   await expect(page.locator("#practice-job-status-detail")).toContainText("FunASRモデルを読み込んでいます");
   await expect(page.locator("#practice-job-status-detail")).toContainText("待機 105ms / 処理 220ms");
+  await expect(page.locator("#practice-job-status-label")).toHaveText("比較結果を作っています");
+  await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / gpt-5.6-terra");
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-runpod-progress.png`, fullPage: true });

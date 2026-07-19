@@ -8,6 +8,7 @@ import re
 import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
+from threading import Lock
 from time import perf_counter
 from typing import Annotated
 
@@ -73,6 +74,7 @@ from .practice_llm import (
     supported_practice_comparison_model,
     validate_playback_padding_seconds,
 )
+from .practice_jobs import PracticeJobFailure, PracticeJobStore
 from .public_sample_audio import PublicSampleAudioStore
 from .providers.openai_api import (
     AsrTranscription,
@@ -184,6 +186,15 @@ def _practice_asr_provider(pipeline: SpeechTranslationPipeline, asr_model: str):
     if isinstance(pipeline.asr, OpenAiAsrProvider):
         return OpenAiAsrProvider(model=asr_model)
     return pipeline.asr
+
+
+def _practice_stage_identity(provider: object, *, fallback_model: str = "") -> tuple[str, str]:
+    name = str(getattr(provider, "name", "") or "")
+    provider_name = "OpenAI" if name.startswith("openai-") else name
+    model = str(getattr(provider, "model", "") or "")
+    if not model:
+        model = str(getattr(getattr(provider, "base_tts", None), "model", "") or "")
+    return provider_name, model or fallback_model
 
 
 def _transcribe_practice_audio(asr_provider, audio_path: Path, source_language: str) -> AsrTranscription:
@@ -1031,7 +1042,11 @@ def create_app(
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
     active_practice_llm_service = practice_llm_service or PracticeLlmService()
+    practice_prompt_job_store = PracticeJobStore()
+    practice_attempt_job_store = PracticeJobStore()
     practice_attempt_llm_options: dict[str, dict[str, object]] = {}
+    practice_attempt_finalization_jobs: dict[str, dict[str, object]] = {}
+    practice_attempt_finalization_lock = Lock()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
@@ -1566,16 +1581,32 @@ def create_app(
         practice_asr_model: str,
         precomputed_asr_result: AsrTranscription | None = None,
         precomputed_asr_ms: float | None = None,
+        progress_callback=None,
     ) -> dict[str, object]:
         timings_ms: dict[str, float] = {}
         total_started = perf_counter()
         used_precomputed_asr = precomputed_asr_result is not None
         asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        asr_provider_name, asr_model_name = _practice_stage_identity(
+            asr_provider,
+            fallback_model=practice_asr_model,
+        )
+        translation_provider_name, translation_model_name = _practice_stage_identity(
+            active_openai_pipeline.translator
+        )
+        tts_provider_name, tts_model_name = _practice_stage_identity(active_openai_pipeline.tts)
         with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
             try:
                 if precomputed_asr_result is None:
+                    if progress_callback is not None:
+                        progress_callback(
+                            stage="transcribing_prompt",
+                            label="録音を文字にしています",
+                            provider=asr_provider_name,
+                            model=asr_model_name,
+                        )
                     started = perf_counter()
                     asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), "auto")
                     timings_ms["asr"] = _elapsed_ms(started)
@@ -1584,6 +1615,13 @@ def create_app(
                     timings_ms["asr"] = float(precomputed_asr_ms or 0.0)
                 transcript = asr_result.text
 
+                if progress_callback is not None:
+                    progress_callback(
+                        stage="translating_prompt",
+                        label="学習言語へ翻訳しています",
+                        provider=translation_provider_name,
+                        model=translation_model_name,
+                    )
                 started = perf_counter()
                 target_text = active_openai_pipeline.translator.translate(
                     transcript,
@@ -1594,6 +1632,13 @@ def create_app(
                     target_text = simplify_chinese_text(target_text)
                 timings_ms["translation"] = _elapsed_ms(started)
 
+                if progress_callback is not None:
+                    progress_callback(
+                        stage="synthesizing_prompt",
+                        label="お手本音声を作っています",
+                        provider=tts_provider_name,
+                        model=tts_model_name,
+                    )
                 started = perf_counter()
                 tts_output = _normalize_tts_provider_output(
                     active_openai_pipeline.tts.synthesize(target_text, practice_target_language),
@@ -2071,6 +2116,7 @@ def create_app(
         asr_model: Annotated[str, Form()] = "whisper-1",
         comparison_model: Annotated[str, Form()] = "",
         playback_padding_seconds: Annotated[str, Form()] = "",
+        progress_mode: Annotated[str, Form()] = "",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
@@ -2154,6 +2200,7 @@ def create_app(
                     "playback_padding_seconds": selected_playback_padding,
                     "reference_audio_duration": reference_audio_duration,
                     "attempt_audio_duration": attempt_audio_duration,
+                    "progress_mode": progress_mode,
                 }
                 if use_llm
                 else None
@@ -2171,7 +2218,12 @@ def create_app(
             return snapshot
 
         asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
-        try:
+        asr_provider_name, asr_model_name = _practice_stage_identity(
+            asr_provider,
+            fallback_model=practice_asr_model,
+        )
+
+        def run_local_attempt(report=None):
             with NamedTemporaryFile(suffix=_upload_suffix(model_audio.filename)) as model_temp_audio, NamedTemporaryFile(
                 suffix=_upload_suffix(audio.filename)
             ) as attempt_temp_audio:
@@ -2179,6 +2231,13 @@ def create_app(
                 model_temp_audio.flush()
                 attempt_temp_audio.write(attempt_audio_bytes)
                 attempt_temp_audio.flush()
+                if report is not None:
+                    report(
+                        stage="transcribing_model",
+                        label="お手本音声を確認しています",
+                        provider=asr_provider_name,
+                        model=asr_model_name,
+                    )
                 model_started = perf_counter()
                 model_transcription = _transcribe_practice_audio(
                     asr_provider,
@@ -2186,6 +2245,13 @@ def create_app(
                     practice_target_language,
                 )
                 model_asr_ms = _elapsed_ms(model_started)
+                if report is not None:
+                    report(
+                        stage="transcribing_attempt",
+                        label="録音を確認しています",
+                        provider=asr_provider_name,
+                        model=asr_model_name,
+                    )
                 attempt_started = perf_counter()
                 attempt_transcription = _transcribe_practice_audio(
                     asr_provider,
@@ -2201,29 +2267,117 @@ def create_app(
                     Path(attempt_temp_audio.name),
                     fallback_words=attempt_transcription.words,
                 )
+            if report is not None and selected_comparison_model:
+                report(
+                    stage="evaluating_comparison",
+                    label="比較結果を作っています",
+                    provider="OpenAI",
+                    model=selected_comparison_model,
+                )
+            return _create_practice_attempt_result_from_transcriptions(
+                practice_target_language=practice_target_language,
+                target_text=normalized_target_text,
+                attempt_transcription=attempt_transcription,
+                attempt_provider_name=str(getattr(asr_provider, "name", "") or ""),
+                attempt_asr_ms=attempt_asr_ms,
+                model_transcription=model_transcription,
+                model_provider_name=str(getattr(asr_provider, "name", "") or ""),
+                model_asr_ms=model_asr_ms,
+                comparison_model=selected_comparison_model,
+                playback_padding_seconds=selected_playback_padding,
+                reference_audio_duration=reference_audio_duration,
+                attempt_audio_duration=attempt_audio_duration,
+            )
+
+        if progress_mode == "job":
+            def run_local_attempt_job(report):
+                try:
+                    result = run_local_attempt(report)
+                    snapshot = {
+                        "job_id": "",
+                        "status": "succeeded",
+                        "result": result,
+                    }
+                    _update_practice_attempt_history(
+                        active_audio_history_store,
+                        recording_entry,
+                        snapshot,
+                    )
+                    return result
+                except PracticeLlmError as error:
+                    raise PracticeJobFailure(
+                        current_stage={
+                            "stage": "failed",
+                            "label": "処理に失敗しました",
+                            "provider": "OpenAI",
+                            "model": selected_comparison_model,
+                        },
+                        error=_practice_llm_error_envelope(error)["error"],
+                    ) from error
+
+            planned_stages = [
+                {
+                    "stage": "transcribing_model",
+                    "label": "お手本音声を確認しています",
+                    "provider": asr_provider_name,
+                    "model": asr_model_name,
+                },
+                {
+                    "stage": "transcribing_attempt",
+                    "label": "録音を確認しています",
+                    "provider": asr_provider_name,
+                    "model": asr_model_name,
+                },
+            ]
+            if selected_comparison_model:
+                planned_stages.append(
+                    {
+                        "stage": "evaluating_comparison",
+                        "label": "比較結果を作っています",
+                        "provider": "OpenAI",
+                        "model": selected_comparison_model,
+                    }
+                )
+            response.status_code = 202
+            return practice_attempt_job_store.start(
+                run_local_attempt_job,
+                planned_stages=planned_stages,
+            )
+
+        try:
+            result = run_local_attempt()
+        except (PracticeAlignmentError, PracticeLlmError):
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        result = _create_practice_attempt_result_from_transcriptions(
-            practice_target_language=practice_target_language,
-            target_text=normalized_target_text,
-            attempt_transcription=attempt_transcription,
-            attempt_provider_name=asr_provider.name,
-            attempt_asr_ms=attempt_asr_ms,
-            model_transcription=model_transcription,
-            model_provider_name=asr_provider.name,
-            model_asr_ms=model_asr_ms,
-            comparison_model=selected_comparison_model,
-            playback_padding_seconds=selected_playback_padding,
-            reference_audio_duration=reference_audio_duration,
-            attempt_audio_duration=attempt_audio_duration,
+        result_providers = (
+            result.get("providers")
+            if isinstance(result.get("providers"), dict)
+            else {}
         )
+        result_provider_name = str(
+            result_providers.get("asr") or getattr(asr_provider, "name", "") or ""
+        )
+        result_asr_model = str(result.get("asr_model") or practice_asr_model)
         snapshot = {
             "job_id": "",
             "status": "succeeded",
-            "current_stage": {"stage": "complete", "label": "比較準備が完了しました", "provider": asr_provider.name, "model": attempt_transcription.model},
-            "stages": [{"stage": "complete", "label": "完了", "provider": asr_provider.name, "model": attempt_transcription.model}],
+            "current_stage": {
+                "stage": "complete",
+                "label": "比較準備が完了しました",
+                "provider": result_provider_name,
+                "model": result_asr_model,
+            },
+            "stages": [
+                {
+                    "stage": "complete",
+                    "label": "完了",
+                    "provider": result_provider_name,
+                    "model": result_asr_model,
+                }
+            ],
             "metrics": {},
             "result": result,
             "error": None,
@@ -2233,6 +2387,26 @@ def create_app(
 
     @app.get("/api/practice/attempt-jobs/{job_id}")
     def get_practice_attempt_job(job_id: str) -> dict[str, object]:
+        if practice_attempt_job_store.has(job_id):
+            return practice_attempt_job_store.snapshot(job_id)
+        with practice_attempt_finalization_lock:
+            finalization = practice_attempt_finalization_jobs.get(job_id)
+        if finalization is not None:
+            snapshot = practice_attempt_job_store.snapshot(
+                str(finalization["local_job_id"])
+            )
+            snapshot["job_id"] = job_id
+            snapshot["metrics"] = finalization.get("metrics") or {}
+            recording_entry = _practice_attempt_history_entry(
+                active_audio_history_store,
+                job_id,
+            )
+            _update_practice_attempt_history(
+                active_audio_history_store,
+                recording_entry,
+                snapshot,
+            )
+            return snapshot
         try:
             body = active_runpod_practice_asr_provider.job_status(job_id)
             health = (
@@ -2244,10 +2418,70 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
+        llm_options = practice_attempt_llm_options.get(job_id)
+        if (
+            str(body.get("status") or "").upper() == "COMPLETED"
+            and llm_options is not None
+            and llm_options.get("progress_mode") == "job"
+        ):
+            comparison_model = str(llm_options.get("comparison_model") or "")
+
+            def finalize_runpod_attempt(report):
+                report(
+                    stage="evaluating_comparison",
+                    label="比較結果を作っています",
+                    provider="OpenAI",
+                    model=comparison_model,
+                )
+                completed_snapshot = _practice_attempt_job_snapshot(
+                    body,
+                    llm_options=llm_options,
+                )
+                if completed_snapshot["status"] == "failed":
+                    raise PracticeJobFailure(
+                        current_stage=completed_snapshot["current_stage"],
+                        error=completed_snapshot.get("error"),
+                    )
+                return completed_snapshot["result"]
+
+            with practice_attempt_finalization_lock:
+                finalization = practice_attempt_finalization_jobs.get(job_id)
+                if finalization is None:
+                    local_snapshot = practice_attempt_job_store.start(
+                        finalize_runpod_attempt,
+                        planned_stages=[
+                            {
+                                "stage": "evaluating_comparison",
+                                "label": "比較結果を作っています",
+                                "provider": "OpenAI",
+                                "model": comparison_model,
+                            }
+                        ],
+                    )
+                    finalization = {
+                        "local_job_id": local_snapshot["job_id"],
+                        "metrics": _runpod_practice_metrics(body),
+                    }
+                    practice_attempt_finalization_jobs[job_id] = finalization
+            snapshot = practice_attempt_job_store.snapshot(
+                str(finalization["local_job_id"])
+            )
+            snapshot["job_id"] = job_id
+            snapshot["metrics"] = finalization.get("metrics") or {}
+            recording_entry = _practice_attempt_history_entry(
+                active_audio_history_store,
+                job_id,
+            )
+            _update_practice_attempt_history(
+                active_audio_history_store,
+                recording_entry,
+                snapshot,
+            )
+            return snapshot
         snapshot = _practice_attempt_job_snapshot(
             body,
             health=health,
-            llm_options=practice_attempt_llm_options.get(job_id),
+            llm_options=llm_options,
         )
         recording_entry = _practice_attempt_history_entry(active_audio_history_store, job_id)
         _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
@@ -2255,6 +2489,7 @@ def create_app(
 
     @app.post("/api/practice/recordings")
     async def create_practice_recording(
+        response: Response,
         audio: Annotated[UploadFile, File()],
         recording_intent: Annotated[str, Form()],
         target_language: Annotated[str, Form()] = "ja-JP",
@@ -2262,6 +2497,7 @@ def create_app(
         include_pinyin: Annotated[bool, Form()] = False,
         use_own_voice: Annotated[bool, Form()] = False,
         asr_model: Annotated[str, Form()] = "whisper-1",
+        progress_mode: Annotated[str, Form()] = "",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
@@ -2307,6 +2543,68 @@ def create_app(
             )
             return result
 
+        if progress_mode == "job":
+            filename = audio.filename or "practice.webm"
+            asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+            asr_provider_name, asr_model_name = _practice_stage_identity(
+                asr_provider,
+                fallback_model=practice_asr_model,
+            )
+            translation_provider_name, translation_model_name = _practice_stage_identity(
+                active_openai_pipeline.translator
+            )
+            tts_provider_name, tts_model_name = _practice_stage_identity(
+                active_openai_pipeline.tts
+            )
+
+            def run_prompt_job(report):
+                result = _create_practice_prompt_result(
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                    practice_target_language=practice_target_language,
+                    include_pinyin=include_pinyin,
+                    practice_asr_model=practice_asr_model,
+                    progress_callback=report,
+                )
+                result["recording_kind"] = "prompt"
+                if use_own_voice:
+                    result["voice_conversion_job"] = _start_practice_voice_conversion_job(
+                        source_audio_bytes=base64.b64decode(str(result["audio_base64"])),
+                        source_audio_mime_type=str(result["audio_mime_type"]),
+                        reference_audio_bytes=audio_bytes,
+                        reference_audio_filename=filename,
+                    )
+                active_audio_history_store.update_metadata(
+                    recording_entry,
+                    _practice_history_diagnostics_metadata(result),
+                )
+                return result
+
+            response.status_code = 202
+            return practice_prompt_job_store.start(
+                run_prompt_job,
+                planned_stages=[
+                    {
+                        "stage": "transcribing_prompt",
+                        "label": "録音を文字にしています",
+                        "provider": asr_provider_name,
+                        "model": asr_model_name,
+                    },
+                    {
+                        "stage": "translating_prompt",
+                        "label": "学習言語へ翻訳しています",
+                        "provider": translation_provider_name,
+                        "model": translation_model_name,
+                    },
+                    {
+                        "stage": "synthesizing_prompt",
+                        "label": "お手本音声を作っています",
+                        "provider": tts_provider_name,
+                        "model": tts_model_name,
+                    },
+                ],
+            )
+
         result = _create_practice_prompt_result(
             audio_bytes=audio_bytes,
             filename=audio.filename or "",
@@ -2327,6 +2625,13 @@ def create_app(
             _practice_history_diagnostics_metadata(result),
         )
         return result
+
+    @app.get("/api/practice/prompt-jobs/{job_id}")
+    def get_practice_prompt_job(job_id: str) -> dict[str, object]:
+        try:
+            return practice_prompt_job_store.snapshot(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
 
     @app.get("/api/practice/voice-jobs/{job_id}")
     def get_practice_voice_job(job_id: str) -> dict[str, object]:
