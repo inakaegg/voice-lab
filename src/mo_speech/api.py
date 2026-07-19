@@ -59,9 +59,6 @@ from .practice import (
     PRACTICE_TARGET_LANGUAGES,
     PracticeAlignmentError,
     PracticeAlignmentInputError,
-    evaluate_practice_attempt,
-    normalize_practice_text,
-    practice_comparison_alignment_canonical,
     simplify_chinese_text,
     supported_practice_target_language,
     validate_practice_alignment_target,
@@ -1803,74 +1800,21 @@ def create_app(
             else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
         )
         compare_started = perf_counter()
-        if comparison_model:
-            if model_transcription is None:
-                raise PracticeLlmError("reference ASR is missing", stage="prepare_input")
-            reference_no_speech = (
-                not model_recognized_text.strip()
-                and not model_asr_timestamps.get("words")
-                and not model_asr_timestamps.get("segments")
-            )
-            if reference_no_speech:
-                raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
-            no_speech = (
-                not recognized_text.strip()
-                and not asr_timestamps.get("words")
-                and not asr_timestamps.get("segments")
-            )
-            if no_speech:
-                compare_ms = _elapsed_ms(compare_started)
-                return {
-                    "recording_kind": "attempt",
-                    "target_language": practice_target_language,
-                    "target_text": target_text,
-                    "recognized_text": recognized_text,
-                    "model_recognized_text": model_recognized_text,
-                    "asr_model": attempt_transcription.model,
-                    "asr_timestamps": asr_timestamps,
-                    "model_asr_timestamps": model_asr_timestamps,
-                    "outcome": "no_speech",
-                    "message": "音声を検出できませんでした。もう一度録音してください。",
-                    "comparison_alignment": None,
-                    "model_comparison_alignment": None,
-                    "comparison_model": comparison_model,
-                    "playback_padding_seconds": playback_padding_seconds,
-                    "timings_ms": {
-                        "asr": attempt_asr_ms,
-                        "model_asr": model_asr_ms,
-                        "compare": compare_ms,
-                        "total": attempt_asr_ms + model_asr_ms + compare_ms,
-                    },
-                    "providers": {
-                        "asr": attempt_provider_name,
-                        "model_asr": model_provider_name or attempt_provider_name,
-                        "comparison": "openai-responses",
-                    },
-                }
-            llm_input = build_practice_llm_input(
-                target_language=practice_target_language,
-                target_text=target_text,
-                padding_seconds=playback_padding_seconds,
-                reference_audio_duration=reference_audio_duration,
-                attempt_audio_duration=attempt_audio_duration,
-                reference_asr={
-                    "recognized_text": model_recognized_text,
-                    "model": model_transcription.model,
-                    "words": model_asr_timestamps["words"],
-                },
-                attempt_asr={
-                    "recognized_text": recognized_text,
-                    "model": attempt_transcription.model,
-                    "words": asr_timestamps["words"],
-                },
-            )
-            evaluated = active_practice_llm_service.evaluate(
-                model=comparison_model,
-                input_payload=llm_input,
-            )
-            comparison_alignment, model_comparison_alignment = (
-                comparison_alignments_from_llm_result(evaluated.result)
-            )
+        if model_transcription is None:
+            raise PracticeLlmError("reference ASR is missing", stage="prepare_input")
+        reference_no_speech = (
+            not model_recognized_text.strip()
+            and not model_asr_timestamps.get("words")
+            and not model_asr_timestamps.get("segments")
+        )
+        if reference_no_speech:
+            raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
+        no_speech = (
+            not recognized_text.strip()
+            and not asr_timestamps.get("words")
+            and not asr_timestamps.get("segments")
+        )
+        if no_speech:
             compare_ms = _elapsed_ms(compare_started)
             return {
                 "recording_kind": "attempt",
@@ -1881,16 +1825,12 @@ def create_app(
                 "asr_model": attempt_transcription.model,
                 "asr_timestamps": asr_timestamps,
                 "model_asr_timestamps": model_asr_timestamps,
-                "outcome": "evaluated",
-                "overall_score": evaluated.result["overall_score"],
-                "overall_comment": evaluated.result["overall_comment"],
-                "llm_comparison": evaluated.result,
-                "comparison_alignment": comparison_alignment,
-                "model_comparison_alignment": model_comparison_alignment,
+                "outcome": "no_speech",
+                "message": "音声を検出できませんでした。もう一度録音してください。",
+                "comparison_alignment": None,
+                "model_comparison_alignment": None,
                 "comparison_model": comparison_model,
                 "playback_padding_seconds": playback_padding_seconds,
-                "llm_usage": evaluated.usage,
-                "llm_estimated_cost_usd": evaluated.estimated_cost_usd,
                 "timings_ms": {
                     "asr": attempt_asr_ms,
                     "model_asr": model_asr_ms,
@@ -1903,72 +1843,31 @@ def create_app(
                     "comparison": "openai-responses",
                 },
             }
-        if model_transcription is not None:
-            try:
-                model_comparison_alignment = practice_comparison_alignment_canonical(
-                    target_text=target_text,
-                    recognized_text=model_recognized_text,
-                    target_language=practice_target_language,
-                    asr_timestamps=model_asr_timestamps,
-                )
-            except PracticeAlignmentError as error:
-                raise PracticeAlignmentError(
-                    error.reason,
-                    stage="reference_asr",
-                    retryable=error.retryable,
-                ) from error
-            if model_comparison_alignment.get("outcome") == "no_speech":
-                raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
-        else:
-            model_comparison_alignment = {
-                "alignment_contract_version": 1,
-                "outcome": "evaluated",
-                "available": False,
-                "target_phrase_count": 0,
-                "playable_phrase_count": 0,
-                "all_phrases_playable": False,
-                "unassigned_non_filler_count": 0,
-                "complete": False,
-                "target_language": practice_target_language,
-                "phrases": [],
-                "diagnostics": {},
-            }
-        comparison_alignment = practice_comparison_alignment_canonical(
-            target_text=target_text,
-            recognized_text=recognized_text,
+        llm_input = build_practice_llm_input(
             target_language=practice_target_language,
-            asr_timestamps=asr_timestamps,
+            target_text=target_text,
+            padding_seconds=playback_padding_seconds,
+            reference_audio_duration=reference_audio_duration,
+            attempt_audio_duration=attempt_audio_duration,
+            reference_asr={
+                "recognized_text": model_recognized_text,
+                "model": model_transcription.model,
+                "words": model_asr_timestamps["words"],
+            },
+            attempt_asr={
+                "recognized_text": recognized_text,
+                "model": attempt_transcription.model,
+                "words": asr_timestamps["words"],
+            },
+        )
+        evaluated = active_practice_llm_service.evaluate(
+            model=comparison_model,
+            input_payload=llm_input,
+        )
+        comparison_alignment, model_comparison_alignment = (
+            comparison_alignments_from_llm_result(evaluated.result)
         )
         compare_ms = _elapsed_ms(compare_started)
-        no_speech = (
-            not recognized_text.strip()
-            and not asr_timestamps.get("words")
-            and not asr_timestamps.get("segments")
-        )
-        evaluation = (
-            {
-                "outcome": "no_speech",
-                "message": "音声を検出できませんでした。もう一度録音してください。",
-                "normalized_target": normalize_practice_text(target_text, practice_target_language),
-                "normalized_recognized": "",
-                "global_similarity": None,
-                "phrase_similarity": None,
-                "phrase_macro_similarity": None,
-                "lowest_phrase_similarity": None,
-                "similarity": None,
-                "grade": None,
-                "grade_label": "",
-                "diff": [],
-                "phrase_matches": [],
-                "unconsumed_recognized": [],
-            }
-            if no_speech
-            else {
-                "outcome": "evaluated",
-                "message": "",
-                **evaluate_practice_attempt(target_text, recognized_text, practice_target_language),
-            }
-        )
         return {
             "recording_kind": "attempt",
             "target_language": practice_target_language,
@@ -1978,9 +1877,16 @@ def create_app(
             "asr_model": attempt_transcription.model,
             "asr_timestamps": asr_timestamps,
             "model_asr_timestamps": model_asr_timestamps,
-            **evaluation,
+            "outcome": "evaluated",
+            "overall_score": evaluated.result["overall_score"],
+            "overall_comment": evaluated.result["overall_comment"],
+            "llm_comparison": evaluated.result,
             "comparison_alignment": comparison_alignment,
             "model_comparison_alignment": model_comparison_alignment,
+            "comparison_model": comparison_model,
+            "playback_padding_seconds": playback_padding_seconds,
+            "llm_usage": evaluated.usage,
+            "llm_estimated_cost_usd": evaluated.estimated_cost_usd,
             "timings_ms": {
                 "asr": attempt_asr_ms,
                 "model_asr": model_asr_ms,
@@ -1989,7 +1895,8 @@ def create_app(
             },
             "providers": {
                 "asr": attempt_provider_name,
-                **({"model_asr": model_provider_name or attempt_provider_name} if model_transcription is not None else {}),
+                "model_asr": model_provider_name or attempt_provider_name,
+                "comparison": "openai-responses",
             },
         }
 
@@ -2179,26 +2086,19 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         normalized_target_text = str(target_text or "").strip()
         validate_practice_alignment_target(normalized_target_text, practice_target_language)
-        use_llm = bool(str(comparison_model or "").strip() or str(playback_padding_seconds or "").strip())
-        if use_llm:
-            if practice_target_language != "zh-CN" and practice_asr_model not in OPENAI_TIMESTAMP_ASR_MODELS:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"asr_model '{practice_asr_model}' does not return word timestamps, "
-                        "which the LLM comparison requires; use whisper-1 for comparison_model requests"
-                    ),
-                )
-            try:
-                selected_comparison_model = supported_practice_comparison_model(comparison_model)
-                selected_playback_padding = validate_playback_padding_seconds(
-                    playback_padding_seconds
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-        else:
-            selected_comparison_model = ""
-            selected_playback_padding = 0.1
+        if practice_target_language != "zh-CN" and practice_asr_model not in OPENAI_TIMESTAMP_ASR_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"asr_model '{practice_asr_model}' does not return word timestamps, "
+                    "which the LLM comparison requires; use whisper-1 for comparison_model requests"
+                ),
+            )
+        try:
+            selected_comparison_model = supported_practice_comparison_model(comparison_model)
+            selected_playback_padding = validate_playback_padding_seconds(playback_padding_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         attempt_audio_bytes = await audio.read()
         model_audio_bytes = await model_audio.read()
@@ -2253,18 +2153,14 @@ def create_app(
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
             job_id = str(body.get("id") or body.get("job_id") or "")
-            llm_options = (
-                {
-                    "comparison_model": selected_comparison_model,
-                    "playback_padding_seconds": selected_playback_padding,
-                    "reference_audio_duration": reference_audio_duration,
-                    "attempt_audio_duration": attempt_audio_duration,
-                    "progress_mode": progress_mode,
-                }
-                if use_llm
-                else None
-            )
-            if job_id and llm_options is not None:
+            llm_options = {
+                "comparison_model": selected_comparison_model,
+                "playback_padding_seconds": selected_playback_padding,
+                "reference_audio_duration": reference_audio_duration,
+                "attempt_audio_duration": attempt_audio_duration,
+                "progress_mode": progress_mode,
+            }
+            if job_id:
                 practice_attempt_llm_options[job_id] = llm_options
             snapshot = _practice_attempt_job_snapshot(
                 body,

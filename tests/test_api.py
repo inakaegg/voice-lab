@@ -1636,54 +1636,6 @@ def test_practice_prompt_api_omits_non_chinese_tokens_from_local_pinyin(monkeypa
     assert "1TB" not in payload["display_text"]["pinyin_text"]
 
 
-def test_practice_attempt_job_returns_typed_provider_contract_error() -> None:
-    class InvalidAttemptTimestampAsr:
-        name = "invalid-timestamp-asr"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            if audio_path.read_bytes() == b"model audio":
-                return AsrTranscription(
-                    text="Open it.",
-                    model="invalid-timestamp-asr",
-                    words=[{"text": "Open it", "start": 0.1, "end": 0.8}],
-                    timestamp_granularities=["word"],
-                )
-            return AsrTranscription(
-                text="",
-                model="invalid-timestamp-asr",
-                words=[{"text": "ghost", "start": "invalid", "end": 1.0}],
-                timestamp_granularities=["word"],
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=InvalidAttemptTimestampAsr(),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline))
-
-    response = client.post(
-        "/api/practice/attempt-jobs",
-        data={"target_language": "en-US", "target_text": "Open it."},
-        files={
-            "audio": ("repeat.webm", b"repeat audio", "audio/webm"),
-            "model_audio": ("model.wav", b"model audio", "audio/wav"),
-        },
-    )
-
-    assert response.status_code == 502
-    assert response.json() == {
-        "error": {
-            "code": "practice_alignment_provider_contract_error",
-            "reason": "invalid_timestamp_payload",
-            "stage": "attempt_asr",
-            "retryable": True,
-            "message": "音声の解析結果を確認できませんでした。もう一度お試しください。",
-            "diagnostic_flags": ["invalid_timestamp_payload"],
-        }
-    }
-
-
 def test_practice_attempt_job_rejects_a_boundary_only_target_before_asr() -> None:
     class MustNotRunAsr:
         name = "must-not-run"
@@ -1805,6 +1757,51 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
                 },
             }
 
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            # このfakeはPracticeLlmServiceの代わりであり、validate_practice_llm_result済みの
+            # 結果を直接返す。そのためmatched_text/start/end/playback_*も自前で計算して含める。
+            result = {
+                "schema_version": 1,
+                "overall_score": 80,
+                "overall_comment": "「哈」と「到」が異なります。",
+                "phrases": [
+                    {
+                        "phrase_index": 0,
+                        "target_text": "你好吗？你今天去哪里？",
+                        "score": 80,
+                        "comment": "「哈」と「到」が異なります。",
+                        "reference": {
+                            "status": "assigned",
+                            "word_start_index": 0,
+                            "word_end_index": 3,
+                            "matched_text": "你好吗你今天去哪里",
+                            "start": 0.1,
+                            "end": 2.4,
+                            "playback_start": 0.0,
+                            "playback_end": 2.5,
+                        },
+                        "attempt": {
+                            "status": "partial",
+                            "word_start_index": 0,
+                            "word_end_index": 3,
+                            "matched_text": "你哈吗你今天到那里",
+                            "start": 0.1,
+                            "end": 2.3,
+                            "playback_start": 0.0,
+                            "playback_end": 2.4,
+                        },
+                    }
+                ],
+            }
+            return PracticeLlmEvaluation(
+                result=result,
+                usage={"total_tokens": 100},
+                estimated_cost_usd=None,
+                elapsed_ms=5.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
@@ -1820,12 +1817,18 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
             openai_pipeline=pipeline,
             runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
             audio_history_store=history_store,
+            practice_llm_service=FakePracticeLlm(),
         )
     )
 
     submitted = client.post(
         "/api/practice/attempt-jobs",
-        data={"target_language": "zh-CN", "target_text": "你好吗？你今天去哪里？"},
+        data={
+            "target_language": "zh-CN",
+            "target_text": "你好吗？你今天去哪里？",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.1",
+        },
         files={
             "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
             "model_audio": ("model.wav", b"model audio", "audio/wav"),
@@ -1849,8 +1852,11 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert snapshot["status"] == "succeeded"
     assert snapshot["metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
     assert snapshot["result"]["recognized_text"] == "你哈吗？你今天到那里？"
+    assert snapshot["result"]["overall_score"] == 80
     assert snapshot["result"]["comparison_alignment"]["complete"] is True
+    assert snapshot["result"]["comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(2.4)
     assert snapshot["result"]["model_comparison_alignment"]["complete"] is True
+    assert snapshot["result"]["model_comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(2.5)
     completed_history = history_store.list_entries("recordings")
     assert len(completed_history) == 1
     metadata = completed_history[0].metadata
@@ -1858,15 +1864,11 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert metadata["practice_job_metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
     diagnostics = metadata["practice_diagnostics"]
     assert diagnostics["outcome"] == "evaluated"
-    assert diagnostics["similarity"] == snapshot["result"]["similarity"]
-    assert diagnostics["grade"] == snapshot["result"]["grade"]
+    assert diagnostics["overall_score"] == 80
     assert diagnostics["recognized_text"] == "你哈吗？你今天到那里？"
     assert diagnostics["model_recognized_text"] == "你好吗？你今天去哪里？"
     assert diagnostics["asr_timestamps"]["words"][0] == {"text": "你哈吗", "start": 0.1, "end": 0.8}
     assert diagnostics["model_asr_timestamps"]["words"][0] == {"text": "你好吗", "start": 0.1, "end": 0.8}
-    assert diagnostics["comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.3)
-    assert diagnostics["comparison_alignment"]["diagnostics"]["candidate_count"] > 0
-    assert diagnostics["model_comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.4)
 
 
 @pytest.mark.parametrize("llm_fails", [False, True])
@@ -2233,56 +2235,6 @@ def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> 
         (b"model audio", "en-US", True),
         (b"attempt audio", "en-US", True),
     ]
-
-
-def test_practice_attempt_job_returns_no_speech_without_scoring_or_alignment() -> None:
-    class NoSpeechAttemptAsr:
-        name = "fake-whisper"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            if audio_path.read_bytes() == b"model audio":
-                return AsrTranscription(
-                    text="Please close the window.",
-                    model="whisper-1",
-                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
-                    timestamp_granularities=["word"],
-                )
-            return AsrTranscription(
-                text="",
-                model="whisper-1",
-                words=[],
-                segments=[],
-                timestamp_granularities=["word", "segment"],
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=NoSpeechAttemptAsr(),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline))
-
-    response = client.post(
-        "/api/practice/attempt-jobs",
-        data={"target_language": "en-US", "target_text": "Please close the window."},
-        files={
-            "audio": ("silent.wav", b"0.72 seconds of silence", "audio/wav"),
-            "model_audio": ("model.wav", b"model audio", "audio/wav"),
-        },
-    )
-
-    assert response.status_code == 200
-    snapshot = response.json()
-    assert snapshot["status"] == "succeeded"
-    assert snapshot["result"]["outcome"] == "no_speech"
-    assert snapshot["result"]["message"] == "音声を検出できませんでした。もう一度録音してください。"
-    assert snapshot["result"]["similarity"] is None
-    assert snapshot["result"]["global_similarity"] is None
-    assert snapshot["result"]["phrase_similarity"] is None
-    assert snapshot["result"]["grade"] is None
-    assert snapshot["result"]["diff"] == []
-    assert snapshot["result"]["comparison_alignment"]["available"] is False
-    assert snapshot["result"]["model_comparison_alignment"]["available"] is True
 
 
 def test_practice_attempt_job_returns_no_speech_for_llm_comparison_without_calling_llm() -> None:
