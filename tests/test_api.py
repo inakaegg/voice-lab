@@ -222,7 +222,7 @@ def test_speakloop_alias_serves_practice_ui() -> None:
     assert "/react/assets/speakloop.js" in response.text
 
 
-def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
+def test_practice_attempt_job_rejects_unsupported_asr_model() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"en-US": "I want coffee"}),
         translator=FakeTranslationProvider({}),
@@ -231,9 +231,12 @@ def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
     client = TestClient(create_app(openai_pipeline=pipeline))
 
     response = client.post(
-        "/api/practice/attempts",
+        "/api/practice/attempt-jobs",
         data={"target_language": "en-US", "target_text": "I want a coffee.", "asr_model": "unknown-asr"},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+        files={
+            "audio": ("repeat.webm", b"repeat audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
     )
 
     assert response.status_code == 400
@@ -1633,66 +1636,18 @@ def test_practice_prompt_api_omits_non_chinese_tokens_from_local_pinyin(monkeypa
     assert "1TB" not in payload["display_text"]["pinyin_text"]
 
 
-def test_practice_attempt_api_scores_repeat_audio() -> None:
-    pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"en-US": "I want coffee"}),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline))
-
-    response = client.post(
-        "/api/practice/attempts",
-        data={"target_language": "en-US", "target_text": "I want a coffee."},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["recognized_text"] == "I want coffee"
-    assert payload["grade"] == "ok"
-    assert payload["similarity"] >= 0.95
-    assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(payload["diff"][0])
-    assert payload["providers"]["asr"] == "fake-asr"
-
-
-def test_practice_attempt_api_uses_target_language_for_asr() -> None:
-    captured = {}
-
-    class CapturingRunpodAsr:
-        name = "runpod-funasr-paraformer-zh"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            captured["source_language"] = source_language
-            captured["include_timestamps"] = include_timestamps
-            return AsrTranscription(
-                text="绿茶和咖啡，哪一种的咖啡因含量更多呢？",
-                model="funasr/paraformer-zh",
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=CapturingRunpodAsr()))
-
-    response = client.post(
-        "/api/practice/attempts",
-        data={"target_language": "zh-CN", "target_text": "绿茶和咖啡，哪一种的咖啡因含量更多呢？"},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    assert captured == {"source_language": "zh-CN", "include_timestamps": True}
-    assert response.json()["providers"]["asr"] == "runpod-funasr-paraformer-zh"
-
-
-def test_practice_attempt_api_returns_typed_provider_contract_error() -> None:
-    class InvalidTimestampAsr:
+def test_practice_attempt_job_returns_typed_provider_contract_error() -> None:
+    class InvalidAttemptTimestampAsr:
         name = "invalid-timestamp-asr"
 
         def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            if audio_path.read_bytes() == b"model audio":
+                return AsrTranscription(
+                    text="Open it.",
+                    model="invalid-timestamp-asr",
+                    words=[{"text": "Open it", "start": 0.1, "end": 0.8}],
+                    timestamp_granularities=["word"],
+                )
             return AsrTranscription(
                 text="",
                 model="invalid-timestamp-asr",
@@ -1701,16 +1656,19 @@ def test_practice_attempt_api_returns_typed_provider_contract_error() -> None:
             )
 
     pipeline = SpeechTranslationPipeline(
-        asr=InvalidTimestampAsr(),
+        asr=InvalidAttemptTimestampAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(create_app(openai_pipeline=pipeline))
 
     response = client.post(
-        "/api/practice/attempts",
+        "/api/practice/attempt-jobs",
         data={"target_language": "en-US", "target_text": "Open it."},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+        files={
+            "audio": ("repeat.webm", b"repeat audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
     )
 
     assert response.status_code == 502
@@ -1726,7 +1684,7 @@ def test_practice_attempt_api_returns_typed_provider_contract_error() -> None:
     }
 
 
-def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> None:
+def test_practice_attempt_job_rejects_a_boundary_only_target_before_asr() -> None:
     class MustNotRunAsr:
         name = "must-not-run"
 
@@ -1741,9 +1699,12 @@ def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> Non
     client = TestClient(create_app(openai_pipeline=pipeline))
 
     response = client.post(
-        "/api/practice/attempts",
+        "/api/practice/attempt-jobs",
         data={"target_language": "en-US", "target_text": "..."},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+        files={
+            "audio": ("repeat.webm", b"repeat audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
     )
 
     assert response.status_code == 400
@@ -1759,7 +1720,7 @@ def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> Non
     }
 
 
-def test_practice_attempt_routes_reject_oversized_targets_before_asr() -> None:
+def test_practice_attempt_job_rejects_oversized_targets_before_asr() -> None:
     class MustNotRunAsr:
         name = "must-not-run"
 
@@ -1773,45 +1734,27 @@ def test_practice_attempt_routes_reject_oversized_targets_before_asr() -> None:
     )
     client = TestClient(create_app(openai_pipeline=pipeline))
     target_text = " ".join(f"Phrase {index}." for index in range(17))
-    cases = [
-        (
-            "/api/practice/attempts",
-            {"target_language": "en-US", "target_text": target_text},
-            {"audio": ("attempt.webm", b"attempt audio", "audio/webm")},
-        ),
-        (
-            "/api/practice/attempt-jobs",
-            {"target_language": "en-US", "target_text": target_text},
-            {
-                "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
-                "model_audio": ("model.wav", b"model audio", "audio/wav"),
-            },
-        ),
-        (
-            "/api/practice/recordings",
-            {
-                "recording_intent": "attempt",
-                "target_language": "en-US",
-                "current_target_text": target_text,
-            },
-            {"audio": ("attempt.webm", b"attempt audio", "audio/webm")},
-        ),
-    ]
 
-    for path, data, files in cases:
-        response = client.post(path, data=data, files=files)
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "en-US", "target_text": target_text},
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
 
-        assert response.status_code == 400
-        assert response.json() == {
-            "error": {
-                "code": "practice_alignment_invalid_input",
-                "reason": "alignment_input_too_large",
-                "stage": "input",
-                "retryable": False,
-                "message": "入力内容を確認して、もう一度お試しください。",
-                "diagnostic_flags": ["alignment_input_too_large"],
-            }
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "practice_alignment_invalid_input",
+            "reason": "alignment_input_too_large",
+            "stage": "input",
+            "retryable": False,
+            "message": "入力内容を確認して、もう一度お試しください。",
+            "diagnostic_flags": ["alignment_input_too_large"],
         }
+    }
 
 
 def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(tmp_path, monkeypatch) -> None:
@@ -2451,24 +2394,14 @@ def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> Non
     assert completed["error"]["reason"] == "empty_reference_asr"
 
 
-def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
-    class FakeRunpodAsr:
-        name = "runpod-funasr-paraformer-zh"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            return AsrTranscription(
-                text="我想學習軟體開發",
-                model="funasr/paraformer-zh",
-                words=[{"text": "我", "start": 0.0, "end": 0.2}],
-                timestamp_granularities=["word"],
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+def test_practice_recording_api_rejects_attempt_intent() -> None:
+    """/api/practice/recordings only creates prompts now; attempts go through
+    /api/practice/attempt-jobs (which needs the model audio for comparison)."""
+    client = TestClient(create_app(openai_pipeline=SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "unused"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=FakeRunpodAsr()))
+    )))
 
     response = client.post(
         "/api/practice/recordings",
@@ -2476,13 +2409,8 @@ def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
         files={"audio": ("recording.webm", b"repeat audio", "audio/webm")},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["recording_kind"] == "attempt"
-    assert payload["recognized_text"] == "我想学习软体开发"
-    assert "classification" not in payload
-    assert payload["grade"] == "perfect"
-    assert payload["asr_model"] == "funasr/paraformer-zh"
+    assert response.status_code == 400
+    assert response.json()["detail"] == "recording_intent must be prompt"
 
 
 def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exists() -> None:

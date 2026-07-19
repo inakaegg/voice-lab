@@ -1993,56 +1993,6 @@ def create_app(
             },
         }
 
-    def _create_practice_attempt_result(
-        *,
-        audio_bytes: bytes,
-        filename: str,
-        practice_target_language: str,
-        target_text: str,
-        practice_asr_model: str,
-        precomputed_asr_result: AsrTranscription | None = None,
-        precomputed_asr_ms: float | None = None,
-    ) -> dict[str, object]:
-        if practice_target_language == "zh-CN":
-            target_text = simplify_chinese_text(target_text)
-        asr_provider = (
-            active_runpod_practice_asr_provider
-            if practice_target_language == "zh-CN"
-            else _practice_asr_provider(active_openai_pipeline, practice_asr_model)
-        )
-        with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_audio.flush()
-            try:
-                if precomputed_asr_result is None:
-                    asr_started = perf_counter()
-                    asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
-                    asr_ms = _elapsed_ms(asr_started)
-                else:
-                    asr_result = precomputed_asr_result
-                    asr_ms = float(precomputed_asr_ms or 0.0)
-                recognized_text = asr_result.text
-                if practice_target_language == "zh-CN":
-                    recognized_text = simplify_chinese_text(recognized_text)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        return _create_practice_attempt_result_from_transcriptions(
-            practice_target_language=practice_target_language,
-            target_text=target_text,
-            attempt_transcription=AsrTranscription(
-                text=recognized_text,
-                model=asr_result.model,
-                words=asr_result.words,
-                segments=asr_result.segments,
-                timestamp_granularities=asr_result.timestamp_granularities,
-            ),
-            attempt_provider_name=asr_provider.name,
-            attempt_asr_ms=asr_ms,
-        )
-
     def _practice_attempt_job_snapshot(
         body: dict[str, object],
         *,
@@ -2627,10 +2577,8 @@ def create_app(
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if recording_intent not in {"prompt", "attempt"}:
-            raise HTTPException(status_code=400, detail="recording_intent must be prompt or attempt")
-        if recording_intent == "attempt":
-            validate_practice_alignment_target(current_target_text, practice_target_language)
+        if recording_intent != "prompt":
+            raise HTTPException(status_code=400, detail="recording_intent must be prompt")
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -2647,21 +2595,6 @@ def create_app(
                 "content_type": audio.content_type or "",
             },
         )
-
-        if recording_intent == "attempt":
-            result = _create_practice_attempt_result(
-                audio_bytes=audio_bytes,
-                filename=audio.filename or "",
-                practice_target_language=practice_target_language,
-                target_text=current_target_text,
-                practice_asr_model=practice_asr_model,
-            )
-            result["recording_kind"] = "attempt"
-            active_audio_history_store.update_metadata(
-                recording_entry,
-                _practice_history_diagnostics_metadata(result),
-            )
-            return result
 
         if progress_mode == "job":
             filename = audio.filename or "practice.webm"
@@ -2862,52 +2795,6 @@ def create_app(
                 "tts_text": target_text,
                 "text_preview": target_text[:80],
             },
-        )
-        active_audio_history_store.update_metadata(
-            recording_entry,
-            _practice_history_diagnostics_metadata(result),
-        )
-        return result
-
-    @app.post("/api/practice/attempts")
-    async def create_practice_attempt(
-        audio: Annotated[UploadFile, File()],
-        target_language: Annotated[str, Form()],
-        target_text: Annotated[str, Form()],
-        asr_model: Annotated[str, Form()] = "whisper-1",
-    ) -> dict[str, object]:
-        try:
-            practice_target_language = supported_practice_target_language(target_language)
-        except ValueError as exc:
-            raise PracticeAlignmentInputError("unsupported_target_language") from exc
-        try:
-            practice_asr_model = supported_openai_practice_asr_model(asr_model)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        validate_practice_alignment_target(target_text, practice_target_language)
-        if practice_target_language == "zh-CN":
-            target_text = simplify_chinese_text(target_text)
-
-        audio_bytes = await audio.read()
-        recording_entry = _save_audio_history_recording(
-            active_audio_history_store,
-            audio_bytes,
-            suffix=_upload_suffix(audio.filename),
-            metadata={
-                "endpoint": "practice-attempts",
-                "target_language": practice_target_language,
-                "asr_model": practice_asr_model,
-                "filename": audio.filename or "",
-                "content_type": audio.content_type or "",
-            },
-        )
-
-        result = _create_practice_attempt_result(
-            audio_bytes=audio_bytes,
-            filename=audio.filename or "",
-            practice_target_language=practice_target_language,
-            target_text=target_text,
-            practice_asr_model=practice_asr_model,
         )
         active_audio_history_store.update_metadata(
             recording_entry,

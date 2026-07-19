@@ -1195,9 +1195,6 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "POST" && url.pathname === "/api/practice/recordings") {
       return jsonResponse(await createPracticeRecording(request, env));
     }
-    if (request.method === "POST" && url.pathname === "/api/practice/attempts") {
-      return jsonResponse(await createPracticeAttempt(request, env));
-    }
     if (request.method === "POST" && url.pathname === "/api/practice/attempt-jobs") {
       const snapshot = await createPracticeAttemptJob(request, env);
       const status = snapshot.status === "queued" || snapshot.status === "running" ? 202 : 200;
@@ -2955,17 +2952,11 @@ async function createPracticeRecording(request, env) {
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const currentTargetText = stringFormValue(form, "current_target_text", "");
   const recordingIntent = stringFormValue(form, "recording_intent", "").trim();
-  if (recordingIntent !== "prompt" && recordingIntent !== "attempt") {
-    throw httpError(400, "recording_intent must be prompt or attempt");
-  }
-  const attemptTargetText = recordingIntent === "attempt"
-    ? canonicalPracticeText(currentTargetText, targetLanguage)
-    : "";
-  if (recordingIntent === "attempt") {
-    validatePracticeTargetForAlignment(attemptTargetText);
+  if (recordingIntent !== "prompt") {
+    throw httpError(400, "recording_intent must be prompt");
   }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
-  const useOwnVoice = recordingIntent === "prompt" && optionEnabled(stringFormValue(form, "use_own_voice", "false"));
+  const useOwnVoice = optionEnabled(stringFormValue(form, "use_own_voice", "false"));
   if (useOwnVoice) {
     const separateReferenceFields = [
       "reference_audio",
@@ -2988,46 +2979,6 @@ async function createPracticeRecording(request, env) {
   });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  if (recordingIntent === "attempt") {
-    const targetText = attemptTargetText;
-    const targetStarted = Date.now();
-    const targetTranscription = await practiceAttemptTranscription(env, {
-      audioBytes,
-      audioMimeType,
-      targetLanguage,
-      filename: audio.name || `practice.${extensionForMimeType(audioMimeType)}`,
-      model: asrModel,
-    });
-    const targetAsrMs = Date.now() - targetStarted;
-    const recognizedText = canonicalPracticeText(targetTranscription.text, targetLanguage);
-    const asrTimestamps = serializeAsrTimestamps(targetTranscription);
-    const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
-    const result = {
-      recording_kind: "attempt",
-      target_language: targetLanguage,
-      target_text: targetText,
-      recognized_text: recognizedText,
-      asr_model: targetTranscription.model,
-      asr_timestamps: asrTimestamps,
-      ...evaluation,
-      comparison_alignment: practiceComparisonAlignmentCanonical({
-        targetText,
-        recognizedText,
-        targetLanguage,
-        asrTimestamps,
-      }),
-      timings_ms: {
-        asr: targetAsrMs,
-        compare: 0,
-        total: targetAsrMs,
-      },
-      providers: {
-        asr: targetTranscription.provider,
-      },
-    };
-    return result;
-  }
 
   const autoStarted = Date.now();
   const autoTranscription = await openAiTranscribeDetail(env, {
@@ -3104,58 +3055,6 @@ function validatePracticeTargetForAlignment(targetText) {
   if (phrases.length > MAX_CANONICAL_TARGET_PHRASES) {
     throw new PracticeAlignmentInputError("alignment_input_too_large");
   }
-}
-
-async function createPracticeAttempt(request, env) {
-  const form = await request.formData();
-  const audio = requiredBlob(form, "audio");
-  const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
-  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
-  const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
-  validatePracticeTargetForAlignment(targetText);
-  await enforcePublicFeatureAccess(request, env, "speakloop", {
-    audioBytes: Number(audio.size || 0),
-    textChars: targetText.length,
-  });
-  const audioBytes = await audio.arrayBuffer();
-  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  const totalStarted = Date.now();
-  const asrStarted = Date.now();
-  const transcription = await practiceAttemptTranscription(env, {
-    audioBytes,
-    audioMimeType,
-    targetLanguage,
-    filename: audio.name || `repeat.${extensionForMimeType(audioMimeType)}`,
-    model: asrModel,
-  });
-  const recognizedText = canonicalPracticeText(transcription.text, targetLanguage);
-  const asrMs = Date.now() - asrStarted;
-  const asrTimestamps = serializeAsrTimestamps(transcription);
-  const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
-  const result = {
-    target_language: targetLanguage,
-    target_text: targetText,
-    recognized_text: recognizedText,
-    asr_model: transcription.model,
-    asr_timestamps: asrTimestamps,
-    ...evaluation,
-    comparison_alignment: practiceComparisonAlignmentCanonical({
-      targetText,
-      recognizedText,
-      targetLanguage,
-      asrTimestamps,
-    }),
-    timings_ms: {
-      asr: asrMs,
-      compare: Math.max(0, Date.now() - totalStarted - asrMs),
-      total: Date.now() - totalStarted,
-    },
-    providers: {
-      asr: transcription.provider,
-    },
-  };
-  return result;
 }
 
 async function createPracticeAttemptJob(request, env) {
@@ -4058,58 +3957,6 @@ async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage
   return transcription.text;
 }
 
-async function practiceAttemptTranscription(env, {
-  audioBytes,
-  audioMimeType,
-  targetLanguage,
-  filename,
-  model,
-}) {
-  if (targetLanguage === "zh-CN") {
-    return runpodPracticeAsr(env, {
-      audioBytes,
-      audioMimeType,
-      sourceLanguage: targetLanguage,
-    });
-  }
-  const transcription = await openAiTranscribeDetail(env, {
-    audioBytes,
-    audioMimeType,
-    sourceLanguage: targetLanguage,
-    filename,
-    model,
-    includeTimestamps: true,
-  });
-  return {
-    ...transcription,
-    provider: `openai-asr-${transcription.model}`,
-  };
-}
-
-async function runpodPracticeAsr(env, { audioBytes, audioMimeType, sourceLanguage }) {
-  const body = await submitRunpodSyncJob(env, {
-    operation_mode: "practice_asr",
-    source_language: sourceLanguage,
-    audio_mime_type: normalizeMimeType(audioMimeType) || "audio/wav",
-    audio_base64: arrayBufferToBase64(audioBytes),
-  });
-  const output = runpodSyncOutput(body, "RunPod practice ASR");
-  const model = String(output.model || FUNASR_DEFAULT_PRACTICE_ASR_MODEL);
-  const providers = output.providers && typeof output.providers === "object" ? output.providers : {};
-  return {
-    text: String(output.text || "").trim(),
-    model,
-    timestamp_granularities: Array.isArray(output.timestamp_granularities)
-      ? output.timestamp_granularities.map(String)
-      : [],
-    words: normalizedAsrTimingRows(output.words, "text"),
-    segments: normalizedAsrTimingRows(output.segments, "text"),
-    raw_timestamp_word_count: Array.isArray(output.words) ? output.words.length : 0,
-    raw_timestamp_segment_count: Array.isArray(output.segments) ? output.segments.length : 0,
-    provider: String(providers.asr || "funasr-paraformer-zh"),
-  };
-}
-
 async function openAiTranscribeDetail(env, {
   audioBytes,
   audioMimeType,
@@ -4403,29 +4250,8 @@ async function submitRunpodJob(env, inputPayload) {
   });
 }
 
-async function submitRunpodSyncJob(env, inputPayload) {
-  return runpodRequest(env, "/runsync", {
-    method: "POST",
-    payload: runpodRequestPayload(inputPayload),
-  });
-}
-
 function runpodRequestPayload(inputPayload) {
   return { input: inputPayload };
-}
-
-function runpodSyncOutput(body, label) {
-  if (body && typeof body.output === "object" && body.output !== null) {
-    return body.output;
-  }
-  if (body && typeof body === "object" && body.audio_base64) {
-    return body;
-  }
-  const status = String(body?.status || "").toUpperCase();
-  if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
-    throw httpError(502, runpodErrorMessage(body));
-  }
-  throw httpError(502, `${label} did not return output`);
 }
 
 async function runpodRequest(env, path, { method = "GET", payload = null, timeoutMs = null } = {}) {
