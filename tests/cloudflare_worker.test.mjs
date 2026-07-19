@@ -1465,7 +1465,11 @@ test("Cloudflare worker requests whisper timestamps for pronunciation practice",
     if (url === "https://api.openai.com/v1/audio/transcriptions") {
       const filename = init.body.get("file")?.name || "";
       if (filename === "model.wav") {
-        return json({ text: "I want a coffee.", words: [], segments: [] });
+        return json({
+          text: "I want a coffee.",
+          words: [{ word: "I want a coffee", start: 0.05, end: 1.15 }],
+          segments: [],
+        });
       }
       return json({
         text: "I want coffee.",
@@ -1477,53 +1481,21 @@ test("Cloudflare worker requests whisper timestamps for pronunciation practice",
         segments: [{ text: "I want coffee.", start: 0.1, end: 1.1 }],
       });
     }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
-  const form = new FormData();
-  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
-  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
-  form.append("target_language", "en-US");
-  form.append("target_text", "I want a coffee.");
-  form.append("asr_model", "whisper-1");
-
-  const response = await handleRequest(
-    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
-    env,
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  const attemptCall = calls.find((call) => call.init.body.get("file")?.name === "repeat.webm");
-  assert.equal(attemptCall.init.body.get("model"), "whisper-1");
-  assert.equal(attemptCall.init.body.get("response_format"), "verbose_json");
-  assert.deepEqual(attemptCall.init.body.getAll("timestamp_granularities[]"), ["word", "segment"]);
-  assert.equal(payload.result.recognized_text, "I want coffee.");
-  assert.equal(payload.result.asr_timestamps.available, true);
-  assert.equal(payload.result.asr_timestamps.words[0].text, "I");
-  assert.equal(payload.result.comparison_alignment.complete, true);
-  assert.equal(payload.result.comparison_alignment.phrases[0].audio_start, 0.1);
-  assert.equal(payload.result.comparison_alignment.phrases[0].audio_end, 1.1);
-  assert.equal(payload.result.providers.asr, "openai-asr-whisper-1");
-
-  const cookie = await adminCookie(env);
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/practice-history", { headers: { cookie } }), env)
-  ).json();
-  assert.equal(history.settings.enabled, false);
-  assert.deepEqual(history.recordings, []);
-});
-
-test("Cloudflare worker returns a typed alignment provider contract error", async () => {
-  const env = adminAuthEnv(async (url, init) => {
-    if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      const filename = init.body.get("file")?.name || "";
-      if (filename === "model.wav") {
-        return json({ text: "Open it.", words: [{ word: "Open it", start: 0.1, end: 0.8 }], segments: [] });
-      }
+    if (url === "https://api.openai.com/v1/responses") {
       return json({
-        text: "",
-        words: [{ word: "ghost", start: "invalid", end: 1.0 }],
-        segments: [],
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 90,
+          overall_comment: "ok",
+          phrases: [{
+            phrase_index: 0,
+            target_text: "I want a coffee.",
+            score: 90,
+            comment: "ok",
+            reference: { status: "assigned", word_start_index: 0, word_end_index: 1 },
+            attempt: { status: "assigned", word_start_index: 0, word_end_index: 3 },
+          }],
+        }),
       });
     }
     throw new Error(`unexpected url: ${url}`);
@@ -1532,25 +1504,38 @@ test("Cloudflare worker returns a typed alignment provider contract error", asyn
   form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
   form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
   form.append("target_language", "en-US");
-  form.append("target_text", "Open it.");
+  form.append("target_text", "I want a coffee.");
   form.append("asr_model", "whisper-1");
+  form.append("comparison_model", "gpt-5.4-nano");
 
   const response = await handleRequest(
     new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
     env,
   );
+  const payload = await response.json();
 
-  assert.equal(response.status, 502);
-  assert.deepEqual(await response.json(), {
-    error: {
-      code: "practice_alignment_provider_contract_error",
-      reason: "invalid_timestamp_payload",
-      stage: "attempt_asr",
-      retryable: true,
-      message: "音声の解析結果を確認できませんでした。もう一度お試しください。",
-      diagnostic_flags: ["invalid_timestamp_payload"],
-    },
-  });
+  assert.equal(response.status, 200);
+  const attemptCall = calls.find((call) => call.init.body?.get?.("file")?.name === "repeat.webm");
+  assert.equal(attemptCall.init.body.get("model"), "whisper-1");
+  assert.equal(attemptCall.init.body.get("response_format"), "verbose_json");
+  assert.deepEqual(attemptCall.init.body.getAll("timestamp_granularities[]"), ["word", "segment"]);
+  assert.equal(payload.result.recognized_text, "I want coffee.");
+  assert.equal(payload.result.asr_timestamps.available, true);
+  assert.equal(payload.result.asr_timestamps.words[0].text, "I");
+  assert.equal(payload.result.overall_score, 90);
+  assert.equal(payload.result.comparison_alignment.complete, true);
+  assert.equal(payload.result.comparison_alignment.phrases[0].audio_start, 0);
+  assert.equal(payload.result.comparison_alignment.phrases[0].audio_end, 1.1);
+  assert.equal(payload.result.model_comparison_alignment.phrases[0].audio_start, 0);
+  assert.equal(payload.result.model_comparison_alignment.phrases[0].audio_end, 1.15);
+  assert.equal(payload.result.providers.asr, "openai-asr-whisper-1");
+
+  const cookie = await adminCookie(env);
+  const history = await (
+    await handleRequest(new Request("https://example.com/api/practice-history", { headers: { cookie } }), env)
+  ).json();
+  assert.equal(history.settings.enabled, false);
+  assert.deepEqual(history.recordings, []);
 });
 
 test("Cloudflare worker rejects a boundary-only practice target before ASR", async () => {
@@ -1622,50 +1607,6 @@ test("Cloudflare worker rejects oversized practice targets before external ASR",
       },
     });
   }
-});
-
-test("Cloudflare worker returns no_speech for a silent practice attempt without scoring", async () => {
-  const env = adminAuthEnv(async (url, init) => {
-    if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      const filename = init.body.get("file")?.name || "";
-      await new Promise((resolve) => setTimeout(resolve, filename === "model.wav" ? 40 : 1));
-      if (filename === "model.wav") {
-        return json({
-          text: "Please close the window.",
-          words: [{ word: "Please close the window", start: 0.1, end: 1.2 }],
-          segments: [],
-        });
-      }
-      return json({ text: "", words: [], segments: [] });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
-  const form = new FormData();
-  form.append("audio", new Blob(["0.72 seconds of silence"], { type: "audio/wav" }), "silent.wav");
-  form.append("model_audio", new Blob(["model audio"], { type: "audio/wav" }), "model.wav");
-  form.append("target_language", "en-US");
-  form.append("target_text", "Please close the window.");
-
-  const response = await handleRequest(
-    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
-    env,
-  );
-  const snapshot = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(snapshot.status, "succeeded");
-  assert.equal(snapshot.result.outcome, "no_speech");
-  assert.equal(snapshot.result.message, "音声を検出できませんでした。もう一度録音してください。");
-  assert.equal(snapshot.result.similarity, null);
-  assert.equal(snapshot.result.global_similarity, null);
-  assert.equal(snapshot.result.phrase_similarity, null);
-  assert.equal(snapshot.result.grade, null);
-  assert.deepEqual(snapshot.result.diff, []);
-  assert.equal(snapshot.result.comparison_alignment.available, false);
-  assert.equal(snapshot.result.model_comparison_alignment.available, true);
-  assert.ok(snapshot.result.timings_ms.model_asr >= 25);
-  assert.ok(snapshot.result.timings_ms.asr < snapshot.result.timings_ms.model_asr);
-  assert.ok(snapshot.result.timings_ms.total >= snapshot.result.timings_ms.model_asr);
 });
 
 test("Cloudflare worker returns no_speech for a silent LLM comparison attempt without calling the LLM", async () => {
@@ -1790,6 +1731,33 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
         },
       });
     }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 80,
+          overall_comment: "「哈」と「到」が異なります。",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "你好吗？",
+              score: 70,
+              comment: "「好」が「哈」と認識されています。",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 1 },
+              attempt: { status: "partial", word_start_index: 0, word_end_index: 1 },
+            },
+            {
+              phrase_index: 1,
+              target_text: "你今天去哪里？",
+              score: 85,
+              comment: "「去」が「到」と認識されています。",
+              reference: { status: "assigned", word_start_index: 1, word_end_index: 3 },
+              attempt: { status: "partial", word_start_index: 1, word_end_index: 3 },
+            },
+          ],
+        }),
+      });
+    }
     throw new Error(`unexpected url: ${url}`);
   });
   const form = new FormData();
@@ -1797,6 +1765,7 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
   form.append("target_language", "zh-CN");
   form.append("target_text", "你好吗？你今天去哪里？");
+  form.append("comparison_model", "gpt-5.6-terra");
 
   const submitted = await handleRequest(
     new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),

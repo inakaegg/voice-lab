@@ -3065,19 +3065,16 @@ async function createPracticeAttemptJob(request, env) {
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
   validatePracticeTargetForAlignment(targetText);
-  const comparisonModelRaw = stringFormValue(form, "comparison_model", "");
-  const playbackPaddingRaw = stringFormValue(form, "playback_padding_seconds", "");
-  const useLlm = Boolean(comparisonModelRaw.trim() || playbackPaddingRaw.trim());
-  const comparisonModel = useLlm ? supportedPracticeComparisonModel(comparisonModelRaw) : "";
-  const playbackPaddingSeconds = useLlm
-    ? validatePlaybackPaddingSeconds(playbackPaddingRaw)
-    : DEFAULT_PLAYBACK_PADDING_SECONDS;
-  if (useLlm && targetLanguage !== "zh-CN" && !OPENAI_TIMESTAMP_ASR_MODELS.has(asrModel)) {
+  if (targetLanguage !== "zh-CN" && !OPENAI_TIMESTAMP_ASR_MODELS.has(asrModel)) {
     throw httpError(
       400,
       `asr_model '${asrModel}' does not return word timestamps, which the LLM comparison requires; use whisper-1 for comparison_model requests`,
     );
   }
+  const comparisonModel = supportedPracticeComparisonModel(stringFormValue(form, "comparison_model", ""));
+  const playbackPaddingSeconds = validatePlaybackPaddingSeconds(
+    stringFormValue(form, "playback_padding_seconds", ""),
+  );
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
     textChars: targetText.length,
@@ -3097,12 +3094,10 @@ async function createPracticeAttemptJob(request, env) {
       model_audio_base64: arrayBufferToBase64(modelAudioBytes),
     });
     const jobId = String(body?.id || body?.job_id || "");
-    if (useLlm) {
-      await savePracticeAttemptLlmOptions(env, jobId, {
-        comparison_model: comparisonModel,
-        playback_padding_seconds: playbackPaddingSeconds,
-      });
-    }
+    await savePracticeAttemptLlmOptions(env, jobId, {
+      comparison_model: comparisonModel,
+      playback_padding_seconds: playbackPaddingSeconds,
+    });
     let health = null;
     if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
       try {
@@ -3306,73 +3301,18 @@ async function practiceAttemptComparisonResult({
   const asrTimestamps = serializeAsrTimestamps(attemptTranscription);
   const modelAsrTimestamps = serializeAsrTimestamps(modelTranscription);
 
-  if (comparisonModel) {
-    const referenceNoSpeech =
-      !String(modelRecognizedText || "").trim() &&
-      !(modelAsrTimestamps?.words || []).length &&
-      !(modelAsrTimestamps?.segments || []).length;
-    if (referenceNoSpeech) {
-      throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
-    }
-    const noSpeech =
-      !String(recognizedText || "").trim() &&
-      !(asrTimestamps?.words || []).length &&
-      !(asrTimestamps?.segments || []).length;
-    if (noSpeech) {
-      const attemptMs = Number(timings.asr || 0);
-      const modelMs = Number(timings.model_asr || 0);
-      return {
-        recording_kind: "attempt",
-        target_language: targetLanguage,
-        target_text: targetText,
-        recognized_text: recognizedText,
-        model_recognized_text: modelRecognizedText,
-        asr_model: attemptTranscription.model,
-        asr_timestamps: asrTimestamps,
-        model_asr_timestamps: modelAsrTimestamps,
-        outcome: "no_speech",
-        message: "音声を検出できませんでした。もう一度録音してください。",
-        comparison_alignment: null,
-        model_comparison_alignment: null,
-        comparison_model: comparisonModel,
-        playback_padding_seconds: playbackPaddingSeconds,
-        timings_ms: {
-          asr: attemptMs,
-          model_asr: modelMs,
-          compare: 0,
-          total: attemptMs + modelMs,
-        },
-        providers: {
-          asr: attemptTranscription.provider,
-          model_asr: modelTranscription.provider || attemptTranscription.provider,
-          comparison: "openai-responses",
-        },
-      };
-    }
-    const llmInput = buildPracticeLlmInput({
-      targetLanguage,
-      targetText,
-      paddingSeconds: playbackPaddingSeconds,
-      referenceAudioDuration: practiceAudioDurationSeconds(modelTranscription),
-      attemptAudioDuration: practiceAudioDurationSeconds(attemptTranscription),
-      referenceAsr: {
-        recognized_text: modelRecognizedText,
-        model: modelTranscription.model,
-        words: modelAsrTimestamps.words,
-      },
-      attemptAsr: {
-        recognized_text: recognizedText,
-        model: attemptTranscription.model,
-        words: asrTimestamps.words,
-      },
-    });
-    const compareStarted = Date.now();
-    const { result: llmResult } = await callPracticeLlmService(env, {
-      model: comparisonModel,
-      inputPayload: llmInput,
-    });
-    const [comparisonAlignment, modelComparisonAlignment] = comparisonAlignmentsFromLlmResult(llmResult);
-    const compareMs = Date.now() - compareStarted;
+  const referenceNoSpeech =
+    !String(modelRecognizedText || "").trim() &&
+    !(modelAsrTimestamps?.words || []).length &&
+    !(modelAsrTimestamps?.segments || []).length;
+  if (referenceNoSpeech) {
+    throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
+  }
+  const noSpeech =
+    !String(recognizedText || "").trim() &&
+    !(asrTimestamps?.words || []).length &&
+    !(asrTimestamps?.segments || []).length;
+  if (noSpeech) {
     const attemptMs = Number(timings.asr || 0);
     const modelMs = Number(timings.model_asr || 0);
     return {
@@ -3384,19 +3324,17 @@ async function practiceAttemptComparisonResult({
       asr_model: attemptTranscription.model,
       asr_timestamps: asrTimestamps,
       model_asr_timestamps: modelAsrTimestamps,
-      outcome: "evaluated",
-      overall_score: llmResult.overall_score,
-      overall_comment: llmResult.overall_comment,
-      llm_comparison: llmResult,
-      comparison_alignment: comparisonAlignment,
-      model_comparison_alignment: modelComparisonAlignment,
+      outcome: "no_speech",
+      message: "音声を検出できませんでした。もう一度録音してください。",
+      comparison_alignment: null,
+      model_comparison_alignment: null,
       comparison_model: comparisonModel,
       playback_padding_seconds: playbackPaddingSeconds,
       timings_ms: {
         asr: attemptMs,
         model_asr: modelMs,
-        compare: compareMs,
-        total: attemptMs + modelMs + compareMs,
+        compare: 0,
+        total: attemptMs + modelMs,
       },
       providers: {
         asr: attemptTranscription.provider,
@@ -3405,26 +3343,32 @@ async function practiceAttemptComparisonResult({
       },
     };
   }
-
-  const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
-  let modelComparisonAlignment;
-  try {
-    modelComparisonAlignment = practiceComparisonAlignmentCanonical({
-      targetText,
-      recognizedText: modelRecognizedText,
-      targetLanguage,
-      asrTimestamps: modelAsrTimestamps,
-    });
-  } catch (error) {
-    if (!(error instanceof PracticeAlignmentError)) throw error;
-    throw new PracticeAlignmentError(error.reason, {
-      stage: "reference_asr",
-      retryable: error.retryable,
-    });
-  }
-  if (modelComparisonAlignment.outcome === "no_speech") {
-    throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
-  }
+  const llmInput = buildPracticeLlmInput({
+    targetLanguage,
+    targetText,
+    paddingSeconds: playbackPaddingSeconds,
+    referenceAudioDuration: practiceAudioDurationSeconds(modelTranscription),
+    attemptAudioDuration: practiceAudioDurationSeconds(attemptTranscription),
+    referenceAsr: {
+      recognized_text: modelRecognizedText,
+      model: modelTranscription.model,
+      words: modelAsrTimestamps.words,
+    },
+    attemptAsr: {
+      recognized_text: recognizedText,
+      model: attemptTranscription.model,
+      words: asrTimestamps.words,
+    },
+  });
+  const compareStarted = Date.now();
+  const { result: llmResult } = await callPracticeLlmService(env, {
+    model: comparisonModel,
+    inputPayload: llmInput,
+  });
+  const [comparisonAlignment, modelComparisonAlignment] = comparisonAlignmentsFromLlmResult(llmResult);
+  const compareMs = Date.now() - compareStarted;
+  const attemptMs = Number(timings.asr || 0);
+  const modelMs = Number(timings.model_asr || 0);
   return {
     recording_kind: "attempt",
     target_language: targetLanguage,
@@ -3434,23 +3378,24 @@ async function practiceAttemptComparisonResult({
     asr_model: attemptTranscription.model,
     asr_timestamps: asrTimestamps,
     model_asr_timestamps: modelAsrTimestamps,
-    ...evaluation,
-    comparison_alignment: practiceComparisonAlignmentCanonical({
-      targetText,
-      recognizedText,
-      targetLanguage,
-      asrTimestamps,
-    }),
+    outcome: "evaluated",
+    overall_score: llmResult.overall_score,
+    overall_comment: llmResult.overall_comment,
+    llm_comparison: llmResult,
+    comparison_alignment: comparisonAlignment,
     model_comparison_alignment: modelComparisonAlignment,
+    comparison_model: comparisonModel,
+    playback_padding_seconds: playbackPaddingSeconds,
     timings_ms: {
-      asr: Number(timings.asr || 0),
-      model_asr: Number(timings.model_asr || 0),
-      compare: Number(timings.compare || 0),
-      total: Number(timings.total || 0),
+      asr: attemptMs,
+      model_asr: modelMs,
+      compare: compareMs,
+      total: attemptMs + modelMs + compareMs,
     },
     providers: {
       asr: attemptTranscription.provider,
-      model_asr: modelTranscription.provider,
+      model_asr: modelTranscription.provider || attemptTranscription.provider,
+      comparison: "openai-responses",
     },
   };
 }
