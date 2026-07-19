@@ -1897,6 +1897,308 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(snapshot.result.model_comparison_alignment.phrases[1].audio_end, 2.4);
 });
 
+test("Cloudflare worker scores an English practice attempt using the LLM comparison", async () => {
+  const llmCalls = [];
+  const env = fakeEnv(async (url, init) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      const filename = init.body.get("file")?.name || "";
+      if (filename === "model.wav") {
+        return json({
+          text: "Hello world",
+          duration: 0.9,
+          words: [
+            { word: "Hello", start: 0.0, end: 0.4 },
+            { word: "world", start: 0.4, end: 0.9 },
+          ],
+          segments: [],
+        });
+      }
+      return json({
+        text: "Hello word",
+        duration: 1.0,
+        words: [
+          { word: "Hello", start: 0.1, end: 0.5 },
+          { word: "word", start: 0.5, end: 1.0 },
+        ],
+        segments: [],
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      const body = JSON.parse(init.body);
+      llmCalls.push(body);
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 80,
+          overall_comment: "「world」の発音を確認しましょう。",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "Hello world.",
+              score: 80,
+              comment: "「word」として認識されています。",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+              attempt: { status: "partial", word_start_index: 0, word_end_index: 2 },
+            },
+          ],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "en-US");
+  form.append("target_text", "Hello world.");
+  form.append("comparison_model", "gpt-5.4-nano");
+  form.append("playback_padding_seconds", "0.1");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const snapshot = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(snapshot.status, "succeeded");
+  assert.equal(snapshot.result.outcome, "evaluated");
+  assert.equal(snapshot.result.overall_score, 80);
+  assert.equal(snapshot.result.overall_comment, "「world」の発音を確認しましょう。");
+  assert.equal(snapshot.result.comparison_model, "gpt-5.4-nano");
+  assert.equal(snapshot.result.llm_comparison.phrases[0].score, 80);
+  assert.equal(snapshot.result.providers.comparison, "openai-responses");
+  assert.ok(Math.abs(snapshot.result.comparison_alignment.phrases[0].audio_end - 1.0) < 1e-6);
+  assert.ok(Math.abs(snapshot.result.model_comparison_alignment.phrases[0].audio_end - 0.9) < 1e-6);
+  assert.equal(llmCalls.length, 1);
+  assert.equal(llmCalls[0].model, "gpt-5.4-nano");
+  assert.equal(llmCalls[0].text.format.strict, true);
+});
+
+test("Cloudflare worker surfaces an LLM validation failure as the generic comparison error for English attempts", async () => {
+  const env = fakeEnv(async (url, init) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      const filename = init.body.get("file")?.name || "";
+      const words = filename === "model.wav"
+        ? [{ word: "Hi", start: 0.0, end: 0.3 }]
+        : [{ word: "Hi", start: 0.0, end: 0.3 }];
+      return json({ text: "Hi", duration: 0.3, words, segments: [] });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 100,
+          overall_comment: "ok",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "this does not match the target text",
+              score: 100,
+              comment: "ok",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 1 },
+              attempt: { status: "assigned", word_start_index: 0, word_end_index: 1 },
+            },
+          ],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "en-US");
+  form.append("target_text", "Hi");
+  form.append("comparison_model", "gpt-5.4-nano");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 502);
+  assert.equal(payload.error.code, "practice_llm_failed");
+  assert.equal(payload.error.stage, "validate_response");
+  assert.equal(payload.error.message, "比較結果を作成できませんでした。もう一度お試しください。");
+  assert.equal(payload.error.fallback_to_legacy, false);
+});
+
+test("Cloudflare worker scores a Chinese practice attempt using the LLM comparison after RunPod ASR completes", async () => {
+  const llmCalls = [];
+  const env = fakeEnv(async (url, init = {}) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") {
+      return json({ id: "practice-llm-job-1", status: "IN_QUEUE" });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/health") {
+      return json({ workers: { idle: 1, running: 0, initializing: 0 } });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/status/practice-llm-job-1") {
+      return json({
+        id: "practice-llm-job-1",
+        status: "COMPLETED",
+        output: {
+          practice_asr_contract_version: 2,
+          target_text: "你好。",
+          text: "你好。",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [
+            { text: "你", start: 0.1, end: 0.3 },
+            { text: "好", start: 0.3, end: 0.6 },
+          ],
+          segments: [],
+          model_transcription: {
+            text: "你好。",
+            model: "funasr/paraformer-zh",
+            timestamp_granularities: ["word"],
+            words: [
+              { text: "你", start: 0.0, end: 0.25 },
+              { text: "好", start: 0.25, end: 0.5 },
+            ],
+            segments: [],
+          },
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      const body = JSON.parse(init.body);
+      llmCalls.push(body);
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 95,
+          overall_comment: "よくできました。",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "你好。",
+              score: 95,
+              comment: "正しく言えています。",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+              attempt: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+            },
+          ],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "zh-CN");
+  form.append("target_text", "你好。");
+  form.append("comparison_model", "gpt-5.6-luna");
+  form.append("playback_padding_seconds", "0.05");
+
+  const submitted = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  assert.equal(submitted.status, 202);
+
+  const completed = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs/practice-llm-job-1"),
+    env,
+  );
+  const snapshot = await completed.json();
+
+  assert.equal(completed.status, 200);
+  assert.equal(snapshot.status, "succeeded");
+  assert.equal(snapshot.result.outcome, "evaluated");
+  assert.equal(snapshot.result.overall_score, 95);
+  assert.equal(snapshot.result.comparison_model, "gpt-5.6-luna");
+  assert.equal(snapshot.result.playback_padding_seconds, 0.05);
+  assert.equal(snapshot.result.providers.comparison, "openai-responses");
+  assert.equal(llmCalls.length, 1);
+  assert.equal(llmCalls[0].model, "gpt-5.6-luna");
+  assert.equal(llmCalls[0].text.format.strict, true);
+});
+
+test("Cloudflare worker surfaces an LLM validation failure as a failed job snapshot for Chinese attempts", async () => {
+  const env = fakeEnv(async (url, init = {}) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") {
+      return json({ id: "practice-llm-job-fail", status: "IN_QUEUE" });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/health") {
+      return json({ workers: { idle: 1, running: 0, initializing: 0 } });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/status/practice-llm-job-fail") {
+      return json({
+        id: "practice-llm-job-fail",
+        status: "COMPLETED",
+        output: {
+          practice_asr_contract_version: 2,
+          target_text: "你好。",
+          text: "你好。",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [{ text: "你", start: 0.1, end: 0.3 }, { text: "好", start: 0.3, end: 0.6 }],
+          segments: [],
+          model_transcription: {
+            text: "你好。",
+            model: "funasr/paraformer-zh",
+            timestamp_granularities: ["word"],
+            words: [{ text: "你", start: 0.0, end: 0.25 }, { text: "好", start: 0.25, end: 0.5 }],
+            segments: [],
+          },
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      // word_end_index is out of range for a 2-word ASR result: an invalid LLM response.
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 100,
+          overall_comment: "ok",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "你好。",
+              score: 100,
+              comment: "ok",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 99 },
+              attempt: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+            },
+          ],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "zh-CN");
+  form.append("target_text", "你好。");
+  form.append("comparison_model", "gpt-5.6-terra");
+
+  const submitted = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  assert.equal(submitted.status, 202);
+
+  const completed = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs/practice-llm-job-fail"),
+    env,
+  );
+  const snapshot = await completed.json();
+
+  assert.equal(completed.status, 200);
+  assert.equal(snapshot.status, "failed");
+  assert.equal(snapshot.current_stage.label, "比較結果を作成できませんでした");
+  assert.equal(snapshot.error.code, "practice_llm_failed");
+  assert.equal(snapshot.error.stage, "validate_response");
+  assert.equal(snapshot.error.message, "比較結果を作成できませんでした。もう一度お試しください。");
+  assert.equal(snapshot.result, null);
+});
+
 test("Cloudflare worker explains when the RunPod practice image predates the dual-audio contract", async () => {
   const env = fakeEnv(async (url) => {
     if (url === "https://api.runpod.ai/v2/endpoint/status/outdated-practice-job") {

@@ -6,6 +6,7 @@ const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OU
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
+const PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX = "practice-attempt-llm-options:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
@@ -123,6 +124,382 @@ export class PracticeAlignmentInputError extends Error {
   }
 }
 
+export class PracticeLlmError extends Error {
+  constructor(detail, { stage }) {
+    super(detail);
+    this.name = "PracticeLlmError";
+    this.detail = detail;
+    this.stage = stage;
+    this.fallback_to_legacy = false;
+  }
+}
+
+export const PRACTICE_LLM_COMPARISON_MODELS = ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.4-nano"];
+const DEFAULT_PRACTICE_COMPARISON_MODEL = PRACTICE_LLM_COMPARISON_MODELS[0];
+const DEFAULT_PLAYBACK_PADDING_SECONDS = 0.1;
+const PRACTICE_COMPARISON_ERROR_MESSAGE = "比較結果を作成できませんでした。もう一度お試しください。";
+
+// この文言はローカルFastAPI版(src/mo_speech/practice_llm.py)と同一に保つ。
+export const PRACTICE_LLM_PROMPT = `あなたは発音練習アプリの比較・採点処理です。入力された目標文、お手本ASR、復唱ASRだけを根拠に、UI表示とフレーズ比較再生にそのまま使える完成JSONを返してください。
+
+規則:
+- 目標文を意味と文法のまとまりでフレーズ分割する。フレーズのtarget_textを順に連結すると、空白・句読点を含めて元のtarget_textと完全一致すること。
+- reference_asr.wordsとattempt_asr.wordsの配列位置を使う。word_start_indexは0始まりinclusive、word_end_indexはexclusive。
+- 対応できる連続範囲だけをassignedまたはpartialにする。対応できない場合はmissingとし、word_start_indexとword_end_indexをnullにする。
+- 復唱が目標と異なる場合も、誤って発話した語を含む対応発話全体を選ぶ。目標と一致した末尾だけへ狭めない。
+- 一致文字列と再生時刻はアプリ側が選択した位置番号から直接計算するため、返す必要はない。word_start_index/word_end_indexで対応範囲を正確に選ぶことだけに集中する。
+- scoreとoverall_scoreは0から100の整数。ASRで認識された内容と目標文の一致を評価する。声調や発音などASR文字列から分からないことを断定しない。
+- commentとoverall_commentは日本語で簡潔に書く。
+- アプリ側で意味判断や採点を作り直す必要がない完成結果を返す。
+- schema以外の説明を出力しない。
+`;
+
+function practiceLlmRangeSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["status", "word_start_index", "word_end_index"],
+    properties: {
+      status: { type: "string", enum: ["assigned", "partial", "missing"] },
+      word_start_index: { type: ["integer", "null"] },
+      word_end_index: { type: ["integer", "null"] },
+    },
+  };
+}
+
+const PRACTICE_LLM_RESULT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["schema_version", "overall_score", "overall_comment", "phrases"],
+  properties: {
+    schema_version: { type: "integer", const: 1 },
+    overall_score: { type: "integer", minimum: 0, maximum: 100 },
+    overall_comment: { type: "string" },
+    phrases: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["phrase_index", "target_text", "score", "comment", "reference", "attempt"],
+        properties: {
+          phrase_index: { type: "integer", minimum: 0 },
+          target_text: { type: "string", minLength: 1 },
+          score: { type: "integer", minimum: 0, maximum: 100 },
+          comment: { type: "string" },
+          reference: practiceLlmRangeSchema(),
+          attempt: practiceLlmRangeSchema(),
+        },
+      },
+    },
+  },
+};
+
+export function supportedPracticeComparisonModel(value) {
+  const model = String(value || DEFAULT_PRACTICE_COMPARISON_MODEL).trim();
+  if (!PRACTICE_LLM_COMPARISON_MODELS.includes(model)) {
+    throw httpError(400, "unsupported practice comparison model");
+  }
+  return model;
+}
+
+export function validatePlaybackPaddingSeconds(value) {
+  const trimmed = String(value ?? "").trim();
+  const padding = trimmed === "" ? DEFAULT_PLAYBACK_PADDING_SECONDS : Number(value);
+  if (!Number.isFinite(padding)) {
+    throw httpError(400, "playback padding must be a number");
+  }
+  const roundedSteps = Math.round(padding / 0.05);
+  if (padding < 0 || padding > 0.5 || Math.abs(padding - roundedSteps * 0.05) > 1e-9) {
+    throw httpError(400, "playback padding must be between 0.00 and 0.50 in 0.05 increments");
+  }
+  return Math.round(padding * 100) / 100;
+}
+
+export function buildPracticeLlmInput({
+  targetLanguage,
+  targetText,
+  paddingSeconds,
+  referenceAudioDuration,
+  attemptAudioDuration,
+  referenceAsr,
+  attemptAsr,
+}) {
+  return {
+    target_language: targetLanguage,
+    target_text: targetText,
+    padding_seconds: paddingSeconds,
+    reference_audio_duration: referenceAudioDuration,
+    attempt_audio_duration: attemptAudioDuration,
+    reference_asr: referenceAsr,
+    attempt_asr: attemptAsr,
+  };
+}
+
+function practiceLlmRequiredFiniteNumber(value, label) {
+  if (typeof value === "boolean") {
+    throw new PracticeLlmError(`${label} is invalid`, { stage: "validate_response" });
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new PracticeLlmError(`${label} is invalid`, { stage: "validate_response" });
+  }
+  return number;
+}
+
+function practiceLlmValidateScore(value, label) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 100) {
+    throw new PracticeLlmError(`${label} is invalid`, { stage: "validate_response" });
+  }
+}
+
+function practiceLlmValidateRange(value, asrValue, { duration, padding, label }) {
+  if (!value || typeof value !== "object" || !asrValue || typeof asrValue !== "object") {
+    throw new PracticeLlmError(`${label} range is invalid`, { stage: "validate_response" });
+  }
+  const words = asrValue.words;
+  if (!Array.isArray(words)) {
+    throw new PracticeLlmError(`${label} words are invalid`, { stage: "validate_response" });
+  }
+  const status = value.status;
+  const startIndex = value.word_start_index;
+  const endIndex = value.word_end_index;
+  if (status === "missing") {
+    if ((startIndex ?? null) !== null || (endIndex ?? null) !== null) {
+      throw new PracticeLlmError(`${label} missing range has word indexes`, { stage: "validate_response" });
+    }
+    value.matched_text = "";
+    value.start = null;
+    value.end = null;
+    value.playback_start = null;
+    value.playback_end = null;
+    return;
+  }
+  if (status !== "assigned" && status !== "partial") {
+    throw new PracticeLlmError(`${label} status is invalid`, { stage: "validate_response" });
+  }
+  if (
+    typeof startIndex !== "number" ||
+    !Number.isInteger(startIndex) ||
+    typeof endIndex !== "number" ||
+    !Number.isInteger(endIndex) ||
+    startIndex < 0 ||
+    endIndex <= startIndex ||
+    endIndex > words.length
+  ) {
+    throw new PracticeLlmError(`${label} word range is invalid`, { stage: "validate_response" });
+  }
+  const selected = words.slice(startIndex, endIndex);
+  if (!selected.length || selected.some((word) => !word || typeof word !== "object")) {
+    throw new PracticeLlmError(`${label} selected words are invalid`, { stage: "validate_response" });
+  }
+
+  // start/end/playback_start/playback_endはword_start_index/word_end_indexが決まれば
+  // 一意に定まる値なので、LLMには転記させずここで直接計算する。ローカルFastAPI版
+  // (practice_llm.py)と同じ設計。詳細はdocs/speech-translation/ROADMAP.mdを参照。
+  const start = practiceLlmRequiredFiniteNumber(selected[0].start, `${label} word start`);
+  const end = practiceLlmRequiredFiniteNumber(selected[selected.length - 1].end, `${label} word end`);
+  const audioDuration = practiceLlmRequiredFiniteNumber(duration, `${label} audio duration`);
+  const playbackStart = Math.max(0, start - padding);
+  const playbackEnd = Math.min(audioDuration, end + padding);
+  if (playbackEnd <= playbackStart) {
+    throw new PracticeLlmError(`${label} playback range is empty`, { stage: "validate_response" });
+  }
+
+  value.matched_text = selected.map((word) => String(word.text || "")).join("");
+  value.start = start;
+  value.end = end;
+  value.playback_start = playbackStart;
+  value.playback_end = playbackEnd;
+}
+
+export function validatePracticeLlmResult(value, inputPayload) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new PracticeLlmError("response is not an object", { stage: "validate_response" });
+  }
+  const result = structuredClone(value);
+  if (result.schema_version !== 1) {
+    throw new PracticeLlmError("unsupported schema_version", { stage: "validate_response" });
+  }
+  practiceLlmValidateScore(result.overall_score, "overall_score");
+  if (typeof result.overall_comment !== "string") {
+    throw new PracticeLlmError("overall_comment is invalid", { stage: "validate_response" });
+  }
+  const phrases = result.phrases;
+  if (!Array.isArray(phrases) || phrases.length === 0) {
+    throw new PracticeLlmError("phrases is empty", { stage: "validate_response" });
+  }
+  const indices = phrases.map((phrase) => (phrase && typeof phrase === "object" ? phrase.phrase_index : null));
+  const expectedIndices = phrases.map((_, index) => index);
+  if (JSON.stringify(indices) !== JSON.stringify(expectedIndices)) {
+    throw new PracticeLlmError("phrase_index must be sequential", { stage: "validate_response" });
+  }
+  const reconstructed = phrases.map((phrase) => String(phrase?.target_text || "")).join("");
+  if (reconstructed !== String(inputPayload?.target_text || "")) {
+    throw new PracticeLlmError("target phrases do not reconstruct target_text", { stage: "validate_response" });
+  }
+
+  const padding = practiceLlmRequiredFiniteNumber(inputPayload?.padding_seconds, "padding_seconds");
+  for (const phrase of phrases) {
+    if (!phrase || typeof phrase !== "object" || !String(phrase.target_text || "")) {
+      throw new PracticeLlmError("phrase is invalid", { stage: "validate_response" });
+    }
+    practiceLlmValidateScore(phrase.score, "phrase score");
+    if (typeof phrase.comment !== "string") {
+      throw new PracticeLlmError("phrase comment is invalid", { stage: "validate_response" });
+    }
+    practiceLlmValidateRange(phrase.reference, inputPayload?.reference_asr, {
+      duration: inputPayload?.reference_audio_duration,
+      padding,
+      label: "reference",
+    });
+    practiceLlmValidateRange(phrase.attempt, inputPayload?.attempt_asr, {
+      duration: inputPayload?.attempt_audio_duration,
+      padding,
+      label: "attempt",
+    });
+  }
+  return result;
+}
+
+function practiceLlmPlaybackAlignment(phrases, side) {
+  const playbackPhrases = phrases.map((phrase) => {
+    const selected = phrase?.[side];
+    if (!selected || typeof selected !== "object") {
+      throw new PracticeLlmError(`${side} phrase is invalid`, { stage: "validate_response" });
+    }
+    return {
+      index: phrase.phrase_index,
+      target_text: phrase.target_text,
+      available: selected.status !== "missing",
+      audio_start: selected.playback_start ?? null,
+      audio_end: selected.playback_end ?? null,
+      matched_text: selected.matched_text,
+      status: selected.status,
+    };
+  });
+  const playable = playbackPhrases.filter((phrase) => phrase.available === true).length;
+  const complete = playable === playbackPhrases.length;
+  return {
+    alignment_contract_version: 2,
+    outcome: "evaluated",
+    available: playable > 0,
+    target_phrase_count: playbackPhrases.length,
+    playable_phrase_count: playable,
+    all_phrases_playable: complete,
+    complete,
+    phrases: playbackPhrases,
+  };
+}
+
+export function comparisonAlignmentsFromLlmResult(result) {
+  const phrases = result.phrases;
+  if (!Array.isArray(phrases)) {
+    throw new PracticeLlmError("phrases is invalid", { stage: "validate_response" });
+  }
+  return [practiceLlmPlaybackAlignment(phrases, "attempt"), practiceLlmPlaybackAlignment(phrases, "reference")];
+}
+
+export function practiceAudioDurationSeconds(transcription) {
+  const duration = Number(transcription?.duration);
+  if (Number.isFinite(duration) && duration > 0) {
+    return duration;
+  }
+  const words = Array.isArray(transcription?.words) ? transcription.words : [];
+  let max = 0;
+  for (const word of words) {
+    const end = Number(word?.end);
+    if (Number.isFinite(end) && end > max) {
+      max = end;
+    }
+  }
+  return max;
+}
+
+export async function callPracticeLlmService(env, { model, inputPayload }) {
+  const selectedModel = supportedPracticeComparisonModel(model);
+  let stage = "call_api";
+  try {
+    const response = await runtimeFetch(env)("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        instructions: PRACTICE_LLM_PROMPT,
+        input: JSON.stringify(inputPayload),
+        text: {
+          format: {
+            type: "json_schema",
+            name: "speakloop_practice_comparison",
+            strict: true,
+            schema: PRACTICE_LLM_RESULT_SCHEMA,
+          },
+        },
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new PracticeLlmError(
+        body?.error?.message || body?.error || `OpenAI request failed: ${response.status}`,
+        { stage },
+      );
+    }
+    const outputText = textFromOpenAiResponse(body);
+    stage = "parse_response";
+    let parsed;
+    try {
+      parsed = JSON.parse(outputText);
+    } catch (error) {
+      throw new PracticeLlmError(`invalid JSON from model: ${errorMessage(error)}`, { stage });
+    }
+    stage = "validate_response";
+    const result = validatePracticeLlmResult(parsed, inputPayload);
+    return { result };
+  } catch (error) {
+    if (error instanceof PracticeLlmError) {
+      throw error;
+    }
+    throw new PracticeLlmError(errorMessage(error), { stage });
+  }
+}
+
+function practiceLlmErrorEnvelope(error) {
+  return {
+    error: {
+      code: "practice_llm_failed",
+      stage: error.stage,
+      message: PRACTICE_COMPARISON_ERROR_MESSAGE,
+      retryable: true,
+      fallback_to_legacy: false,
+    },
+  };
+}
+
+async function savePracticeAttemptLlmOptions(env, jobId, options) {
+  if (!jobId) {
+    return;
+  }
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(`${PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX}${jobId}`, JSON.stringify(options), {
+      expirationTtl: numberFromEnv(env.CLOUDFLARE_PRACTICE_LLM_OPTIONS_TTL_SECONDS, 900),
+    });
+  } else {
+    ephemeralPracticeAttemptLlmOptions.set(jobId, options);
+  }
+}
+
+async function readPracticeAttemptLlmOptions(env, jobId) {
+  const kv = stateKv(env);
+  if (kv) {
+    return kvGetJson(kv, `${PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX}${jobId}`, null);
+  }
+  return ephemeralPracticeAttemptLlmOptions.get(jobId) || null;
+}
+
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
   joke_text: "",
@@ -183,6 +560,7 @@ const DEFAULT_PUBLIC_SAMPLE_AUDIOS = {
 let ephemeralUserSettings = null;
 let ephemeralPublicAccessSettings = null;
 const ephemeralTranslationJobs = new Map();
+const ephemeralPracticeAttemptLlmOptions = new Map();
 const ephemeralPublicUsage = new Map();
 
 export default {
@@ -788,6 +1166,9 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (error instanceof PracticeAlignmentError) {
       return jsonResponse(practiceAlignmentErrorEnvelope(error), { status: 502 });
+    }
+    if (error instanceof PracticeLlmError) {
+      return jsonResponse(practiceLlmErrorEnvelope(error), { status: 502 });
     }
     return jsonResponse({ detail: errorMessage(error) }, { status: error.status || 500 });
   }
@@ -2689,6 +3070,13 @@ async function createPracticeAttemptJob(request, env) {
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
   validatePracticeTargetForAlignment(targetText);
+  const comparisonModelRaw = stringFormValue(form, "comparison_model", "");
+  const playbackPaddingRaw = stringFormValue(form, "playback_padding_seconds", "");
+  const useLlm = Boolean(comparisonModelRaw.trim() || playbackPaddingRaw.trim());
+  const comparisonModel = useLlm ? supportedPracticeComparisonModel(comparisonModelRaw) : "";
+  const playbackPaddingSeconds = useLlm
+    ? validatePlaybackPaddingSeconds(playbackPaddingRaw)
+    : DEFAULT_PLAYBACK_PADDING_SECONDS;
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
     textChars: targetText.length,
@@ -2707,6 +3095,13 @@ async function createPracticeAttemptJob(request, env) {
       model_audio_mime_type: modelAudioMimeType || "audio/wav",
       model_audio_base64: arrayBufferToBase64(modelAudioBytes),
     });
+    const jobId = String(body?.id || body?.job_id || "");
+    if (useLlm) {
+      await savePracticeAttemptLlmOptions(env, jobId, {
+        comparison_model: comparisonModel,
+        playback_padding_seconds: playbackPaddingSeconds,
+      });
+    }
     let health = null;
     if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
       try {
@@ -2715,7 +3110,7 @@ async function createPracticeAttemptJob(request, env) {
         health = null;
       }
     }
-    return practiceAttemptJobSnapshot(body, health);
+    return practiceAttemptJobSnapshot(body, health, env);
   }
 
   const started = Date.now();
@@ -2745,7 +3140,7 @@ async function createPracticeAttemptJob(request, env) {
   const totalMs = Date.now() - started;
   const modelTranscription = modelAsr.transcription;
   const attemptTranscription = attemptAsr.transcription;
-  const result = practiceAttemptComparisonResult({
+  const result = await practiceAttemptComparisonResult({
     targetLanguage,
     targetText,
     attemptTranscription: {
@@ -2757,6 +3152,9 @@ async function createPracticeAttemptJob(request, env) {
       provider: `openai-asr-${modelTranscription.model}`,
     },
     timings: { asr: attemptAsr.elapsedMs, model_asr: modelAsr.elapsedMs, total: totalMs },
+    comparisonModel,
+    playbackPaddingSeconds,
+    env,
   });
   return {
     job_id: "",
@@ -2787,10 +3185,10 @@ async function getPracticeAttemptJob(jobId, env) {
       health = null;
     }
   }
-  return practiceAttemptJobSnapshot(body, health);
+  return practiceAttemptJobSnapshot(body, health, env);
 }
 
-function practiceAttemptJobSnapshot(body, health = null) {
+async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
   const jobId = String(body?.id || body?.job_id || "");
   const status = String(body?.status || "").toUpperCase();
   const metrics = runpodPracticeMetrics(body);
@@ -2815,16 +3213,29 @@ function practiceAttemptJobSnapshot(body, health = null) {
     }
     const attemptTranscription = runpodPracticeTranscription(output);
     const modelTranscription = runpodPracticeTranscription(output.model_transcription);
+    const llmOptions = await readPracticeAttemptLlmOptions(env, jobId);
     let result;
     try {
-      result = practiceAttemptComparisonResult({
+      result = await practiceAttemptComparisonResult({
         targetLanguage: "zh-CN",
         targetText: canonicalPracticeText(output.target_text || "", "zh-CN"),
         attemptTranscription,
         modelTranscription,
         timings: output.timings_ms || {},
+        comparisonModel: llmOptions?.comparison_model || "",
+        playbackPaddingSeconds: llmOptions?.playback_padding_seconds ?? DEFAULT_PLAYBACK_PADDING_SECONDS,
+        env,
       });
     } catch (error) {
+      if (error instanceof PracticeLlmError) {
+        return failedPracticeAttemptJob(
+          jobId,
+          stages,
+          metrics,
+          practiceLlmErrorEnvelope(error).error,
+          "比較結果を作成できませんでした",
+        );
+      }
       if (!(error instanceof PracticeAlignmentError)) throw error;
       return failedPracticeAttemptJob(
         jobId,
@@ -2864,17 +3275,79 @@ function practiceAttemptJobSnapshot(body, health = null) {
   };
 }
 
-function practiceAttemptComparisonResult({
+async function practiceAttemptComparisonResult({
   targetLanguage,
   targetText,
   attemptTranscription,
   modelTranscription,
   timings = {},
+  comparisonModel = "",
+  playbackPaddingSeconds = DEFAULT_PLAYBACK_PADDING_SECONDS,
+  env = {},
 }) {
   const recognizedText = canonicalPracticeText(attemptTranscription.text || "", targetLanguage);
   const modelRecognizedText = canonicalPracticeText(modelTranscription.text || "", targetLanguage);
   const asrTimestamps = serializeAsrTimestamps(attemptTranscription);
   const modelAsrTimestamps = serializeAsrTimestamps(modelTranscription);
+
+  if (comparisonModel) {
+    const llmInput = buildPracticeLlmInput({
+      targetLanguage,
+      targetText,
+      paddingSeconds: playbackPaddingSeconds,
+      referenceAudioDuration: practiceAudioDurationSeconds(modelTranscription),
+      attemptAudioDuration: practiceAudioDurationSeconds(attemptTranscription),
+      referenceAsr: {
+        recognized_text: modelRecognizedText,
+        model: modelTranscription.model,
+        words: modelAsrTimestamps.words,
+      },
+      attemptAsr: {
+        recognized_text: recognizedText,
+        model: attemptTranscription.model,
+        words: asrTimestamps.words,
+      },
+    });
+    const compareStarted = Date.now();
+    const { result: llmResult } = await callPracticeLlmService(env, {
+      model: comparisonModel,
+      inputPayload: llmInput,
+    });
+    const [comparisonAlignment, modelComparisonAlignment] = comparisonAlignmentsFromLlmResult(llmResult);
+    const compareMs = Date.now() - compareStarted;
+    const attemptMs = Number(timings.asr || 0);
+    const modelMs = Number(timings.model_asr || 0);
+    return {
+      recording_kind: "attempt",
+      target_language: targetLanguage,
+      target_text: targetText,
+      recognized_text: recognizedText,
+      model_recognized_text: modelRecognizedText,
+      asr_model: attemptTranscription.model,
+      asr_timestamps: asrTimestamps,
+      model_asr_timestamps: modelAsrTimestamps,
+      outcome: "evaluated",
+      overall_score: llmResult.overall_score,
+      overall_comment: llmResult.overall_comment,
+      llm_comparison: llmResult,
+      comparison_alignment: comparisonAlignment,
+      model_comparison_alignment: modelComparisonAlignment,
+      comparison_model: comparisonModel,
+      playback_padding_seconds: playbackPaddingSeconds,
+      timings_ms: {
+        asr: attemptMs,
+        model_asr: modelMs,
+        compare: compareMs,
+        total: attemptMs + modelMs + compareMs,
+      },
+      providers: {
+        asr: attemptTranscription.provider,
+        model_asr: modelTranscription.provider || attemptTranscription.provider,
+        comparison: "openai-responses",
+      },
+    };
+  }
+
   const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
   let modelComparisonAlignment;
   try {
@@ -3555,6 +4028,7 @@ function transcriptionFromOpenAiJson(text, model, timestampGranularities) {
     segments: normalizedAsrTimingRows(payload.segments, "text"),
     raw_timestamp_word_count: Array.isArray(payload.words) ? payload.words.length : 0,
     raw_timestamp_segment_count: Array.isArray(payload.segments) ? payload.segments.length : 0,
+    duration: Number.isFinite(Number(payload.duration)) && Number(payload.duration) > 0 ? Number(payload.duration) : null,
   };
 }
 
