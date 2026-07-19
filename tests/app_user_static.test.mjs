@@ -122,6 +122,7 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.doesNotMatch(practiceSource, /hasPairedComparisonAlignment/);
   assert.match(practiceSource, /renderRecognizedDiff/);
   assert.match(practiceSource, /buildPracticeDiffCells/);
+  assert.match(practiceSource, /function renderLlmFeedbackText\(payload\) \{\s*renderRecognizedDiff\(payload\)/);
   assert.doesNotMatch(practiceSource, /renderPracticeGrade/);
   assert.match(practiceSource, /practice-diff-correction/);
   assert.doesNotMatch(practiceSource, /抜け:/);

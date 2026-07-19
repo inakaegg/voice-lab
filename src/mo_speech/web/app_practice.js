@@ -710,7 +710,7 @@ function renderPhraseFeedback(phrases) {
 }
 
 function renderLlmFeedbackText(payload) {
-  recognizedText.textContent = displayChineseText(payload.recognized_text || "");
+  renderRecognizedDiff(payload);
   overallComment.textContent = payload.overall_comment || "";
   renderPhraseFeedback(payload.llm_comparison?.phrases || []);
 }

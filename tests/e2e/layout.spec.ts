@@ -442,7 +442,10 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
   const repeatRecord = page.locator("#practice-repeat-record-button");
   await repeatRecord.click();
   await repeatRecord.click();
-  await expect(page.locator("#practice-recognized-text")).toHaveText("软开发者很受欢迎。");
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
+    (elements) => elements.map((element) => element.textContent || "").join(""),
+  )).toBe("软_开发者很受欢迎");
+  await expect(page.locator("#practice-recognized-text .practice-diff-correction", { hasText: "件" })).toHaveCount(1);
   await expect(page.locator("#practice-score")).toHaveText("93点");
   await expect(page.locator("#practice-overall-comment")).toHaveText("「件」の音を確認しましょう。");
   await expect(page.locator("#practice-phrase-feedback")).toContainText("「软件」の「件」が認識されませんでした。");
@@ -481,7 +484,9 @@ test("SpeakLoop switches Chinese text display without resubmitting audio", async
       node.nodeName === "RUBY" ? node.firstChild?.textContent || "" : node.textContent || ""
     ).join("")
   )).toContain("軟件開發者很受歡迎");
-  await expect(page.locator("#practice-recognized-text")).toHaveText("軟開發者很受歡迎。");
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
+    (elements) => elements.map((element) => element.textContent || "").join(""),
+  )).toBe("軟_開發者很受歡迎");
   await expect(page.locator("#practice-phrase-feedback")).toContainText("軟件開發者很受歡迎。");
   expect(recordingRequests).toBe(2);
   await assertNoHorizontalOverflow(page);
@@ -1306,7 +1311,9 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
   const technicalLog = await page.evaluate(() => JSON.stringify((window as Window & { __voiceLabTechnicalLogs?: unknown[][] }).__voiceLabTechnicalLogs || []));
   expect(technicalLog).toContain("RunPod Serverless");
   expect(technicalLog).toContain("funasr/paraformer-zh");
-  await expect(page.locator("#practice-recognized-text")).toHaveText("你哈？你今天这里？");
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
+    (elements) => elements.map((element) => element.textContent || "").join(""),
+  )).toBe("你哈_你今天这_里");
   await expect(page.locator("#practice-score")).toHaveText("80点");
   await expect(page.locator("#practice-phrase-feedback li")).toHaveCount(2);
   await expect(page.locator("#practice-play-model-button")).toContainText("一部フレーズ比較再生");

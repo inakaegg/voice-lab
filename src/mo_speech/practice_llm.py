@@ -28,12 +28,9 @@ PRACTICE_LLM_PROMPT = """\
 規則:
 - 目標文を意味と文法のまとまりでフレーズ分割する。フレーズのtarget_textを順に連結すると、空白・句読点を含めて元のtarget_textと完全一致すること。
 - reference_asr.wordsとattempt_asr.wordsの配列位置を使う。word_start_indexは0始まりinclusive、word_end_indexはexclusive。
-- 対応できる連続範囲だけをassignedまたはpartialにする。対応できない場合はmissingとし、位置番号と時刻はnull、matched_textは空文字にする。
+- 対応できる連続範囲だけをassignedまたはpartialにする。対応できない場合はmissingとし、word_start_indexとword_end_indexをnullにする。
 - 復唱が目標と異なる場合も、誤って発話した語を含む対応発話全体を選ぶ。目標と一致した末尾だけへ狭めない。
-- matched_textは選択したwordsのtextを順に連結した文字列と完全一致させる。
-- startは選択範囲の先頭word.start、endは末尾word.endを入力から正確に転記する。時刻を推測しない。
-- playback_startはmax(0, start-padding_seconds)とする。playback_endは、お手本ではmin(reference_audio_duration, end+padding_seconds)、復唱ではmin(attempt_audio_duration, end+padding_seconds)とする。小数は入力精度を保ち、必要以上に丸めない。
-- お手本と復唱の両方へ同じpadding_secondsを使う。
+- 一致文字列と再生時刻はアプリ側が選択した位置番号から直接計算するため、返す必要はない。word_start_index/word_end_indexで対応範囲を正確に選ぶことだけに集中する。
 - scoreとoverall_scoreは0から100の整数。ASRで認識された内容と目標文の一致を評価する。声調や発音などASR文字列から分からないことを断定しない。
 - commentとoverall_commentは日本語で簡潔に書く。
 - アプリ側で意味判断や採点を作り直す必要がない完成結果を返す。
@@ -45,25 +42,11 @@ def _range_schema() -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": [
-            "status",
-            "word_start_index",
-            "word_end_index",
-            "matched_text",
-            "start",
-            "end",
-            "playback_start",
-            "playback_end",
-        ],
+        "required": ["status", "word_start_index", "word_end_index"],
         "properties": {
             "status": {"type": "string", "enum": ["assigned", "partial", "missing"]},
             "word_start_index": {"type": ["integer", "null"]},
             "word_end_index": {"type": ["integer", "null"]},
-            "matched_text": {"type": "string"},
-            "start": {"type": ["number", "null"]},
-            "end": {"type": ["number", "null"]},
-            "playback_start": {"type": ["number", "null"]},
-            "playback_end": {"type": ["number", "null"]},
         },
     }
 
@@ -261,24 +244,20 @@ def _validate_range(
     if not isinstance(words, list):
         raise PracticeLlmError(f"{label} words are invalid", stage="validate_response")
     status = value.get("status")
-    timed_keys = (
-        "word_start_index",
-        "word_end_index",
-        "start",
-        "end",
-        "playback_start",
-        "playback_end",
-    )
+    start_index = value.get("word_start_index")
+    end_index = value.get("word_end_index")
     if status == "missing":
-        if any(value.get(key) is not None for key in timed_keys):
-            raise PracticeLlmError(f"{label} missing range has values", stage="validate_response")
+        if start_index is not None or end_index is not None:
+            raise PracticeLlmError(f"{label} missing range has word indexes", stage="validate_response")
         value["matched_text"] = ""
+        value["start"] = None
+        value["end"] = None
+        value["playback_start"] = None
+        value["playback_end"] = None
         return
     if status not in {"assigned", "partial"}:
         raise PracticeLlmError(f"{label} status is invalid", stage="validate_response")
 
-    start_index = value.get("word_start_index")
-    end_index = value.get("word_end_index")
     if (
         isinstance(start_index, bool)
         or isinstance(end_index, bool)
@@ -292,24 +271,23 @@ def _validate_range(
     selected = words[start_index:end_index]
     if not selected or any(not isinstance(word, dict) for word in selected):
         raise PracticeLlmError(f"{label} selected words are invalid", stage="validate_response")
-    value["matched_text"] = "".join(str(word.get("text") or "") for word in selected)
 
-    expected_start = _required_finite_number(selected[0].get("start"), f"{label} word start")
-    expected_end = _required_finite_number(selected[-1].get("end"), f"{label} word end")
+    # start/end/playback_start/playback_end はword_start_index/word_end_indexが決まれば
+    # 一意に定まる値なので、LLMには転記させずここで直接計算する。LLMによる四則演算の
+    # 取りこぼしで比較結果全体が失敗する事態を避けるための設計。
+    start = _required_finite_number(selected[0].get("start"), f"{label} word start")
+    end = _required_finite_number(selected[-1].get("end"), f"{label} word end")
     audio_duration = _required_finite_number(duration, f"{label} audio duration")
-    expected_playback_start = max(0.0, expected_start - padding)
-    expected_playback_end = min(audio_duration, expected_end + padding)
-    for field, expected in (
-        ("start", expected_start),
-        ("end", expected_end),
-        ("playback_start", expected_playback_start),
-        ("playback_end", expected_playback_end),
-    ):
-        actual = _required_finite_number(value.get(field), f"{label} {field}")
-        if not math.isclose(actual, expected, abs_tol=1e-6):
-            raise PracticeLlmError(f"{label} {field} differs from input", stage="validate_response")
-    if expected_playback_end <= expected_playback_start:
+    playback_start = max(0.0, start - padding)
+    playback_end = min(audio_duration, end + padding)
+    if playback_end <= playback_start:
         raise PracticeLlmError(f"{label} playback range is empty", stage="validate_response")
+
+    value["matched_text"] = "".join(str(word.get("text") or "") for word in selected)
+    value["start"] = start
+    value["end"] = end
+    value["playback_start"] = playback_start
+    value["playback_end"] = playback_end
 
 
 def _required_finite_number(value: object, label: str) -> float:

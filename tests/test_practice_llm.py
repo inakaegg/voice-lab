@@ -31,11 +31,47 @@ def load_fixture() -> dict[str, object]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
-def test_prompt_requires_complete_wrong_utterance_and_complete_timestamps() -> None:
+def _assert_deep_close(actual: object, expected: object) -> None:
+    """Compare recursively, tolerating float rounding from end+padding arithmetic."""
+    if isinstance(expected, float):
+        assert actual == pytest.approx(expected, abs=1e-6)
+    elif isinstance(expected, dict):
+        assert isinstance(actual, dict)
+        assert actual.keys() == expected.keys()
+        for key in expected:
+            _assert_deep_close(actual[key], expected[key])
+    elif isinstance(expected, list):
+        assert isinstance(actual, list)
+        assert len(actual) == len(expected)
+        for actual_item, expected_item in zip(actual, expected):
+            _assert_deep_close(actual_item, expected_item)
+    else:
+        assert actual == expected
+
+
+def _strip_llm_supplied_timestamps(response: dict[str, object]) -> dict[str, object]:
+    """Shape a fixture's evidence response like what the model now returns.
+
+    The fixture records a real, reviewed request/response pair from before this
+    change, when the LLM still echoed matched_text/start/end/playback_start/
+    playback_end. The app now computes those from word_start_index/word_end_index
+    instead, so tests that simulate a model response strip them here.
+    """
+    stripped = copy.deepcopy(response)
+    for phrase in stripped["phrases"]:
+        for side in ("reference", "attempt"):
+            range_value = phrase[side]
+            for key in ("matched_text", "start", "end", "playback_start", "playback_end"):
+                range_value.pop(key, None)
+    return stripped
+
+
+def test_prompt_requires_complete_wrong_utterance_and_delegates_timestamps_to_app() -> None:
     assert "誤って発話した語を含む対応発話全体" in PRACTICE_LLM_PROMPT
     assert "一致した末尾だけへ狭めない" in PRACTICE_LLM_PROMPT
-    assert "start" in PRACTICE_LLM_PROMPT
-    assert "playback_start" in PRACTICE_LLM_PROMPT
+    assert "word_start_index" in PRACTICE_LLM_PROMPT
+    assert "返す必要はない" in PRACTICE_LLM_PROMPT
+    assert "playback_start" not in PRACTICE_LLM_PROMPT
     assert "アプリ側で意味判断や採点を作り直す必要がない完成結果" in PRACTICE_LLM_PROMPT
 
 
@@ -58,60 +94,68 @@ def test_model_and_padding_settings_are_restricted() -> None:
             validate_playback_padding_seconds(value)
 
 
-def test_reviewed_real_asr_pair_validates_without_rewriting_llm_values() -> None:
+def test_reviewed_real_asr_pair_computes_timestamps_from_word_indexes() -> None:
     fixture = load_fixture()
-    input_payload = fixture["input"]
-    llm_result = fixture["llm_response"]
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
 
-    validated = validate_practice_llm_result(llm_result, input_payload)
+    validated = validate_practice_llm_result(model_output, fixture["input"])
 
-    assert validated == llm_result
     assert validated["overall_score"] == 59
-    assert validated["phrases"][3]["attempt"] == {
-        "status": "partial",
-        "word_start_index": 17,
-        "word_end_index": 24,
-        "matched_text": "你就像咱妈样呢",
-        "start": 8.459,
-        "end": 10.289,
-        "playback_start": 8.359,
-        "playback_end": 10.26,
-    }
+    # Recomputed purely from word_start_index/word_end_index must reproduce the
+    # same numbers that were previously observed as correct in the real session.
+    _assert_deep_close(validated["phrases"][3]["attempt"], fixture["llm_response"]["phrases"][3]["attempt"])
+    _assert_deep_close(
+        validated["phrases"][3]["attempt"],
+        {
+            "status": "partial",
+            "word_start_index": 17,
+            "word_end_index": 24,
+            "matched_text": "你就像咱妈样呢",
+            "start": 8.459,
+            "end": 10.289,
+            "playback_start": 8.359,
+            "playback_end": 10.26,
+        },
+    )
 
 
-def test_matched_text_is_rebuilt_from_llm_word_indexes() -> None:
+def test_matched_text_from_llm_is_ignored_even_if_present() -> None:
     fixture = load_fixture()
-    result = copy.deepcopy(fixture["llm_response"])
-    raw_matched_text = "位置番号と無関係な文字列"
-    result["phrases"][0]["reference"]["matched_text"] = raw_matched_text
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    model_output["phrases"][0]["reference"]["matched_text"] = "位置番号と無関係な文字列"
 
-    validated = validate_practice_llm_result(result, fixture["input"])
+    validated = validate_practice_llm_result(model_output, fixture["input"])
 
-    assert result["phrases"][0]["reference"]["matched_text"] == raw_matched_text
     assert validated["phrases"][0]["reference"]["matched_text"] == "你好"
 
 
-def test_missing_range_ignores_llm_matched_text() -> None:
+def test_missing_range_computes_empty_matched_text_and_null_timestamps() -> None:
     fixture = load_fixture()
-    result = copy.deepcopy(fixture["llm_response"])
-    missing = result["phrases"][0]["reference"]
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    missing = model_output["phrases"][0]["reference"]
     missing.update(
         {
             "status": "missing",
             "word_start_index": None,
             "word_end_index": None,
+            # Stray fields the model has no schema slot for anymore; must be ignored.
             "matched_text": "位置番号がない場合の誤った文字列",
-            "start": None,
-            "end": None,
-            "playback_start": None,
-            "playback_end": None,
+            "start": 1.0,
         }
     )
 
-    validated = validate_practice_llm_result(result, fixture["input"])
+    validated = validate_practice_llm_result(model_output, fixture["input"])
 
-    assert missing["matched_text"] == "位置番号がない場合の誤った文字列"
-    assert validated["phrases"][0]["reference"]["matched_text"] == ""
+    assert validated["phrases"][0]["reference"] == {
+        "status": "missing",
+        "word_start_index": None,
+        "word_end_index": None,
+        "matched_text": "",
+        "start": None,
+        "end": None,
+        "playback_start": None,
+        "playback_end": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -122,20 +166,19 @@ def test_missing_range_ignores_llm_matched_text() -> None:
         (("phrases", 2, "attempt", "word_end_index"), 9),
         (("phrases", 3, "phrase_index"), 2),
         (("phrases", 1, "target_text"), "花了三个多小时"),
-        (("phrases", 3, "attempt", "start"), 9.719),
-        (("phrases", 3, "attempt", "playback_start"), 9.619),
+        (("phrases", 0, "reference", "status"), "unknown"),
     ],
 )
 def test_invalid_llm_result_is_rejected_without_legacy_fallback(path, value) -> None:
     fixture = load_fixture()
-    result = copy.deepcopy(fixture["llm_response"])
-    target = result
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    target = model_output
     for part in path[:-1]:
         target = target[part]
     target[path[-1]] = value
 
     with pytest.raises(PracticeLlmError) as raised:
-        validate_practice_llm_result(result, fixture["input"])
+        validate_practice_llm_result(model_output, fixture["input"])
 
     assert raised.value.stage == "validate_response"
     assert raised.value.fallback_to_legacy is False
@@ -143,9 +186,12 @@ def test_invalid_llm_result_is_rejected_without_legacy_fallback(path, value) -> 
 
 def test_llm_result_is_exposed_to_existing_phrase_playback_without_changing_times() -> None:
     fixture = load_fixture()
-    result = fixture["llm_response"]
+    validated = validate_practice_llm_result(
+        _strip_llm_supplied_timestamps(fixture["llm_response"]),
+        fixture["input"],
+    )
 
-    attempt, reference = comparison_alignments_from_llm_result(result)
+    attempt, reference = comparison_alignments_from_llm_result(validated)
 
     assert attempt["target_phrase_count"] == 4
     assert attempt["all_phrases_playable"] is True
@@ -183,7 +229,8 @@ class FakeResponses:
 
 def test_service_sends_strict_schema_and_writes_a_complete_diagnostic_log(tmp_path) -> None:
     fixture = load_fixture()
-    responses = FakeResponses(fixture["llm_response"])
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    responses = FakeResponses(model_output)
     service = PracticeLlmService(
         client=SimpleNamespace(responses=responses),
         log_dir=tmp_path,
@@ -206,7 +253,10 @@ def test_service_sends_strict_schema_and_writes_a_complete_diagnostic_log(tmp_pa
     assert call["instructions"] == PRACTICE_LLM_PROMPT
     assert call["text"]["format"]["type"] == "json_schema"
     assert call["text"]["format"]["strict"] is True
-    assert evaluated.result == fixture["llm_response"]
+    # The service reconstructs matched_text/start/end/playback_* from word
+    # indexes, so the final result matches the full (pre-strip) fixture even
+    # though the simulated model only returned status/word_start_index/word_end_index.
+    _assert_deep_close(evaluated.result, fixture["llm_response"])
     assert evaluated.usage["total_tokens"] == 150
     assert evaluated.estimated_cost_usd == pytest.approx(0.000564)
 
@@ -215,15 +265,15 @@ def test_service_sends_strict_schema_and_writes_a_complete_diagnostic_log(tmp_pa
     assert log["status"] == "succeeded"
     assert log["request"]["prompt"] == PRACTICE_LLM_PROMPT
     assert log["request"]["input"] == fixture["input"]
-    assert log["response"]["parsed"] == fixture["llm_response"]
-    assert log["final_result"] == fixture["llm_response"]
+    assert log["response"]["parsed"] == model_output
+    _assert_deep_close(log["final_result"], fixture["llm_response"])
     assert log["billing"]["estimated_cost_usd"] == pytest.approx(0.000564)
     assert "api_key" not in json.dumps(log).lower()
 
 
-def test_service_logs_raw_matched_text_separately_from_final_result(tmp_path) -> None:
+def test_service_ignores_a_stray_matched_text_field_from_the_model(tmp_path) -> None:
     fixture = load_fixture()
-    raw_result = copy.deepcopy(fixture["llm_response"])
+    raw_result = _strip_llm_supplied_timestamps(fixture["llm_response"])
     raw_result["phrases"][0]["reference"]["matched_text"] = "LLMが誤記した文字列"
     responses = FakeResponses(raw_result)
     service = PracticeLlmService(
@@ -246,8 +296,8 @@ def test_service_logs_raw_matched_text_separately_from_final_result(tmp_path) ->
 
 def test_service_keeps_the_llm_return_and_usage_in_a_validation_failure_log(tmp_path) -> None:
     fixture = load_fixture()
-    invalid = copy.deepcopy(fixture["llm_response"])
-    invalid["phrases"][0]["attempt"]["start"] = 99.0
+    invalid = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    invalid["phrases"][0]["attempt"]["word_start_index"] = 999
     responses = FakeResponses(invalid)
     service = PracticeLlmService(
         client=SimpleNamespace(responses=responses),
