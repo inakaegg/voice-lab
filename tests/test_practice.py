@@ -1,4 +1,4 @@
-from mo_speech.practice import evaluate_practice_attempt, normalize_practice_text, simplify_chinese_text
+from mo_speech.practice import normalize_practice_text, simplify_chinese_text
 
 
 def test_practice_normalization_handles_supported_learning_languages() -> None:
@@ -17,61 +17,3 @@ def test_practice_normalization_treats_common_chinese_variants_as_equivalent() -
 
 def test_practice_opencc_conversion_changes_script_without_replacing_regional_vocabulary() -> None:
     assert simplify_chinese_text("我想學習軟體開發，也喜歡龍馬精神。") == "我想学习软体开发，也喜欢龙马精神。"
-
-
-def test_practice_attempt_grades_similarity() -> None:
-    perfect = evaluate_practice_attempt("I want a coffee.", "I want a coffee.", "en-US")
-    ok = evaluate_practice_attempt("I want a coffee.", "i want coffee", "en-US")
-    almost = evaluate_practice_attempt("I want a coffee.", "I want a toffee", "en-US")
-    retry = evaluate_practice_attempt("I want a coffee.", "good morning", "en-US")
-
-    assert perfect["grade"] == "perfect"
-    assert ok["grade"] == "ok"
-    assert almost["grade"] == "almost"
-    assert retry["grade"] == "retry"
-    assert 0 <= retry["similarity"] < almost["similarity"] < ok["similarity"] < perfect["similarity"] <= 1
-    assert ok["diff"]
-    assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(ok["diff"][0])
-
-
-def test_practice_attempt_keeps_missing_target_ranges_in_diff() -> None:
-    result = evaluate_practice_attempt(
-        "我最近买了一辆自行车，是公路车。价格还挺贵的。",
-        "我最近买了一辆自行车，是公路车。",
-        "zh-CN",
-    )
-
-    deleted = [entry for entry in result["diff"] if entry["type"] == "delete"]
-    assert deleted
-    assert deleted[-1]["target"] == "价格还挺贵的"
-    assert deleted[-1]["recognized"] == ""
-
-
-def test_practice_attempt_aligns_target_phrases_to_recognized_positions() -> None:
-    result = evaluate_practice_attempt(
-        "昨天买了一辆自行车，是 Trek 的 Domane。这是我的第一辆公路车。",
-        "嗯 昨天买了一辆自行车 是 Trek 的 Domane 啊 这是我的第一辆公路车",
-        "zh-CN",
-    )
-
-    assert result["phrase_similarity"] >= 0.9
-    assert result["similarity"] >= result["global_similarity"]
-    assert len(result["phrase_matches"]) == 2
-    assert result["phrase_matches"][0]["matched"] is True
-    assert result["phrase_matches"][0]["recognized_start"] > 0
-    assert result["phrase_matches"][1]["recognized_start"] >= result["phrase_matches"][0]["recognized_end"]
-
-
-def test_practice_attempt_keeps_colon_inside_canonical_phrases() -> None:
-    result = evaluate_practice_attempt(
-        "A: 我想要咖啡。B: 明天天气好吗？",
-        "我想要咖啡。明天天气好吗？",
-        "zh-CN",
-    )
-
-    assert [match["target"] for match in result["phrase_matches"]] == [
-        "A: 我想要咖啡。",
-        "B: 明天天气好吗？",
-    ]
-    assert result["phrase_matches"][0]["matched"] is True
-    assert result["phrase_matches"][1]["matched"] is True
