@@ -1,5 +1,6 @@
 _ai/
 tmp/
+.worktrees/
 
 # Local model/runtime caches must stay outside git.
 models/
