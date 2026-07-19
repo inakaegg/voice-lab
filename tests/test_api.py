@@ -335,6 +335,58 @@ def test_practice_prompt_job_reports_asr_translation_and_tts_models() -> None:
     assert completed.json()["result"]["target_text"] == "Hello."
 
 
+def test_practice_attempt_job_reuses_cached_model_asr_across_retries() -> None:
+    class CountingAsr:
+        name = "counting-asr"
+
+        def __init__(self) -> None:
+            self.calls_by_content: dict[bytes, int] = {}
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            content = audio_path.read_bytes()
+            self.calls_by_content[content] = self.calls_by_content.get(content, 0) + 1
+            if content == b"model audio":
+                return AsrTranscription(
+                    text="Please close the window.",
+                    model="whisper-1",
+                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(
+                text="Please close the door.",
+                model="whisper-1",
+                words=[{"text": "Please close the door", "start": 0.1, "end": 1.2}],
+                timestamp_granularities=["word"],
+            )
+
+    asr = CountingAsr()
+    pipeline = SpeechTranslationPipeline(
+        asr=asr,
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    for attempt_audio in (b"attempt take one", b"attempt take two"):
+        response = client.post(
+            "/api/practice/attempt-jobs",
+            data={"target_language": "en-US", "target_text": "Please close the window."},
+            files={
+                "audio": ("attempt.wav", attempt_audio, "audio/wav"),
+                "model_audio": ("model.wav", b"model audio", "audio/wav"),
+            },
+        )
+        assert response.status_code == 200
+
+    # The reference/model audio is byte-identical across both attempts (the
+    # client resends the same TTS'd prompt audio every time), so it must be
+    # transcribed only once. Each attempt recording is genuinely new audio and
+    # must always be transcribed.
+    assert asr.calls_by_content[b"model audio"] == 1
+    assert asr.calls_by_content[b"attempt take one"] == 1
+    assert asr.calls_by_content[b"attempt take two"] == 1
+
+
 def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> None:
     class TimestampAsr:
         name = "timestamp-asr"
