@@ -1897,6 +1897,51 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(snapshot.result.model_comparison_alignment.phrases[1].audio_end, 2.4);
 });
 
+test("Cloudflare worker returns no_speech for a silent English attempt without calling the LLM", async () => {
+  const llmCalls = [];
+  const env = fakeEnv(async (url, init) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      const filename = init.body.get("file")?.name || "";
+      if (filename === "model.wav") {
+        return json({
+          text: "Please close the window.",
+          duration: 1.2,
+          words: [{ word: "Please close the window", start: 0.1, end: 1.2 }],
+          segments: [],
+        });
+      }
+      return json({ text: "", words: [], segments: [] });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      llmCalls.push(JSON.parse(init.body));
+      throw new Error("LLM must not be called for a silent attempt recording");
+    }
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["0.72 seconds of silence"], { type: "audio/wav" }), "silent.wav");
+  form.append("model_audio", new Blob(["model audio"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "en-US");
+  form.append("target_text", "Please close the window.");
+  form.append("comparison_model", "gpt-5.4-nano");
+  form.append("playback_padding_seconds", "0.1");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const snapshot = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(snapshot.status, "succeeded");
+  assert.equal(snapshot.result.outcome, "no_speech");
+  assert.equal(snapshot.result.message, "音声を検出できませんでした。もう一度録音してください。");
+  assert.equal(snapshot.result.comparison_alignment, null);
+  assert.equal(snapshot.result.model_comparison_alignment, null);
+  assert.equal(snapshot.result.comparison_model, "gpt-5.4-nano");
+  assert.equal(llmCalls.length, 0);
+});
+
 test("Cloudflare worker scores an English practice attempt using the LLM comparison", async () => {
   const llmCalls = [];
   const env = fakeEnv(async (url, init) => {
