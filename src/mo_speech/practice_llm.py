@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import math
 import os
@@ -198,7 +199,7 @@ def validate_practice_llm_result(
 ) -> dict[str, object]:
     if not isinstance(value, dict):
         raise PracticeLlmError("response is not an object", stage="validate_response")
-    result = value
+    result = deepcopy(value)
     if result.get("schema_version") != 1:
         raise PracticeLlmError("unsupported schema_version", stage="validate_response")
     _validate_score(result.get("overall_score"), "overall_score")
@@ -269,8 +270,9 @@ def _validate_range(
         "playback_end",
     )
     if status == "missing":
-        if value.get("matched_text") != "" or any(value.get(key) is not None for key in timed_keys):
+        if any(value.get(key) is not None for key in timed_keys):
             raise PracticeLlmError(f"{label} missing range has values", stage="validate_response")
+        value["matched_text"] = ""
         return
     if status not in {"assigned", "partial"}:
         raise PracticeLlmError(f"{label} status is invalid", stage="validate_response")
@@ -290,9 +292,7 @@ def _validate_range(
     selected = words[start_index:end_index]
     if not selected or any(not isinstance(word, dict) for word in selected):
         raise PracticeLlmError(f"{label} selected words are invalid", stage="validate_response")
-    matched_text = "".join(str(word.get("text") or "") for word in selected)
-    if value.get("matched_text") != matched_text:
-        raise PracticeLlmError(f"{label} matched_text differs from words", stage="validate_response")
+    value["matched_text"] = "".join(str(word.get("text") or "") for word in selected)
 
     expected_start = _required_finite_number(selected[0].get("start"), f"{label} word start")
     expected_end = _required_finite_number(selected[-1].get("end"), f"{label} word end")

@@ -79,6 +79,41 @@ def test_reviewed_real_asr_pair_validates_without_rewriting_llm_values() -> None
     }
 
 
+def test_matched_text_is_rebuilt_from_llm_word_indexes() -> None:
+    fixture = load_fixture()
+    result = copy.deepcopy(fixture["llm_response"])
+    raw_matched_text = "位置番号と無関係な文字列"
+    result["phrases"][0]["reference"]["matched_text"] = raw_matched_text
+
+    validated = validate_practice_llm_result(result, fixture["input"])
+
+    assert result["phrases"][0]["reference"]["matched_text"] == raw_matched_text
+    assert validated["phrases"][0]["reference"]["matched_text"] == "你好"
+
+
+def test_missing_range_ignores_llm_matched_text() -> None:
+    fixture = load_fixture()
+    result = copy.deepcopy(fixture["llm_response"])
+    missing = result["phrases"][0]["reference"]
+    missing.update(
+        {
+            "status": "missing",
+            "word_start_index": None,
+            "word_end_index": None,
+            "matched_text": "位置番号がない場合の誤った文字列",
+            "start": None,
+            "end": None,
+            "playback_start": None,
+            "playback_end": None,
+        }
+    )
+
+    validated = validate_practice_llm_result(result, fixture["input"])
+
+    assert missing["matched_text"] == "位置番号がない場合の誤った文字列"
+    assert validated["phrases"][0]["reference"]["matched_text"] == ""
+
+
 @pytest.mark.parametrize(
     ("path", "value"),
     [
@@ -184,6 +219,29 @@ def test_service_sends_strict_schema_and_writes_a_complete_diagnostic_log(tmp_pa
     assert log["final_result"] == fixture["llm_response"]
     assert log["billing"]["estimated_cost_usd"] == pytest.approx(0.000564)
     assert "api_key" not in json.dumps(log).lower()
+
+
+def test_service_logs_raw_matched_text_separately_from_final_result(tmp_path) -> None:
+    fixture = load_fixture()
+    raw_result = copy.deepcopy(fixture["llm_response"])
+    raw_result["phrases"][0]["reference"]["matched_text"] = "LLMが誤記した文字列"
+    responses = FakeResponses(raw_result)
+    service = PracticeLlmService(
+        client=SimpleNamespace(responses=responses),
+        log_dir=tmp_path,
+        pricing={},
+    )
+
+    evaluated = service.evaluate(
+        model="gpt-5.6-terra",
+        input_payload=fixture["input"],
+    )
+
+    [log_path] = list(tmp_path.glob("*.json"))
+    log = json.loads(log_path.read_text(encoding="utf-8"))
+    assert log["response"]["parsed"]["phrases"][0]["reference"]["matched_text"] == "LLMが誤記した文字列"
+    assert log["final_result"]["phrases"][0]["reference"]["matched_text"] == "你好"
+    assert evaluated.result["phrases"][0]["reference"]["matched_text"] == "你好"
 
 
 def test_service_keeps_the_llm_return_and_usage_in_a_validation_failure_log(tmp_path) -> None:
