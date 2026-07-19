@@ -1799,6 +1799,110 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(snapshot.result.model_comparison_alignment.phrases[1].audio_end, 2.4);
 });
 
+test("Cloudflare worker reuses cached model ASR across Chinese attempt retries", async () => {
+  const runCalls = [];
+  const env = fakeEnv(async (url, init = {}) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") {
+      const body = parseJsonBody(init.body);
+      runCalls.push(body.input);
+      return json({ id: `practice-job-${runCalls.length}`, status: "IN_QUEUE" });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/health") {
+      return json({ workers: { idle: 1, running: 0, initializing: 0 } });
+    }
+    // 1回目のjobだけがお手本音声を受け取りFunASR推論してmodel_transcriptionを返す。
+    // 2回目は同じお手本音声なのでキャッシュを再利用し、RunPod側はmodel_transcriptionを
+    // 返さない(=送信側もmodel_audio_base64を送っていない想定)。
+    if (url === "https://api.runpod.ai/v2/endpoint/status/practice-job-1") {
+      return json({
+        id: "practice-job-1",
+        status: "COMPLETED",
+        output: {
+          practice_asr_contract_version: 2,
+          target_text: "你好。",
+          text: "你好",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [{ text: "你好", start: 0.1, end: 0.8 }],
+          segments: [],
+          model_transcription: {
+            text: "你好",
+            model: "funasr/paraformer-zh",
+            timestamp_granularities: ["word"],
+            words: [{ text: "你好", start: 0.0, end: 0.7 }],
+            segments: [],
+          },
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/status/practice-job-2") {
+      return json({
+        id: "practice-job-2",
+        status: "COMPLETED",
+        output: {
+          practice_asr_contract_version: 2,
+          target_text: "你好。",
+          text: "你好",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [{ text: "你好", start: 0.1, end: 0.8 }],
+          segments: [],
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 100,
+          overall_comment: "正確です。",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "你好。",
+              score: 100,
+              comment: "正確です。",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 1 },
+              attempt: { status: "assigned", word_start_index: 0, word_end_index: 1 },
+            },
+          ],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const form = new FormData();
+    form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+    form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+    form.append("target_language", "zh-CN");
+    form.append("target_text", "你好。");
+    form.append("comparison_model", "gpt-5.6-terra");
+
+    const submitted = await handleRequest(
+      new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+      env,
+    );
+    assert.equal(submitted.status, 202);
+    const jobId = (await submitted.json()).job_id;
+
+    const completed = await handleRequest(
+      new Request(`https://example.com/api/practice/attempt-jobs/${jobId}`),
+      env,
+    );
+    const snapshot = await completed.json();
+    assert.equal(snapshot.status, "succeeded", JSON.stringify(snapshot));
+    assert.equal(snapshot.result.overall_score, 100);
+  }
+
+  assert.equal(runCalls.length, 2);
+  assert.ok(runCalls[0].model_audio_base64, "the first submission must include the model audio");
+  assert.equal(runCalls[1].model_audio_base64, undefined, "the second submission must reuse the cached model ASR");
+});
+
 test("Cloudflare worker returns no_speech for a silent English attempt without calling the LLM", async () => {
   const llmCalls = [];
   const env = fakeEnv(async (url, init) => {

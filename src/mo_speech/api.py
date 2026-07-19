@@ -1997,7 +1997,23 @@ def create_app(
                     "error": error,
                 }
             model_payload = output.get("model_transcription")
-            if not isinstance(model_payload, dict):
+            cached_model_transcription = (llm_options or {}).get("cached_model_transcription")
+            if isinstance(model_payload, dict):
+                model_transcription = _asr_transcription_from_runpod_output(model_payload)
+                model_audio_cache_key = (llm_options or {}).get("model_audio_cache_key")
+                if isinstance(model_audio_cache_key, str) and model_audio_cache_key:
+                    with _practice_model_asr_cache_lock:
+                        _practice_model_asr_cache[model_audio_cache_key] = model_transcription
+                        _practice_model_asr_cache.move_to_end(model_audio_cache_key)
+                        while len(_practice_model_asr_cache) > _PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES:
+                            _practice_model_asr_cache.popitem(last=False)
+            elif isinstance(cached_model_transcription, AsrTranscription):
+                # このjobはお手本音声のASRキャッシュがあったため、submit_comparison_job呼び出し時に
+                # model_audio_base64を送らずRunPod側のFunASR推論を省略した(_transcribe_practice_model_audio
+                # と同じ意図のキャッシュ)。RunPod出力にmodel_transcriptionが無いのは想定どおりであり、
+                # 送信前に確定していたキャッシュ済みの結果をそのまま使う。
+                model_transcription = cached_model_transcription
+            else:
                 return {
                     "job_id": job_id,
                     "status": "failed",
@@ -2008,7 +2024,6 @@ def create_app(
                     "error": "RunPod practice job did not return model_transcription",
                 }
             attempt_transcription = _asr_transcription_from_runpod_output(output)
-            model_transcription = _asr_transcription_from_runpod_output(model_payload)
             providers = output.get("providers") if isinstance(output.get("providers"), dict) else {}
             provider_name = str(providers.get("asr") or active_runpod_practice_asr_provider.name)
             timings = output.get("timings_ms") if isinstance(output.get("timings_ms"), dict) else {}
@@ -2183,9 +2198,20 @@ def create_app(
                         Path(model_temp_audio.name),
                         fallback_words=[],
                     )
+                    model_audio_cache_key = _practice_model_asr_cache_key(
+                        model_audio_bytes,
+                        practice_target_language,
+                        active_runpod_practice_asr_provider,
+                    )
+                    with _practice_model_asr_cache_lock:
+                        cached_model_transcription = _practice_model_asr_cache.get(model_audio_cache_key)
+                        if cached_model_transcription is not None:
+                            _practice_model_asr_cache.move_to_end(model_audio_cache_key)
                     body = active_runpod_practice_asr_provider.submit_comparison_job(
                         attempt_audio_path=Path(attempt_temp_audio.name),
-                        model_audio_path=Path(model_temp_audio.name),
+                        model_audio_path=(
+                            None if cached_model_transcription is not None else Path(model_temp_audio.name)
+                        ),
                         source_language=practice_target_language,
                         target_text=simplify_chinese_text(normalized_target_text),
                     )
@@ -2204,6 +2230,8 @@ def create_app(
                 "reference_audio_duration": reference_audio_duration,
                 "attempt_audio_duration": attempt_audio_duration,
                 "progress_mode": progress_mode,
+                "model_audio_cache_key": model_audio_cache_key,
+                "cached_model_transcription": cached_model_transcription,
             }
             if job_id:
                 practice_attempt_llm_options[job_id] = llm_options

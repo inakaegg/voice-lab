@@ -519,15 +519,34 @@ async function readPracticeAttemptResult(env, jobId) {
   return ephemeralPracticeAttemptResults.get(jobId) || null;
 }
 
+function practiceModelAsrCacheKey(digest, model, sourceLanguage) {
+  return `${PRACTICE_MODEL_ASR_CACHE_KV_PREFIX}${model}:${sourceLanguage}:${digest}`;
+}
+
+async function lookupPracticeModelAsrCache(env, key) {
+  const kv = stateKv(env);
+  return kv ? await kvGetJson(kv, key, null) : ephemeralPracticeModelAsrCache.get(key) || null;
+}
+
+async function storePracticeModelAsrCache(env, key, transcription) {
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(key, JSON.stringify(transcription), {
+      expirationTtl: numberFromEnv(env.CLOUDFLARE_PRACTICE_MODEL_ASR_CACHE_TTL_SECONDS, 3600),
+    });
+  } else {
+    ephemeralPracticeModelAsrCache.set(key, transcription);
+  }
+}
+
 async function cachedPracticeModelTranscription(env, { audioBytes, audioMimeType, sourceLanguage, filename, model }) {
   // お手本音声は同じ目標文への再挑戦のたびに同じ内容で送られてくる。同一音声・
   // 言語・モデルの組で結果は変わらないため、復唱のたびにASRを再実行せず
   // KV(ローカル開発時はメモリ)キャッシュを再利用する。復唱(attempt)音声は
   // 毎回新しい録音なのでキャッシュしない。
   const digest = bufferToHex(await crypto.subtle.digest("SHA-256", audioBytes));
-  const key = `${PRACTICE_MODEL_ASR_CACHE_KV_PREFIX}${model}:${sourceLanguage}:${digest}`;
-  const kv = stateKv(env);
-  const cached = kv ? await kvGetJson(kv, key, null) : ephemeralPracticeModelAsrCache.get(key) || null;
+  const key = practiceModelAsrCacheKey(digest, model, sourceLanguage);
+  const cached = await lookupPracticeModelAsrCache(env, key);
   if (cached) {
     return cached;
   }
@@ -539,14 +558,18 @@ async function cachedPracticeModelTranscription(env, { audioBytes, audioMimeType
     model,
     includeTimestamps: true,
   });
-  if (kv) {
-    await kv.put(key, JSON.stringify(transcription), {
-      expirationTtl: numberFromEnv(env.CLOUDFLARE_PRACTICE_MODEL_ASR_CACHE_TTL_SECONDS, 3600),
-    });
-  } else {
-    ephemeralPracticeModelAsrCache.set(key, transcription);
-  }
+  await storePracticeModelAsrCache(env, key, transcription);
   return transcription;
+}
+
+async function lookupRunpodPracticeModelAsrCache(env, { audioBytes, sourceLanguage }) {
+  // 中国語(RunPod FunASR経由)のお手本音声も、OpenAI経路と同じKV(ローカル開発時は
+  // メモリ)キャッシュ空間を使う。modelにはOpenAIのモデル名と衝突しないRunPod
+  // provider名を使い、同じ音声でもproviderが違えば別キーになるようにする。
+  const digest = bufferToHex(await crypto.subtle.digest("SHA-256", audioBytes));
+  const key = practiceModelAsrCacheKey(digest, "runpod-funasr-paraformer-zh", sourceLanguage);
+  const cached = await lookupPracticeModelAsrCache(env, key);
+  return { key, cached };
 }
 
 const DEFAULT_USER_SETTINGS = {
@@ -3039,19 +3062,31 @@ async function createPracticeAttemptJob(request, env) {
   const modelAudioMimeType = normalizeMimeType(modelAudio.type || guessAudioMimeType(modelAudio.name));
 
   if (targetLanguage === "zh-CN") {
+    const { key: modelAudioCacheKey, cached: cachedModelTranscription } = await lookupRunpodPracticeModelAsrCache(env, {
+      audioBytes: modelAudioBytes,
+      sourceLanguage: targetLanguage,
+    });
     const body = await submitRunpodJob(env, {
       operation_mode: "practice_asr",
       source_language: targetLanguage,
       target_text: targetText,
       audio_mime_type: audioMimeType || "audio/wav",
       audio_base64: arrayBufferToBase64(audioBytes),
-      model_audio_mime_type: modelAudioMimeType || "audio/wav",
-      model_audio_base64: arrayBufferToBase64(modelAudioBytes),
+      // お手本音声のASR結果が既にキャッシュ済みの場合はmodel_audio_base64を送らない。
+      // RunPod側のhandlerはmodel_audio_base64が無ければお手本側のFunASR推論を省略する。
+      ...(cachedModelTranscription
+        ? {}
+        : {
+          model_audio_mime_type: modelAudioMimeType || "audio/wav",
+          model_audio_base64: arrayBufferToBase64(modelAudioBytes),
+        }),
     });
     const jobId = String(body?.id || body?.job_id || "");
     await savePracticeAttemptLlmOptions(env, jobId, {
       comparison_model: comparisonModel,
       playback_padding_seconds: playbackPaddingSeconds,
+      model_audio_cache_key: modelAudioCacheKey,
+      cached_model_transcription: cachedModelTranscription || null,
     });
     let health = null;
     if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
@@ -3168,12 +3203,21 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
         "RunPod imageの更新が必要です",
       );
     }
-    if (!output.model_transcription || typeof output.model_transcription !== "object") {
+    const llmOptions = await readPracticeAttemptLlmOptions(env, jobId);
+    const modelTranscriptionReturned = output.model_transcription && typeof output.model_transcription === "object";
+    if (!modelTranscriptionReturned && !llmOptions?.cached_model_transcription) {
       return failedPracticeAttemptJob(jobId, stages, metrics, "RunPod practice job did not return model_transcription");
     }
     const attemptTranscription = runpodPracticeTranscription(output);
-    const modelTranscription = runpodPracticeTranscription(output.model_transcription);
-    const llmOptions = await readPracticeAttemptLlmOptions(env, jobId);
+    const modelTranscription = modelTranscriptionReturned
+      ? runpodPracticeTranscription(output.model_transcription)
+      : llmOptions.cached_model_transcription;
+    if (modelTranscriptionReturned && llmOptions?.model_audio_cache_key) {
+      // このjobはお手本音声ASRのキャッシュが無かったため、model_audio_base64を送って
+      // RunPod側でFunASR推論した。次回以降の同じお手本音声への再挑戦がRunPod側の
+      // 推論を省略できるよう、確定したtranscriptionをキャッシュへ書き込む。
+      await storePracticeModelAsrCache(env, llmOptions.model_audio_cache_key, modelTranscription);
+    }
     let result;
     try {
       result = await practiceAttemptComparisonResult({

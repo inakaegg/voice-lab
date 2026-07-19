@@ -977,6 +977,129 @@ def test_chinese_practice_attempt_job_includes_per_character_pinyin_for_the_reco
     assert result["comparison_recognized_pinyin"] == ["wan2", "shang4", "hao3"]
 
 
+def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp_path) -> None:
+    class RetryTrackingRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def __init__(self) -> None:
+            self.submissions: list[dict[str, object]] = []
+
+        def submit_comparison_job(self, **kwargs):
+            job_id = f"practice-job-{len(self.submissions) + 1}"
+            self.submissions.append({"model_audio_included": kwargs["model_audio_path"] is not None})
+            return {"id": job_id, "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            output = {
+                "practice_asr_contract_version": 2,
+                "target_text": "你好。",
+                "text": "你好",
+                "model": "funasr/paraformer-zh",
+                "timestamp_granularities": ["word"],
+                "words": [{"text": "你好", "start": 0.1, "end": 0.8}],
+                "segments": [],
+                "providers": {"asr": "funasr-paraformer-zh"},
+            }
+            # 1回目のjobだけがRunPod側でお手本音声のFunASR推論を行い、
+            # model_transcriptionを返す。2回目はキャッシュを使うためmodel_audio_base64を
+            # 送っておらず、RunPod側もmodel_transcriptionを返さない想定。
+            if job_id == "practice-job-1":
+                output["model_transcription"] = {
+                    "text": "你好",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                    "segments": [],
+                }
+            return {"id": job_id, "status": "COMPLETED", "output": output}
+
+    class FixedPracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 100,
+                    "overall_comment": "正確です。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "你好。",
+                            "score": 100,
+                            "comment": "正確です。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "你好",
+                                "start": 0.0,
+                                "end": 0.7,
+                                "playback_start": 0.0,
+                                "playback_end": 0.7,
+                            },
+                            "attempt": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "你好",
+                                "start": 0.1,
+                                "end": 0.8,
+                                "playback_start": 0.0,
+                                "playback_end": 0.8,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 80},
+                estimated_cost_usd=None,
+                elapsed_ms=10.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    runpod = RetryTrackingRunpodAsr()
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=runpod,
+            practice_llm_service=FixedPracticeLlm(),
+        )
+    )
+
+    for _ in range(2):
+        submitted = client.post(
+            "/api/practice/attempt-jobs",
+            data={
+                "target_language": "zh-CN",
+                "target_text": "你好。",
+                "comparison_model": "gpt-5.6-terra",
+                "playback_padding_seconds": "0.10",
+            },
+            files={
+                "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+                "model_audio": ("model.wav", b"model audio", "audio/wav"),
+            },
+        )
+        assert submitted.status_code == 202
+        job_id = submitted.json()["job_id"]
+        completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
+        assert completed.json()["status"] == "succeeded", completed.json()
+        assert completed.json()["result"]["overall_score"] == 100
+
+    # 1回目はお手本音声を含めてjobを送るが、2回目は同じお手本音声(同一バイト列)なので
+    # キャッシュを再利用し、model_audio_pathを送らずRunPod側のFunASR推論を省略する。
+    assert runpod.submissions == [
+        {"model_audio_included": True},
+        {"model_audio_included": False},
+    ]
+
+
 def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:
     class TimestampAsr:
         name = "timestamp-asr"
