@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -212,9 +213,12 @@ def validate_practice_llm_result(
     indices = [phrase.get("phrase_index") if isinstance(phrase, dict) else None for phrase in phrases]
     if indices != expected_indices:
         raise PracticeLlmError("phrase_index must be sequential", stage="validate_response")
-    if "".join(str(phrase.get("target_text") or "") for phrase in phrases) != str(
-        input_payload.get("target_text") or ""
-    ):
+    reconstructed = "".join(str(phrase.get("target_text") or "") for phrase in phrases)
+    target_text = str(input_payload.get("target_text") or "")
+    # フレーズ境界の空白配分はLLMごとにばらつく(例: 文末のピリオド直後に次フレーズが
+    # 続き、文間の半角スペースが失われる)。単語の欠落・誤りは連続空白の正規化では
+    # 隠れないため、空白run単位で比較する。
+    if _normalize_reconstruction_whitespace(reconstructed) != _normalize_reconstruction_whitespace(target_text):
         raise PracticeLlmError("target phrases do not reconstruct target_text", stage="validate_response")
 
     padding = _required_finite_number(input_payload.get("padding_seconds"), "padding_seconds")
@@ -243,6 +247,13 @@ def validate_practice_llm_result(
                     )
                 previous_word_ends[side] = range_value["word_end_index"]
     return result
+
+
+def _normalize_reconstruction_whitespace(text: str) -> str:
+    # フレーズ境界の空白は失われたり増えたりしうる(例: 文末ピリオド直後に次フレーズが
+    # 続き、文間の半角スペースがゼロ個になる)。空白の有無・個数を丸ごと無視して比較する。
+    # 単語や文字そのものの欠落・誤りは空白除去では隠れない。
+    return re.sub(r"\s+", "", text)
 
 
 def _validate_score(value: object, label: str) -> None:
