@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
+from collections import OrderedDict
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from threading import Lock
@@ -205,6 +207,42 @@ def _transcribe_practice_audio(asr_provider, audio_path: Path, source_language: 
         text=asr_provider.transcribe(audio_path, source_language),
         model=getattr(asr_provider, "name", "asr"),
     )
+
+
+_PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES = 64
+_practice_model_asr_cache: "OrderedDict[str, AsrTranscription]" = OrderedDict()
+_practice_model_asr_cache_lock = Lock()
+
+
+def _practice_model_asr_cache_key(audio_bytes: bytes, source_language: str, asr_provider: object) -> str:
+    provider_name = str(getattr(asr_provider, "name", "") or asr_provider.__class__.__name__)
+    digest = hashlib.sha256(audio_bytes).hexdigest()
+    return f"{provider_name}:{source_language}:{digest}"
+
+
+def _transcribe_practice_model_audio(
+    asr_provider,
+    audio_path: Path,
+    source_language: str,
+    audio_bytes: bytes,
+) -> AsrTranscription:
+    """お手本音声は同じ目標文への再挑戦のたびに同じ内容で送られてくる。
+    同一音声・言語・providerの組で結果は変わらないため、復唱のたびに
+    ASRを再実行せずプロセス内キャッシュを再利用する。復唱(attempt)音声は
+    毎回新しい録音なのでキャッシュしない。"""
+    key = _practice_model_asr_cache_key(audio_bytes, source_language, asr_provider)
+    with _practice_model_asr_cache_lock:
+        cached = _practice_model_asr_cache.get(key)
+        if cached is not None:
+            _practice_model_asr_cache.move_to_end(key)
+            return cached
+    transcription = _transcribe_practice_audio(asr_provider, audio_path, source_language)
+    with _practice_model_asr_cache_lock:
+        _practice_model_asr_cache[key] = transcription
+        _practice_model_asr_cache.move_to_end(key)
+        while len(_practice_model_asr_cache) > _PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES:
+            _practice_model_asr_cache.popitem(last=False)
+    return transcription
 
 
 def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
@@ -2273,10 +2311,11 @@ def create_app(
                         model=asr_model_name,
                     )
                 model_started = perf_counter()
-                model_transcription = _transcribe_practice_audio(
+                model_transcription = _transcribe_practice_model_audio(
                     asr_provider,
                     Path(model_temp_audio.name),
                     practice_target_language,
+                    model_audio_bytes,
                 )
                 model_asr_ms = _elapsed_ms(model_started)
                 if report is not None:

@@ -1942,6 +1942,74 @@ test("Cloudflare worker returns no_speech for a silent English attempt without c
   assert.equal(llmCalls.length, 0);
 });
 
+test("Cloudflare worker reuses cached model ASR across English attempt retries", async () => {
+  const transcriptionCallsByFilename = {};
+  const env = fakeEnv(async (url, init) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      const filename = init.body.get("file")?.name || "";
+      transcriptionCallsByFilename[filename] = (transcriptionCallsByFilename[filename] || 0) + 1;
+      if (filename === "model.wav") {
+        return json({
+          text: "Hello world",
+          duration: 0.9,
+          words: [
+            { word: "Hello", start: 0.0, end: 0.4 },
+            { word: "world", start: 0.4, end: 0.9 },
+          ],
+          segments: [],
+        });
+      }
+      return json({
+        text: "Hello word",
+        duration: 1.0,
+        words: [
+          { word: "Hello", start: 0.1, end: 0.5 },
+          { word: "word", start: 0.5, end: 1.0 },
+        ],
+        segments: [],
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 80,
+          overall_comment: "ok",
+          phrases: [{
+            phrase_index: 0,
+            target_text: "Hello world.",
+            score: 80,
+            comment: "ok",
+            reference: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+            attempt: { status: "partial", word_start_index: 0, word_end_index: 2 },
+          }],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+
+  for (let attemptNumber = 0; attemptNumber < 2; attemptNumber += 1) {
+    const form = new FormData();
+    form.append("audio", new Blob([`repeat attempt ${attemptNumber}`], { type: "audio/webm" }), "repeat.webm");
+    form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+    form.append("target_language", "en-US");
+    form.append("target_text", "Hello world.");
+    form.append("comparison_model", "gpt-5.4-nano");
+    const response = await handleRequest(
+      new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+      env,
+    );
+    assert.equal(response.status, 200);
+  }
+
+  // The reference/model audio is byte-identical across both attempts, so it
+  // must be transcribed only once. Each attempt recording is genuinely new
+  // audio and must always be transcribed.
+  assert.equal(transcriptionCallsByFilename["model.wav"], 1);
+  assert.equal(transcriptionCallsByFilename["repeat.webm"], 2);
+});
+
 test("Cloudflare worker scores an English practice attempt using the LLM comparison", async () => {
   const llmCalls = [];
   const env = fakeEnv(async (url, init) => {
