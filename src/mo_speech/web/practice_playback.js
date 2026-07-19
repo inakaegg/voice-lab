@@ -1,8 +1,6 @@
 (function practicePlaybackContract(global) {
   function availableRanges(alignment) {
-    const entries = Array.isArray(alignment?.phrases)
-      ? alignment.phrases
-      : (Array.isArray(alignment?.ranges) ? alignment.ranges : []);
+    const entries = Array.isArray(alignment?.phrases) ? alignment.phrases : [];
     return entries.filter((range) => {
       const start = Number(range?.audio_start);
       const end = Number(range?.audio_end);

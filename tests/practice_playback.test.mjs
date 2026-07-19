@@ -71,7 +71,7 @@ test("partial paired ranges stay in partial phrase mode and use a matching label
 });
 
 test("whole comparison and no-speech never report phrase playback", () => {
-  const noPair = { available: false, complete: false, target_phrase_count: 2, ranges: [] };
+  const noPair = { available: false, complete: false, target_phrase_count: 2, phrases: [] };
   const whole = comparisonPlaybackPlan({
     modelReady: true,
     repeatReady: true,
@@ -99,29 +99,6 @@ test("whole comparison and no-speech never report phrase playback", () => {
   assert.equal(whole.description, "フレーズの区切りを確認できなかったため、全体を比較します。");
   assert.deepEqual({ mode: noSpeech.mode, label: noSpeech.label }, { mode: "model", label: "お手本を再生" });
   assert.equal(noSpeech.description, "");
-});
-
-test("stored legacy ranges remain playable during the canonical migration", () => {
-  const legacy = {
-    available: true,
-    complete: true,
-    target_phrase_count: 1,
-    ranges: [{ index: 0, available: true, audio_start: 0.2, audio_end: 1.2 }],
-  };
-  const plan = comparisonPlaybackPlan({
-    modelReady: true,
-    repeatReady: true,
-    resultVisible: true,
-    outcome: "evaluated",
-    recognizedLanguageMatches: true,
-    attemptAlignment: legacy,
-    modelAlignment: legacy,
-    modelDuration: 1.4,
-    repeatDuration: 1.4,
-  });
-
-  assert.equal(plan.mode, "phrase");
-  assert.equal(plan.ranges.length, 1);
 });
 
 test("segment playback stops at the exact end instead of 30ms early", () => {
