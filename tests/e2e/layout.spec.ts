@@ -932,11 +932,42 @@ test("SpeakLoop plays the converted model audio but submits the original TTS for
           target_text: "What are you doing today?",
           recognized_text: "What are you doing today?",
           model_recognized_text: "What are you doing today?",
-          similarity: 1,
-          grade: "perfect",
-          diff: [],
-          comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
-          model_comparison_alignment: { available: false, complete: false, target_phrase_count: 1, phrases: [] },
+          outcome: "evaluated",
+          overall_score: 100,
+          overall_comment: "完璧です。",
+          llm_comparison: {
+            schema_version: 1,
+            overall_score: 100,
+            overall_comment: "完璧です。",
+            phrases: [{
+              phrase_index: 0,
+              target_text: "What are you doing today?",
+              score: 100,
+              comment: "正しく言えています。",
+            }],
+          },
+          comparison_model: "gpt-5.6-terra",
+          playback_padding_seconds: 0.1,
+          comparison_alignment: {
+            alignment_contract_version: 2,
+            outcome: "evaluated",
+            available: false,
+            target_phrase_count: 1,
+            playable_phrase_count: 0,
+            all_phrases_playable: false,
+            complete: false,
+            phrases: [],
+          },
+          model_comparison_alignment: {
+            alignment_contract_version: 2,
+            outcome: "evaluated",
+            available: false,
+            target_phrase_count: 1,
+            playable_phrase_count: 0,
+            all_phrases_playable: false,
+            complete: false,
+            phrases: [],
+          },
         },
       }),
     });
@@ -979,6 +1010,10 @@ test("SpeakLoop plays the converted model audio but submits the original TTS for
   await repeatRecord.click();
   await repeatRecord.click();
   await expect(page.locator("#practice-result-panel")).toBeVisible();
+  await expect(page.locator("#practice-score")).toHaveText("100点");
+  await expect(page.locator("#practice-overall-comment")).toHaveText("完璧です。");
+  await expect(page.locator("#practice-recognized-text")).toHaveText("What are you doing today");
+  await expect(page.locator("#practice-phrase-feedback")).toContainText("正しく言えています。");
   const modelOnlyButton = page.locator("#practice-play-model-only-button");
   await expect(modelOnlyButton).toBeVisible();
   await expect(modelOnlyButton).toBeEnabled();
