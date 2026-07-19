@@ -2843,6 +2843,13 @@ button.practice-diff-cell:focus-visible {
   letter-spacing: 0.04em;
 }
 
+.practice-diff-cell.is-tone .practice-diff-heard {
+  color: #a05a00;
+  text-decoration: underline dashed;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.12em;
+}
+
 .practice-job-status {
   align-items: center;
   background: color-mix(in srgb, var(--user-accent, #2f80ed) 8%, #fff);
@@ -4900,6 +4907,7 @@ html[data-theme="dark"] .react-public-body .practice-job-status-detail { color: 
 html[data-theme="dark"] .react-public-body button.practice-diff-cell:hover,
 html[data-theme="dark"] .react-public-body button.practice-diff-cell:focus-visible { background: rgba(193, 18, 31, 0.16); }
 html[data-theme="dark"] .react-public-body .practice-diff-correction { color: #8eb7ff; }
+html[data-theme="dark"] .react-public-body .practice-diff-cell.is-tone .practice-diff-heard { color: #e0a94b; }
 html[data-theme="dark"] .react-public-body .practice-native-transcript { color: #d9e1ef; }
 html[data-theme="dark"] .react-public-body .practice-mini-label { color: #d8b56f; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-current-language span,

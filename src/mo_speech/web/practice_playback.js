@@ -123,9 +123,134 @@
     return !active || ended || Number(currentTime) >= Number(segmentEnd);
   }
 
+  function practiceDisplayCharsEqual(left, right) {
+    const normalizedLeft = String(left || "").normalize("NFKC").toLocaleLowerCase();
+    const normalizedRight = String(right || "").normalize("NFKC").toLocaleLowerCase();
+    if (normalizedLeft === normalizedRight) return true;
+    const punctuationPairs = new Set(["?？", "？?", "!！", "！!", ",，", "，,", ".。", "。."]);
+    return punctuationPairs.has(`${left || ""}${right || ""}`);
+  }
+
+  function pinyinSyllable(list, index) {
+    const value = Array.isArray(list) ? list[index] : undefined;
+    return typeof value === "string" && value ? value : "";
+  }
+
+  function pinyinBaseSyllable(syllable) {
+    return syllable.replace(/[0-9]$/, "");
+  }
+
+  // 目標文字と復唱文字が食い違うセルを、ピンイン(声調つき)が分かる場合だけ細分する。
+  // 一致文字列(equal)自体の判定は変えず、既存のLevenshtein整列結果の解釈を補うだけ。
+  function classifySubstitution(targetChar, recognizedChar, targetIndex, recognizedIndex, pinyin) {
+    if (!pinyin) return "substitute";
+    const targetSyllable = pinyinSyllable(pinyin.target, targetIndex);
+    const recognizedSyllable = pinyinSyllable(pinyin.recognized, recognizedIndex);
+    if (!targetSyllable || !recognizedSyllable) return "substitute";
+    if (targetSyllable === recognizedSyllable) return "equal";
+    if (pinyinBaseSyllable(targetSyllable) === pinyinBaseSyllable(recognizedSyllable)) return "tone";
+    return "substitute";
+  }
+
+  // 目標文(targetTextValue)と復唱ASR文(recognizedTextValue)の文字単位差分を作る。
+  // pinyinを渡すと、同音の字違い(ASRの字選び)はequalへ、声調だけの違いはtoneへ再分類する。
+  // pinyin = { target: string[], recognized: string[] } で、それぞれ
+  // Array.from(targetTextValue) / Array.from(recognizedTextValue) と同じ添字に揃えること。
+  function buildPracticeDiffCells(targetTextValue, recognizedTextValue, pinyin = null) {
+    const targetChars = Array.from(targetTextValue || "");
+    const recognizedChars = Array.from(recognizedTextValue || "");
+    const rows = targetChars.length + 1;
+    const columns = recognizedChars.length + 1;
+    const distance = Array.from({ length: rows }, () => new Array(columns).fill(0));
+    for (let targetIndex = targetChars.length; targetIndex >= 0; targetIndex -= 1) {
+      distance[targetIndex][recognizedChars.length] = targetChars.length - targetIndex;
+    }
+    for (let recognizedIndex = recognizedChars.length; recognizedIndex >= 0; recognizedIndex -= 1) {
+      distance[targetChars.length][recognizedIndex] = recognizedChars.length - recognizedIndex;
+    }
+    for (let targetIndex = targetChars.length - 1; targetIndex >= 0; targetIndex -= 1) {
+      for (let recognizedIndex = recognizedChars.length - 1; recognizedIndex >= 0; recognizedIndex -= 1) {
+        if (practiceDisplayCharsEqual(targetChars[targetIndex], recognizedChars[recognizedIndex])) {
+          distance[targetIndex][recognizedIndex] = distance[targetIndex + 1][recognizedIndex + 1];
+        } else {
+          distance[targetIndex][recognizedIndex] = 1 + Math.min(
+            distance[targetIndex + 1][recognizedIndex + 1],
+            distance[targetIndex + 1][recognizedIndex],
+            distance[targetIndex][recognizedIndex + 1],
+          );
+        }
+      }
+    }
+
+    const cells = [];
+    let targetIndex = 0;
+    let recognizedIndex = 0;
+    while (targetIndex < targetChars.length || recognizedIndex < recognizedChars.length) {
+      const targetChar = targetChars[targetIndex];
+      const recognizedChar = recognizedChars[recognizedIndex];
+      if (
+        targetIndex < targetChars.length &&
+        recognizedIndex < recognizedChars.length &&
+        practiceDisplayCharsEqual(targetChar, recognizedChar)
+      ) {
+        cells.push({ type: "equal", correction: "", heard: recognizedChar, targetOffset: targetIndex });
+        targetIndex += 1;
+        recognizedIndex += 1;
+        continue;
+      }
+      const currentDistance = distance[targetIndex][recognizedIndex];
+      if (
+        targetIndex < targetChars.length &&
+        recognizedIndex < recognizedChars.length &&
+        currentDistance === 1 + distance[targetIndex + 1][recognizedIndex + 1]
+      ) {
+        const type = classifySubstitution(targetChar, recognizedChar, targetIndex, recognizedIndex, pinyin);
+        cells.push({
+          type,
+          correction: type === "equal" ? "" : targetChar,
+          heard: recognizedChar,
+          targetOffset: targetIndex,
+        });
+        targetIndex += 1;
+        recognizedIndex += 1;
+        continue;
+      }
+      if (
+        targetIndex < targetChars.length &&
+        currentDistance === 1 + distance[targetIndex + 1][recognizedIndex]
+      ) {
+        cells.push({ type: "delete", correction: targetChar, heard: "_", targetOffset: targetIndex });
+        targetIndex += 1;
+        continue;
+      }
+      cells.push({ type: "insert", correction: "", heard: recognizedChar || "_", targetOffset: targetIndex });
+      recognizedIndex += 1;
+    }
+    return cells.length ? cells : [{ type: "insert", correction: "", heard: "（聞き取れませんでした）" }];
+  }
+
+  // equalの連続に加え、substitute/tone/deleteなど同種の不一致セルが連続する場合もまとめる。
+  // 1文字ごとに正誤セルが分裂するのを防ぎ、語や句のまとまりで表示できるようにする。
+  function compactPracticeDiffCells(cells) {
+    const compacted = [];
+    cells.forEach((cell) => {
+      const previous = compacted[compacted.length - 1];
+      if (previous && previous.type === cell.type) {
+        previous.heard += cell.type === "delete" ? "" : cell.heard;
+        previous.correction += cell.correction;
+        return;
+      }
+      compacted.push({ ...cell });
+    });
+    return compacted;
+  }
+
   global.voiceLabPracticePlayback = {
     comparisonPlaybackPlan,
     comparisonRangeForTargetOffset,
     shouldStopAudioSegment,
+    comparableTargetText,
+    buildPracticeDiffCells,
+    compactPracticeDiffCells,
   };
 })(globalThis);
