@@ -79,6 +79,14 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.doesNotMatch(practiceSource, /segment_mode:/);
   assert.doesNotMatch(practiceSource, /segmentModeSelect|nextPromptButton/);
   assert.match(practiceSource, /function practiceAsrModel\(\)\s*\{[^}]*return "whisper-1"/s);
+  assert.match(practiceSource, /form\.append\("comparison_model", comparisonModelSelect\.value\)/);
+  assert.match(practiceSource, /form\.append\("playback_padding_seconds", normalizedPlaybackPadding/);
+  assert.match(practiceSource, /comparison_model:/);
+  assert.match(practiceSource, /playback_padding_seconds:/);
+  assert.match(practiceSource, /payload\.overall_score/);
+  assert.match(practiceSource, /payload\.overall_comment/);
+  assert.match(practiceSource, /payload\.llm_comparison\?\.phrases/);
+  assert.match(practiceSource, /比較結果を作成できませんでした。もう一度お試しください。/);
   assert.match(practiceSource, /comparison_alignment/);
   assert.match(practiceSource, /include_pinyin/);
   assert.match(practiceSource, /currentTargetPinyinStatus/);
@@ -108,7 +116,7 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.doesNotMatch(practiceSource, /hasPairedComparisonAlignment/);
   assert.match(practiceSource, /renderRecognizedDiff/);
   assert.match(practiceSource, /buildPracticeDiffCells/);
-  assert.match(practiceSource, /renderPracticeGrade/);
+  assert.doesNotMatch(practiceSource, /renderPracticeGrade/);
   assert.match(practiceSource, /practice-diff-correction/);
   assert.doesNotMatch(practiceSource, /抜け:/);
   assert.match(practiceSource, /practice-diff-cell/);

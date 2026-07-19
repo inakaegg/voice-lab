@@ -63,6 +63,16 @@ from .practice import (
     supported_practice_target_language,
     validate_practice_alignment_target,
 )
+from .practice_llm import (
+    PRACTICE_COMPARISON_ERROR_MESSAGE,
+    PracticeLlmError,
+    PracticeLlmService,
+    build_practice_llm_input,
+    comparison_alignments_from_llm_result,
+    probe_audio_duration_seconds,
+    supported_practice_comparison_model,
+    validate_playback_padding_seconds,
+)
 from .public_sample_audio import PublicSampleAudioStore
 from .providers.openai_api import (
     AsrTranscription,
@@ -154,6 +164,18 @@ def _practice_alignment_error_envelope(
             "retryable": error.retryable,
             "message": message,
             "diagnostic_flags": [error.reason],
+        }
+    }
+
+
+def _practice_llm_error_envelope(error: PracticeLlmError) -> dict[str, object]:
+    return {
+        "error": {
+            "code": "practice_llm_failed",
+            "stage": error.stage,
+            "message": PRACTICE_COMPARISON_ERROR_MESSAGE,
+            "retryable": True,
+            "fallback_to_legacy": False,
         }
     }
 
@@ -338,6 +360,13 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "phrase_similarity": result.get("phrase_similarity"),
         "similarity": result.get("similarity"),
         "grade": result.get("grade"),
+        "overall_score": result.get("overall_score"),
+        "overall_comment": result.get("overall_comment") or "",
+        "llm_comparison": result.get("llm_comparison") or {},
+        "comparison_model": result.get("comparison_model") or "",
+        "playback_padding_seconds": result.get("playback_padding_seconds"),
+        "llm_usage": result.get("llm_usage") or {},
+        "llm_estimated_cost_usd": result.get("llm_estimated_cost_usd"),
         "phrase_matches": result.get("phrase_matches") or [],
         "comparison_alignment": result.get("comparison_alignment") or {},
         "model_comparison_alignment": result.get("model_comparison_alignment") or {},
@@ -954,6 +983,7 @@ def create_app(
     audio_history_store: AudioHistoryStore | None = None,
     user_settings_store: UserSettingsStore | None = None,
     public_sample_audio_store: PublicSampleAudioStore | None = None,
+    practice_llm_service: PracticeLlmService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Voice Lab")
 
@@ -970,6 +1000,13 @@ def create_app(
         error: PracticeAlignmentInputError,
     ) -> JSONResponse:
         return JSONResponse(status_code=400, content=_practice_alignment_error_envelope(error))
+
+    @app.exception_handler(PracticeLlmError)
+    async def practice_llm_error_handler(
+        _request: Request,
+        error: PracticeLlmError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=502, content=_practice_llm_error_envelope(error))
 
     active_pipeline = pipeline or create_pipeline_from_env()
     active_openai_pipeline = openai_pipeline or create_openai_pipeline()
@@ -993,6 +1030,8 @@ def create_app(
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
+    active_practice_llm_service = practice_llm_service or PracticeLlmService()
+    practice_attempt_llm_options: dict[str, dict[str, object]] = {}
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
@@ -1658,6 +1697,10 @@ def create_app(
         model_transcription: AsrTranscription | None = None,
         model_provider_name: str = "",
         model_asr_ms: float = 0.0,
+        comparison_model: str = "",
+        playback_padding_seconds: float = 0.1,
+        reference_audio_duration: float = 0.0,
+        attempt_audio_duration: float = 0.0,
     ) -> dict[str, object]:
         if practice_target_language == "zh-CN":
             target_text = simplify_chinese_text(target_text)
@@ -1674,6 +1717,65 @@ def create_app(
             else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
         )
         compare_started = perf_counter()
+        if comparison_model:
+            if model_transcription is None:
+                raise PracticeLlmError("reference ASR is missing", stage="prepare_input")
+            llm_input = build_practice_llm_input(
+                target_language=practice_target_language,
+                target_text=target_text,
+                padding_seconds=playback_padding_seconds,
+                reference_audio_duration=reference_audio_duration,
+                attempt_audio_duration=attempt_audio_duration,
+                reference_asr={
+                    "recognized_text": model_recognized_text,
+                    "model": model_transcription.model,
+                    "words": model_asr_timestamps["words"],
+                },
+                attempt_asr={
+                    "recognized_text": recognized_text,
+                    "model": attempt_transcription.model,
+                    "words": asr_timestamps["words"],
+                },
+            )
+            evaluated = active_practice_llm_service.evaluate(
+                model=comparison_model,
+                input_payload=llm_input,
+            )
+            comparison_alignment, model_comparison_alignment = (
+                comparison_alignments_from_llm_result(evaluated.result)
+            )
+            compare_ms = _elapsed_ms(compare_started)
+            return {
+                "recording_kind": "attempt",
+                "target_language": practice_target_language,
+                "target_text": target_text,
+                "recognized_text": recognized_text,
+                "model_recognized_text": model_recognized_text,
+                "asr_model": attempt_transcription.model,
+                "asr_timestamps": asr_timestamps,
+                "model_asr_timestamps": model_asr_timestamps,
+                "outcome": "evaluated",
+                "overall_score": evaluated.result["overall_score"],
+                "overall_comment": evaluated.result["overall_comment"],
+                "llm_comparison": evaluated.result,
+                "comparison_alignment": comparison_alignment,
+                "model_comparison_alignment": model_comparison_alignment,
+                "comparison_model": comparison_model,
+                "playback_padding_seconds": playback_padding_seconds,
+                "llm_usage": evaluated.usage,
+                "llm_estimated_cost_usd": evaluated.estimated_cost_usd,
+                "timings_ms": {
+                    "asr": attempt_asr_ms,
+                    "model_asr": model_asr_ms,
+                    "compare": compare_ms,
+                    "total": attempt_asr_ms + model_asr_ms + compare_ms,
+                },
+                "providers": {
+                    "asr": attempt_provider_name,
+                    "model_asr": model_provider_name or attempt_provider_name,
+                    "comparison": "openai-responses",
+                },
+            }
         if model_transcription is not None:
             try:
                 model_comparison_alignment = practice_comparison_alignment_canonical(
@@ -1818,6 +1920,7 @@ def create_app(
         body: dict[str, object],
         *,
         health: object | None = None,
+        llm_options: dict[str, object] | None = None,
     ) -> dict[str, object]:
         job_id = str(body.get("id") or body.get("job_id") or "")
         status = str(body.get("status") or "").upper()
@@ -1885,8 +1988,33 @@ def create_app(
                     model_transcription=model_transcription,
                     model_provider_name=provider_name,
                     model_asr_ms=float(timings.get("model_asr") or 0.0),
+                    comparison_model=str((llm_options or {}).get("comparison_model") or ""),
+                    playback_padding_seconds=float(
+                        (llm_options or {}).get("playback_padding_seconds") or 0.1
+                    ),
+                    reference_audio_duration=float(
+                        (llm_options or {}).get("reference_audio_duration") or 0.0
+                    ),
+                    attempt_audio_duration=float(
+                        (llm_options or {}).get("attempt_audio_duration") or 0.0
+                    ),
                 )
-            except PracticeAlignmentError as error:
+            except (PracticeAlignmentError, PracticeLlmError) as error:
+                if isinstance(error, PracticeLlmError):
+                    return {
+                        "job_id": job_id,
+                        "status": "failed",
+                        "current_stage": {
+                            "stage": "failed",
+                            "label": PRACTICE_COMPARISON_ERROR_MESSAGE,
+                            "provider": "OpenAI",
+                            "model": str((llm_options or {}).get("comparison_model") or ""),
+                        },
+                        "stages": stages,
+                        "metrics": metrics,
+                        "result": None,
+                        **_practice_llm_error_envelope(error),
+                    }
                 return {
                     "job_id": job_id,
                     "status": "failed",
@@ -1941,6 +2069,8 @@ def create_app(
         target_language: Annotated[str, Form()] = "en-US",
         target_text: Annotated[str, Form()] = "",
         asr_model: Annotated[str, Form()] = "whisper-1",
+        comparison_model: Annotated[str, Form()] = "",
+        playback_padding_seconds: Annotated[str, Form()] = "",
     ) -> dict[str, object]:
         try:
             practice_target_language = supported_practice_target_language(target_language)
@@ -1952,6 +2082,18 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         normalized_target_text = str(target_text or "").strip()
         validate_practice_alignment_target(normalized_target_text, practice_target_language)
+        use_llm = bool(str(comparison_model or "").strip() or str(playback_padding_seconds or "").strip())
+        if use_llm:
+            try:
+                selected_comparison_model = supported_practice_comparison_model(comparison_model)
+                selected_playback_padding = validate_playback_padding_seconds(
+                    playback_padding_seconds
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            selected_comparison_model = ""
+            selected_playback_padding = 0.1
 
         attempt_audio_bytes = await audio.read()
         model_audio_bytes = await model_audio.read()
@@ -1983,6 +2125,14 @@ def create_app(
                     attempt_temp_audio.flush()
                     model_temp_audio.write(model_audio_bytes)
                     model_temp_audio.flush()
+                    attempt_audio_duration = probe_audio_duration_seconds(
+                        Path(attempt_temp_audio.name),
+                        fallback_words=[],
+                    )
+                    reference_audio_duration = probe_audio_duration_seconds(
+                        Path(model_temp_audio.name),
+                        fallback_words=[],
+                    )
                     body = active_runpod_practice_asr_provider.submit_comparison_job(
                         attempt_audio_path=Path(attempt_temp_audio.name),
                         model_audio_path=Path(model_temp_audio.name),
@@ -1997,7 +2147,24 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
-            snapshot = _practice_attempt_job_snapshot(body, health=health)
+            job_id = str(body.get("id") or body.get("job_id") or "")
+            llm_options = (
+                {
+                    "comparison_model": selected_comparison_model,
+                    "playback_padding_seconds": selected_playback_padding,
+                    "reference_audio_duration": reference_audio_duration,
+                    "attempt_audio_duration": attempt_audio_duration,
+                }
+                if use_llm
+                else None
+            )
+            if job_id and llm_options is not None:
+                practice_attempt_llm_options[job_id] = llm_options
+            snapshot = _practice_attempt_job_snapshot(
+                body,
+                health=health,
+                llm_options=llm_options,
+            )
             _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
             if snapshot["status"] in {"queued", "running"}:
                 response.status_code = 202
@@ -2026,6 +2193,14 @@ def create_app(
                     practice_target_language,
                 )
                 attempt_asr_ms = _elapsed_ms(attempt_started)
+                reference_audio_duration = probe_audio_duration_seconds(
+                    Path(model_temp_audio.name),
+                    fallback_words=model_transcription.words,
+                )
+                attempt_audio_duration = probe_audio_duration_seconds(
+                    Path(attempt_temp_audio.name),
+                    fallback_words=attempt_transcription.words,
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -2039,6 +2214,10 @@ def create_app(
             model_transcription=model_transcription,
             model_provider_name=asr_provider.name,
             model_asr_ms=model_asr_ms,
+            comparison_model=selected_comparison_model,
+            playback_padding_seconds=selected_playback_padding,
+            reference_audio_duration=reference_audio_duration,
+            attempt_audio_duration=attempt_audio_duration,
         )
         snapshot = {
             "job_id": "",
@@ -2065,7 +2244,11 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
-        snapshot = _practice_attempt_job_snapshot(body, health=health)
+        snapshot = _practice_attempt_job_snapshot(
+            body,
+            health=health,
+            llm_options=practice_attempt_llm_options.get(job_id),
+        )
         recording_entry = _practice_attempt_history_entry(active_audio_history_store, job_id)
         _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
         return snapshot

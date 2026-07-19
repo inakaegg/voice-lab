@@ -13,6 +13,7 @@ from mo_speech.api import create_app
 from mo_speech.audio_history import AudioHistoryStore
 from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
+from mo_speech.practice_llm import PracticeLlmError, PracticeLlmEvaluation
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from mo_speech.providers.openai_api import AsrTranscription
 from mo_speech.providers.voice import (
@@ -237,6 +238,172 @@ def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
 
     assert response.status_code == 400
     assert "unsupported practice ASR model" in response.json()["detail"]
+
+
+def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> None:
+    class TimestampAsr:
+        name = "timestamp-asr"
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def transcribe_detail(self, *_args, **_kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                return AsrTranscription(
+                    text="Hello world",
+                    model=self.name,
+                    words=[
+                        {"text": "Hello", "start": 0.0, "end": 0.4},
+                        {"text": " world", "start": 0.4, "end": 0.8},
+                    ],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(
+                text="Hello word",
+                model=self.name,
+                words=[
+                    {"text": "Hello", "start": 0.1, "end": 0.5},
+                    {"text": " word", "start": 0.5, "end": 0.9},
+                ],
+                timestamp_granularities=["word"],
+            )
+
+    class FakePracticeLlm:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def evaluate(self, *, model, input_payload):
+            self.calls.append({"model": model, "input": input_payload})
+            result = {
+                "schema_version": 1,
+                "overall_score": 72,
+                "overall_comment": "最後の単語を確認しましょう。",
+                "phrases": [
+                    {
+                        "phrase_index": 0,
+                        "target_text": "Hello world.",
+                        "score": 72,
+                        "comment": "worldがwordとして認識されています。",
+                        "reference": {
+                            "status": "assigned",
+                            "word_start_index": 0,
+                            "word_end_index": 2,
+                            "matched_text": "Hello world",
+                            "start": 0.0,
+                            "end": 0.8,
+                            "playback_start": 0.0,
+                            "playback_end": 0.8,
+                        },
+                        "attempt": {
+                            "status": "partial",
+                            "word_start_index": 0,
+                            "word_end_index": 2,
+                            "matched_text": "Hello word",
+                            "start": 0.1,
+                            "end": 0.9,
+                            "playback_start": 0.0,
+                            "playback_end": 0.9,
+                        },
+                    }
+                ],
+            }
+            return PracticeLlmEvaluation(
+                result=result,
+                usage={"total_tokens": 321},
+                estimated_cost_usd=None,
+                elapsed_ms=12.5,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    asr = TimestampAsr()
+    llm = FakePracticeLlm()
+    pipeline = SpeechTranslationPipeline(
+        asr=asr,
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=llm))
+
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "en-US",
+            "target_text": "Hello world.",
+            "comparison_model": "gpt-5.4-nano",
+            "playback_padding_seconds": "0.15",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["overall_score"] == 72
+    assert result["overall_comment"] == "最後の単語を確認しましょう。"
+    assert result["llm_comparison"]["phrases"][0]["score"] == 72
+    assert result["comparison_alignment"]["phrases"][0]["audio_start"] == pytest.approx(0.0)
+    assert result["comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(0.9)
+    assert result["model_comparison_alignment"]["phrases"][0]["audio_start"] == pytest.approx(0.0)
+    assert result["model_comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(0.8)
+    assert "similarity" not in result
+    assert llm.calls[0]["model"] == "gpt-5.4-nano"
+    assert llm.calls[0]["input"]["padding_seconds"] == pytest.approx(0.15)
+    assert llm.calls[0]["input"]["reference_asr"]["recognized_text"] == "Hello world"
+    assert llm.calls[0]["input"]["attempt_asr"]["recognized_text"] == "Hello word"
+
+
+def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:
+    class TimestampAsr:
+        name = "timestamp-asr"
+
+        def transcribe_detail(self, *_args, **_kwargs):
+            return AsrTranscription(
+                text="Hello",
+                model=self.name,
+                words=[{"text": "Hello", "start": 0.0, "end": 0.5}],
+                timestamp_granularities=["word"],
+            )
+
+    class FailingPracticeLlm:
+        def evaluate(self, **_kwargs):
+            raise PracticeLlmError("invalid response", stage="validate_response")
+
+    pipeline = SpeechTranslationPipeline(
+        asr=TimestampAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(
+        create_app(openai_pipeline=pipeline, practice_llm_service=FailingPracticeLlm())
+    )
+
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "en-US",
+            "target_text": "Hello.",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.10",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": {
+            "code": "practice_llm_failed",
+            "stage": "validate_response",
+            "message": "比較結果を作成できませんでした。もう一度お試しください。",
+            "retryable": True,
+            "fallback_to_legacy": False,
+        }
+    }
 
 
 def test_practice_admin_serves_practice_history_ui() -> None:

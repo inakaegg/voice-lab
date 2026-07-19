@@ -91,13 +91,21 @@
           "status": "assigned",
           "word_start_index": 0,
           "word_end_index": 2,
-          "matched_text": "你好"
+          "matched_text": "你好",
+          "start": 0.0,
+          "end": 0.541,
+          "playback_start": 0.0,
+          "playback_end": 0.641
         },
         "attempt": {
           "status": "assigned",
           "word_start_index": 0,
           "word_end_index": 2,
-          "matched_text": "你好"
+          "matched_text": "你好",
+          "start": 0.72,
+          "end": 2.339,
+          "playback_start": 0.62,
+          "playback_end": 2.439
         }
       },
       {
@@ -109,13 +117,21 @@
           "status": "assigned",
           "word_start_index": 2,
           "word_end_index": 9,
-          "matched_text": "花了三个多小时"
+          "matched_text": "花了三个多小时",
+          "start": 1.266208,
+          "end": 2.28302,
+          "playback_start": 1.166208,
+          "playback_end": 2.38302
         },
         "attempt": {
           "status": "assigned",
           "word_start_index": 2,
           "word_end_index": 9,
-          "matched_text": "发了三个多消息"
+          "matched_text": "发了三个多消息",
+          "start": 2.339,
+          "end": 5.22,
+          "playback_start": 2.239,
+          "playback_end": 5.32
         }
       },
       {
@@ -127,13 +143,21 @@
           "status": "assigned",
           "word_start_index": 9,
           "word_end_index": 17,
-          "matched_text": "codex已经完成实现了"
+          "matched_text": "codex已经完成实现了",
+          "start": 2.28302,
+          "end": 5.54625,
+          "playback_start": 2.18302,
+          "playback_end": 5.64625
         },
         "attempt": {
           "status": "assigned",
           "word_start_index": 9,
           "word_end_index": 17,
-          "matched_text": "codix已经完全实现了"
+          "matched_text": "codix已经完全实现了",
+          "start": 5.22,
+          "end": 8.459,
+          "playback_start": 5.12,
+          "playback_end": 8.559
         }
       },
       {
@@ -145,13 +169,21 @@
           "status": "assigned",
           "word_start_index": 17,
           "word_end_index": 23,
-          "matched_text": "质量怎么样呢"
+          "matched_text": "质量怎么样呢",
+          "start": 6.23675,
+          "end": 7.313083,
+          "playback_start": 6.13675,
+          "playback_end": 7.413083
         },
         "attempt": {
           "status": "partial",
           "word_start_index": 17,
           "word_end_index": 24,
-          "matched_text": "你就像咱妈样呢"
+          "matched_text": "你就像咱妈样呢",
+          "start": 8.459,
+          "end": 10.289,
+          "playback_start": 8.359,
+          "playback_end": 10.26
         }
       }
     ]
@@ -271,7 +303,7 @@
   "review_notes": {
     "phrase_split_and_word_indices": "Observed in the past gpt-5.6-terra result.",
     "asr_words_and_timestamps": "Recovered from the original Codex session log after the source worktree was removed.",
-    "scores_and_comments": "Draft expected LLM values for review; they are not output from the past alignment-only API call.",
+    "scores_comments_and_complete_timestamps": "Expected product output reviewed after the past alignment-only call; this object is not presented as the raw response from that earlier call.",
     "attempt_last_playback_end": "Clamped from ASR end 10.289 plus padding to the measured audio duration 10.26.",
     "legacy_three_phrase_alignment": "Intentionally excluded."
   }

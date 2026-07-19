@@ -1688,6 +1688,28 @@ audio {
   outline: 0;
 }
 
+.practice-comparison-model select {
+  min-width: 6.2em;
+}
+
+.practice-playback-padding {
+  gap: 7px;
+}
+
+.practice-playback-padding input[type="range"] {
+  accent-color: #2f80ed;
+  inline-size: 88px;
+}
+
+.practice-playback-padding output {
+  color: #0f4da2;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  min-inline-size: 3.8em;
+  text-align: right;
+}
+
 .practice-inline-setting {
   align-items: center;
   background: rgba(255, 255, 255, 0.82);
@@ -2561,6 +2583,58 @@ fieldset.public-samples-admin {
   grid-column: 1 / -1;
 }
 
+.practice-overall-comment {
+  color: var(--react-ink);
+  font-size: 14px;
+  font-weight: 750;
+  grid-column: 1 / -1;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.practice-phrase-feedback {
+  display: grid;
+  gap: 7px;
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.practice-phrase-feedback li {
+  background: var(--react-accent-soft);
+  border: 1px solid var(--react-border);
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+}
+
+.practice-phrase-feedback-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.practice-phrase-feedback-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.practice-phrase-feedback-heading span {
+  color: var(--react-accent-hover);
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.practice-phrase-feedback p {
+  color: var(--react-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .practice-comparison-note {
   color: var(--react-muted);
   font-size: 13px;
@@ -2628,6 +2702,12 @@ fieldset.public-samples-admin {
   background: #e9f7ff;
   border-color: #2f80ed;
   color: #0f4da2;
+}
+
+.practice-grade-badge[data-grade="llm"] {
+  background: #e9f2ff;
+  border-color: #5a7fc4;
+  color: #234f91;
 }
 
 .practice-grade-badge[data-grade="almost"] {
@@ -4642,6 +4722,8 @@ html[data-tab-audio-available="false"] .react-public-body[data-layout="compact"]
 @media (max-width: 480px) {
   .react-public-body[data-layout="compact"] .practice-current-language { padding: 0 10px; }
   .react-public-body[data-layout="compact"] .practice-language-select select { font-size: 14px; min-width: 7.5em; }
+  .react-public-body[data-layout="compact"] .practice-comparison-model select { min-width: 5.8em; }
+  .react-public-body[data-layout="compact"] .practice-playback-padding input[type="range"] { inline-size: 72px; }
   .react-public-body[data-layout="compact"] .practice-script-toggle button { min-height: 36px; padding-inline: 10px; }
   .react-public-body[data-layout="compact"] .practice-own-voice-control { min-height: 42px; }
   .react-public-body[data-layout="compact"] .practice-own-voice-tooltip { width: min(300px, calc(100vw - 32px)); }
@@ -4747,6 +4829,7 @@ html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-generat
 }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { background: transparent; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { color: #bdcaf0; }
+html[data-theme="dark"] .react-public-body .practice-playback-padding output { color: #bdcaf0; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button[aria-pressed="true"] {
   background: transparent;
   color: #dce5ff;
@@ -4797,6 +4880,15 @@ html[data-theme="dark"] .react-public-body .practice-recognized-text {
   background: #111722;
   border-color: var(--react-border);
   color: #f2f5fa;
+}
+html[data-theme="dark"] .react-public-body .practice-phrase-feedback li {
+  background: rgba(94, 159, 240, 0.1);
+  border-color: var(--react-border);
+}
+html[data-theme="dark"] .react-public-body .practice-grade-badge[data-grade="llm"] {
+  background: rgba(94, 159, 240, 0.15);
+  border-color: #6f9bd8;
+  color: #c5dcff;
 }
 html[data-theme="dark"] .react-public-body .practice-job-status {
   background: rgba(42, 54, 78, 0.9);
