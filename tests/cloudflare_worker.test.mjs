@@ -2208,6 +2208,93 @@ test("Cloudflare worker keeps practice attempt LLM options alive for the whole 3
   );
 });
 
+test("Cloudflare worker includes per-character pinyin for the recognized-text diff on Chinese attempts", async () => {
+  const env = fakeEnv(async (url, init = {}) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") {
+      return json({ id: "practice-pinyin-job-1", status: "IN_QUEUE" });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/health") {
+      return json({ workers: { idle: 1, running: 0, initializing: 0 } });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/status/practice-pinyin-job-1") {
+      return json({
+        id: "practice-pinyin-job-1",
+        status: "COMPLETED",
+        output: {
+          practice_asr_contract_version: 2,
+          target_text: "晚上好。",
+          text: "完上好",
+          model: "funasr/paraformer-zh",
+          timestamp_granularities: ["word"],
+          words: [
+            { text: "完", start: 0.0, end: 0.3 },
+            { text: "上", start: 0.3, end: 0.5 },
+            { text: "好", start: 0.5, end: 0.8 },
+          ],
+          segments: [],
+          model_transcription: {
+            text: "晚上好",
+            model: "funasr/paraformer-zh",
+            timestamp_granularities: ["word"],
+            words: [
+              { text: "晚", start: 0.0, end: 0.2 },
+              { text: "上", start: 0.2, end: 0.4 },
+              { text: "好", start: 0.4, end: 0.7 },
+            ],
+            segments: [],
+          },
+          providers: { asr: "funasr-paraformer-zh" },
+        },
+      });
+    }
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({
+        output_text: JSON.stringify({
+          schema_version: 1,
+          overall_score: 90,
+          overall_comment: "最初の文字の声調を確認しましょう。",
+          phrases: [
+            {
+              phrase_index: 0,
+              target_text: "晚上好。",
+              score: 90,
+              comment: "「晚」が「完」に近い音で認識されています。",
+              reference: { status: "assigned", word_start_index: 0, word_end_index: 3 },
+              attempt: { status: "assigned", word_start_index: 0, word_end_index: 3 },
+            },
+          ],
+        }),
+      });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "zh-CN");
+  form.append("target_text", "晚上好。");
+  form.append("comparison_model", "gpt-5.6-terra");
+  form.append("playback_padding_seconds", "0.05");
+
+  const submitted = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  assert.equal(submitted.status, 202);
+
+  const completed = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs/practice-pinyin-job-1"),
+    env,
+  );
+  const snapshot = await completed.json();
+
+  assert.equal(snapshot.status, "succeeded");
+  // 目標「晚上好」(wan3 shang4 hao3)、復唱「完上好」(wan2 shang4 hao3)。
+  // 1文字目は音節同じで声調だけ違い、2・3文字目は完全一致。
+  assert.deepEqual(snapshot.result.comparison_target_pinyin, ["wan3", "shang4", "hao3"]);
+  assert.deepEqual(snapshot.result.comparison_recognized_pinyin, ["wan2", "shang4", "hao3"]);
+});
+
 test("Cloudflare worker surfaces an LLM validation failure as a failed job snapshot for Chinese attempts", async () => {
   let comparisonCalls = 0;
   const env = fakeEnv(async (url, init = {}) => {

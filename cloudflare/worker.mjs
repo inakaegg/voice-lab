@@ -3324,6 +3324,8 @@ async function practiceAttemptComparisonResult({
   const compareMs = Date.now() - compareStarted;
   const attemptMs = Number(timings.asr || 0);
   const modelMs = Number(timings.model_asr || 0);
+  const comparisonTargetPinyin = targetLanguage === "zh-CN" ? practiceDiffPinyinChars(targetText) : [];
+  const comparisonRecognizedPinyin = targetLanguage === "zh-CN" ? practiceDiffPinyinChars(recognizedText) : [];
   return {
     recording_kind: "attempt",
     target_language: targetLanguage,
@@ -3339,6 +3341,8 @@ async function practiceAttemptComparisonResult({
     llm_comparison: llmResult,
     comparison_alignment: comparisonAlignment,
     model_comparison_alignment: modelComparisonAlignment,
+    comparison_target_pinyin: comparisonTargetPinyin,
+    comparison_recognized_pinyin: comparisonRecognizedPinyin,
     comparison_model: comparisonModel,
     playback_padding_seconds: playbackPaddingSeconds,
     timings_ms: {
@@ -3812,6 +3816,36 @@ function createChinesePinyinText(text) {
   } catch (error) {
     console.warn("practice pinyin generation failed", error);
     return "";
+  }
+}
+
+// 「聞こえた言葉」の文字単位diffが使う正規化と同じ結果を返す。
+// フロント側 practiceDisplayComparableText (practice_playback.js) と同じ規則
+// (NFKC正規化、Punctuation/Symbolカテゴリの除去、空白の圧縮)にする。ここで返す
+// 文字列のArray.from()した添字が、practiceDiffPinyinCharsの返り値の添字と一致する。
+function practiceDiffComparableText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\p{P}\p{S}]+/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+// diff比較用の文字ごとの声調つきピンイン配列(非漢字は空文字列)を返す。
+// 文字列全体をまとめて変換すると、非漢字の扱いや多音字の文脈判定でトークン数が
+// ずれる恐れがあるため、1文字ずつ変換してArray.from(comparable text)と同じ長さ・
+// 同じ添字を保証する。
+function practiceDiffPinyinChars(text) {
+  const comparable = practiceDiffComparableText(text);
+  if (!comparable) return [];
+  try {
+    return Array.from(comparable).map((char) => {
+      const result = pinyin(char, { toneType: "num", type: "array", nonZh: "removed" });
+      return result[0] || "";
+    });
+  } catch (error) {
+    console.warn("practice diff pinyin generation failed", error);
+    return Array.from(comparable).map(() => "");
   }
 }
 

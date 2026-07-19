@@ -854,6 +854,129 @@ def test_chinese_practice_attempt_job_reports_llm_stage_after_runpod_asr(tmp_pat
     assert completed.json()["result"]["overall_score"] == 100
 
 
+def test_chinese_practice_attempt_job_includes_per_character_pinyin_for_the_recognized_diff(
+    tmp_path,
+) -> None:
+    class CompletedRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def submit_comparison_job(self, **_kwargs):
+            return {"id": "practice-job-pinyin", "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "晚上好。",
+                    "text": "完上好",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [
+                        {"text": "完", "start": 0.0, "end": 0.3},
+                        {"text": "上", "start": 0.3, "end": 0.5},
+                        {"text": "好", "start": 0.5, "end": 0.8},
+                    ],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "晚上好",
+                        "model": "funasr/paraformer-zh",
+                        "timestamp_granularities": ["word"],
+                        "words": [
+                            {"text": "晚", "start": 0.0, "end": 0.2},
+                            {"text": "上", "start": 0.2, "end": 0.4},
+                            {"text": "好", "start": 0.4, "end": 0.7},
+                        ],
+                        "segments": [],
+                    },
+                    "providers": {"asr": "funasr-paraformer-zh"},
+                },
+            }
+
+    class BlockingPracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 90,
+                    "overall_comment": "最初の文字の声調を確認しましょう。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "晚上好。",
+                            "score": 90,
+                            "comment": "「晚」が「完」に近い音で認識されています。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 3,
+                                "matched_text": "晚上好",
+                                "start": 0.0,
+                                "end": 0.7,
+                                "playback_start": 0.0,
+                                "playback_end": 0.7,
+                            },
+                            "attempt": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 3,
+                                "matched_text": "完上好",
+                                "start": 0.0,
+                                "end": 0.8,
+                                "playback_start": 0.0,
+                                "playback_end": 0.8,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=10.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=CompletedRunpodAsr(),
+            practice_llm_service=BlockingPracticeLlm(),
+        )
+    )
+
+    submitted = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "zh-CN",
+            "target_text": "晚上好。",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.10",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert submitted.status_code == 202
+    job_id = submitted.json()["job_id"]
+    completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
+    assert completed.json()["status"] == "succeeded"
+    result = completed.json()["result"]
+    # 目標「晚上好」(wan3 shang4 hao3)、復唱「完上好」(wan2 shang4 hao3)。
+    # 1文字目は音節同じで声調だけ違い、2・3文字目は完全一致。
+    assert result["comparison_target_pinyin"] == ["wan3", "shang4", "hao3"]
+    assert result["comparison_recognized_pinyin"] == ["wan2", "shang4", "hao3"]
+
+
 def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:
     class TimestampAsr:
         name = "timestamp-asr"

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import unicodedata
 from collections import OrderedDict
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
@@ -803,6 +804,42 @@ def _normalize_practice_pinyin_tokens(tokens: list[str]) -> str:
             continue
         normalized_tokens.extend(part for part in normalized.split(" ") if part)
     return " ".join(normalized_tokens).strip()
+
+
+def _practice_diff_comparable_text(text: str) -> str:
+    """「聞こえた言葉」の文字単位diffが使う正規化と同じ結果を返す。
+
+    フロント側 practiceDisplayComparableText (practice_playback.js) と同じ規則
+    (NFKC正規化、Punctuation/Symbolカテゴリの除去、空白の圧縮)にする。ここで返す
+    文字列のArray.from()した添字が、_practice_diff_pinyin_charsの返り値の添字と
+    一致する前提でクライアント側が読む。
+    """
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    stripped = "".join(
+        char for char in normalized if not unicodedata.category(char).startswith(("P", "S"))
+    )
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def _practice_diff_pinyin_chars(text: str) -> list[str]:
+    """diff比較用の文字ごとの声調つきピンイン配列(非漢字は空文字列)を返す。
+
+    文字列全体をまとめて変換すると、非漢字の扱いや多音字の文脈判定でトークン数が
+    ずれる恐れがあるため、1文字ずつ変換してArray.from(comparable text)と同じ長さ・
+    同じ添字を保証する。
+    """
+    comparable = _practice_diff_comparable_text(text)
+    if not comparable:
+        return []
+    try:
+        from pypinyin import Style, lazy_pinyin
+    except ImportError:
+        return ["" for _ in comparable]
+    result: list[str] = []
+    for char in comparable:
+        tokens = lazy_pinyin(char, style=Style.TONE3, neutral_tone_with_five=True, errors="ignore")
+        result.append(tokens[0] if tokens else "")
+    return result
 
 
 def _supported_vibevoice_output_language(value: str | None) -> str:
@@ -1868,6 +1905,12 @@ def create_app(
             comparison_alignments_from_llm_result(evaluated.result)
         )
         compare_ms = _elapsed_ms(compare_started)
+        comparison_target_pinyin = (
+            _practice_diff_pinyin_chars(target_text) if practice_target_language == "zh-CN" else []
+        )
+        comparison_recognized_pinyin = (
+            _practice_diff_pinyin_chars(recognized_text) if practice_target_language == "zh-CN" else []
+        )
         return {
             "recording_kind": "attempt",
             "target_language": practice_target_language,
@@ -1883,6 +1926,8 @@ def create_app(
             "llm_comparison": evaluated.result,
             "comparison_alignment": comparison_alignment,
             "model_comparison_alignment": model_comparison_alignment,
+            "comparison_target_pinyin": comparison_target_pinyin,
+            "comparison_recognized_pinyin": comparison_recognized_pinyin,
             "comparison_model": comparison_model,
             "playback_padding_seconds": playback_padding_seconds,
             "llm_usage": evaluated.usage,
