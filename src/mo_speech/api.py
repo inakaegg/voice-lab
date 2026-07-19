@@ -778,7 +778,7 @@ def _supported_vibevoice_output_language(value: str | None) -> str:
 def _vibevoice_script_translation_model() -> str:
     return os.getenv(
         "OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL",
-        os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.5"),
+        os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.6-terra"),
     )
 
 
@@ -947,7 +947,7 @@ def _practice_pinyin_text_openai(text: str) -> str:
 
     try:
         response = OpenAI().responses.create(
-            model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.5")),
+            model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.6-terra")),
             instructions=(
                 "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. "
                 "Return one pinyin syllable per Chinese character, separated by spaces. "

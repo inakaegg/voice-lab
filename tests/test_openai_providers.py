@@ -183,10 +183,10 @@ def test_openai_translation_uses_responses_api(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: client))
 
-    provider = OpenAiTranslationProvider(model="gpt-5.5")
+    provider = OpenAiTranslationProvider(model="test-translation-model")
 
     assert provider.translate("Selamat pagi.", "id-ID", "ja-JP") == "おはようございます。"
-    assert captured["model"] == "gpt-5.5"
+    assert captured["model"] == "test-translation-model"
     assert "professional speech translation engine" in captured["instructions"]
     assert "Indonesian" in captured["input"]
     assert "Japanese" in captured["input"]
@@ -217,11 +217,12 @@ def test_openai_tts_uses_speech_api(monkeypatch) -> None:
     assert captured["input"] == "こんにちは。"
 
 
-def test_create_openai_pipeline_supports_default_and_seed_vc() -> None:
+def test_create_openai_pipeline_supports_default_and_seed_vc(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_TRANSLATION_MODEL", raising=False)
     pipeline = create_openai_pipeline()
 
     assert pipeline.asr.name == "openai-asr-gpt-4o-transcribe"
-    assert pipeline.translator.name == "openai-translation-gpt-5.5"
+    assert pipeline.translator.name == "openai-translation-gpt-5.6-terra"
     assert pipeline.tts.supported_voice_modes == ("default", "convert")
 
 

@@ -253,7 +253,7 @@ test("SpeakLoop shows prompt ASR, translation, and speech generation stages", as
             stage: "translating_prompt",
             label: "学習言語へ翻訳しています",
             provider: "OpenAI",
-            model: "gpt-5.5",
+            model: "gpt-5.6-terra",
           },
         }),
       });
@@ -303,7 +303,7 @@ test("SpeakLoop shows prompt ASR, translation, and speech generation stages", as
   await expect(page.locator("#practice-job-status-label")).toHaveText("録音を文字にしています");
   await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / whisper-1");
   await expect(page.locator("#practice-job-status-label")).toHaveText("学習言語へ翻訳しています");
-  await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / gpt-5.5");
+  await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / gpt-5.6-terra");
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-speakloop-prompt-translation.png`, fullPage: true });

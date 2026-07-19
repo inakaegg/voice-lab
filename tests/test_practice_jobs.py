@@ -23,7 +23,7 @@ def test_practice_job_reports_the_actual_stage_provider_and_model() -> None:
             stage="translating_prompt",
             label="学習言語へ翻訳しています",
             provider="OpenAI",
-            model="gpt-5.5",
+            model="gpt-5.6-terra",
         )
         entered_translation.set()
         assert finish.wait(timeout=2)
@@ -42,7 +42,7 @@ def test_practice_job_reports_the_actual_stage_provider_and_model() -> None:
                 "stage": "translating_prompt",
                 "label": "学習言語へ翻訳しています",
                 "provider": "OpenAI",
-                "model": "gpt-5.5",
+                "model": "gpt-5.6-terra",
             },
         ],
     )
@@ -55,7 +55,7 @@ def test_practice_job_reports_the_actual_stage_provider_and_model() -> None:
         "stage": "translating_prompt",
         "label": "学習言語へ翻訳しています",
         "provider": "OpenAI",
-        "model": "gpt-5.5",
+        "model": "gpt-5.6-terra",
     }
 
     finish.set()

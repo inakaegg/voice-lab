@@ -38,7 +38,7 @@ def _hiragana_with_openai(text: str) -> str:
         raise RuntimeError("openai package is required for Japanese hiragana display text.") from exc
 
     response = OpenAI().responses.create(
-        model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.5")),
+        model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.6-terra")),
         instructions=(
             "Convert the Japanese sentence to hiragana only for display to language learners. "
             "Return only the hiragana text, with no notes. Keep punctuation and Arabic numerals readable."

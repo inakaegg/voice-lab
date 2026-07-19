@@ -96,7 +96,7 @@ def _rewrite_user_effects_with_openai(text: str, *, osaka_dialect: bool, variati
         )
 
     response = OpenAI().responses.create(
-        model=os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.5")),
+        model=os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.6-terra")),
         instructions=" ".join(instructions),
         input=text,
     )

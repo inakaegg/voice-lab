@@ -868,7 +868,7 @@ async function runtimePayload(env) {
     provider_mode: "cloudflare",
     providers: {
       asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     supported_voice_modes: ["default", "convert"],
@@ -880,7 +880,7 @@ async function runtimePayload(env) {
         reason: openaiAvailable ? "" : "OPENAI_API_KEY が設定されていません。",
         providers: {
           asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
-          translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+          translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
           tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
         },
         settings: {
@@ -1833,7 +1833,7 @@ function coerceEffectAudios(value) {
 
 async function generateJokeVariants(jokeTexts, variationCount, env) {
   const rawText = await openAiText(env, {
-    model: env.OPENAI_JOKE_VARIATION_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+    model: env.OPENAI_JOKE_VARIATION_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
     instructions:
       "You create short joke text variations for a speech conversion app. Keep each variation in the same language as its source joke. Return only strict JSON in this shape: {\"variants\":[[\"variant 1 for source 1\",\"variant 2 for source 1\"],[\"variant 1 for source 2\",\"variant 2 for source 2\"]]}. Each inner array must correspond to the source joke at the same index.",
     input: JSON.stringify({ jokes: jokeTexts, variants_per_joke: variationCount }),
@@ -1939,7 +1939,7 @@ async function createTranslationJob(request, env) {
     },
     providers: {
       asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
       ...(textTransform ? { text_transform: textTransform } : {}),
     },
@@ -2341,7 +2341,7 @@ async function createUserDisplayText(payload, env) {
     return { kanji_text: text, hiragana_text: "", indonesian_text: "" };
   }
   const hiragana = await openAiText(env, {
-    model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+    model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
     instructions:
       "Convert the Japanese sentence to hiragana only for display to language learners. Return only the hiragana text, with no notes. Keep punctuation and Arabic numerals readable.",
     input: text,
@@ -2385,7 +2385,7 @@ async function createUserJokeOutput(payload, env) {
   }
   const targetLanguage = String(payload.target_language || "id-ID");
   const translatedText = await openAiText(env, {
-    model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+    model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
     instructions: "Translate the text into natural Indonesian for a short spoken joke. Return only the translated text.",
     input: text,
   });
@@ -2399,7 +2399,7 @@ async function createUserJokeOutput(payload, env) {
     timings_ms: tts.timings_ms,
     providers: {
       asr: "none",
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     warnings: [],
@@ -2463,7 +2463,7 @@ async function createPracticePrompt(request, env) {
     },
     providers: {
       asr: `openai-asr-${asrModel}`,
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     detected_source_language: translation.source_language,
@@ -2596,7 +2596,7 @@ async function createPracticeRecording(request, env) {
     },
     providers: {
       asr: `openai-asr-${asrModel}`,
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.5"}`,
+      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     detected_source_language: translation.source_language,
@@ -3227,7 +3227,7 @@ async function prepareVibeVoiceScriptForGeneration(form, env, script) {
   if (!requested) {
     return { script, diagnostics };
   }
-  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
+  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra";
   const translationResult = parseVibeVoiceTranslationResult(await openAiText(env, {
     model,
     instructions: [
@@ -3270,7 +3270,7 @@ async function createVibeVoiceScript(request, env) {
   if (seedScript.length > 5_000) {
     throw httpError(413, "seed_script must be 5000 characters or fewer");
   }
-  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5";
+  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra";
   const script = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
     model,
     instructions: [
@@ -3613,7 +3613,7 @@ async function translateTranscript(env, { transcript, sourceLanguage, targetLang
         "Return only strict JSON: {\"source_language\":\"ja-JP|id-ID|zh-CN|en-US|auto\",\"target_language\":\"...\",\"translated_text\":\"...\"}.",
       ].join(" ");
   const rawText = await openAiText(env, {
-    model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+    model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
     instructions,
     input: JSON.stringify({
       source_language: sourceLanguage,
@@ -3756,7 +3756,7 @@ async function transformUserText(text, targetLanguage, options, env) {
   }
   return (
     await openAiText(env, {
-      model: env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.5",
+      model: env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
       instructions: instructions.join(" "),
       input: text,
     })

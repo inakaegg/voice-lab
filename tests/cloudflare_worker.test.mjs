@@ -1218,6 +1218,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
     }
     throw new Error(`unexpected url: ${url}`);
   }, { kv: fakeKv() });
+  delete env.OPENAI_TRANSLATION_MODEL;
   const form = new FormData();
   form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
   form.append("target_language", "zh-CN");
@@ -1249,6 +1250,7 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(calls[0].init.body.get("response_format"), "verbose_json");
   assert.deepEqual(calls[0].init.body.getAll("timestamp_granularities[]"), ["word", "segment"]);
   assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
+  assert.equal(calls[1].body.model, "gpt-5.6-terra");
   assert.equal(calls[2].url, "https://api.openai.com/v1/audio/speech");
   assert.equal(calls.filter((call) => call.url === "https://api.openai.com/v1/responses").length, 1);
   assert.equal(history.recordings.length, 0);
@@ -2158,7 +2160,7 @@ test("Cloudflare worker creates user text output with OpenAI text transform and 
   assert.equal(payload.transformed_text, "めっちゃこんにちは");
   assert.equal(payload.audio_mime_type, "audio/wav");
   assert.equal(payload.audio_base64, Buffer.from([1, 2, 3]).toString("base64"));
-  assert.equal(calls[0].body.model, "gpt-5.5");
+  assert.equal(calls[0].body.model, "gpt-5.6-terra");
   assert.equal(calls[1].body.response_format, "wav");
 });
 
@@ -2631,9 +2633,9 @@ function fakeEnv(fetchImpl, options = {}) {
     RUNPOD_API_BASE_URL: "https://api.runpod.ai/v2",
     RUNPOD_SERVERLESS_TRANSLATION_BACKEND: "openai",
     OPENAI_API_KEY: "openai-secret",
-    OPENAI_TRANSLATION_MODEL: "gpt-5.5",
-    OPENAI_TEXT_TRANSFORM_MODEL: "gpt-5.5",
-    OPENAI_TEXT_DISPLAY_MODEL: "gpt-5.5",
+    OPENAI_TRANSLATION_MODEL: "gpt-5.6-terra",
+    OPENAI_TEXT_TRANSFORM_MODEL: "gpt-5.6-terra",
+    OPENAI_TEXT_DISPLAY_MODEL: "gpt-5.6-terra",
     OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
     OPENAI_TTS_VOICE: "coral",
     OPENAI_TTS_RESPONSE_FORMAT: "wav",
