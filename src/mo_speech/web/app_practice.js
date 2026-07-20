@@ -1287,6 +1287,7 @@ function playAudioSegmentToEnd(audio, start, end, token) {
     const duration = Number.isFinite(audio.duration) ? audio.duration : end;
     const segmentStart = Math.max(0, Math.min(start, duration));
     const segmentEnd = Math.max(segmentStart, Math.min(end, duration));
+    const originalVolume = audio.volume;
     let frame = 0;
     const done = () => {
       if (frame) {
@@ -1296,6 +1297,7 @@ function playAudioSegmentToEnd(audio, start, end, token) {
       audio.removeEventListener("ended", done);
       audio.removeEventListener("error", done);
       audio.pause();
+      audio.volume = originalVolume;
       resolve();
     };
     const watch = () => {
@@ -1308,10 +1310,17 @@ function playAudioSegmentToEnd(audio, start, end, token) {
         done();
         return;
       }
+      audio.volume = originalVolume * playbackContract.segmentFadeVolume({
+        currentTime: audio.currentTime,
+        segmentStart,
+        segmentEnd,
+        fadeSeconds: 0.03,
+      });
       frame = requestAnimationFrame(watch);
     };
     audio.pause();
     audio.currentTime = segmentStart;
+    audio.volume = 0;
     applyPlaybackSpeed(audio);
     audio.addEventListener("ended", done, { once: true });
     audio.addEventListener("error", done, { once: true });

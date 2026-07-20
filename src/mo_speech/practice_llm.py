@@ -274,6 +274,32 @@ def _validate_score(value: object, label: str) -> None:
         raise PracticeLlmError(f"{label} is invalid", stage="validate_response")
 
 
+def clamped_playback_range(
+    words: list[dict[str, object]],
+    *,
+    start_index: int,
+    end_index: int,
+    audio_duration: float,
+    padding: float,
+) -> tuple[float, float]:
+    """選択範囲を無音側だけへ延長し、隣接する発話の手前で止める。"""
+    selected = words[start_index:end_index]
+    start = _required_finite_number(selected[0].get("start"), "word start")
+    end = _required_finite_number(selected[-1].get("end"), "word end")
+    duration = _required_finite_number(audio_duration, "audio duration")
+
+    playback_start = max(0.0, start - padding)
+    if start_index > 0:
+        previous_end = _required_finite_number(words[start_index - 1].get("end"), "previous word end")
+        playback_start = max(playback_start, previous_end) if previous_end < start else start
+
+    playback_end = min(duration, end + padding)
+    if end_index < len(words):
+        next_start = _required_finite_number(words[end_index].get("start"), "next word start")
+        playback_end = min(playback_end, next_start) if next_start > end else min(duration, end)
+    return playback_start, playback_end
+
+
 def _validate_range(
     value: object,
     asr_value: object,
@@ -322,8 +348,13 @@ def _validate_range(
     start = _required_finite_number(selected[0].get("start"), f"{label} word start")
     end = _required_finite_number(selected[-1].get("end"), f"{label} word end")
     audio_duration = _required_finite_number(duration, f"{label} audio duration")
-    playback_start = max(0.0, start - padding)
-    playback_end = min(audio_duration, end + padding)
+    playback_start, playback_end = clamped_playback_range(
+        words,
+        start_index=start_index,
+        end_index=end_index,
+        audio_duration=audio_duration,
+        padding=padding,
+    )
     if playback_end <= playback_start:
         raise PracticeLlmError(f"{label} playback range is empty", stage="validate_response")
 

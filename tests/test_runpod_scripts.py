@@ -83,7 +83,7 @@ def test_runpod_common_sets_resident_gpu_model_lifecycle_defaults() -> None:
         "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR "
         "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION "
         "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE "
-        "FUNASR_MODEL FUNASR_VAD_MODEL FUNASR_PUNC_MODEL FUNASR_HUB FUNASR_DEVICE"
+        "FUNASR_MODEL FUNASR_FA_MODEL FUNASR_VAD_MODEL FUNASR_PUNC_MODEL FUNASR_HUB FUNASR_DEVICE"
     )
 
     result = subprocess.run(
@@ -102,6 +102,7 @@ def test_runpod_common_sets_resident_gpu_model_lifecycle_defaults() -> None:
         "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION": "1",
         "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE": "1",
         "FUNASR_MODEL": "funasr/paraformer-zh",
+        "FUNASR_FA_MODEL": "funasr/fa-zh",
         "FUNASR_VAD_MODEL": "funasr/fsmn-vad",
         "FUNASR_PUNC_MODEL": "funasr/ct-punc",
         "FUNASR_HUB": "hf",
@@ -285,7 +286,7 @@ def test_runpod_smoke_script_supports_chinese_practice_asr() -> None:
     assert '"source_language": "zh-CN"' in script
     assert 'input_payload["model_audio_base64"]' in script
     assert 'input_payload["target_text"] = args.target_text' in script
-    assert 'PRACTICE_ASR_CONTRACT_VERSION = 2' in script
+    assert 'PRACTICE_ASR_CONTRACT_VERSION = 3' in script
     assert 'practice_asr_contract_version' in script
     assert '"preload_practice_asr": args.preload_practice_asr' in script
     assert 'key.endswith("audio_base64")' in script

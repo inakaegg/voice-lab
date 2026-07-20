@@ -120,7 +120,8 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_WORKERS_MAX` | 最大worker数。既定は `1`。`2` 以上にすると同時VC jobを別workerへ振れるが、新規workerはcold startとSeed-VC preloadをそれぞれ行うため、低頻度デモでは必ず高速化する設定ではない。 |
 | `MO_PRELOAD_MODELS` | FastAPI通常pipelineの起動時preload。30GB最小デモでは `0` にし、VCだけを別途preloadする。 |
 | `MO_VC_BACKENDS` | UI/VC比較で使うVC backend。RunPod単体デモでは `seed-vc` に絞る。 |
-| `FUNASR_MODEL` / `FUNASR_VAD_MODEL` / `FUNASR_PUNC_MODEL` | 中国語発音練習ASRの本体、VAD、句読点モデル。既定は `funasr/paraformer-zh`、`funasr/fsmn-vad`、`funasr/ct-punc`。 |
+| `FUNASR_MODEL` / `FUNASR_FA_MODEL` | 中国語発音練習ASRとforced alignmentのモデル。既定は `funasr/paraformer-zh` と `funasr/fa-zh`。 |
+| `FUNASR_VAD_MODEL` / `FUNASR_PUNC_MODEL` | 中国語発音練習のVADと句読点モデル。既定は `funasr/fsmn-vad` と `funasr/ct-punc`。 |
 | `FUNASR_HUB` / `FUNASR_DEVICE` | FunASRの取得元と実行device。RunPod imageの既定は `hf` / `cuda`。 |
 | `MO_RUNPOD_PRELOAD_FUNASR_ON_START` | 起動時にFunASRを先読みするか。VibeVoiceやSeed-VCとVRAMを共用するため既定は `0`。 |
 | `MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR` | FunASRをロードする前に常駐Seed-VCを解放するか。既定は `1`。 |
@@ -469,7 +470,16 @@ python scripts/runpod_smoke_serverless.py \
   --request-mode async
 ```
 
-`--model-audio` と `--target-text` を省略すると復唱音声単体のFunASR確認になる。SpeakLoopの比較経路を確認する場合は省略しない。両音声を指定したsmokeは `practice_asr_contract_version=2` と `model_transcription` も検査し、旧imageまたは不完全なhandler応答では終了コード1にする。
+`--model-audio` と `--target-text` を省略すると復唱音声単体のFunASR確認になる。SpeakLoopの比較経路を確認する場合は省略しない。両音声を指定したsmokeは `practice_asr_contract_version=3` と `model_transcription` も検査する。旧imageまたは不完全なhandler応答では終了コード1にする。
+
+保存済みSpeakLoop音声で整列とVADの整合性を回帰確認する場合は `scripts/evaluate_fa_zh_alignment.py` を使う。このスクリプトは従来timestampと `fa-zh` + VADスナップ後について、同じ発話島との距離を記録する。VADスナップ後の値はVAD境界を使うため、手動正解境界に対する精度や製品上の改善を示さない。境界品質の採否には、別に固定した手動正解境界または聴取評価を使う。既定では結果をgit管理外の `tmp/fa-zh-alignment-results.json` へ保存する。
+
+```sh
+python scripts/evaluate_fa_zh_alignment.py \
+  --recordings-dir tmp/audio-history/recordings \
+  --outputs-dir tmp/audio-history/outputs \
+  --device cpu
+```
 
 FunASRをwarmupする場合は `--operation-mode warmup --preload-practice-asr` を使う。Seed-VCとFunASRを同じwarmup requestで同時に先読みする指定は受け付けない。
 

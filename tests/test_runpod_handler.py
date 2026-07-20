@@ -117,6 +117,19 @@ def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: py
                 timestamp_granularities=["word"],
             )
 
+        def force_align_detail(self, audio_path, transcription):
+            assert audio_path.read_bytes() == b"chinese attempt"
+            return AsrTranscription(
+                text=transcription.text,
+                model=transcription.model,
+                words=[
+                    {"text": "在", "start": 0.0, "end": 0.25},
+                    {"text": "中国", "start": 0.25, "end": 0.55},
+                ],
+                segments=[{"text": transcription.text, "start": 0.0, "end": 0.55}],
+                timestamp_granularities=["word"],
+            )
+
     monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
 
     payload = runpod_handler.handler(
@@ -132,14 +145,14 @@ def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: py
 
     assert payload["text"] == "在中国的AI服务方面。"
     assert payload["model"] == "funasr/paraformer-zh"
-    assert payload["words"][0] == {"text": "在", "start": 0.1, "end": 0.2}
+    assert payload["words"][0] == {"text": "在", "start": 0.0, "end": 0.25}
     assert payload["timestamp_granularities"] == ["word"]
     assert payload["providers"] == {"asr": "funasr-paraformer-zh"}
     assert payload["serverless"]["operation_mode"] == "practice_asr"
 
 
 def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[bytes, str]] = []
+    calls: list[tuple[str, bytes, str]] = []
     progress: list[dict[str, object]] = []
 
     class FakeFunAsrProvider:
@@ -151,11 +164,22 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
             assert include_timestamps is True
             audio = audio_path.read_bytes()
             text = "你好吗？" if audio == b"model audio" else "你哈吗？"
-            calls.append((audio, text))
+            calls.append(("asr", audio, text))
             return AsrTranscription(
                 text=text,
                 model=self.model,
                 words=[{"text": text.rstrip("？"), "start": 0.1, "end": 0.9}],
+                timestamp_granularities=["word"],
+            )
+
+        def force_align_detail(self, audio_path, transcription):
+            audio = audio_path.read_bytes()
+            calls.append(("align", audio, transcription.text))
+            return AsrTranscription(
+                text=transcription.text,
+                model=transcription.model,
+                words=[{"text": transcription.words[0]["text"], "start": 0.0, "end": 0.8}],
+                segments=[{"text": transcription.text, "start": 0.0, "end": 0.8}],
                 timestamp_granularities=["word"],
             )
 
@@ -177,11 +201,16 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
         }
     )
 
-    assert calls == [(b"model audio", "你好吗？"), (b"attempt audio", "你哈吗？")]
+    assert calls == [
+        ("asr", b"model audio", "你好吗？"),
+        ("align", b"model audio", "你好吗？"),
+        ("asr", b"attempt audio", "你哈吗？"),
+        ("align", b"attempt audio", "你哈吗？"),
+    ]
     assert payload["text"] == "你哈吗？"
     assert payload["target_text"] == "你好吗？"
     assert payload["model_transcription"]["text"] == "你好吗？"
-    assert payload["practice_asr_contract_version"] == 2
+    assert payload["practice_asr_contract_version"] == 3
     assert [entry["stage"] for entry in progress] == [
         "initializing",
         "transcribing_model",
@@ -206,6 +235,10 @@ def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pyt
             calls.append("transcribe-funasr")
             return AsrTranscription(text="你好", model="funasr/paraformer-zh")
 
+        def force_align_detail(self, _audio_path, transcription):
+            calls.append("align-funasr")
+            return transcription
+
     monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", FakeVoiceConversionService())
     monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE_LOAD_MS", 1.0)
     monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
@@ -220,7 +253,7 @@ def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pyt
         }
     )
 
-    assert calls == ["release-vc", "transcribe-funasr"]
+    assert calls == ["release-vc", "transcribe-funasr", "align-funasr"]
     assert runpod_handler._VOICE_CONVERSION_SERVICE is None
     assert runpod_handler._VOICE_CONVERSION_SERVICE_LOAD_MS is None
 

@@ -53,7 +53,7 @@ _DEFAULT_RUNPOD_VIBEVOICE_ARTIFACT_AUDIO_FORMAT = "mp3"
 _DEFAULT_RUNPOD_VIBEVOICE_MAX_ARTIFACTS = 64
 _DEFAULT_RUNPOD_VIBEVOICE_MAX_ARTIFACT_BASE64_CHARS = 2_000_000
 _DEFAULT_RUNPOD_VIBEVOICE_EXCLUDE_ARTIFACT_KINDS = ("speaker_vibevoice",)
-PRACTICE_ASR_CONTRACT_VERSION = 2
+PRACTICE_ASR_CONTRACT_VERSION = 3
 
 
 def handler(event: dict[str, Any]) -> dict[str, object]:
@@ -363,6 +363,7 @@ def _handle_practice_asr(
     temp_write_ms = 0.0
     model_transcription = None
     model_asr_ms = 0.0
+    model_alignment_ms = 0.0
     model_temp_write_ms = 0.0
     if model_audio_bytes is not None:
         _report_runpod_progress(
@@ -385,6 +386,12 @@ def _handle_practice_asr(
                 include_timestamps=True,
             )
             model_asr_ms = _elapsed_ms(model_asr_started)
+            model_alignment_started = perf_counter()
+            model_transcription = provider.force_align_detail(
+                Path(model_temp_audio.name),
+                model_transcription,
+            )
+            model_alignment_ms = _elapsed_ms(model_alignment_started)
 
     _report_runpod_progress(
         event,
@@ -406,6 +413,9 @@ def _handle_practice_asr(
             include_timestamps=True,
         )
         asr_ms = _elapsed_ms(asr_started)
+        alignment_started = perf_counter()
+        transcription = provider.force_align_detail(Path(temp_audio.name), transcription)
+        alignment_ms = _elapsed_ms(alignment_started)
 
     _report_runpod_progress(
         event,
@@ -426,7 +436,9 @@ def _handle_practice_asr(
         "timings_ms": {
             "asr": asr_ms,
             "model_asr": model_asr_ms,
-            "total": asr_ms + model_asr_ms,
+            "alignment": alignment_ms,
+            "model_alignment": model_alignment_ms,
+            "total": asr_ms + model_asr_ms + alignment_ms + model_alignment_ms,
         },
         "providers": {"asr": provider.name},
         "warnings": [],

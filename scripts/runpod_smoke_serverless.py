@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-PRACTICE_ASR_CONTRACT_VERSION = 2
+PRACTICE_ASR_CONTRACT_VERSION = 3
 
 
 def _optional_float_env(name: str) -> float | None:

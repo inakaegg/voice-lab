@@ -126,7 +126,7 @@ test("reviewed real ASR pair computes timestamps from word indexes", () => {
     matched_text: "你就像咱妈样呢",
     start: 8.459,
     end: 10.289,
-    playback_start: 8.359,
+    playback_start: 8.459,
     playback_end: 10.26,
   });
 });
@@ -213,7 +213,7 @@ for (const { path: fieldPath, value } of INVALID_RESULT_CASES) {
   });
 }
 
-test("LLM result is exposed to existing phrase playback without changing times", () => {
+test("LLM result is exposed to phrase playback with neighboring speech clamping", () => {
   const fixture = loadFixture();
   const validated = validatePracticeLlmResult(stripLlmSuppliedTimestamps(fixture.llm_response), fixture.input);
 
@@ -221,7 +221,7 @@ test("LLM result is exposed to existing phrase playback without changing times",
 
   assert.equal(attempt.target_phrase_count, 4);
   assert.equal(attempt.all_phrases_playable, true);
-  assert.ok(Math.abs(attempt.phrases[3].audio_start - 8.359) <= 1e-6);
+  assert.ok(Math.abs(attempt.phrases[3].audio_start - 8.459) <= 1e-6);
   assert.ok(Math.abs(attempt.phrases[3].audio_end - 10.26) <= 1e-6);
   assert.ok(Math.abs(reference.phrases[3].audio_start - 6.13675) <= 1e-6);
   assert.ok(Math.abs(reference.phrases[3].audio_end - 7.413083) <= 1e-6);

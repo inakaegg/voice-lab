@@ -12,6 +12,7 @@ from mo_speech.practice_llm import (
     PRACTICE_LLM_PROMPT,
     PracticeLlmError,
     PracticeLlmService,
+    clamped_playback_range,
     comparison_alignments_from_llm_result,
     supported_practice_comparison_model,
     validate_playback_padding_seconds,
@@ -95,6 +96,38 @@ def test_model_and_padding_settings_are_restricted() -> None:
             validate_playback_padding_seconds(value)
 
 
+def test_playback_padding_extends_only_into_silence_before_neighboring_speech() -> None:
+    words = [
+        {"text": "前", "start": 0.0, "end": 0.45},
+        {"text": "対象", "start": 0.8, "end": 1.2},
+        {"text": "次", "start": 1.25, "end": 1.6},
+    ]
+
+    assert clamped_playback_range(
+        words,
+        start_index=1,
+        end_index=2,
+        audio_duration=2.0,
+        padding=0.3,
+    ) == pytest.approx((0.5, 1.25))
+
+
+def test_playback_padding_is_disabled_toward_overlapping_neighboring_speech() -> None:
+    words = [
+        {"text": "前", "start": 0.0, "end": 0.85},
+        {"text": "対象", "start": 0.8, "end": 1.2},
+        {"text": "次", "start": 1.1, "end": 1.6},
+    ]
+
+    assert clamped_playback_range(
+        words,
+        start_index=1,
+        end_index=2,
+        audio_duration=2.0,
+        padding=0.3,
+    ) == pytest.approx((0.8, 1.2))
+
+
 def test_reviewed_real_asr_pair_computes_timestamps_from_word_indexes() -> None:
     fixture = load_fixture()
     model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
@@ -114,7 +147,7 @@ def test_reviewed_real_asr_pair_computes_timestamps_from_word_indexes() -> None:
             "matched_text": "你就像咱妈样呢",
             "start": 8.459,
             "end": 10.289,
-            "playback_start": 8.359,
+            "playback_start": 8.459,
             "playback_end": 10.26,
         },
     )
@@ -196,7 +229,7 @@ def test_invalid_llm_result_is_rejected_without_legacy_fallback(path, value) -> 
     assert raised.value.fallback_to_legacy is False
 
 
-def test_llm_result_is_exposed_to_existing_phrase_playback_without_changing_times() -> None:
+def test_llm_result_is_exposed_to_phrase_playback_with_neighbor_clamping() -> None:
     fixture = load_fixture()
     validated = validate_practice_llm_result(
         _strip_llm_supplied_timestamps(fixture["llm_response"]),
@@ -207,7 +240,7 @@ def test_llm_result_is_exposed_to_existing_phrase_playback_without_changing_time
 
     assert attempt["target_phrase_count"] == 4
     assert attempt["all_phrases_playable"] is True
-    assert attempt["phrases"][3]["audio_start"] == pytest.approx(8.359)
+    assert attempt["phrases"][3]["audio_start"] == pytest.approx(8.459)
     assert attempt["phrases"][3]["audio_end"] == pytest.approx(10.26)
     assert reference["phrases"][3]["audio_start"] == pytest.approx(6.13675)
     assert reference["phrases"][3]["audio_end"] == pytest.approx(7.413083)

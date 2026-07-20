@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mo_speech.providers.funasr import FunAsrPracticeProvider, transcription_from_funasr_result
+from mo_speech.providers.openai_api import AsrTranscription
 
 
 def test_funasr_result_maps_character_timestamps_from_milliseconds_to_seconds() -> None:
@@ -94,3 +95,60 @@ def test_funasr_provider_rejects_non_chinese_input(tmp_path: Path) -> None:
         assert str(exc) == "FunASR practice ASR only supports zh-CN"
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_funasr_provider_forced_alignment_uses_raw_joined_text_and_shared_hf_hub(tmp_path: Path) -> None:
+    factory_calls: list[dict[str, object]] = []
+    received_text: list[str] = []
+
+    class FakeAlignmentModel:
+        def generate(self, *, input, data_type):
+            audio_path, text_path = input
+            assert Path(audio_path).read_bytes() == b"audio"
+            assert data_type == ("sound", "text")
+            received_text.append(Path(text_path).read_text(encoding="utf-8"))
+            return [{"text": "你 好", "timestamp": [[100, 250], [250, 500]]}]
+
+    def alignment_factory(**kwargs):
+        factory_calls.append(kwargs)
+        return FakeAlignmentModel()
+
+    audio_path = tmp_path / "model.wav"
+    audio_path.write_bytes(b"audio")
+    provider = FunAsrPracticeProvider(
+        hub="hf",
+        alignment_model_factory=alignment_factory,
+    )
+    transcription = AsrTranscription(
+        text="你好。",
+        model="funasr/paraformer-zh",
+        words=[
+            {"text": "你", "start": 0.4, "end": 0.7},
+            {"text": "好", "start": 0.7, "end": 1.0},
+        ],
+        timestamp_granularities=["word"],
+    )
+
+    aligned = provider.force_align_detail(
+        audio_path,
+        transcription,
+        speech_islands=[(0.0, 0.55)],
+    )
+
+    assert received_text == ["你好"]
+    assert factory_calls == [
+        {
+            "model": "funasr/fa-zh",
+            "hub": "hf",
+            "device": "cuda",
+            "disable_update": True,
+            "disable_pbar": True,
+        }
+    ]
+    assert aligned.text == "你好。"
+    assert aligned.model == "funasr/paraformer-zh"
+    assert aligned.words == [
+        {"text": "你", "start": 0.0, "end": 0.25},
+        {"text": "好", "start": 0.25, "end": 0.55},
+    ]
+    assert aligned.segments == [{"text": "你好。", "start": 0.0, "end": 0.55}]

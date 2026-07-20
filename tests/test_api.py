@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from mo_speech.api import create_app
+from mo_speech.api import _practice_model_asr_cache_key, create_app
 from mo_speech.audio_history import AudioHistoryEntry, AudioHistoryStore
 from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
@@ -21,6 +21,14 @@ from mo_speech.providers.voice import (
     VoiceConversionBackendInfo,
     VoiceConversionService,
 )
+
+
+def test_practice_model_asr_cache_key_versions_for_fa_zh_alignment() -> None:
+    provider = SimpleNamespace(name="runpod-funasr-paraformer-zh")
+
+    key = _practice_model_asr_cache_key(b"model audio", "zh-CN", provider)
+
+    assert key.startswith("fa-zh-v1:runpod-funasr-paraformer-zh:zh-CN:")
 
 
 @pytest.fixture(autouse=True)
@@ -797,7 +805,7 @@ def test_chinese_practice_attempt_job_reports_llm_stage_after_runpod_asr(tmp_pat
                 "id": job_id,
                 "status": "COMPLETED",
                 "output": {
-                    "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                     "target_text": "你好。",
                     "text": "你好",
                     "model": "funasr/paraformer-zh",
@@ -927,7 +935,7 @@ def test_chinese_practice_attempt_job_preserves_context_for_polyphonic_diff_piny
                 "id": job_id,
                 "status": "COMPLETED",
                 "output": {
-                    "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                     "target_text": "银行。",
                     "text": "银形",
                     "model": "funasr/paraformer-zh",
@@ -1053,7 +1061,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
         def job_status(self, job_id):
             self.status_calls += 1
             output = {
-                "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                 "target_text": "你好。",
                 "text": "你好",
                 "model": "funasr/paraformer-zh",
@@ -1270,7 +1278,7 @@ def test_chinese_practice_attempt_job_retries_empty_model_asr_instead_of_caching
         def job_status(self, job_id):
             job_index = int(job_id.rsplit("-", 1)[-1]) - 1
             output = {
-                "practice_asr_contract_version": 2,
+                "practice_asr_contract_version": 3,
                 "target_text": "你好。",
                 "text": "",
                 "model": "funasr/paraformer-zh",
@@ -2261,7 +2269,7 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
                 "delayTime": 1200,
                 "executionTime": 450,
                 "output": {
-                    "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                     "target_text": "你好吗？你今天去哪里？",
                     "text": "你哈吗？你今天到那里？",
                     "model": "funasr/paraformer-zh",
@@ -2426,7 +2434,7 @@ def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
                 "id": job_id,
                 "status": "COMPLETED",
                 "output": {
-                    "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                     "target_text": "你好。",
                     "text": "你好。",
                     "model": "funasr/paraformer-zh",
@@ -2556,7 +2564,7 @@ def test_practice_attempt_job_falls_back_to_asr_word_ends_when_duration_probe_fa
                 "id": job_id,
                 "status": "COMPLETED",
                 "output": {
-                    "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                     "target_text": "你好。",
                     "text": "你好。",
                     "model": "funasr/paraformer-zh",
@@ -2647,6 +2655,7 @@ def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
                 "id": job_id,
                 "status": "COMPLETED",
                 "output": {
+                    "practice_asr_contract_version": 2,
                     "target_text": "你好吗？",
                     "text": "你好吗？",
                     "model": "funasr/paraformer-zh",
@@ -2669,7 +2678,7 @@ def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
     payload = response.json()
     assert payload["status"] == "failed"
     assert payload["current_stage"]["label"] == "RunPod imageの更新が必要です"
-    assert "practice ASR contract v2" in payload["error"]
+    assert "practice ASR contract v3" in payload["error"]
     assert "再デプロイ" in payload["error"]
 
 
@@ -2682,7 +2691,7 @@ def test_practice_attempt_job_fails_with_typed_empty_reference_error() -> None:
                 "id": job_id,
                 "status": "COMPLETED",
                 "output": {
-                    "practice_asr_contract_version": 2,
+                    "practice_asr_contract_version": 3,
                     "target_text": "你好吗？",
                     "text": "你好吗？",
                     "model": "funasr/paraformer-zh",
