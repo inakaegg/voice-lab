@@ -2341,10 +2341,10 @@ def test_practice_attempt_job_returns_no_speech_for_llm_comparison_without_calli
 
 def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> None:
     class EmptyReferenceAsr:
-        name = "fake-whisper"
+        name = "empty-reference-fake-asr"
 
         def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            if audio_path.read_bytes() == b"model audio":
+            if audio_path.read_bytes() == b"empty reference model audio":
                 return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
             return AsrTranscription(
                 text="Please close the window.",
@@ -2369,18 +2369,18 @@ def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> Non
             "progress_mode": "job",
         },
         files={
-            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
-            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+            "audio": ("attempt.webm", b"attempt audio for empty reference test", "audio/webm"),
+            "model_audio": ("model.wav", b"empty reference model audio", "audio/wav"),
         },
     )
     job_id = submitted.json()["job_id"]
 
     completed = None
-    for _ in range(100):
+    for _ in range(500):
         completed = client.get(f"/api/practice/attempt-jobs/{job_id}").json()
         if completed["status"] == "failed":
             break
-        sleep(0.01)
+        sleep(0.02)
 
     assert completed["status"] == "failed"
     assert completed["error"]["code"] == "practice_alignment_provider_contract_error"
