@@ -6,7 +6,7 @@
 
 Private vulnerability reportingを有効にするまでは、公開Issueへ秘密情報、個人情報、未修正の脆弱性の詳細を投稿しないでください。
 
-報告には、影響するrouteまたはcomponent、再現条件、想定される影響、確認したrevisionを含めてください。API key、token、個人情報、第三者の音声データは添付しないでください。
+報告に含めてください: 影響するrouteまたはcomponent、再現条件、想定される影響、確認したrevision。添付しないでください: API key、token、個人情報、第三者の音声データ。
 
 ## 対象
 

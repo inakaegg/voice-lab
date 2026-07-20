@@ -2,7 +2,7 @@
 
 ## 目的
 
-公開デモで扱う設定、quota、監査イベント、job metadata、公開サンプル音声を、データ特性に合うCloudflareサービスへ分ける。ユーザーの入力音声と生成音声はCloudflare公開版で履歴保存せず、音声履歴はローカルFastAPI版だけの機能とする。
+公開デモで扱うデータを、データ特性に合うCloudflareサービスへ分ける。対象データは設定・quota・監査イベント・job metadata・公開サンプル音声である。ユーザーの入力音声と生成音声はCloudflare公開版で履歴保存せず、音声履歴はローカルFastAPI版だけの機能とする。
 
 ## 現在の実装
 
@@ -14,7 +14,7 @@
 | 研究用SkitVoice sample metadata/blob | D1 / R2（bindingなしではKV fallback） | dataは削除せず管理者経路だけで扱い、一般向けAPIから除外 |
 | quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存。D1は48時間／90日を超えたデータを日次削除 |
 
-`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは翻訳、VC、SpeakLoop、SkitVoice、TTSの入力・生成音声を履歴indexやblobとして書き込まない。
+`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは入力・生成音声を履歴indexやblobとして書き込まない。対象は翻訳・VC・SpeakLoop・SkitVoice・TTSである。
 
 既存SkitVoice sampleは由来・許諾・生成model・AI生成表示を確認できないため、一般向け `GET /api/public-sample-audios` から返さない。外部R2 objectはこのローカル変更で削除せず、管理者認証済みの同APIと管理画面だけで確認・管理する。これはdata削除完了を意味しない。
 
@@ -29,7 +29,7 @@ bucket_name = "mo-speech-audio"
 preview_bucket_name = "mo-speech-audio-preview"
 ```
 
-ローカル/CIではfake R2 bindingを使い、公開サンプルのR2保存、取得、削除、KV fallbackを検証する。bucket名やCloudflare account IDはコードへハードコードしない。
+ローカル/CIではfake R2 bindingを使う。検証対象は公開サンプルのR2保存、取得、削除、KV fallbackである。bucket名やCloudflare account IDはコードへハードコードしない。
 
 ## R2の用途
 
@@ -82,7 +82,7 @@ CREATE INDEX audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
 
 `email` と `last_login_at` は `migrations/0003_public_user_email.sql` で追加した。管理画面の利用者一覧だけが読み、quotaと監査ログは従来どおりhashで識別する。この列を追加する前の行はNULLのままで、過去の利用者は復元しない。
 
-音声、台本、入力本文、OAuth token、raw IP addressはauditへ保存しない。emailを保存する必要がある場合も用途と保持期間を決め、表示用情報と台帳用識別子を分ける。
+auditへ保存しない対象: 音声・台本・入力本文・OAuth token・raw IP address。emailを保存する必要がある場合も用途と保持期間を決め、表示用情報と台帳用識別子を分ける。
 
 D1は48時間を超えた日次quotaと90日を超えた`audit_events`をWorkerのCron Triggerで1日1回削除する。日次実行の間隔を含む実際の最大保持期間は、それぞれ3日未満、91日未満となる。累計quotaと`public_users`のhash識別子は利用上限を維持するため公開デモの運用中に限り保持し、デモ終了時に削除する。KV fallbackの日次quotaは48時間、auditは90日のTTLを設定し、累計quotaはD1と同じく公開デモの運用中に保持する。
 

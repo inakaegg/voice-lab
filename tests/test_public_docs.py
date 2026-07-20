@@ -283,6 +283,22 @@ def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> N
     assert not (ROOT / "docs/speech-translation/PRACTICE_LLM_COMPARISON_SPEC.md").exists()
 
 
+def test_speech_translation_docs_are_consolidated() -> None:
+    # 完了済みフェーズ履歴と統合済み文書は再作成しない。詳細はGit履歴を正とする。
+    assert not (ROOT / "docs/speech-translation/PHASES.md").exists()
+    assert not (ROOT / "docs/speech-translation/LATENCY.md").exists()
+    assert not (ROOT / "docs/speech-translation/MODEL_EVALUATION.md").exists()
+    assert not (ROOT / "docs/speech-translation/REFERENCE_SELECTION.md").exists()
+
+    local_providers = read_text("docs/speech-translation/LOCAL_PROVIDERS.md")
+    assert "benchmark_pipeline.py" in local_providers
+    assert "要件未達" in local_providers
+
+    voice_clone = read_text("docs/speech-translation/VOICE_CLONE.md")
+    assert "silencedetect" in voice_clone
+    assert "REFERENCE_SELECTION.md" not in voice_clone
+
+
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:
     storage = read_text("docs/deployment/STORAGE.md")
 
@@ -388,10 +404,10 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
 def test_runpod_practice_contract_documents_the_cached_reference_asr_exception() -> None:
     spec = read_text("docs/speech-translation/SPEC.md")
     cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
-    roadmap = read_text("docs/speech-translation/ROADMAP.md")
 
     assert "お手本ASRのキャッシュがある場合は `model_audio_base64` を省略できる" in spec
     assert "`model_transcription` も返さない" in spec
     assert "`model_audio_base64` を省略したjob" in cloudflare
     assert "旧imageとは判定しない" in cloudflare
-    assert "音声履歴と独立した短期job state" in roadmap
+    # 現在の実装仕様はSPEC.mdを正とする（ROADMAP.mdは将来方針に限る）。
+    assert "音声履歴と独立した短期job state" in spec

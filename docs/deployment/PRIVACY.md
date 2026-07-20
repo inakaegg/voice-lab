@@ -13,9 +13,9 @@
 | OpenAI | 対象機能の入力音声またはテキスト | ASR、翻訳、テキスト加工、TTS |
 | RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声。管理者研究時は参照音声、台本、翻訳結果、生成設定 | FunASR、Seed-VC、管理者専用VibeVoice |
 
-ブラウザへOpenAI・RunPodのAPI keyを渡さない。URL参照音声の取得はローカルFastAPIだけで行い、Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
+ブラウザへOpenAI・RunPodのAPI keyを渡さない。URL参照音声の取得はローカルFastAPIだけで行う。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
 
-同意、AI生成表示、保存・削除、外部送信、abuse対応はVibeVoice固有ではなく、Seed-VCと将来の音声providerにも適用するVoice Lab共通方針とする。利用者が送信権限を持つ音声だけを扱い、用途、送信先、Voice Lab側の保存有無を送信前に表示する。checkboxは第三者本人の同意を証明するものではないため、公開入力面とserver contractでも扱える参照音声を制限する。
+同意・AI生成表示・保存/削除・外部送信・abuse対応はVibeVoice固有ではなく、Seed-VCと将来の音声providerにも適用するVoice Lab共通方針とする。利用者が送信権限を持つ音声だけを扱い、用途、送信先、Voice Lab側の保存有無を送信前に表示する。checkboxは第三者本人の同意を証明するものではないため、公開入力面とserver contractでも扱える参照音声を制限する。
 
 ## Voice Labが保存する情報
 
@@ -23,14 +23,14 @@
 - Google emailはquotaと監査の識別に使う前にSHA-256 hash化する。D1と現在のKV fallbackは、quota keyとaudit eventへ平文emailを新規保存しない。
 - ログインしたメールアドレスと日時は `public_users` テーブルへ平文で保存し、管理者だけが `GET /api/public-users` と `/admin` の利用者一覧で読む。quota keyとaudit eventは従来どおりhashだけを保存する。平文emailは公開デモの運用中に限り保持し、公開デモ終了時に削除する。
 - 2026-07-16より前に作られた平文emailを含むlegacy KV quota keyは、新Workerのproduction反映後に2件を削除した。2026-07-17の再検査で、legacy KVの平文email keyは0件である。
-- Googleログイン後のブラウザには、email、発行時刻、有効期限を含む署名cookieを `HttpOnly`、`Secure`、`SameSite=Lax` で保存する。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
+- Googleログイン後のブラウザには署名cookieを保存する。cookieの内容はemail、発行時刻、有効期限である。保存属性は `HttpOnly`、`Secure`、`SameSite=Lax` とする。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
 - D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
 - R2は管理者が公開用として登録したサンプル音声だけを保存する。
 - 既存SkitVoice sampleは由来・許諾・生成model・AI生成表示を確認できないため、一般向けsample APIから返さない。外部R2 objectはこのローカル変更では削除せず、管理者経路でのみ確認・管理する。
 - KVは短期job snapshot、ready状態、設定、bindingがない環境のfallbackに使う。短期job snapshotは1時間、fallbackの日次quotaは48時間、audit eventは90日で失効する。fallbackの累計quotaは公開デモの運用中に限り保持する。管理設定の `admin_google_emails` には運営者の平文emailを保存し、`/fun` のuser settingsには管理者が入力した設定・本文を保存できる。一般利用者のquota・audit識別子とは用途を分ける。
 - ローカルFastAPI版は開発者の端末へ音声履歴と診断情報を保存でき、Cloudflare公開版とは保存境界が異なる。
 
-「履歴として保存しない」は、OpenAI、RunPod、Google、Cloudflareがそれぞれのサービス条件に基づいて行う処理やログ保持まで否定する表現として使わない。正式なプライバシーポリシーでは、各処理事業者の現行条件を確認して案内する。
+「履歴として保存しない」は、外部処理事業者が行う処理やログ保持まで否定する表現として使わない。対象事業者はOpenAI、RunPod、Google、Cloudflareである。正式なプライバシーポリシーでは、各処理事業者の現行条件を確認して案内する。
 
 ## RunPodのjob・result・log境界
 
