@@ -1046,6 +1046,7 @@ def create_app(
     practice_prompt_job_store = PracticeJobStore()
     practice_attempt_job_store = PracticeJobStore()
     practice_attempt_llm_options: dict[str, dict[str, object]] = {}
+    practice_attempt_result_cache: dict[str, dict[str, object]] = {}
     practice_attempt_finalization_jobs: dict[str, dict[str, object]] = {}
     practice_attempt_finalization_lock = Lock()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
@@ -1979,6 +1980,11 @@ def create_app(
             {"stage": "finalizing", "label": "比較準備", "provider": "Voice Lab", "model": "funasr/paraformer-zh"},
         ]
         if status == "COMPLETED":
+            # このjob_idが既に確定済みなら、再ポーリングのたびにLLM比較を再実行して
+            # 二重課金・スコアの揺れが起きないよう、確定済みsnapshotをそのまま返す。
+            cached_snapshot = practice_attempt_result_cache.get(job_id)
+            if cached_snapshot is not None:
+                return cached_snapshot
             output = body.get("output")
             if not isinstance(output, dict):
                 return {
@@ -2076,7 +2082,7 @@ def create_app(
                     "result": None,
                     **_practice_alignment_error_envelope(error),
                 }
-            return {
+            snapshot = {
                 "job_id": job_id,
                 "status": "succeeded",
                 "current_stage": {"stage": "complete", "label": "比較準備が完了しました", "provider": "Voice Lab", "model": attempt_transcription.model},
@@ -2085,6 +2091,9 @@ def create_app(
                 "result": result,
                 "error": None,
             }
+            if job_id:
+                practice_attempt_result_cache[job_id] = snapshot
+            return snapshot
         if status in {"FAILED", "CANCELLED", "TIMED_OUT"}:
             error = _runpod_practice_error_message(body)
             return {

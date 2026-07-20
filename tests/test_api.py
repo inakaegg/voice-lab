@@ -1874,6 +1874,123 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert diagnostics["model_comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.4)
 
 
+def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(tmp_path, monkeypatch) -> None:
+    class FakeAsyncRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def submit_comparison_job(self, **kwargs):
+            return {"id": "practice-repoll-job", "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 0, "initializing": 1}}
+
+        def job_status(self, job_id):
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "你好。",
+                    "text": "你好。",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [{"text": "你好", "start": 0.1, "end": 0.8}],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "你好。",
+                        "model": "funasr/paraformer-zh",
+                        "timestamp_granularities": ["word"],
+                        "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                        "segments": [],
+                    },
+                    "providers": {"asr": "funasr-paraformer-zh"},
+                },
+            }
+
+    class FakePracticeLlm:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def evaluate(self, *, model, input_payload):
+            self.calls += 1
+            result = {
+                "schema_version": 1,
+                "overall_score": 90,
+                "overall_comment": "よくできました。",
+                "phrases": [
+                    {
+                        "phrase_index": 0,
+                        "target_text": "你好。",
+                        "score": 90,
+                        "comment": "よくできました。",
+                        "reference": {
+                            "status": "assigned",
+                            "word_start_index": 0,
+                            "word_end_index": 1,
+                            "matched_text": "你好",
+                            "start": 0.0,
+                            "end": 0.7,
+                            "playback_start": 0.0,
+                            "playback_end": 0.7,
+                        },
+                        "attempt": {
+                            "status": "assigned",
+                            "word_start_index": 0,
+                            "word_end_index": 1,
+                            "matched_text": "你好",
+                            "start": 0.1,
+                            "end": 0.8,
+                            "playback_start": 0.0,
+                            "playback_end": 0.8,
+                        },
+                    }
+                ],
+            }
+            return PracticeLlmEvaluation(
+                result=result,
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=5.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
+    llm = FakePracticeLlm()
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
+            practice_llm_service=llm,
+        )
+    )
+
+    client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "zh-CN", "target_text": "你好。", "comparison_model": "gpt-5.6-terra"},
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    first = client.get("/api/practice/attempt-jobs/practice-repoll-job")
+    second = client.get("/api/practice/attempt-jobs/practice-repoll-job")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["result"]["overall_score"] == 90
+    assert second.json()["result"]["overall_score"] == 90
+    assert llm.calls == 1, "re-polling a completed RunPod job must reuse the cached comparison instead of calling the LLM again"
+
+
 def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
     class OutdatedRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
