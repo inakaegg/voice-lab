@@ -8,7 +8,7 @@
 関連文書:
 
 - [現行SPEC](SPEC.md)
-- [学習ロードマップ](LEARNING_ROADMAP.md)
+- [SpeakLoopロードマップ](ROADMAP.md)
 
 旧canonical案、旧policy案、旧評価計画、旧未決定事項一覧は本文書に統合済みであり、規範として参照しない。
 
@@ -1353,7 +1353,7 @@ affected_tests:
 - `partial_overlap_negative` 12件を独立判定し、曖昧な4件だけをscoreから除外した。
 - `ownership.conservative`と`content.canonical_normalized`を採用し、未採用profileをproduction switchとして残していない。
 - canonical evaluationはPython/Workerとも、raw 512件中ambiguous 10件を除く502/502で一致した。内訳はpilot 20/20、segment policy 12/12、round2 76/76、第1弾194/194、assignment 200/200である。
-- [SPEC.md](SPEC.md)、schema、Python、Worker、fixture、test、UI、[LEARNING_ROADMAP.md](LEARNING_ROADMAP.md)を同じ変更単位で同期した。
+- [SPEC.md](SPEC.md)、schema、Python、Worker、fixture、test、UI、[ROADMAP.md](ROADMAP.md)を同じ変更単位で同期した。
 - `python3 -m pytest`は917件、`npm test`は261件、Playwrightは1440px、1024px、390pxの99件が成功した。今回のalignment再評価では見えるUIを変更していないため、Playwrightの再実行は不要と判断した。
 - Light／Darkのpartial result、whole fallback、no-speech、reference error、attempt errorを実画面で確認し、横overflow、clip、重なり、主要操作の不一致がないことを確認した。
 - `npm run check:js`、`npm run check:web`、`git diff --check`を完了した。

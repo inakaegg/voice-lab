@@ -223,7 +223,7 @@ class OpenAiAsrProvider:
 
 @dataclass
 class OpenAiTranslationProvider:
-    model: str = field(default_factory=lambda: os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.5"))
+    model: str = field(default_factory=lambda: os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.6-terra"))
     _client: Any | None = field(default=None, init=False, repr=False)
 
     @property

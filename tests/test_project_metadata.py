@@ -17,3 +17,24 @@ def test_funasr_dependencies_include_official_audio_runtime_requirement() -> Non
 
     assert '"funasr==1.3.14"' in funasr_extra
     assert '"torchaudio==2.8.0"' in funasr_extra
+
+
+def test_active_openai_text_defaults_do_not_use_gpt_5_5() -> None:
+    paths = (
+        ".env.example",
+        "Dockerfile.runpod",
+        "cloudflare/worker.mjs",
+        "scripts/runpod.env.example",
+        "scripts/runpod_common.sh",
+        "src/mo_speech/api.py",
+        "src/mo_speech/providers/openai_api.py",
+        "src/mo_speech/text_display.py",
+        "src/mo_speech/transforms.py",
+        "src/mo_speech/user_settings.py",
+        "wrangler.toml",
+    )
+
+    for path in paths:
+        text = (ROOT / path).read_text(encoding="utf-8")
+        assert "gpt-5.5" not in text, path
+        assert "gpt-5.6-terra" in text, path

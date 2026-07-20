@@ -141,7 +141,7 @@ python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 | `CHATTERBOX_REFERENCE_MAX_SECONDS` | `10` | Chatterboxに渡す参照音声の上限秒数。 |
 | `OPENAI_API_KEY` | なし | OpenAI API backendを使う場合に必要。git管理外の環境変数として渡す。 |
 | `OPENAI_ASR_MODEL` | `gpt-4o-transcribe` | OpenAI文字起こしモデル。 |
-| `OPENAI_TRANSLATION_MODEL` | `gpt-5.5` | OpenAI翻訳用Responses APIモデル。 |
+| `OPENAI_TRANSLATION_MODEL` | `gpt-5.6-terra` | OpenAI翻訳用Responses APIモデル。 |
 | `OPENAI_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI TTSモデル。 |
 | `OPENAI_TTS_VOICE` | `coral` | OpenAI TTS voice。 |
 | `OPENAI_TTS_RESPONSE_FORMAT` | `wav` | OpenAI TTSの出力形式。Seed-VC後段を考慮し既定はwav。 |

@@ -225,7 +225,7 @@ def _generate_joke_variants_with_openai(joke_texts: tuple[str, ...], variation_c
         raise RuntimeError("openai package is required for joke variations.") from exc
 
     response = OpenAI().responses.create(
-        model=os.getenv("OPENAI_JOKE_VARIATION_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.5")),
+        model=os.getenv("OPENAI_JOKE_VARIATION_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.6-terra")),
         instructions=(
             "You create short joke text variations for a speech conversion app. "
             "Keep each variation in the same language as its source joke. "

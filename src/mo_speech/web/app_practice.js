@@ -1,4 +1,7 @@
 const targetLanguageSelect = document.querySelector("#practice-target-language-select");
+const comparisonModelSelect = document.querySelector("#practice-comparison-model-select");
+const playbackPaddingSlider = document.querySelector("#practice-playback-padding-slider");
+const playbackPaddingValue = document.querySelector("#practice-playback-padding-value");
 const nativePanel = document.querySelector("#practice-native-panel");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
 const nativeCancelButton = document.querySelector("#practice-native-cancel-button");
@@ -44,7 +47,8 @@ const repeatAudio = document.querySelector("#practice-repeat-audio");
 const resultSummary = document.querySelector("#practice-result-panel .practice-result-summary");
 const scoreBar = document.querySelector("#practice-result-panel .practice-score-bar");
 const comparisonNote = document.querySelector("#practice-comparison-note");
-const gradeGuide = document.querySelector("#practice-prompt-panel .practice-grade-guide");
+const overallComment = document.querySelector("#practice-overall-comment");
+const phraseFeedback = document.querySelector("#practice-phrase-feedback");
 const playbackContract = window.voiceLabPracticePlayback;
 
 const languageLabels = {
@@ -78,6 +82,12 @@ const nativeUiLabels = {
 const practiceSettingsStorageKey = "mo:practice-settings";
 const defaultPracticeTargetLanguage = "en-US";
 const selectablePracticeTargetLanguages = new Set(["zh-CN", "en-US"]);
+const selectableComparisonModels = new Set([
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+]);
 
 let selectedTargetLanguage = defaultPracticeTargetLanguage;
 let selectedChineseScript = "simplified";
@@ -114,6 +124,8 @@ let isComparisonPlaying = false;
 let comparisonPlaybackToken = 0;
 
 targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
+comparisonModelSelect.addEventListener("change", savePracticeSettings);
+playbackPaddingSlider.addEventListener("input", handlePlaybackPaddingChange);
 nativeRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("native");
   toggleRecording("native");
@@ -286,6 +298,9 @@ async function submitPracticeRecording(blob, kind) {
   form.append("include_pinyin", selectedTargetLanguage === "zh-CN" ? "true" : "false");
   form.append("use_own_voice", ownVoiceToggle.checked ? "true" : "false");
   form.append("asr_model", practiceAsrModel());
+  form.append("comparison_model", comparisonModelSelect.value);
+  form.append("playback_padding_seconds", normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2));
+  form.append("progress_mode", "job");
   form.append("audio", blob, `practice.${extensionForMimeType(blob.type)}`);
   if (recordingIntent === "attempt") {
     if (!currentModelAsrAudioBlob) {
@@ -304,7 +319,10 @@ async function submitPracticeRecording(blob, kind) {
     const completed = await waitForPracticeAttemptJob(submitted);
     if (completed.status !== "succeeded" || !completed.result) {
       console.error("[SpeakLoop job] attempt failed", completed);
-      throw new Error("音声処理を完了できませんでした。しばらくしてからもう一度お試しください。");
+      throw new Error(apiErrorMessage(
+        completed,
+        "比較結果を作成できませんでした。もう一度お試しください。",
+      ));
     }
     setRepeatAudio(blob);
     renderAttemptResult(completed.result);
@@ -314,7 +332,21 @@ async function submitPracticeRecording(blob, kind) {
     }
     return;
   }
-  const payload = await postPracticeForm("/api/practice/recordings", form);
+  let payload = await postPracticeForm("/api/practice/recordings", form);
+  if (["queued", "running", "succeeded", "failed"].includes(payload?.status)) {
+    renderPracticeJobStatus(payload);
+    progress.hidden = true;
+    setStatus("");
+    const completed = await waitForPracticePromptJob(payload);
+    if (completed.status !== "succeeded" || !completed.result) {
+      console.error("[SpeakLoop job] prompt failed", completed);
+      throw new Error(apiErrorMessage(
+        completed,
+        "お手本を作成できませんでした。もう一度お試しください。",
+      ));
+    }
+    payload = completed.result;
+  }
   const voiceJob = payload.voice_conversion_job || null;
   renderPromptResult(payload, { deferModelAudio: Boolean(voiceJob) });
   if (voiceJob) {
@@ -338,6 +370,46 @@ async function submitPracticeRecording(blob, kind) {
       .then(() => playAudioWithCurrentSpeed(modelAudio))
       .catch(() => {});
   }
+}
+
+async function waitForPracticePromptJob(initialSnapshot) {
+  let snapshot = initialSnapshot;
+  const deadline = Date.now() + 30 * 60 * 1000;
+  let consecutiveErrors = 0;
+  while (snapshot?.status === "queued" || snapshot?.status === "running") {
+    if (!snapshot.job_id) {
+      throw new Error("お手本の作成を開始できませんでした。");
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("お手本の作成が30分以内に完了しませんでした。");
+    }
+    await sleep(snapshot.status === "queued" ? 1200 : 850);
+    try {
+      const response = await fetch(`/api/practice/prompt-jobs/${encodeURIComponent(snapshot.job_id)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(payload, `job status failed: ${response.status}`));
+      }
+      snapshot = payload;
+      consecutiveErrors = 0;
+      renderPracticeJobStatus(snapshot);
+    } catch (error) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= 3) {
+        throw error;
+      }
+      renderPracticeJobStatus({
+        ...snapshot,
+        current_stage: {
+          ...(snapshot.current_stage || {}),
+          label: "処理状況を再確認しています",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+  renderPracticeJobStatus(snapshot);
+  return snapshot;
 }
 
 async function waitForPracticeVoiceJob(initialSnapshot) {
@@ -467,10 +539,18 @@ function publicPracticeStageLabel(stage, state) {
       return "GPUサーバーを準備しています";
     case "loading_model":
       return "音声認識を準備しています";
+    case "transcribing_prompt":
+      return "録音を文字にしています";
+    case "translating_prompt":
+      return "学習言語へ翻訳しています";
+    case "synthesizing_prompt":
+      return "お手本音声を作っています";
     case "transcribing_model":
       return "お手本音声を確認しています";
     case "transcribing_attempt":
       return "録音を確認しています";
+    case "evaluating_comparison":
+      return "比較結果を作っています";
     case "loading_seed_vc_model":
       return "お手本の声を調整する準備をしています";
     case "voice_conversion":
@@ -586,22 +666,24 @@ function renderAttemptResult(payload) {
   currentModelComparisonAlignment = payload.model_comparison_alignment || null;
   resultSummary.hidden = noSpeech;
   scoreBar.hidden = noSpeech;
-  gradeGuide.hidden = noSpeech;
+  overallComment.hidden = noSpeech;
+  phraseFeedback.hidden = noSpeech;
   resultPanel.hidden = false;
   if (noSpeech) {
     gradeBadge.textContent = "";
     gradeBadge.removeAttribute("data-grade");
     scoreText.textContent = "";
     scoreFill.style.width = "0%";
+    overallComment.textContent = "";
+    phraseFeedback.replaceChildren();
     recognizedText.textContent = payload.message || "音声を検出できませんでした。もう一度録音してください。";
   } else {
-    const percent = Math.round(Number(payload.similarity || 0) * 100);
-    const grade = renderPracticeGrade(percent);
-    gradeBadge.textContent = grade.label;
-    gradeBadge.dataset.grade = grade.key;
-    scoreText.textContent = `${percent}%`;
+    const percent = Math.round(Number(payload.overall_score || 0));
+    gradeBadge.textContent = "LLM採点";
+    gradeBadge.dataset.grade = "llm";
+    scoreText.textContent = `${percent}点`;
     scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-    renderRecognizedDiff(payload);
+    renderLlmFeedbackText(payload);
   }
   nativePanel.hidden = false;
   setActiveRecordSlot("repeat");
@@ -609,17 +691,28 @@ function renderAttemptResult(payload) {
   syncPlayButton();
 }
 
-function renderPracticeGrade(percent) {
-  if (percent >= 100) {
-    return { key: "perfect", label: "できました" };
-  }
-  if (percent >= 95) {
-    return { key: "ok", label: "いいかんじ" };
-  }
-  if (percent >= 90) {
-    return { key: "almost", label: "まあまあ" };
-  }
-  return { key: "retry", label: "もう一回" };
+function renderPhraseFeedback(phrases) {
+  phraseFeedback.replaceChildren();
+  phrases.forEach((phrase) => {
+    const item = document.createElement("li");
+    const heading = document.createElement("div");
+    heading.className = "practice-phrase-feedback-heading";
+    const text = document.createElement("strong");
+    text.textContent = displayChineseText(phrase.target_text || "");
+    const score = document.createElement("span");
+    score.textContent = `${Math.round(Number(phrase.score || 0))}点`;
+    const comment = document.createElement("p");
+    comment.textContent = phrase.comment || "";
+    heading.append(text, score);
+    item.append(heading, comment);
+    phraseFeedback.append(item);
+  });
+}
+
+function renderLlmFeedbackText(payload) {
+  renderRecognizedDiff(payload);
+  overallComment.textContent = payload.overall_comment || "";
+  renderPhraseFeedback(payload.llm_comparison?.phrases || []);
 }
 
 function resetPractice() {
@@ -641,6 +734,8 @@ function resetPractice() {
   nativeTranscriptPanel.hidden = true;
   nativeTranscript.textContent = "";
   recognizedText.textContent = "";
+  overallComment.textContent = "";
+  phraseFeedback.replaceChildren();
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
@@ -801,6 +896,13 @@ function handleSpeedChange() {
   savePracticeSettings();
 }
 
+function handlePlaybackPaddingChange() {
+  const padding = normalizedPlaybackPadding(playbackPaddingSlider.value);
+  playbackPaddingSlider.value = String(padding);
+  playbackPaddingValue.textContent = `${padding.toFixed(2)}秒`;
+  savePracticeSettings();
+}
+
 function handlePinyinSettingChange() {
   savePracticeSettings();
   renderTargetDisplay();
@@ -821,7 +923,7 @@ async function selectChineseScript(script) {
   savePracticeSettings();
   renderTargetDisplay();
   if (currentAttemptPayload) {
-    renderRecognizedDiff(currentAttemptPayload);
+    renderLlmFeedbackText(currentAttemptPayload);
   }
 }
 
@@ -1143,6 +1245,8 @@ function setBusy(busy, message, target = 100, kind = processingKind) {
   nativeRecordButton.disabled = busy;
   repeatRecordButton.disabled = busy || !currentTargetText;
   ownVoiceToggle.disabled = busy;
+  comparisonModelSelect.disabled = busy;
+  playbackPaddingSlider.disabled = busy;
   playModelButton.disabled = busy || !modelAudio.src;
   playModelOnlyButton.disabled = busy || !modelAudio.src;
   const processingButton = buttonForRecordSlot(kind || activeRecordSlot);
@@ -1401,6 +1505,13 @@ function loadPracticeSettings() {
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   selectedChineseScript = settings.chinese_script === "traditional" ? "traditional" : "simplified";
   ownVoiceToggle.checked = settings.own_voice === true;
+  comparisonModelSelect.value = selectableComparisonModels.has(settings.comparison_model)
+    ? settings.comparison_model
+    : "gpt-5.6-terra";
+  playbackPaddingSlider.value = String(
+    normalizedPlaybackPadding(settings.playback_padding_seconds),
+  );
+  playbackPaddingValue.textContent = `${normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2)}秒`;
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageSelect.value = selectedTargetLanguage;
   syncPinyinSettingVisibility();
@@ -1412,7 +1523,7 @@ function loadPracticeSettings() {
       .then(() => {
         renderTargetDisplay();
         if (currentAttemptPayload) {
-          renderRecognizedDiff(currentAttemptPayload);
+          renderLlmFeedbackText(currentAttemptPayload);
         }
       })
       .catch(() => showError("繁体字表示を読み込めませんでした。"));
@@ -1435,6 +1546,8 @@ function savePracticeSettings() {
         target_language: selectedTargetLanguage,
         chinese_script: selectedChineseScript,
         own_voice: Boolean(ownVoiceToggle.checked),
+        comparison_model: comparisonModelSelect.value,
+        playback_padding_seconds: normalizedPlaybackPadding(playbackPaddingSlider.value),
         show_pinyin: Boolean(pinyinToggle.checked),
         speed: normalizedPlaybackSpeed(speedSlider.value),
       }),
@@ -1446,6 +1559,14 @@ function savePracticeSettings() {
 
 function practiceAsrModel() {
   return "whisper-1";
+}
+
+function normalizedPlaybackPadding(value) {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    return 0.1;
+  }
+  return Math.max(0, Math.min(0.5, Math.round(parsed / 0.05) * 0.05));
 }
 
 function syncPinyinSettingVisibility() {

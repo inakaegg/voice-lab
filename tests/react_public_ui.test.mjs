@@ -33,7 +33,7 @@ test("React public UI preserves SpeakLoop controller while the SkitVoice public 
 });
 
 test("React pages expose the DOM ids required by legacy controllers", () => {
-  for (const id of ["practice-target-language-select", "practice-chinese-script-setting", "practice-script-simplified", "practice-script-traditional", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-status", "practice-error"]) {
+  for (const id of ["practice-target-language-select", "practice-comparison-model-select", "practice-playback-padding-slider", "practice-playback-padding-value", "practice-chinese-script-setting", "practice-script-simplified", "practice-script-traditional", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-overall-comment", "practice-phrase-feedback", "practice-status", "practice-error"]) {
     assert.match(speakloop, new RegExp(`id=["']${id}["']`));
   }
   assert.doesNotMatch(skitvoice, /vibevoice-form|vibevoice-script|vibevoice-generate-button|vibevoice-result|vibevoice-diagnostics/);
@@ -129,6 +129,17 @@ test("SpeakLoop keeps comparison playback simple without an auto-play preference
   assert.match(speakloop, /practice-play-model-only-button/);
   assert.match(speakloop, /お手本だけ再生/);
   assert.match(speakloop, /practice-speed-slider/);
+});
+
+test("SpeakLoop exposes LLM comparison model and common before-after padding settings", () => {
+  for (const model of ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.4-nano"]) {
+    assert.match(speakloop, new RegExp(`<option value="${model}"`));
+  }
+  assert.match(speakloop, /id="practice-comparison-model-select"[\s\S]*defaultValue="gpt-5\.6-terra"/);
+  assert.match(speakloop, /id="practice-playback-padding-slider"[\s\S]*min="0"[\s\S]*max="0\.5"[\s\S]*step="0\.05"[\s\S]*defaultValue="0\.1"/);
+  assert.match(speakloop, /前後余白/);
+  assert.match(speakloop, /LLM採点/);
+  assert.doesNotMatch(speakloop, /99\.5%以上/);
 });
 
 test("SpeakLoop exposes recording cancel controls for both recording actions", () => {

@@ -33,14 +33,13 @@ def test_project_agent_guide_contains_current_validation_commands() -> None:
 
 
 def test_status_docs_do_not_claim_cloudflare_gateway_is_unimplemented() -> None:
-    task = read_text("TASK.md")
+    roadmap = read_text("docs/speech-translation/ROADMAP.md")
     known_limits = read_text("docs/speech-translation/KNOWN_LIMITS.md")
 
-    assert "SpeakLoop" in task
-    assert "SkitVoice" not in task
-    assert "VibeVoice" not in task
-    assert "Cloudflare Worker" in task
-    assert "通常CI" in task
+    assert "SpeakLoop" in roadmap
+    assert "SkitVoice" not in roadmap
+    assert "VibeVoice" not in roadmap
+    assert "Cloudflare Worker" in roadmap
     assert "Cloudflare gateway、" not in known_limits
     assert "Workers KV" in known_limits
     assert "R2" in known_limits
@@ -81,23 +80,21 @@ def test_secret_scanning_layers_are_documented() -> None:
     readme = read_text("README.md")
     checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
-    task = read_text("TASK.md")
 
     assert "scripts/install_git_hooks.sh" in readme
     assert "pre-commit" in checklist
     assert "pre-push" in checklist
     assert "GitHub Push Protection" in checklist
     assert "全branchへのpush" in roadmap
-    assert "commit前" in task
-    assert "push前" in task
+    assert "commit前" in roadmap
+    assert "push前" in roadmap
 
 
 def test_publication_record_tracks_private_docs_remediation_and_external_controls() -> None:
     checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
-    task = read_text("TASK.md")
 
-    for document in (checklist, roadmap, task):
+    for document in (checklist, roadmap):
         assert "GitHub repository" in document
         assert "private" in document
         assert "再公開" in document
@@ -232,12 +229,11 @@ def test_privacy_boundary_explains_external_processing_without_blocking_runpod()
 
 def test_public_summaries_focus_on_speakloop_while_technical_boundaries_remain() -> None:
     readme = read_text("README.md")
-    task = read_text("TASK.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     spec = read_text("docs/speech-translation/SPEC.md")
     vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
 
-    for document in (readme, task, roadmap):
+    for document in (readme, roadmap):
         assert "SpeakLoop" in document
         assert "SkitVoice" not in document
         assert "VibeVoice" not in document
@@ -250,7 +246,6 @@ def test_public_summaries_focus_on_speakloop_while_technical_boundaries_remain()
 def test_current_state_docs_match_the_deployed_production_boundary() -> None:
     for relative_path in (
         "README.md",
-        "TASK.md",
         "docs/deployment/CLOUDFLARE.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
@@ -261,6 +256,23 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "production" in document, relative_path
         assert "本番未deploy" not in document, relative_path
         assert "production公開環境へ反映済み" in document, relative_path
+
+
+def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> None:
+    roadmap = read_text("docs/speech-translation/ROADMAP.md")
+
+    assert "LLMによる比較再生と採点" in roadmap
+    assert "Hono" in roadmap
+    assert "FastAPI" in roadmap
+    assert "Cloudflare Worker" in roadmap
+    assert "Python依存処理" in roadmap
+    assert "公開文書の整理" in roadmap
+    assert "既存文書への統合" in roadmap
+    assert "`_ai/`" in roadmap
+    assert "Git履歴" in roadmap
+    assert not (ROOT / "TASK.md").exists()
+    assert not (ROOT / "docs/speech-translation/LEARNING_ROADMAP.md").exists()
+    assert not (ROOT / "docs/speech-translation/PRACTICE_LLM_COMPARISON_SPEC.md").exists()
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:
