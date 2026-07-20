@@ -338,7 +338,7 @@ def test_practice_prompt_job_reports_asr_translation_and_tts_models() -> None:
     assert completed.json()["result"]["target_text"] == "Hello."
 
 
-def test_practice_attempt_job_reuses_cached_model_asr_across_retries() -> None:
+def test_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp_path) -> None:
     class CountingAsr:
         name = "counting-asr"
 
@@ -362,13 +362,55 @@ def test_practice_attempt_job_reuses_cached_model_asr_across_retries() -> None:
                 timestamp_granularities=["word"],
             )
 
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 50,
+                    "overall_comment": "windowがdoorになっています。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "Please close the window.",
+                            "score": 50,
+                            "comment": "windowがdoorになっています。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Please close the window",
+                                "start": 0.1,
+                                "end": 1.2,
+                                "playback_start": 0.0,
+                                "playback_end": 1.2,
+                            },
+                            "attempt": {
+                                "status": "partial",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Please close the door",
+                                "start": 0.1,
+                                "end": 1.2,
+                                "playback_start": 0.0,
+                                "playback_end": 1.2,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=8.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
     asr = CountingAsr()
     pipeline = SpeechTranslationPipeline(
         asr=asr,
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
 
     for attempt_audio in (b"attempt take one", b"attempt take two"):
         response = client.post(
@@ -2188,7 +2230,7 @@ def test_practice_attempt_job_fails_with_typed_empty_reference_error() -> None:
     }
 
 
-def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> None:
+def test_practice_attempt_job_transcribes_both_english_audios_with_whisper(tmp_path) -> None:
     class SequencedAsr:
         name = "fake-whisper"
 
@@ -2212,9 +2254,51 @@ def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> 
                 timestamp_granularities=["word"],
             )
 
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 80,
+                    "overall_comment": "areが抜けています。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "Where are you going?",
+                            "score": 80,
+                            "comment": "areが抜けています。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Where are you going",
+                                "start": 0.1,
+                                "end": 1.2,
+                                "playback_start": 0.0,
+                                "playback_end": 1.2,
+                            },
+                            "attempt": {
+                                "status": "partial",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Where you going",
+                                "start": 0.1,
+                                "end": 1.0,
+                                "playback_start": 0.0,
+                                "playback_end": 1.0,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=8.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
     asr = SequencedAsr()
     pipeline = SpeechTranslationPipeline(asr=asr, translator=FakeTranslationProvider({}), tts=FakeTtsProvider())
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
 
     response = client.post(
         "/api/practice/attempt-jobs",
