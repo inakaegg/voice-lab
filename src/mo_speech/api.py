@@ -2381,6 +2381,16 @@ def create_app(
                         },
                         error=_practice_llm_error_envelope(error)["error"],
                     ) from error
+                except PracticeAlignmentError as error:
+                    raise PracticeJobFailure(
+                        current_stage={
+                            "stage": "failed",
+                            "label": "音声の解析結果を確認できませんでした",
+                            "provider": "Voice Lab",
+                            "model": "",
+                        },
+                        error=_practice_alignment_error_envelope(error)["error"],
+                    ) from error
 
             planned_stages = [
                 {

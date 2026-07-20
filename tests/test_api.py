@@ -2339,6 +2339,54 @@ def test_practice_attempt_job_returns_no_speech_for_llm_comparison_without_calli
     assert llm.calls == []
 
 
+def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> None:
+    class EmptyReferenceAsr:
+        name = "fake-whisper"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            if audio_path.read_bytes() == b"model audio":
+                return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
+            return AsrTranscription(
+                text="Please close the window.",
+                model="whisper-1",
+                words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                timestamp_granularities=["word"],
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=EmptyReferenceAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    submitted = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "en-US",
+            "target_text": "Please close the window.",
+            "comparison_model": "gpt-5.4-nano",
+            "progress_mode": "job",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+    job_id = submitted.json()["job_id"]
+
+    completed = None
+    for _ in range(100):
+        completed = client.get(f"/api/practice/attempt-jobs/{job_id}").json()
+        if completed["status"] == "failed":
+            break
+        sleep(0.01)
+
+    assert completed["status"] == "failed"
+    assert completed["error"]["code"] == "practice_alignment_provider_contract_error"
+    assert completed["error"]["reason"] == "empty_reference_asr"
+
+
 def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
     class FakeRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
