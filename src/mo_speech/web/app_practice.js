@@ -1629,6 +1629,10 @@ function renderRecognizedDiff(payload) {
     : null;
   const cells = playbackContract.compactPracticeDiffCells(
     playbackContract.buildPracticeDiffCells(target, recognized, pinyin),
+    {
+      targetText: target,
+      alignment: currentAttemptComparisonAlignment,
+    },
   );
   const grid = document.createElement("span");
   grid.className = "practice-diff-grid";

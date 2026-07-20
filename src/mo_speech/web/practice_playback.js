@@ -97,12 +97,11 @@
     return comparableTargetText(value).replace(/\s+/gu, "");
   }
 
-  function comparisonRangeForTargetOffset({ targetText, targetOffset, alignment, ranges }) {
+  function comparisonPhraseIndexForTargetOffset({ targetText, targetOffset, alignment }) {
     const offset = Number(targetOffset);
     const target = comparableTargetText(targetText);
     const phrases = Array.isArray(alignment?.phrases) ? alignment.phrases : [];
-    const playableRanges = Array.isArray(ranges) ? ranges : [];
-    if (!target || !Number.isInteger(offset) || offset < 0 || !phrases.length || !playableRanges.length) {
+    if (!target || !Number.isInteger(offset) || offset < 0 || !phrases.length) {
       return null;
     }
 
@@ -124,9 +123,13 @@
       selectedIndex = Number(phrase.index);
       cursor = end;
     }
-    if (!Number.isInteger(selectedIndex)) {
-      return null;
-    }
+    return Number.isInteger(selectedIndex) ? selectedIndex : null;
+  }
+
+  function comparisonRangeForTargetOffset({ targetText, targetOffset, alignment, ranges }) {
+    const playableRanges = Array.isArray(ranges) ? ranges : [];
+    const selectedIndex = comparisonPhraseIndexForTargetOffset({ targetText, targetOffset, alignment });
+    if (!Number.isInteger(selectedIndex) || !playableRanges.length) return null;
     return playableRanges.find((range) => Number(range?.index) === selectedIndex) || null;
   }
 
@@ -242,11 +245,24 @@
 
   // equalの連続に加え、substitute/tone/deleteなど同種の不一致セルが連続する場合もまとめる。
   // 1文字ごとに正誤セルが分裂するのを防ぎ、語や句のまとまりで表示できるようにする。
-  function compactPracticeDiffCells(cells) {
+  function compactPracticeDiffCells(cells, { targetText = "", alignment = null } = {}) {
     const compacted = [];
     cells.forEach((cell) => {
       const previous = compacted[compacted.length - 1];
-      if (previous && previous.type === cell.type) {
+      const previousPhraseIndex = previous
+        ? comparisonPhraseIndexForTargetOffset({ targetText, targetOffset: previous.targetOffset, alignment })
+        : null;
+      const cellPhraseIndex = comparisonPhraseIndexForTargetOffset({
+        targetText,
+        targetOffset: cell.targetOffset,
+        alignment,
+      });
+      const crossesKnownPhraseBoundary = (
+        Number.isInteger(previousPhraseIndex) &&
+        Number.isInteger(cellPhraseIndex) &&
+        previousPhraseIndex !== cellPhraseIndex
+      );
+      if (previous && previous.type === cell.type && !crossesKnownPhraseBoundary) {
         previous.heard += cell.type === "delete" ? "" : cell.heard;
         previous.correction += cell.correction;
         return;

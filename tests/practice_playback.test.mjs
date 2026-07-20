@@ -278,6 +278,24 @@ test("compacting does not merge across different mismatch types", () => {
   assert.deepEqual(compacted[2], { type: "delete", correction: "了吗", heard: "_", targetOffset: 2 });
 });
 
+test("compacting keeps same-type mismatches separate across LLM phrase boundaries", () => {
+  const cells = [
+    { type: "substitute", correction: "好", heard: "坏", targetOffset: 1 },
+    { type: "substitute", correction: "世", heard: "色", targetOffset: 2 },
+  ];
+  const compacted = compactPracticeDiffCells(cells, {
+    targetText: "你好世界",
+    alignment: {
+      phrases: [
+        { index: 0, target_text: "你好。" },
+        { index: 1, target_text: "世界" },
+      ],
+    },
+  });
+
+  assert.deepEqual(compacted, cells);
+});
+
 test("a real logged mismatch (可能 heard as 刚刚) compacts to one readable cell end to end", () => {
   const cells = compactPracticeDiffCells(buildPracticeDiffCells("可能", "刚刚", {
     target: ["ke3", "neng2"],

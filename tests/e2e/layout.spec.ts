@@ -1367,7 +1367,7 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
         result: {
           target_language: "zh-CN",
           target_text: "你好吗？你今天去哪里？",
-          recognized_text: "你哈？你今天这里？",
+          recognized_text: "你好坏？色今天去哪里？",
           model_recognized_text: "你好吗？你今天去哪里？",
           overall_score: 80,
           overall_comment: "2つの語を確認しましょう。",
@@ -1380,8 +1380,8 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
               { phrase_index: 1, target_text: "你今天去哪里？", score: 85, comment: "「去」を確認しましょう。" },
             ],
           },
-          comparison_alignment: { available: true, complete: false, all_phrases_playable: false, target_phrase_count: 2, phrases: [{ index: 0, available: false, audio_start: null, audio_end: null }, { index: 1, available: true, audio_start: 1, audio_end: 2 }] },
-          model_comparison_alignment: { available: true, complete: true, all_phrases_playable: true, target_phrase_count: 2, phrases: [{ index: 0, available: true, audio_start: 0.1, audio_end: 0.9 }, { index: 1, available: true, audio_start: 1, audio_end: 2.1 }] },
+          comparison_alignment: { available: true, complete: false, all_phrases_playable: false, target_phrase_count: 2, phrases: [{ index: 0, target_text: "你好吗？", available: false, audio_start: null, audio_end: null }, { index: 1, target_text: "你今天去哪里？", available: true, audio_start: 1, audio_end: 2 }] },
+          model_comparison_alignment: { available: true, complete: true, all_phrases_playable: true, target_phrase_count: 2, phrases: [{ index: 0, target_text: "你好吗？", available: true, audio_start: 0.1, audio_end: 0.9 }, { index: 1, target_text: "你今天去哪里？", available: true, audio_start: 1, audio_end: 2.1 }] },
         },
       }),
     });
@@ -1440,7 +1440,11 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
   expect(technicalLog).toContain("funasr/paraformer-zh");
   await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
     (elements) => elements.map((element) => element.textContent || "").join(""),
-  )).toBe("你哈_你今天这_里");
+  )).toBe("你好坏色今天去哪里");
+  await expect(page.locator("#practice-recognized-text .practice-diff-cell.is-substitute")).toHaveCount(2);
+  await expect(page.locator("#practice-recognized-text button.practice-diff-cell.is-substitute")).toHaveCount(1);
+  await expect(page.locator("#practice-recognized-text .practice-diff-correction").filter({ hasText: "吗" })).toHaveCount(1);
+  await expect(page.locator("#practice-recognized-text .practice-diff-correction").filter({ hasText: "你" })).toHaveCount(1);
   await expect(page.locator("#practice-score")).toHaveText("80点");
   await expect(page.locator("#practice-phrase-feedback li")).toHaveCount(2);
   await expect(page.locator("#practice-play-model-button")).toContainText("一部フレーズ比較再生");
