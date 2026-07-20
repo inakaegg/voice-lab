@@ -290,6 +290,45 @@ def _asr_transcription_from_runpod_output(
     )
 
 
+def _practice_attempt_llm_options_metadata(
+    options: dict[str, object],
+) -> dict[str, object]:
+    payload = {
+        key: options.get(key)
+        for key in (
+            "comparison_model",
+            "playback_padding_seconds",
+            "reference_audio_duration",
+            "attempt_audio_duration",
+            "progress_mode",
+            "model_audio_cache_key",
+        )
+    }
+    cached_model_transcription = options.get("cached_model_transcription")
+    if isinstance(cached_model_transcription, AsrTranscription):
+        payload["cached_model_transcription"] = {
+            "text": cached_model_transcription.text,
+            **_serialize_asr_timestamps(cached_model_transcription),
+        }
+    return payload
+
+
+def _practice_attempt_llm_options_from_history(
+    entry: AudioHistoryEntry | None,
+) -> dict[str, object] | None:
+    metadata = entry.metadata if entry is not None and isinstance(entry.metadata, dict) else {}
+    payload = metadata.get("practice_attempt_llm_options")
+    if not isinstance(payload, dict):
+        return None
+    options = dict(payload)
+    cached_model_transcription = options.get("cached_model_transcription")
+    if isinstance(cached_model_transcription, dict):
+        options["cached_model_transcription"] = _asr_transcription_from_runpod_output(
+            cached_model_transcription
+        )
+    return options
+
+
 def _runpod_practice_metrics(body: dict[str, object]) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for source_key, target_key in (
@@ -2220,10 +2259,13 @@ def create_app(
                         cached_model_transcription = _practice_model_asr_cache.get(model_audio_cache_key)
                         if cached_model_transcription is not None:
                             _practice_model_asr_cache.move_to_end(model_audio_cache_key)
+                    reuse_cached_model_transcription = (
+                        cached_model_transcription is not None and recording_entry is not None
+                    )
                     body = active_runpod_practice_asr_provider.submit_comparison_job(
                         attempt_audio_path=Path(attempt_temp_audio.name),
                         model_audio_path=(
-                            None if cached_model_transcription is not None else Path(model_temp_audio.name)
+                            None if reuse_cached_model_transcription else Path(model_temp_audio.name)
                         ),
                         source_language=practice_target_language,
                         target_text=simplify_chinese_text(normalized_target_text),
@@ -2244,7 +2286,9 @@ def create_app(
                 "attempt_audio_duration": attempt_audio_duration,
                 "progress_mode": progress_mode,
                 "model_audio_cache_key": model_audio_cache_key,
-                "cached_model_transcription": cached_model_transcription,
+                "cached_model_transcription": (
+                    cached_model_transcription if reuse_cached_model_transcription else None
+                ),
             }
             if job_id:
                 practice_attempt_llm_options[job_id] = llm_options
@@ -2254,6 +2298,15 @@ def create_app(
                 llm_options=llm_options,
             )
             _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+            if job_id:
+                active_audio_history_store.update_metadata(
+                    recording_entry,
+                    {
+                        "practice_attempt_llm_options": (
+                            _practice_attempt_llm_options_metadata(llm_options)
+                        ),
+                    },
+                )
             if snapshot["status"] in {"queued", "running"}:
                 response.status_code = 202
             return snapshot
@@ -2470,7 +2523,15 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
+        recording_entry = _practice_attempt_history_entry(
+            active_audio_history_store,
+            job_id,
+        )
         llm_options = practice_attempt_llm_options.get(job_id)
+        if llm_options is None:
+            llm_options = _practice_attempt_llm_options_from_history(recording_entry)
+            if llm_options is not None:
+                practice_attempt_llm_options[job_id] = llm_options
         if (
             str(body.get("status") or "").upper() == "COMPLETED"
             and llm_options is not None
@@ -2520,10 +2581,6 @@ def create_app(
             )
             snapshot["job_id"] = job_id
             snapshot["metrics"] = finalization.get("metrics") or {}
-            recording_entry = _practice_attempt_history_entry(
-                active_audio_history_store,
-                job_id,
-            )
             _update_practice_attempt_history(
                 active_audio_history_store,
                 recording_entry,
@@ -2535,7 +2592,6 @@ def create_app(
             health=health,
             llm_options=llm_options,
         )
-        recording_entry = _practice_attempt_history_entry(active_audio_history_store, job_id)
         _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
         return snapshot
 

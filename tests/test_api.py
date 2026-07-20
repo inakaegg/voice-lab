@@ -975,7 +975,10 @@ def test_chinese_practice_attempt_job_preserves_context_for_polyphonic_diff_piny
     assert result["comparison_recognized_pinyin"] == ["yin2", "xing2"]
 
 
-def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp_path) -> None:
+def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
+    tmp_path,
+    monkeypatch,
+) -> None:
     class RetryTrackingRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
 
@@ -1001,10 +1004,10 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp
                 "segments": [],
                 "providers": {"asr": "funasr-paraformer-zh"},
             }
-            # 1回目のjobだけがRunPod側でお手本音声のFunASR推論を行い、
-            # model_transcriptionを返す。2回目はキャッシュを使うためmodel_audio_base64を
-            # 送っておらず、RunPod側もmodel_transcriptionを返さない想定。
-            if job_id == "practice-job-1":
+            job_index = int(job_id.rsplit("-", 1)[-1]) - 1
+            # model_audioを含むjobだけがRunPod側でお手本音声をASRし、
+            # model_transcriptionを返す。
+            if self.submissions[job_index]["model_audio_included"]:
                 output["model_transcription"] = {
                     "text": "你好",
                     "model": "funasr/paraformer-zh",
@@ -1062,15 +1065,21 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp
         tts=FakeTtsProvider(),
     )
     runpod = RetryTrackingRunpodAsr()
+    history_store = AudioHistoryStore(root=tmp_path / "practice-history", limit=10, enabled=True)
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
     client = TestClient(
         create_app(
             openai_pipeline=pipeline,
             runpod_practice_asr_provider=runpod,
+            audio_history_store=history_store,
             practice_llm_service=FixedPracticeLlm(),
         )
     )
 
-    for _ in range(2):
+    for attempt_index in range(2):
         submitted = client.post(
             "/api/practice/attempt-jobs",
             data={
@@ -1081,11 +1090,22 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp
             },
             files={
                 "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
-                "model_audio": ("model.wav", b"model audio", "audio/wav"),
+                "model_audio": ("model.wav", b"model audio cache restart", "audio/wav"),
             },
         )
         assert submitted.status_code == 202
         job_id = submitted.json()["job_id"]
+        if attempt_index == 1:
+            # RunPod jobの提出後にFastAPIが再起動しても、jobと一緒に永続化した
+            # お手本ASRを復元し、model_audioを省略したjobを完了できること。
+            client = TestClient(
+                create_app(
+                    openai_pipeline=pipeline,
+                    runpod_practice_asr_provider=runpod,
+                    audio_history_store=history_store,
+                    practice_llm_service=FixedPracticeLlm(),
+                )
+            )
         completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
         assert completed.json()["status"] == "succeeded", completed.json()
         assert completed.json()["result"]["overall_score"] == 100
@@ -1096,6 +1116,39 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp
         {"model_audio_included": True},
         {"model_audio_included": False},
     ]
+
+    disabled_history_client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=AudioHistoryStore(
+                root=tmp_path / "disabled-history",
+                limit=10,
+                enabled=False,
+            ),
+            practice_llm_service=FixedPracticeLlm(),
+        )
+    )
+    submitted = disabled_history_client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "zh-CN",
+            "target_text": "你好。",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.10",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio cache restart", "audio/wav"),
+        },
+    )
+    assert submitted.status_code == 202
+    completed = disabled_history_client.get(
+        f"/api/practice/attempt-jobs/{submitted.json()['job_id']}"
+    )
+    assert completed.json()["status"] == "succeeded", completed.json()
+    # 永続化先が無効なら、再起動後にお手本ASRを失うjobを作らないよう音声を含める。
+    assert runpod.submissions[-1] == {"model_audio_included": True}
 
 
 def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:
