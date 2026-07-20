@@ -984,6 +984,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
 
         def __init__(self) -> None:
             self.submissions: list[dict[str, object]] = []
+            self.status_calls = 0
 
         def submit_comparison_job(self, **kwargs):
             job_id = f"practice-job-{len(self.submissions) + 1}"
@@ -994,6 +995,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
             return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
 
         def job_status(self, job_id):
+            self.status_calls += 1
             output = {
                 "practice_asr_contract_version": 2,
                 "target_text": "你好。",
@@ -1018,7 +1020,11 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
             return {"id": job_id, "status": "COMPLETED", "output": output}
 
     class FixedPracticeLlm:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def evaluate(self, *, model, input_payload):
+            self.calls += 1
             return PracticeLlmEvaluation(
                 result={
                     "schema_version": 1,
@@ -1065,6 +1071,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
         tts=FakeTtsProvider(),
     )
     runpod = RetryTrackingRunpodAsr()
+    practice_llm = FixedPracticeLlm()
     history_store = AudioHistoryStore(root=tmp_path / "practice-history", limit=10, enabled=True)
     monkeypatch.setattr(
         "mo_speech.api_audio_history.prepare_audio_history_wav",
@@ -1075,7 +1082,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
             openai_pipeline=pipeline,
             runpod_practice_asr_provider=runpod,
             audio_history_store=history_store,
-            practice_llm_service=FixedPracticeLlm(),
+            practice_llm_service=practice_llm,
         )
     )
 
@@ -1103,12 +1110,26 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
                     openai_pipeline=pipeline,
                     runpod_practice_asr_provider=runpod,
                     audio_history_store=history_store,
-                    practice_llm_service=FixedPracticeLlm(),
+                    practice_llm_service=practice_llm,
                 )
             )
         completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
         assert completed.json()["status"] == "succeeded", completed.json()
         assert completed.json()["result"]["overall_score"] == 100
+        calls_after_completion = practice_llm.calls
+        status_calls_after_completion = runpod.status_calls
+        client = TestClient(
+            create_app(
+                openai_pipeline=pipeline,
+                runpod_practice_asr_provider=runpod,
+                audio_history_store=history_store,
+                practice_llm_service=practice_llm,
+            )
+        )
+        repeated = client.get(f"/api/practice/attempt-jobs/{job_id}")
+        assert repeated.json() == completed.json()
+        assert practice_llm.calls == calls_after_completion
+        assert runpod.status_calls == status_calls_after_completion
 
     # 1回目はお手本音声を含めてjobを送るが、2回目は同じお手本音声(同一バイト列)なので
     # キャッシュを再利用し、model_audio_pathを送らずRunPod側のFunASR推論を省略する。
@@ -1126,7 +1147,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
                 limit=10,
                 enabled=False,
             ),
-            practice_llm_service=FixedPracticeLlm(),
+            practice_llm_service=practice_llm,
         )
     )
     submitted = disabled_history_client.post(

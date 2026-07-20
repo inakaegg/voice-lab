@@ -329,6 +329,19 @@ def _practice_attempt_llm_options_from_history(
     return options
 
 
+def _practice_attempt_terminal_snapshot_from_history(
+    entry: AudioHistoryEntry | None,
+) -> dict[str, object] | None:
+    metadata = entry.metadata if entry is not None and isinstance(entry.metadata, dict) else {}
+    snapshot = metadata.get("practice_attempt_terminal_snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    status = str(snapshot.get("status") or "")
+    if status not in {"succeeded", "failed"}:
+        return None
+    return dict(snapshot)
+
+
 def _runpod_practice_metrics(body: dict[str, object]) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for source_key, target_key in (
@@ -498,6 +511,8 @@ def _update_practice_attempt_history(
         "practice_job_metrics": snapshot.get("metrics") or {},
         "practice_job_error": str(snapshot.get("error") or ""),
     }
+    if metadata["practice_job_status"] in {"succeeded", "failed"}:
+        metadata["practice_attempt_terminal_snapshot"] = snapshot
     if result is not None:
         metadata.update(_practice_history_diagnostics_metadata(result))
         diagnostics = metadata["practice_diagnostics"]
@@ -2512,6 +2527,15 @@ def create_app(
                 snapshot,
             )
             return snapshot
+        recording_entry = _practice_attempt_history_entry(
+            active_audio_history_store,
+            job_id,
+        )
+        persisted_snapshot = _practice_attempt_terminal_snapshot_from_history(
+            recording_entry
+        )
+        if persisted_snapshot is not None:
+            return persisted_snapshot
         try:
             body = active_runpod_practice_asr_provider.job_status(job_id)
             health = (
@@ -2523,10 +2547,6 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
-        recording_entry = _practice_attempt_history_entry(
-            active_audio_history_store,
-            job_id,
-        )
         llm_options = practice_attempt_llm_options.get(job_id)
         if llm_options is None:
             llm_options = _practice_attempt_llm_options_from_history(recording_entry)
