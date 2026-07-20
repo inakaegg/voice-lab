@@ -1874,7 +1874,12 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert diagnostics["model_comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.4)
 
 
-def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("llm_fails", [False, True])
+def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
+    tmp_path,
+    monkeypatch,
+    llm_fails,
+) -> None:
     class FakeAsyncRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
 
@@ -1913,6 +1918,8 @@ def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
 
         def evaluate(self, *, model, input_payload):
             self.calls += 1
+            if llm_fails:
+                raise PracticeLlmError("invalid response", stage="validate_response")
             result = {
                 "schema_version": 1,
                 "overall_score": 90,
@@ -1986,8 +1993,13 @@ def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["result"]["overall_score"] == 90
-    assert second.json()["result"]["overall_score"] == 90
+    if llm_fails:
+        assert first.json()["status"] == "failed"
+        assert second.json() == first.json()
+        assert first.json()["error"]["code"] == "practice_llm_failed"
+    else:
+        assert first.json()["result"]["overall_score"] == 90
+        assert second.json()["result"]["overall_score"] == 90
     assert llm.calls == 1, "re-polling a completed RunPod job must reuse the cached comparison instead of calling the LLM again"
 
 

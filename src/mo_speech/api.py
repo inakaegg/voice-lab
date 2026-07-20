@@ -2102,7 +2102,7 @@ def create_app(
                 )
             except (PracticeAlignmentError, PracticeLlmError) as error:
                 if isinstance(error, PracticeLlmError):
-                    return {
+                    snapshot = {
                         "job_id": job_id,
                         "status": "failed",
                         "current_stage": {
@@ -2116,21 +2116,25 @@ def create_app(
                         "result": None,
                         **_practice_llm_error_envelope(error),
                     }
-                return {
-                    "job_id": job_id,
-                    "status": "failed",
-                    "current_stage": {
-                        "stage": "failed",
-                        "label": "音声の解析結果を確認できませんでした",
-                        "provider": "Voice Lab",
-                        "model": attempt_transcription.model,
-                        "detail": "もう一度お試しください。",
-                    },
-                    "stages": stages,
-                    "metrics": metrics,
-                    "result": None,
-                    **_practice_alignment_error_envelope(error),
-                }
+                else:
+                    snapshot = {
+                        "job_id": job_id,
+                        "status": "failed",
+                        "current_stage": {
+                            "stage": "failed",
+                            "label": "音声の解析結果を確認できませんでした",
+                            "provider": "Voice Lab",
+                            "model": attempt_transcription.model,
+                            "detail": "もう一度お試しください。",
+                        },
+                        "stages": stages,
+                        "metrics": metrics,
+                        "result": None,
+                        **_practice_alignment_error_envelope(error),
+                    }
+                if job_id:
+                    practice_attempt_result_cache[job_id] = snapshot
+                return snapshot
             snapshot = {
                 "job_id": job_id,
                 "status": "succeeded",
