@@ -30,6 +30,10 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
     monkeypatch.setenv("MO_VIBEVOICE_DEBUG_RESULT_DIR", str(tmp_path / "vibevoice-debug"))
     monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(tmp_path / "public-sample-audios.json"))
+    monkeypatch.setenv(
+        "MO_PRACTICE_ATTEMPT_STATE_DIR",
+        str(tmp_path / "practice-attempt-state"),
+    )
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
@@ -222,7 +226,7 @@ def test_speakloop_alias_serves_practice_ui() -> None:
     assert "/react/assets/speakloop.js" in response.text
 
 
-def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
+def test_practice_attempt_job_rejects_unsupported_asr_model() -> None:
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"en-US": "I want coffee"}),
         translator=FakeTranslationProvider({}),
@@ -231,9 +235,12 @@ def test_practice_attempt_api_rejects_unsupported_asr_model() -> None:
     client = TestClient(create_app(openai_pipeline=pipeline))
 
     response = client.post(
-        "/api/practice/attempts",
+        "/api/practice/attempt-jobs",
         data={"target_language": "en-US", "target_text": "I want a coffee.", "asr_model": "unknown-asr"},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+        files={
+            "audio": ("repeat.webm", b"repeat audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
     )
 
     assert response.status_code == 400
@@ -333,6 +340,152 @@ def test_practice_prompt_job_reports_asr_translation_and_tts_models() -> None:
         sleep(0.01)
     assert completed.status_code == 200
     assert completed.json()["result"]["target_text"] == "Hello."
+
+
+def test_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp_path) -> None:
+    class CountingAsr:
+        name = "counting-asr"
+
+        def __init__(self) -> None:
+            self.calls_by_content: dict[bytes, int] = {}
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            content = audio_path.read_bytes()
+            self.calls_by_content[content] = self.calls_by_content.get(content, 0) + 1
+            if content == b"model audio":
+                return AsrTranscription(
+                    text="Please close the window.",
+                    model="whisper-1",
+                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(
+                text="Please close the door.",
+                model="whisper-1",
+                words=[{"text": "Please close the door", "start": 0.1, "end": 1.2}],
+                timestamp_granularities=["word"],
+            )
+
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 50,
+                    "overall_comment": "windowがdoorになっています。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "Please close the window.",
+                            "score": 50,
+                            "comment": "windowがdoorになっています。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Please close the window",
+                                "start": 0.1,
+                                "end": 1.2,
+                                "playback_start": 0.0,
+                                "playback_end": 1.2,
+                            },
+                            "attempt": {
+                                "status": "partial",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Please close the door",
+                                "start": 0.1,
+                                "end": 1.2,
+                                "playback_start": 0.0,
+                                "playback_end": 1.2,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=8.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    asr = CountingAsr()
+    pipeline = SpeechTranslationPipeline(
+        asr=asr,
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
+
+    for attempt_audio in (b"attempt take one", b"attempt take two"):
+        response = client.post(
+            "/api/practice/attempt-jobs",
+            data={"target_language": "en-US", "target_text": "Please close the window."},
+            files={
+                "audio": ("attempt.wav", attempt_audio, "audio/wav"),
+                "model_audio": ("model.wav", b"model audio", "audio/wav"),
+            },
+        )
+        assert response.status_code == 200
+
+    # The reference/model audio is byte-identical across both attempts (the
+    # client resends the same TTS'd prompt audio every time), so it must be
+    # transcribed only once. Each attempt recording is genuinely new audio and
+    # must always be transcribed.
+    assert asr.calls_by_content[b"model audio"] == 1
+    assert asr.calls_by_content[b"attempt take one"] == 1
+    assert asr.calls_by_content[b"attempt take two"] == 1
+
+
+def test_practice_attempt_job_retries_empty_model_asr_instead_of_caching_it() -> None:
+    class EmptyThenValidReferenceAsr:
+        name = "empty-then-valid-reference-asr"
+
+        def __init__(self) -> None:
+            self.model_calls = 0
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            if audio_path.read_bytes() == b"model audio retry after empty":
+                self.model_calls += 1
+                if self.model_calls == 1:
+                    return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
+                return AsrTranscription(
+                    text="Please close the window.",
+                    model="whisper-1",
+                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
+
+    asr = EmptyThenValidReferenceAsr()
+    pipeline = SpeechTranslationPipeline(
+        asr=asr,
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    def submit_attempt():
+        return client.post(
+            "/api/practice/attempt-jobs",
+            data={
+                "target_language": "en-US",
+                "target_text": "Please close the window.",
+                "comparison_model": "gpt-5.4-nano",
+            },
+            files={
+                "audio": ("silent.wav", b"silent attempt after empty reference", "audio/wav"),
+                "model_audio": ("model.wav", b"model audio retry after empty", "audio/wav"),
+            },
+        )
+
+    failed = submit_attempt()
+    retried = submit_attempt()
+
+    assert failed.status_code == 502
+    assert failed.json()["error"]["reason"] == "empty_reference_asr"
+    assert retried.status_code == 200
+    assert retried.json()["result"]["outcome"] == "no_speech"
+    assert asr.model_calls == 2
 
 
 def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> None:
@@ -755,6 +908,438 @@ def test_chinese_practice_attempt_job_reports_llm_stage_after_runpod_asr(tmp_pat
         sleep(0.01)
     assert completed.json()["job_id"] == job_id
     assert completed.json()["result"]["overall_score"] == 100
+
+
+def test_chinese_practice_attempt_job_preserves_context_for_polyphonic_diff_pinyin(
+    tmp_path,
+) -> None:
+    class CompletedRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def submit_comparison_job(self, **_kwargs):
+            return {"id": "practice-job-pinyin", "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "银行。",
+                    "text": "银形",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [
+                        {"text": "银", "start": 0.0, "end": 0.3},
+                        {"text": "形", "start": 0.3, "end": 0.6},
+                    ],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "银行",
+                        "model": "funasr/paraformer-zh",
+                        "timestamp_granularities": ["word"],
+                        "words": [
+                            {"text": "银", "start": 0.0, "end": 0.3},
+                            {"text": "行", "start": 0.3, "end": 0.6},
+                        ],
+                        "segments": [],
+                    },
+                    "providers": {"asr": "funasr-paraformer-zh"},
+                },
+            }
+
+    class BlockingPracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 90,
+                    "overall_comment": "二文字目の発音を確認しましょう。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "银行。",
+                            "score": 90,
+                            "comment": "「行」が「形」と認識されています。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 2,
+                                "matched_text": "银行",
+                                "start": 0.0,
+                                "end": 0.6,
+                                "playback_start": 0.0,
+                                "playback_end": 0.6,
+                            },
+                            "attempt": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 2,
+                                "matched_text": "银形",
+                                "start": 0.0,
+                                "end": 0.6,
+                                "playback_start": 0.0,
+                                "playback_end": 0.6,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=10.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=CompletedRunpodAsr(),
+            practice_llm_service=BlockingPracticeLlm(),
+        )
+    )
+
+    submitted = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "zh-CN",
+            "target_text": "银行。",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.10",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert submitted.status_code == 202
+    job_id = submitted.json()["job_id"]
+    completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
+    assert completed.json()["status"] == "succeeded"
+    result = completed.json()["result"]
+    # 「银行」の「行」は周囲の語によってhang2になる。「银形」の「形」はxing2のため、
+    # 1文字ずつ変換して両方をxing2にすると実際の違いを隠してしまう。
+    assert result["comparison_target_pinyin"] == ["yin2", "hang2"]
+    assert result["comparison_recognized_pinyin"] == ["yin2", "xing2"]
+
+
+def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class RetryTrackingRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def __init__(self) -> None:
+            self.submissions: list[dict[str, object]] = []
+            self.status_calls = 0
+
+        def submit_comparison_job(self, **kwargs):
+            job_id = f"practice-job-{len(self.submissions) + 1}"
+            self.submissions.append({"model_audio_included": kwargs["model_audio_path"] is not None})
+            return {"id": job_id, "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            self.status_calls += 1
+            output = {
+                "practice_asr_contract_version": 2,
+                "target_text": "你好。",
+                "text": "你好",
+                "model": "funasr/paraformer-zh",
+                "timestamp_granularities": ["word"],
+                "words": [{"text": "你好", "start": 0.1, "end": 0.8}],
+                "segments": [],
+                "providers": {"asr": "funasr-paraformer-zh"},
+            }
+            job_index = int(job_id.rsplit("-", 1)[-1]) - 1
+            # model_audioを含むjobだけがRunPod側でお手本音声をASRし、
+            # model_transcriptionを返す。
+            if self.submissions[job_index]["model_audio_included"]:
+                output["model_transcription"] = {
+                    "text": "你好",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                    "segments": [],
+                }
+            return {"id": job_id, "status": "COMPLETED", "output": output}
+
+    class FixedPracticeLlm:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.models: list[str] = []
+            self.paddings: list[float] = []
+
+        def evaluate(self, *, model, input_payload):
+            self.calls += 1
+            self.models.append(model)
+            self.paddings.append(float(input_payload["padding_seconds"]))
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 100,
+                    "overall_comment": "正確です。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "你好。",
+                            "score": 100,
+                            "comment": "正確です。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "你好",
+                                "start": 0.0,
+                                "end": 0.7,
+                                "playback_start": 0.0,
+                                "playback_end": 0.7,
+                            },
+                            "attempt": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "你好",
+                                "start": 0.1,
+                                "end": 0.8,
+                                "playback_start": 0.0,
+                                "playback_end": 0.8,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 80},
+                estimated_cost_usd=None,
+                elapsed_ms=10.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    runpod = RetryTrackingRunpodAsr()
+    practice_llm = FixedPracticeLlm()
+    history_store = AudioHistoryStore(root=tmp_path / "practice-history", limit=10, enabled=True)
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=history_store,
+            practice_llm_service=practice_llm,
+        )
+    )
+
+    for attempt_index in range(2):
+        submitted = client.post(
+            "/api/practice/attempt-jobs",
+            data={
+                "target_language": "zh-CN",
+                "target_text": "你好。",
+                "comparison_model": "gpt-5.6-terra",
+                "playback_padding_seconds": "0.10",
+            },
+            files={
+                "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+                "model_audio": ("model.wav", b"model audio cache restart", "audio/wav"),
+            },
+        )
+        assert submitted.status_code == 202
+        job_id = submitted.json()["job_id"]
+        if attempt_index == 1:
+            # RunPod jobの提出後にFastAPIが再起動しても、jobと一緒に永続化した
+            # お手本ASRを復元し、model_audioを省略したjobを完了できること。
+            client = TestClient(
+                create_app(
+                    openai_pipeline=pipeline,
+                    runpod_practice_asr_provider=runpod,
+                    audio_history_store=history_store,
+                    practice_llm_service=practice_llm,
+                )
+            )
+        completed = client.get(f"/api/practice/attempt-jobs/{job_id}")
+        assert completed.json()["status"] == "succeeded", completed.json()
+        assert completed.json()["result"]["overall_score"] == 100
+        calls_after_completion = practice_llm.calls
+        status_calls_after_completion = runpod.status_calls
+        client = TestClient(
+            create_app(
+                openai_pipeline=pipeline,
+                runpod_practice_asr_provider=runpod,
+                audio_history_store=history_store,
+                practice_llm_service=practice_llm,
+            )
+        )
+        repeated = client.get(f"/api/practice/attempt-jobs/{job_id}")
+        assert repeated.json() == completed.json()
+        assert practice_llm.calls == calls_after_completion
+        assert runpod.status_calls == status_calls_after_completion
+
+    # 1回目はお手本音声を含めてjobを送るが、2回目は同じお手本音声(同一バイト列)なので
+    # キャッシュを再利用し、model_audio_pathを送らずRunPod側のFunASR推論を省略する。
+    assert runpod.submissions == [
+        {"model_audio_included": True},
+        {"model_audio_included": False},
+    ]
+
+    disabled_history_root = tmp_path / "disabled-history"
+    disabled_history_client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=AudioHistoryStore(
+                root=disabled_history_root,
+                limit=10,
+                enabled=False,
+            ),
+            practice_llm_service=practice_llm,
+        )
+    )
+    submitted = disabled_history_client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "zh-CN",
+            "target_text": "你好。",
+            "comparison_model": "gpt-5.4-nano",
+            "playback_padding_seconds": "0.25",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio cache restart", "audio/wav"),
+        },
+    )
+    assert submitted.status_code == 202
+    disabled_history_client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=AudioHistoryStore(
+                root=disabled_history_root,
+                limit=10,
+                enabled=False,
+            ),
+            practice_llm_service=practice_llm,
+        )
+    )
+    completed = disabled_history_client.get(
+        f"/api/practice/attempt-jobs/{submitted.json()['job_id']}"
+    )
+    assert completed.json()["status"] == "succeeded", completed.json()
+    assert completed.json()["result"]["comparison_model"] == "gpt-5.4-nano"
+    assert completed.json()["result"]["playback_padding_seconds"] == 0.25
+    assert practice_llm.models[-1] == "gpt-5.4-nano"
+    assert practice_llm.paddings[-1] == 0.25
+    # 永続化先が無効なら、再起動後にお手本ASRを失うjobを作らないよう音声を含める。
+    assert runpod.submissions[-1] == {"model_audio_included": True}
+
+
+def test_chinese_practice_attempt_job_retries_empty_model_asr_instead_of_caching_it(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class EmptyThenValidRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def __init__(self) -> None:
+            self.submissions: list[dict[str, object]] = []
+
+        def submit_comparison_job(self, **kwargs):
+            job_id = f"empty-reference-retry-{len(self.submissions) + 1}"
+            self.submissions.append({"model_audio_included": kwargs["model_audio_path"] is not None})
+            return {"id": job_id, "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            job_index = int(job_id.rsplit("-", 1)[-1]) - 1
+            output = {
+                "practice_asr_contract_version": 2,
+                "target_text": "你好。",
+                "text": "",
+                "model": "funasr/paraformer-zh",
+                "words": [],
+                "segments": [],
+            }
+            if self.submissions[job_index]["model_audio_included"]:
+                output["model_transcription"] = (
+                    {
+                        "text": "",
+                        "model": "funasr/paraformer-zh",
+                        "words": [],
+                        "segments": [],
+                    }
+                    if job_index == 0
+                    else {
+                        "text": "你好",
+                        "model": "funasr/paraformer-zh",
+                        "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                        "segments": [],
+                    }
+                )
+            return {"id": job_id, "status": "COMPLETED", "output": output}
+
+    runpod = EmptyThenValidRunpodAsr()
+    history_store = AudioHistoryStore(root=tmp_path / "practice-history", limit=10, enabled=True)
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=SpeechTranslationPipeline(
+                asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+                translator=FakeTranslationProvider({}),
+                tts=FakeTtsProvider(),
+            ),
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=history_store,
+        )
+    )
+
+    def submit_attempt():
+        return client.post(
+            "/api/practice/attempt-jobs",
+            data={
+                "target_language": "zh-CN",
+                "target_text": "你好。",
+                "comparison_model": "gpt-5.6-terra",
+            },
+            files={
+                "audio": ("silent.wav", b"silent Chinese attempt", "audio/wav"),
+                "model_audio": ("model.wav", b"Chinese model audio retry after empty", "audio/wav"),
+            },
+        )
+
+    first_job_id = submit_attempt().json()["job_id"]
+    first_completed = client.get(f"/api/practice/attempt-jobs/{first_job_id}").json()
+    second_job_id = submit_attempt().json()["job_id"]
+    second_completed = client.get(f"/api/practice/attempt-jobs/{second_job_id}").json()
+
+    assert first_completed["status"] == "failed"
+    assert first_completed["error"]["reason"] == "empty_reference_asr"
+    assert second_completed["status"] == "succeeded", second_completed
+    assert second_completed["result"]["outcome"] == "no_speech"
+    assert runpod.submissions == [
+        {"model_audio_included": True},
+        {"model_audio_included": True},
+    ]
 
 
 def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:
@@ -1581,100 +2166,7 @@ def test_practice_prompt_api_omits_non_chinese_tokens_from_local_pinyin(monkeypa
     assert "1TB" not in payload["display_text"]["pinyin_text"]
 
 
-def test_practice_attempt_api_scores_repeat_audio() -> None:
-    pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"en-US": "I want coffee"}),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline))
-
-    response = client.post(
-        "/api/practice/attempts",
-        data={"target_language": "en-US", "target_text": "I want a coffee."},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["recognized_text"] == "I want coffee"
-    assert payload["grade"] == "ok"
-    assert payload["similarity"] >= 0.95
-    assert {"target_start", "target_end", "recognized_start", "recognized_end"} <= set(payload["diff"][0])
-    assert payload["providers"]["asr"] == "fake-asr"
-
-
-def test_practice_attempt_api_uses_target_language_for_asr() -> None:
-    captured = {}
-
-    class CapturingRunpodAsr:
-        name = "runpod-funasr-paraformer-zh"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            captured["source_language"] = source_language
-            captured["include_timestamps"] = include_timestamps
-            return AsrTranscription(
-                text="绿茶和咖啡，哪一种的咖啡因含量更多呢？",
-                model="funasr/paraformer-zh",
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=CapturingRunpodAsr()))
-
-    response = client.post(
-        "/api/practice/attempts",
-        data={"target_language": "zh-CN", "target_text": "绿茶和咖啡，哪一种的咖啡因含量更多呢？"},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    assert captured == {"source_language": "zh-CN", "include_timestamps": True}
-    assert response.json()["providers"]["asr"] == "runpod-funasr-paraformer-zh"
-
-
-def test_practice_attempt_api_returns_typed_provider_contract_error() -> None:
-    class InvalidTimestampAsr:
-        name = "invalid-timestamp-asr"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            return AsrTranscription(
-                text="",
-                model="invalid-timestamp-asr",
-                words=[{"text": "ghost", "start": "invalid", "end": 1.0}],
-                timestamp_granularities=["word"],
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=InvalidTimestampAsr(),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline))
-
-    response = client.post(
-        "/api/practice/attempts",
-        data={"target_language": "en-US", "target_text": "Open it."},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
-    )
-
-    assert response.status_code == 502
-    assert response.json() == {
-        "error": {
-            "code": "practice_alignment_provider_contract_error",
-            "reason": "invalid_timestamp_payload",
-            "stage": "attempt_asr",
-            "retryable": True,
-            "message": "音声の解析結果を確認できませんでした。もう一度お試しください。",
-            "diagnostic_flags": ["invalid_timestamp_payload"],
-        }
-    }
-
-
-def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> None:
+def test_practice_attempt_job_rejects_a_boundary_only_target_before_asr() -> None:
     class MustNotRunAsr:
         name = "must-not-run"
 
@@ -1689,9 +2181,12 @@ def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> Non
     client = TestClient(create_app(openai_pipeline=pipeline))
 
     response = client.post(
-        "/api/practice/attempts",
+        "/api/practice/attempt-jobs",
         data={"target_language": "en-US", "target_text": "..."},
-        files={"audio": ("repeat.webm", b"repeat audio", "audio/webm")},
+        files={
+            "audio": ("repeat.webm", b"repeat audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
     )
 
     assert response.status_code == 400
@@ -1707,7 +2202,7 @@ def test_practice_attempt_api_rejects_a_boundary_only_target_before_asr() -> Non
     }
 
 
-def test_practice_attempt_routes_reject_oversized_targets_before_asr() -> None:
+def test_practice_attempt_job_rejects_oversized_targets_before_asr() -> None:
     class MustNotRunAsr:
         name = "must-not-run"
 
@@ -1721,45 +2216,27 @@ def test_practice_attempt_routes_reject_oversized_targets_before_asr() -> None:
     )
     client = TestClient(create_app(openai_pipeline=pipeline))
     target_text = " ".join(f"Phrase {index}." for index in range(17))
-    cases = [
-        (
-            "/api/practice/attempts",
-            {"target_language": "en-US", "target_text": target_text},
-            {"audio": ("attempt.webm", b"attempt audio", "audio/webm")},
-        ),
-        (
-            "/api/practice/attempt-jobs",
-            {"target_language": "en-US", "target_text": target_text},
-            {
-                "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
-                "model_audio": ("model.wav", b"model audio", "audio/wav"),
-            },
-        ),
-        (
-            "/api/practice/recordings",
-            {
-                "recording_intent": "attempt",
-                "target_language": "en-US",
-                "current_target_text": target_text,
-            },
-            {"audio": ("attempt.webm", b"attempt audio", "audio/webm")},
-        ),
-    ]
 
-    for path, data, files in cases:
-        response = client.post(path, data=data, files=files)
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "en-US", "target_text": target_text},
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
 
-        assert response.status_code == 400
-        assert response.json() == {
-            "error": {
-                "code": "practice_alignment_invalid_input",
-                "reason": "alignment_input_too_large",
-                "stage": "input",
-                "retryable": False,
-                "message": "入力内容を確認して、もう一度お試しください。",
-                "diagnostic_flags": ["alignment_input_too_large"],
-            }
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "practice_alignment_invalid_input",
+            "reason": "alignment_input_too_large",
+            "stage": "input",
+            "retryable": False,
+            "message": "入力内容を確認して、もう一度お試しください。",
+            "diagnostic_flags": ["alignment_input_too_large"],
         }
+    }
 
 
 def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(tmp_path, monkeypatch) -> None:
@@ -1810,6 +2287,51 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
                 },
             }
 
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            # このfakeはPracticeLlmServiceの代わりであり、validate_practice_llm_result済みの
+            # 結果を直接返す。そのためmatched_text/start/end/playback_*も自前で計算して含める。
+            result = {
+                "schema_version": 1,
+                "overall_score": 80,
+                "overall_comment": "「哈」と「到」が異なります。",
+                "phrases": [
+                    {
+                        "phrase_index": 0,
+                        "target_text": "你好吗？你今天去哪里？",
+                        "score": 80,
+                        "comment": "「哈」と「到」が異なります。",
+                        "reference": {
+                            "status": "assigned",
+                            "word_start_index": 0,
+                            "word_end_index": 3,
+                            "matched_text": "你好吗你今天去哪里",
+                            "start": 0.1,
+                            "end": 2.4,
+                            "playback_start": 0.0,
+                            "playback_end": 2.5,
+                        },
+                        "attempt": {
+                            "status": "partial",
+                            "word_start_index": 0,
+                            "word_end_index": 3,
+                            "matched_text": "你哈吗你今天到那里",
+                            "start": 0.1,
+                            "end": 2.3,
+                            "playback_start": 0.0,
+                            "playback_end": 2.4,
+                        },
+                    }
+                ],
+            }
+            return PracticeLlmEvaluation(
+                result=result,
+                usage={"total_tokens": 100},
+                estimated_cost_usd=None,
+                elapsed_ms=5.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
     pipeline = SpeechTranslationPipeline(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
@@ -1825,12 +2347,18 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
             openai_pipeline=pipeline,
             runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
             audio_history_store=history_store,
+            practice_llm_service=FakePracticeLlm(),
         )
     )
 
     submitted = client.post(
         "/api/practice/attempt-jobs",
-        data={"target_language": "zh-CN", "target_text": "你好吗？你今天去哪里？"},
+        data={
+            "target_language": "zh-CN",
+            "target_text": "你好吗？你今天去哪里？",
+            "comparison_model": "gpt-5.6-terra",
+            "playback_padding_seconds": "0.1",
+        },
         files={
             "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
             "model_audio": ("model.wav", b"model audio", "audio/wav"),
@@ -1854,8 +2382,11 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert snapshot["status"] == "succeeded"
     assert snapshot["metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
     assert snapshot["result"]["recognized_text"] == "你哈吗？你今天到那里？"
+    assert snapshot["result"]["overall_score"] == 80
     assert snapshot["result"]["comparison_alignment"]["complete"] is True
+    assert snapshot["result"]["comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(2.4)
     assert snapshot["result"]["model_comparison_alignment"]["complete"] is True
+    assert snapshot["result"]["model_comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(2.5)
     completed_history = history_store.list_entries("recordings")
     assert len(completed_history) == 1
     metadata = completed_history[0].metadata
@@ -1863,15 +2394,11 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert metadata["practice_job_metrics"] == {"delay_time_ms": 1200.0, "execution_time_ms": 450.0}
     diagnostics = metadata["practice_diagnostics"]
     assert diagnostics["outcome"] == "evaluated"
-    assert diagnostics["similarity"] == snapshot["result"]["similarity"]
-    assert diagnostics["grade"] == snapshot["result"]["grade"]
+    assert diagnostics["overall_score"] == 80
     assert diagnostics["recognized_text"] == "你哈吗？你今天到那里？"
     assert diagnostics["model_recognized_text"] == "你好吗？你今天去哪里？"
     assert diagnostics["asr_timestamps"]["words"][0] == {"text": "你哈吗", "start": 0.1, "end": 0.8}
     assert diagnostics["model_asr_timestamps"]["words"][0] == {"text": "你好吗", "start": 0.1, "end": 0.8}
-    assert diagnostics["comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.3)
-    assert diagnostics["comparison_alignment"]["diagnostics"]["candidate_count"] > 0
-    assert diagnostics["model_comparison_alignment"]["phrases"][1]["audio_end"] == pytest.approx(2.4)
 
 
 @pytest.mark.parametrize("llm_fails", [False, True])
@@ -2191,7 +2718,7 @@ def test_practice_attempt_job_fails_with_typed_empty_reference_error() -> None:
     }
 
 
-def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> None:
+def test_practice_attempt_job_transcribes_both_english_audios_with_whisper(tmp_path) -> None:
     class SequencedAsr:
         name = "fake-whisper"
 
@@ -2215,9 +2742,51 @@ def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> 
                 timestamp_granularities=["word"],
             )
 
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            return PracticeLlmEvaluation(
+                result={
+                    "schema_version": 1,
+                    "overall_score": 80,
+                    "overall_comment": "areが抜けています。",
+                    "phrases": [
+                        {
+                            "phrase_index": 0,
+                            "target_text": "Where are you going?",
+                            "score": 80,
+                            "comment": "areが抜けています。",
+                            "reference": {
+                                "status": "assigned",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Where are you going",
+                                "start": 0.1,
+                                "end": 1.2,
+                                "playback_start": 0.0,
+                                "playback_end": 1.2,
+                            },
+                            "attempt": {
+                                "status": "partial",
+                                "word_start_index": 0,
+                                "word_end_index": 1,
+                                "matched_text": "Where you going",
+                                "start": 0.1,
+                                "end": 1.0,
+                                "playback_start": 0.0,
+                                "playback_end": 1.0,
+                            },
+                        }
+                    ],
+                },
+                usage={"total_tokens": 90},
+                estimated_cost_usd=None,
+                elapsed_ms=8.0,
+                log_path=tmp_path / "practice-llm.json",
+            )
+
     asr = SequencedAsr()
     pipeline = SpeechTranslationPipeline(asr=asr, translator=FakeTranslationProvider({}), tts=FakeTtsProvider())
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -2238,56 +2807,6 @@ def test_practice_attempt_job_transcribes_both_english_audios_with_whisper() -> 
         (b"model audio", "en-US", True),
         (b"attempt audio", "en-US", True),
     ]
-
-
-def test_practice_attempt_job_returns_no_speech_without_scoring_or_alignment() -> None:
-    class NoSpeechAttemptAsr:
-        name = "fake-whisper"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            if audio_path.read_bytes() == b"model audio":
-                return AsrTranscription(
-                    text="Please close the window.",
-                    model="whisper-1",
-                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
-                    timestamp_granularities=["word"],
-                )
-            return AsrTranscription(
-                text="",
-                model="whisper-1",
-                words=[],
-                segments=[],
-                timestamp_granularities=["word", "segment"],
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=NoSpeechAttemptAsr(),
-        translator=FakeTranslationProvider({}),
-        tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline))
-
-    response = client.post(
-        "/api/practice/attempt-jobs",
-        data={"target_language": "en-US", "target_text": "Please close the window."},
-        files={
-            "audio": ("silent.wav", b"0.72 seconds of silence", "audio/wav"),
-            "model_audio": ("model.wav", b"model audio", "audio/wav"),
-        },
-    )
-
-    assert response.status_code == 200
-    snapshot = response.json()
-    assert snapshot["status"] == "succeeded"
-    assert snapshot["result"]["outcome"] == "no_speech"
-    assert snapshot["result"]["message"] == "音声を検出できませんでした。もう一度録音してください。"
-    assert snapshot["result"]["similarity"] is None
-    assert snapshot["result"]["global_similarity"] is None
-    assert snapshot["result"]["phrase_similarity"] is None
-    assert snapshot["result"]["grade"] is None
-    assert snapshot["result"]["diff"] == []
-    assert snapshot["result"]["comparison_alignment"]["available"] is False
-    assert snapshot["result"]["model_comparison_alignment"]["available"] is True
 
 
 def test_practice_attempt_job_returns_no_speech_for_llm_comparison_without_calling_llm() -> None:
@@ -2399,24 +2918,14 @@ def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> Non
     assert completed["error"]["reason"] == "empty_reference_asr"
 
 
-def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
-    class FakeRunpodAsr:
-        name = "runpod-funasr-paraformer-zh"
-
-        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
-            return AsrTranscription(
-                text="我想學習軟體開發",
-                model="funasr/paraformer-zh",
-                words=[{"text": "我", "start": 0.0, "end": 0.2}],
-                timestamp_granularities=["word"],
-            )
-
-    pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+def test_practice_recording_api_rejects_attempt_intent() -> None:
+    """/api/practice/recordings only creates prompts now; attempts go through
+    /api/practice/attempt-jobs (which needs the model audio for comparison)."""
+    client = TestClient(create_app(openai_pipeline=SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "unused"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
-    )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=FakeRunpodAsr()))
+    )))
 
     response = client.post(
         "/api/practice/recordings",
@@ -2424,13 +2933,8 @@ def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
         files={"audio": ("recording.webm", b"repeat audio", "audio/webm")},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["recording_kind"] == "attempt"
-    assert payload["recognized_text"] == "我想学习软体开发"
-    assert "classification" not in payload
-    assert payload["grade"] == "perfect"
-    assert payload["asr_model"] == "funasr/paraformer-zh"
+    assert response.status_code == 400
+    assert response.json()["detail"] == "recording_intent must be prompt"
 
 
 def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exists() -> None:

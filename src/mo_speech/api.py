@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
+import unicodedata
+from collections import OrderedDict
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from threading import Lock
@@ -57,13 +60,11 @@ from .practice import (
     PRACTICE_TARGET_LANGUAGES,
     PracticeAlignmentError,
     PracticeAlignmentInputError,
-    evaluate_practice_attempt,
-    normalize_practice_text,
-    practice_comparison_alignment_canonical,
     simplify_chinese_text,
     supported_practice_target_language,
     validate_practice_alignment_target,
 )
+from .practice_attempt_state import PracticeAttemptStateStore
 from .practice_llm import (
     PRACTICE_COMPARISON_ERROR_MESSAGE,
     PracticeLlmError,
@@ -209,6 +210,45 @@ def _transcribe_practice_audio(asr_provider, audio_path: Path, source_language: 
     )
 
 
+_PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES = 64
+_practice_model_asr_cache: "OrderedDict[str, AsrTranscription]" = OrderedDict()
+_practice_model_asr_cache_lock = Lock()
+
+
+def _practice_model_asr_cache_key(audio_bytes: bytes, source_language: str, asr_provider: object) -> str:
+    provider_name = str(getattr(asr_provider, "name", "") or asr_provider.__class__.__name__)
+    digest = hashlib.sha256(audio_bytes).hexdigest()
+    return f"{provider_name}:{source_language}:{digest}"
+
+
+def _transcribe_practice_model_audio(
+    asr_provider,
+    audio_path: Path,
+    source_language: str,
+    audio_bytes: bytes,
+) -> AsrTranscription:
+    """お手本音声は同じ目標文への再挑戦のたびに同じ内容で送られてくる。
+    同一音声・言語・providerの組で結果は変わらないため、復唱のたびに
+    ASRを再実行せずプロセス内キャッシュを再利用する。復唱(attempt)音声は
+    毎回新しい録音なのでキャッシュしない。"""
+    key = _practice_model_asr_cache_key(audio_bytes, source_language, asr_provider)
+    with _practice_model_asr_cache_lock:
+        cached = _practice_model_asr_cache.get(key)
+        if cached is not None:
+            if _practice_asr_has_speech(cached):
+                _practice_model_asr_cache.move_to_end(key)
+                return cached
+            _practice_model_asr_cache.pop(key, None)
+    transcription = _transcribe_practice_audio(asr_provider, audio_path, source_language)
+    if _practice_asr_has_speech(transcription):
+        with _practice_model_asr_cache_lock:
+            _practice_model_asr_cache[key] = transcription
+            _practice_model_asr_cache.move_to_end(key)
+            while len(_practice_model_asr_cache) > _PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES:
+                _practice_model_asr_cache.popitem(last=False)
+    return transcription
+
+
 def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
     raw_words = result.words if isinstance(result.words, list) else []
     raw_segments = result.segments if isinstance(result.segments, list) else []
@@ -237,6 +277,15 @@ def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
     }
 
 
+def _practice_asr_has_speech(result: AsrTranscription) -> bool:
+    timestamps = _serialize_asr_timestamps(result)
+    return bool(
+        str(result.text or "").strip()
+        or timestamps.get("words")
+        or timestamps.get("segments")
+    )
+
+
 def _asr_transcription_from_runpod_output(
     value: object,
     *,
@@ -252,6 +301,58 @@ def _asr_transcription_from_runpod_output(
             str(item) for item in payload.get("timestamp_granularities", []) if str(item)
         ],
     )
+
+
+def _practice_attempt_llm_options_metadata(
+    options: dict[str, object],
+) -> dict[str, object]:
+    payload = {
+        key: options.get(key)
+        for key in (
+            "comparison_model",
+            "playback_padding_seconds",
+            "reference_audio_duration",
+            "attempt_audio_duration",
+            "progress_mode",
+            "model_audio_cache_key",
+        )
+    }
+    cached_model_transcription = options.get("cached_model_transcription")
+    if isinstance(cached_model_transcription, AsrTranscription):
+        payload["cached_model_transcription"] = {
+            "text": cached_model_transcription.text,
+            **_serialize_asr_timestamps(cached_model_transcription),
+        }
+    return payload
+
+
+def _practice_attempt_llm_options_from_history(
+    entry: AudioHistoryEntry | None,
+) -> dict[str, object] | None:
+    metadata = entry.metadata if entry is not None and isinstance(entry.metadata, dict) else {}
+    payload = metadata.get("practice_attempt_llm_options")
+    if not isinstance(payload, dict):
+        return None
+    options = dict(payload)
+    cached_model_transcription = options.get("cached_model_transcription")
+    if isinstance(cached_model_transcription, dict):
+        options["cached_model_transcription"] = _asr_transcription_from_runpod_output(
+            cached_model_transcription
+        )
+    return options
+
+
+def _practice_attempt_terminal_snapshot_from_history(
+    entry: AudioHistoryEntry | None,
+) -> dict[str, object] | None:
+    metadata = entry.metadata if entry is not None and isinstance(entry.metadata, dict) else {}
+    snapshot = metadata.get("practice_attempt_terminal_snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    status = str(snapshot.get("status") or "")
+    if status not in {"succeeded", "failed"}:
+        return None
+    return dict(snapshot)
 
 
 def _runpod_practice_metrics(body: dict[str, object]) -> dict[str, float]:
@@ -423,6 +524,8 @@ def _update_practice_attempt_history(
         "practice_job_metrics": snapshot.get("metrics") or {},
         "practice_job_error": str(snapshot.get("error") or ""),
     }
+    if metadata["practice_job_status"] in {"succeeded", "failed"}:
+        metadata["practice_attempt_terminal_snapshot"] = snapshot
     if result is not None:
         metadata.update(_practice_history_diagnostics_metadata(result))
         diagnostics = metadata["practice_diagnostics"]
@@ -770,6 +873,55 @@ def _normalize_practice_pinyin_tokens(tokens: list[str]) -> str:
     return " ".join(normalized_tokens).strip()
 
 
+def _practice_diff_comparable_text(text: str) -> str:
+    """「聞こえた言葉」の文字単位diffが使う正規化と同じ結果を返す。
+
+    フロント側 practiceDisplayComparableText (practice_playback.js) と同じ規則
+    (NFKC正規化、Punctuation/Symbolカテゴリの除去、空白の圧縮)にする。ここで返す
+    文字列のArray.from()した添字が、_practice_diff_pinyin_charsの返り値の添字と
+    一致する前提でクライアント側が読む。
+    """
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    stripped = "".join(
+        char for char in normalized if not unicodedata.category(char).startswith(("P", "S"))
+    )
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def _practice_diff_pinyin_chars(text: str) -> list[str]:
+    """diff比較用の文字ごとの声調つきピンイン配列(非漢字は空文字列)を返す。
+
+    連続する漢字は文脈付きでまとめて変換する。非漢字位置を空文字列として残し、
+    Array.from(comparable text)と同じ長さ・同じ添字を保証する。
+    """
+    comparable = _practice_diff_comparable_text(text)
+    if not comparable:
+        return []
+    try:
+        from pypinyin import Style, lazy_pinyin
+    except ImportError:
+        return ["" for _ in comparable]
+    result = ["" for _ in comparable]
+    index = 0
+    while index < len(comparable):
+        if not _contains_han_text(comparable[index]):
+            index += 1
+            continue
+        end = index + 1
+        while end < len(comparable) and _contains_han_text(comparable[end]):
+            end += 1
+        tokens = lazy_pinyin(
+            comparable[index:end],
+            style=Style.TONE3,
+            neutral_tone_with_five=True,
+            errors="ignore",
+        )
+        if len(tokens) == end - index:
+            result[index:end] = tokens
+        index = end
+    return result
+
+
 def _supported_vibevoice_output_language(value: str | None) -> str:
     language = str(value or "zh-CN").strip()
     if language not in _VIBEVOICE_OUTPUT_LANGUAGES:
@@ -997,6 +1149,7 @@ def create_app(
     user_settings_store: UserSettingsStore | None = None,
     public_sample_audio_store: PublicSampleAudioStore | None = None,
     practice_llm_service: PracticeLlmService | None = None,
+    practice_attempt_state_store: PracticeAttemptStateStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Voice Lab")
 
@@ -1044,11 +1197,23 @@ def create_app(
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
     active_practice_llm_service = practice_llm_service or PracticeLlmService()
+    active_practice_attempt_state_store = (
+        practice_attempt_state_store or PracticeAttemptStateStore.from_env()
+    )
     practice_prompt_job_store = PracticeJobStore()
     practice_attempt_job_store = PracticeJobStore()
     practice_attempt_llm_options: dict[str, dict[str, object]] = {}
     practice_attempt_result_cache: dict[str, dict[str, object]] = {}
     practice_attempt_finalization_jobs: dict[str, dict[str, object]] = {}
+
+    def track_practice_attempt_snapshot(
+        entry: AudioHistoryEntry | None,
+        snapshot: dict[str, object],
+    ) -> None:
+        _update_practice_attempt_history(active_audio_history_store, entry, snapshot)
+        job_id = str(snapshot.get("job_id") or "")
+        if job_id:
+            active_practice_attempt_state_store.save_terminal_snapshot(job_id, snapshot)
     practice_attempt_finalization_lock = Lock()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
@@ -1765,74 +1930,21 @@ def create_app(
             else {"available": False, "model": "", "timestamp_granularities": [], "words": [], "segments": []}
         )
         compare_started = perf_counter()
-        if comparison_model:
-            if model_transcription is None:
-                raise PracticeLlmError("reference ASR is missing", stage="prepare_input")
-            reference_no_speech = (
-                not model_recognized_text.strip()
-                and not model_asr_timestamps.get("words")
-                and not model_asr_timestamps.get("segments")
-            )
-            if reference_no_speech:
-                raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
-            no_speech = (
-                not recognized_text.strip()
-                and not asr_timestamps.get("words")
-                and not asr_timestamps.get("segments")
-            )
-            if no_speech:
-                compare_ms = _elapsed_ms(compare_started)
-                return {
-                    "recording_kind": "attempt",
-                    "target_language": practice_target_language,
-                    "target_text": target_text,
-                    "recognized_text": recognized_text,
-                    "model_recognized_text": model_recognized_text,
-                    "asr_model": attempt_transcription.model,
-                    "asr_timestamps": asr_timestamps,
-                    "model_asr_timestamps": model_asr_timestamps,
-                    "outcome": "no_speech",
-                    "message": "音声を検出できませんでした。もう一度録音してください。",
-                    "comparison_alignment": None,
-                    "model_comparison_alignment": None,
-                    "comparison_model": comparison_model,
-                    "playback_padding_seconds": playback_padding_seconds,
-                    "timings_ms": {
-                        "asr": attempt_asr_ms,
-                        "model_asr": model_asr_ms,
-                        "compare": compare_ms,
-                        "total": attempt_asr_ms + model_asr_ms + compare_ms,
-                    },
-                    "providers": {
-                        "asr": attempt_provider_name,
-                        "model_asr": model_provider_name or attempt_provider_name,
-                        "comparison": "openai-responses",
-                    },
-                }
-            llm_input = build_practice_llm_input(
-                target_language=practice_target_language,
-                target_text=target_text,
-                padding_seconds=playback_padding_seconds,
-                reference_audio_duration=reference_audio_duration,
-                attempt_audio_duration=attempt_audio_duration,
-                reference_asr={
-                    "recognized_text": model_recognized_text,
-                    "model": model_transcription.model,
-                    "words": model_asr_timestamps["words"],
-                },
-                attempt_asr={
-                    "recognized_text": recognized_text,
-                    "model": attempt_transcription.model,
-                    "words": asr_timestamps["words"],
-                },
-            )
-            evaluated = active_practice_llm_service.evaluate(
-                model=comparison_model,
-                input_payload=llm_input,
-            )
-            comparison_alignment, model_comparison_alignment = (
-                comparison_alignments_from_llm_result(evaluated.result)
-            )
+        if model_transcription is None:
+            raise PracticeLlmError("reference ASR is missing", stage="prepare_input")
+        reference_no_speech = (
+            not model_recognized_text.strip()
+            and not model_asr_timestamps.get("words")
+            and not model_asr_timestamps.get("segments")
+        )
+        if reference_no_speech:
+            raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
+        no_speech = (
+            not recognized_text.strip()
+            and not asr_timestamps.get("words")
+            and not asr_timestamps.get("segments")
+        )
+        if no_speech:
             compare_ms = _elapsed_ms(compare_started)
             return {
                 "recording_kind": "attempt",
@@ -1843,16 +1955,12 @@ def create_app(
                 "asr_model": attempt_transcription.model,
                 "asr_timestamps": asr_timestamps,
                 "model_asr_timestamps": model_asr_timestamps,
-                "outcome": "evaluated",
-                "overall_score": evaluated.result["overall_score"],
-                "overall_comment": evaluated.result["overall_comment"],
-                "llm_comparison": evaluated.result,
-                "comparison_alignment": comparison_alignment,
-                "model_comparison_alignment": model_comparison_alignment,
+                "outcome": "no_speech",
+                "message": "音声を検出できませんでした。もう一度録音してください。",
+                "comparison_alignment": None,
+                "model_comparison_alignment": None,
                 "comparison_model": comparison_model,
                 "playback_padding_seconds": playback_padding_seconds,
-                "llm_usage": evaluated.usage,
-                "llm_estimated_cost_usd": evaluated.estimated_cost_usd,
                 "timings_ms": {
                     "asr": attempt_asr_ms,
                     "model_asr": model_asr_ms,
@@ -1865,71 +1973,36 @@ def create_app(
                     "comparison": "openai-responses",
                 },
             }
-        if model_transcription is not None:
-            try:
-                model_comparison_alignment = practice_comparison_alignment_canonical(
-                    target_text=target_text,
-                    recognized_text=model_recognized_text,
-                    target_language=practice_target_language,
-                    asr_timestamps=model_asr_timestamps,
-                )
-            except PracticeAlignmentError as error:
-                raise PracticeAlignmentError(
-                    error.reason,
-                    stage="reference_asr",
-                    retryable=error.retryable,
-                ) from error
-            if model_comparison_alignment.get("outcome") == "no_speech":
-                raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
-        else:
-            model_comparison_alignment = {
-                "alignment_contract_version": 1,
-                "outcome": "evaluated",
-                "available": False,
-                "target_phrase_count": 0,
-                "playable_phrase_count": 0,
-                "all_phrases_playable": False,
-                "unassigned_non_filler_count": 0,
-                "complete": False,
-                "target_language": practice_target_language,
-                "phrases": [],
-                "diagnostics": {},
-            }
-        comparison_alignment = practice_comparison_alignment_canonical(
-            target_text=target_text,
-            recognized_text=recognized_text,
+        llm_input = build_practice_llm_input(
             target_language=practice_target_language,
-            asr_timestamps=asr_timestamps,
+            target_text=target_text,
+            padding_seconds=playback_padding_seconds,
+            reference_audio_duration=reference_audio_duration,
+            attempt_audio_duration=attempt_audio_duration,
+            reference_asr={
+                "recognized_text": model_recognized_text,
+                "model": model_transcription.model,
+                "words": model_asr_timestamps["words"],
+            },
+            attempt_asr={
+                "recognized_text": recognized_text,
+                "model": attempt_transcription.model,
+                "words": asr_timestamps["words"],
+            },
+        )
+        evaluated = active_practice_llm_service.evaluate(
+            model=comparison_model,
+            input_payload=llm_input,
+        )
+        comparison_alignment, model_comparison_alignment = (
+            comparison_alignments_from_llm_result(evaluated.result)
         )
         compare_ms = _elapsed_ms(compare_started)
-        no_speech = (
-            not recognized_text.strip()
-            and not asr_timestamps.get("words")
-            and not asr_timestamps.get("segments")
+        comparison_target_pinyin = (
+            _practice_diff_pinyin_chars(target_text) if practice_target_language == "zh-CN" else []
         )
-        evaluation = (
-            {
-                "outcome": "no_speech",
-                "message": "音声を検出できませんでした。もう一度録音してください。",
-                "normalized_target": normalize_practice_text(target_text, practice_target_language),
-                "normalized_recognized": "",
-                "global_similarity": None,
-                "phrase_similarity": None,
-                "phrase_macro_similarity": None,
-                "lowest_phrase_similarity": None,
-                "similarity": None,
-                "grade": None,
-                "grade_label": "",
-                "diff": [],
-                "phrase_matches": [],
-                "unconsumed_recognized": [],
-            }
-            if no_speech
-            else {
-                "outcome": "evaluated",
-                "message": "",
-                **evaluate_practice_attempt(target_text, recognized_text, practice_target_language),
-            }
+        comparison_recognized_pinyin = (
+            _practice_diff_pinyin_chars(recognized_text) if practice_target_language == "zh-CN" else []
         )
         return {
             "recording_kind": "attempt",
@@ -1940,9 +2013,18 @@ def create_app(
             "asr_model": attempt_transcription.model,
             "asr_timestamps": asr_timestamps,
             "model_asr_timestamps": model_asr_timestamps,
-            **evaluation,
+            "outcome": "evaluated",
+            "overall_score": evaluated.result["overall_score"],
+            "overall_comment": evaluated.result["overall_comment"],
+            "llm_comparison": evaluated.result,
             "comparison_alignment": comparison_alignment,
             "model_comparison_alignment": model_comparison_alignment,
+            "comparison_target_pinyin": comparison_target_pinyin,
+            "comparison_recognized_pinyin": comparison_recognized_pinyin,
+            "comparison_model": comparison_model,
+            "playback_padding_seconds": playback_padding_seconds,
+            "llm_usage": evaluated.usage,
+            "llm_estimated_cost_usd": evaluated.estimated_cost_usd,
             "timings_ms": {
                 "asr": attempt_asr_ms,
                 "model_asr": model_asr_ms,
@@ -1951,59 +2033,10 @@ def create_app(
             },
             "providers": {
                 "asr": attempt_provider_name,
-                **({"model_asr": model_provider_name or attempt_provider_name} if model_transcription is not None else {}),
+                "model_asr": model_provider_name or attempt_provider_name,
+                "comparison": "openai-responses",
             },
         }
-
-    def _create_practice_attempt_result(
-        *,
-        audio_bytes: bytes,
-        filename: str,
-        practice_target_language: str,
-        target_text: str,
-        practice_asr_model: str,
-        precomputed_asr_result: AsrTranscription | None = None,
-        precomputed_asr_ms: float | None = None,
-    ) -> dict[str, object]:
-        if practice_target_language == "zh-CN":
-            target_text = simplify_chinese_text(target_text)
-        asr_provider = (
-            active_runpod_practice_asr_provider
-            if practice_target_language == "zh-CN"
-            else _practice_asr_provider(active_openai_pipeline, practice_asr_model)
-        )
-        with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_audio.flush()
-            try:
-                if precomputed_asr_result is None:
-                    asr_started = perf_counter()
-                    asr_result = _transcribe_practice_audio(asr_provider, Path(temp_audio.name), practice_target_language)
-                    asr_ms = _elapsed_ms(asr_started)
-                else:
-                    asr_result = precomputed_asr_result
-                    asr_ms = float(precomputed_asr_ms or 0.0)
-                recognized_text = asr_result.text
-                if practice_target_language == "zh-CN":
-                    recognized_text = simplify_chinese_text(recognized_text)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        return _create_practice_attempt_result_from_transcriptions(
-            practice_target_language=practice_target_language,
-            target_text=target_text,
-            attempt_transcription=AsrTranscription(
-                text=recognized_text,
-                model=asr_result.model,
-                words=asr_result.words,
-                segments=asr_result.segments,
-                timestamp_granularities=asr_result.timestamp_granularities,
-            ),
-            attempt_provider_name=asr_provider.name,
-            attempt_asr_ms=asr_ms,
-        )
 
     def _practice_attempt_job_snapshot(
         body: dict[str, object],
@@ -2057,7 +2090,27 @@ def create_app(
                     "error": error,
                 }
             model_payload = output.get("model_transcription")
-            if not isinstance(model_payload, dict):
+            cached_model_transcription = (llm_options or {}).get("cached_model_transcription")
+            if isinstance(model_payload, dict):
+                model_transcription = _asr_transcription_from_runpod_output(model_payload)
+                model_audio_cache_key = (llm_options or {}).get("model_audio_cache_key")
+                if (
+                    isinstance(model_audio_cache_key, str)
+                    and model_audio_cache_key
+                    and _practice_asr_has_speech(model_transcription)
+                ):
+                    with _practice_model_asr_cache_lock:
+                        _practice_model_asr_cache[model_audio_cache_key] = model_transcription
+                        _practice_model_asr_cache.move_to_end(model_audio_cache_key)
+                        while len(_practice_model_asr_cache) > _PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES:
+                            _practice_model_asr_cache.popitem(last=False)
+            elif isinstance(cached_model_transcription, AsrTranscription):
+                # このjobはお手本音声のASRキャッシュがあったため、submit_comparison_job呼び出し時に
+                # model_audio_base64を送らずRunPod側のFunASR推論を省略した(_transcribe_practice_model_audio
+                # と同じ意図のキャッシュ)。RunPod出力にmodel_transcriptionが無いのは想定どおりであり、
+                # 送信前に確定していたキャッシュ済みの結果をそのまま使う。
+                model_transcription = cached_model_transcription
+            else:
                 return {
                     "job_id": job_id,
                     "status": "failed",
@@ -2068,7 +2121,6 @@ def create_app(
                     "error": "RunPod practice job did not return model_transcription",
                 }
             attempt_transcription = _asr_transcription_from_runpod_output(output)
-            model_transcription = _asr_transcription_from_runpod_output(model_payload)
             providers = output.get("providers") if isinstance(output.get("providers"), dict) else {}
             provider_name = str(providers.get("asr") or active_runpod_practice_asr_provider.name)
             timings = output.get("timings_ms") if isinstance(output.get("timings_ms"), dict) else {}
@@ -2191,26 +2243,19 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         normalized_target_text = str(target_text or "").strip()
         validate_practice_alignment_target(normalized_target_text, practice_target_language)
-        use_llm = bool(str(comparison_model or "").strip() or str(playback_padding_seconds or "").strip())
-        if use_llm:
-            if practice_target_language != "zh-CN" and practice_asr_model not in OPENAI_TIMESTAMP_ASR_MODELS:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"asr_model '{practice_asr_model}' does not return word timestamps, "
-                        "which the LLM comparison requires; use whisper-1 for comparison_model requests"
-                    ),
-                )
-            try:
-                selected_comparison_model = supported_practice_comparison_model(comparison_model)
-                selected_playback_padding = validate_playback_padding_seconds(
-                    playback_padding_seconds
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-        else:
-            selected_comparison_model = ""
-            selected_playback_padding = 0.1
+        if practice_target_language != "zh-CN" and practice_asr_model not in OPENAI_TIMESTAMP_ASR_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"asr_model '{practice_asr_model}' does not return word timestamps, "
+                    "which the LLM comparison requires; use whisper-1 for comparison_model requests"
+                ),
+            )
+        try:
+            selected_comparison_model = supported_practice_comparison_model(comparison_model)
+            selected_playback_padding = validate_playback_padding_seconds(playback_padding_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         attempt_audio_bytes = await audio.read()
         model_audio_bytes = await model_audio.read()
@@ -2250,9 +2295,27 @@ def create_app(
                         Path(model_temp_audio.name),
                         fallback_words=[],
                     )
+                    model_audio_cache_key = _practice_model_asr_cache_key(
+                        model_audio_bytes,
+                        practice_target_language,
+                        active_runpod_practice_asr_provider,
+                    )
+                    with _practice_model_asr_cache_lock:
+                        cached_model_transcription = _practice_model_asr_cache.get(model_audio_cache_key)
+                        if cached_model_transcription is not None:
+                            if _practice_asr_has_speech(cached_model_transcription):
+                                _practice_model_asr_cache.move_to_end(model_audio_cache_key)
+                            else:
+                                _practice_model_asr_cache.pop(model_audio_cache_key, None)
+                                cached_model_transcription = None
+                    reuse_cached_model_transcription = (
+                        cached_model_transcription is not None and recording_entry is not None
+                    )
                     body = active_runpod_practice_asr_provider.submit_comparison_job(
                         attempt_audio_path=Path(attempt_temp_audio.name),
-                        model_audio_path=Path(model_temp_audio.name),
+                        model_audio_path=(
+                            None if reuse_cached_model_transcription else Path(model_temp_audio.name)
+                        ),
                         source_language=practice_target_language,
                         target_text=simplify_chinese_text(normalized_target_text),
                     )
@@ -2265,25 +2328,38 @@ def create_app(
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
             job_id = str(body.get("id") or body.get("job_id") or "")
-            llm_options = (
-                {
-                    "comparison_model": selected_comparison_model,
-                    "playback_padding_seconds": selected_playback_padding,
-                    "reference_audio_duration": reference_audio_duration,
-                    "attempt_audio_duration": attempt_audio_duration,
-                    "progress_mode": progress_mode,
-                }
-                if use_llm
-                else None
-            )
-            if job_id and llm_options is not None:
+            llm_options = {
+                "comparison_model": selected_comparison_model,
+                "playback_padding_seconds": selected_playback_padding,
+                "reference_audio_duration": reference_audio_duration,
+                "attempt_audio_duration": attempt_audio_duration,
+                "progress_mode": progress_mode,
+                "model_audio_cache_key": model_audio_cache_key,
+                "cached_model_transcription": (
+                    cached_model_transcription if reuse_cached_model_transcription else None
+                ),
+            }
+            if job_id:
                 practice_attempt_llm_options[job_id] = llm_options
+                active_practice_attempt_state_store.save_options(
+                    job_id,
+                    _practice_attempt_llm_options_metadata(llm_options),
+                )
             snapshot = _practice_attempt_job_snapshot(
                 body,
                 health=health,
                 llm_options=llm_options,
             )
-            _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+            track_practice_attempt_snapshot(recording_entry, snapshot)
+            if job_id:
+                active_audio_history_store.update_metadata(
+                    recording_entry,
+                    {
+                        "practice_attempt_llm_options": (
+                            _practice_attempt_llm_options_metadata(llm_options)
+                        ),
+                    },
+                )
             if snapshot["status"] in {"queued", "running"}:
                 response.status_code = 202
             return snapshot
@@ -2310,10 +2386,11 @@ def create_app(
                         model=asr_model_name,
                     )
                 model_started = perf_counter()
-                model_transcription = _transcribe_practice_audio(
+                model_transcription = _transcribe_practice_model_audio(
                     asr_provider,
                     Path(model_temp_audio.name),
                     practice_target_language,
+                    model_audio_bytes,
                 )
                 model_asr_ms = _elapsed_ms(model_started)
                 if report is not None:
@@ -2463,7 +2540,7 @@ def create_app(
             "result": result,
             "error": None,
         }
-        _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+        track_practice_attempt_snapshot(recording_entry, snapshot)
         return snapshot
 
     @app.get("/api/practice/attempt-jobs/{job_id}")
@@ -2482,12 +2559,22 @@ def create_app(
                 active_audio_history_store,
                 job_id,
             )
-            _update_practice_attempt_history(
-                active_audio_history_store,
-                recording_entry,
-                snapshot,
-            )
+            track_practice_attempt_snapshot(recording_entry, snapshot)
             return snapshot
+        persisted_snapshot = active_practice_attempt_state_store.load_terminal_snapshot(
+            job_id
+        )
+        if persisted_snapshot is not None:
+            return persisted_snapshot
+        recording_entry = _practice_attempt_history_entry(
+            active_audio_history_store,
+            job_id,
+        )
+        persisted_snapshot = _practice_attempt_terminal_snapshot_from_history(
+            recording_entry
+        )
+        if persisted_snapshot is not None:
+            return persisted_snapshot
         try:
             body = active_runpod_practice_asr_provider.job_status(job_id)
             health = (
@@ -2500,6 +2587,23 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
         llm_options = practice_attempt_llm_options.get(job_id)
+        if llm_options is None:
+            llm_options = active_practice_attempt_state_store.load_options(job_id)
+            if llm_options is not None:
+                cached_model_transcription = llm_options.get(
+                    "cached_model_transcription"
+                )
+                if isinstance(cached_model_transcription, dict):
+                    llm_options["cached_model_transcription"] = (
+                        _asr_transcription_from_runpod_output(
+                            cached_model_transcription
+                        )
+                    )
+                practice_attempt_llm_options[job_id] = llm_options
+        if llm_options is None:
+            llm_options = _practice_attempt_llm_options_from_history(recording_entry)
+            if llm_options is not None:
+                practice_attempt_llm_options[job_id] = llm_options
         if (
             str(body.get("status") or "").upper() == "COMPLETED"
             and llm_options is not None
@@ -2549,23 +2653,14 @@ def create_app(
             )
             snapshot["job_id"] = job_id
             snapshot["metrics"] = finalization.get("metrics") or {}
-            recording_entry = _practice_attempt_history_entry(
-                active_audio_history_store,
-                job_id,
-            )
-            _update_practice_attempt_history(
-                active_audio_history_store,
-                recording_entry,
-                snapshot,
-            )
+            track_practice_attempt_snapshot(recording_entry, snapshot)
             return snapshot
         snapshot = _practice_attempt_job_snapshot(
             body,
             health=health,
             llm_options=llm_options,
         )
-        recording_entry = _practice_attempt_history_entry(active_audio_history_store, job_id)
-        _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+        track_practice_attempt_snapshot(recording_entry, snapshot)
         return snapshot
 
     @app.post("/api/practice/recordings")
@@ -2588,10 +2683,8 @@ def create_app(
             practice_asr_model = supported_openai_practice_asr_model(asr_model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if recording_intent not in {"prompt", "attempt"}:
-            raise HTTPException(status_code=400, detail="recording_intent must be prompt or attempt")
-        if recording_intent == "attempt":
-            validate_practice_alignment_target(current_target_text, practice_target_language)
+        if recording_intent != "prompt":
+            raise HTTPException(status_code=400, detail="recording_intent must be prompt")
 
         audio_bytes = await audio.read()
         recording_entry = _save_audio_history_recording(
@@ -2608,21 +2701,6 @@ def create_app(
                 "content_type": audio.content_type or "",
             },
         )
-
-        if recording_intent == "attempt":
-            result = _create_practice_attempt_result(
-                audio_bytes=audio_bytes,
-                filename=audio.filename or "",
-                practice_target_language=practice_target_language,
-                target_text=current_target_text,
-                practice_asr_model=practice_asr_model,
-            )
-            result["recording_kind"] = "attempt"
-            active_audio_history_store.update_metadata(
-                recording_entry,
-                _practice_history_diagnostics_metadata(result),
-            )
-            return result
 
         if progress_mode == "job":
             filename = audio.filename or "practice.webm"
@@ -2823,52 +2901,6 @@ def create_app(
                 "tts_text": target_text,
                 "text_preview": target_text[:80],
             },
-        )
-        active_audio_history_store.update_metadata(
-            recording_entry,
-            _practice_history_diagnostics_metadata(result),
-        )
-        return result
-
-    @app.post("/api/practice/attempts")
-    async def create_practice_attempt(
-        audio: Annotated[UploadFile, File()],
-        target_language: Annotated[str, Form()],
-        target_text: Annotated[str, Form()],
-        asr_model: Annotated[str, Form()] = "whisper-1",
-    ) -> dict[str, object]:
-        try:
-            practice_target_language = supported_practice_target_language(target_language)
-        except ValueError as exc:
-            raise PracticeAlignmentInputError("unsupported_target_language") from exc
-        try:
-            practice_asr_model = supported_openai_practice_asr_model(asr_model)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        validate_practice_alignment_target(target_text, practice_target_language)
-        if practice_target_language == "zh-CN":
-            target_text = simplify_chinese_text(target_text)
-
-        audio_bytes = await audio.read()
-        recording_entry = _save_audio_history_recording(
-            active_audio_history_store,
-            audio_bytes,
-            suffix=_upload_suffix(audio.filename),
-            metadata={
-                "endpoint": "practice-attempts",
-                "target_language": practice_target_language,
-                "asr_model": practice_asr_model,
-                "filename": audio.filename or "",
-                "content_type": audio.content_type or "",
-            },
-        )
-
-        result = _create_practice_attempt_result(
-            audio_bytes=audio_bytes,
-            filename=audio.filename or "",
-            practice_target_language=practice_target_language,
-            target_text=target_text,
-            practice_asr_model=practice_asr_model,
         )
         active_audio_history_store.update_metadata(
             recording_entry,

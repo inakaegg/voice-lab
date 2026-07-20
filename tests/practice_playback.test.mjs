@@ -7,6 +7,8 @@ const {
   comparisonPlaybackPlan,
   comparisonRangeForTargetOffset,
   shouldStopAudioSegment,
+  buildPracticeDiffCells,
+  compactPracticeDiffCells,
 } = globalThis.voiceLabPracticePlayback;
 
 const completeModel = {
@@ -69,7 +71,7 @@ test("partial paired ranges stay in partial phrase mode and use a matching label
 });
 
 test("whole comparison and no-speech never report phrase playback", () => {
-  const noPair = { available: false, complete: false, target_phrase_count: 2, ranges: [] };
+  const noPair = { available: false, complete: false, target_phrase_count: 2, phrases: [] };
   const whole = comparisonPlaybackPlan({
     modelReady: true,
     repeatReady: true,
@@ -97,29 +99,6 @@ test("whole comparison and no-speech never report phrase playback", () => {
   assert.equal(whole.description, "フレーズの区切りを確認できなかったため、全体を比較します。");
   assert.deepEqual({ mode: noSpeech.mode, label: noSpeech.label }, { mode: "model", label: "お手本を再生" });
   assert.equal(noSpeech.description, "");
-});
-
-test("stored legacy ranges remain playable during the canonical migration", () => {
-  const legacy = {
-    available: true,
-    complete: true,
-    target_phrase_count: 1,
-    ranges: [{ index: 0, available: true, audio_start: 0.2, audio_end: 1.2 }],
-  };
-  const plan = comparisonPlaybackPlan({
-    modelReady: true,
-    repeatReady: true,
-    resultVisible: true,
-    outcome: "evaluated",
-    recognizedLanguageMatches: true,
-    attemptAlignment: legacy,
-    modelAlignment: legacy,
-    modelDuration: 1.4,
-    repeatDuration: 1.4,
-  });
-
-  assert.equal(plan.mode, "phrase");
-  assert.equal(plan.ranges.length, 1);
 });
 
 test("segment playback stops at the exact end instead of 30ms early", () => {
@@ -211,4 +190,116 @@ test("a heard-word difference does not fall back to the whole recording without 
   });
 
   assert.equal(selected, null);
+});
+
+test("a repeated phrase is matched by its position, not by re-finding the same text", () => {
+  const alignment = {
+    available: true,
+    complete: true,
+    target_phrase_count: 3,
+    phrases: [
+      { index: 0, target_text: "Yes yes.", available: true, audio_start: 0.0, audio_end: 0.5 },
+      { index: 1, target_text: "No thanks.", available: true, audio_start: 0.5, audio_end: 1.2 },
+      { index: 2, target_text: "Yes yes.", available: true, audio_start: 1.2, audio_end: 1.8 },
+    ],
+  };
+  const ranges = [
+    { index: 0, model: { start: 0.0, end: 0.5 }, repeat: { start: 0.0, end: 0.5 } },
+    { index: 1, model: { start: 0.5, end: 1.2 }, repeat: { start: 0.5, end: 1.2 } },
+    { index: 2, model: { start: 1.2, end: 1.8 }, repeat: { start: 1.2, end: 1.8 } },
+  ];
+  const targetText = "Yes yes. No thanks. Yes yes.";
+
+  const firstOccurrence = comparisonRangeForTargetOffset({ targetText, targetOffset: 1, alignment, ranges });
+  const secondOccurrence = comparisonRangeForTargetOffset({ targetText, targetOffset: 22, alignment, ranges });
+
+  assert.equal(firstOccurrence?.index, 0);
+  assert.equal(secondOccurrence?.index, 2);
+});
+
+test("a plain substitution without pinyin data stays a substitute cell (no behavior change without data)", () => {
+  const cells = buildPracticeDiffCells("是晚上", "洗完上");
+  assert.deepEqual(cells.map((c) => c.type), ["substitute", "substitute", "equal"]);
+});
+
+test("a homophone recognized in place of the target character is treated as correct", () => {
+  // 目標「的」・復唱「地」はどちらも de (声調まで同じ)。ASRが同音の別字を選んだだけで、
+  // 学習者の発音自体は正しいので赤字にしない。
+  const cells = buildPracticeDiffCells("的", "地", {
+    target: ["de5"],
+    recognized: ["de5"],
+  });
+  assert.deepEqual(cells, [{ type: "equal", correction: "", heard: "地", targetOffset: 0 }]);
+});
+
+test("a same-syllable different-tone recognition is flagged as a tone mismatch, not a full substitution", () => {
+  // 目標「晚」(wan3)に対し「完」(wan2)は音節は同じで声調だけ違う。
+  const cells = buildPracticeDiffCells("晚", "完", {
+    target: ["wan3"],
+    recognized: ["wan2"],
+  });
+  assert.deepEqual(cells, [{ type: "tone", correction: "晚", heard: "完", targetOffset: 0 }]);
+});
+
+test("a genuinely different syllable stays a full substitution even with pinyin data available", () => {
+  // 目標「可能」(ke3 neng2)に対し復唱「刚刚」(gang1 gang1)は音節自体が違う実際の誤り。
+  const cells = buildPracticeDiffCells("可能", "刚刚", {
+    target: ["ke3", "neng2"],
+    recognized: ["gang1", "gang1"],
+  });
+  assert.deepEqual(cells.map((c) => c.type), ["substitute", "substitute"]);
+});
+
+test("compacting merges consecutive equal characters and, separately, consecutive same-type mismatches", () => {
+  const cells = [
+    { type: "equal", correction: "", heard: "你", targetOffset: 0 },
+    { type: "equal", correction: "", heard: "好", targetOffset: 1 },
+    { type: "substitute", correction: "可", heard: "刚", targetOffset: 2 },
+    { type: "substitute", correction: "能", heard: "刚", targetOffset: 3 },
+    { type: "equal", correction: "", heard: "了", targetOffset: 4 },
+  ];
+  const compacted = compactPracticeDiffCells(cells);
+  assert.deepEqual(compacted, [
+    { type: "equal", correction: "", heard: "你好", targetOffset: 0 },
+    { type: "substitute", correction: "可能", heard: "刚刚", targetOffset: 2 },
+    { type: "equal", correction: "", heard: "了", targetOffset: 4 },
+  ]);
+});
+
+test("compacting does not merge across different mismatch types", () => {
+  const cells = [
+    { type: "substitute", correction: "可", heard: "刚", targetOffset: 0 },
+    { type: "tone", correction: "晚", heard: "完", targetOffset: 1 },
+    { type: "delete", correction: "了", heard: "_", targetOffset: 2 },
+    { type: "delete", correction: "吗", heard: "_", targetOffset: 3 },
+  ];
+  const compacted = compactPracticeDiffCells(cells);
+  assert.deepEqual(compacted.map((c) => c.type), ["substitute", "tone", "delete"]);
+  assert.deepEqual(compacted[2], { type: "delete", correction: "了吗", heard: "_", targetOffset: 2 });
+});
+
+test("compacting keeps same-type mismatches separate across LLM phrase boundaries", () => {
+  const cells = [
+    { type: "substitute", correction: "好", heard: "坏", targetOffset: 1 },
+    { type: "substitute", correction: "世", heard: "色", targetOffset: 2 },
+  ];
+  const compacted = compactPracticeDiffCells(cells, {
+    targetText: "你好世界",
+    alignment: {
+      phrases: [
+        { index: 0, target_text: "你好。" },
+        { index: 1, target_text: "世界" },
+      ],
+    },
+  });
+
+  assert.deepEqual(compacted, cells);
+});
+
+test("a real logged mismatch (可能 heard as 刚刚) compacts to one readable cell end to end", () => {
+  const cells = compactPracticeDiffCells(buildPracticeDiffCells("可能", "刚刚", {
+    target: ["ke3", "neng2"],
+    recognized: ["gang1", "gang1"],
+  }));
+  assert.deepEqual(cells, [{ type: "substitute", correction: "可能", heard: "刚刚", targetOffset: 0 }]);
 });

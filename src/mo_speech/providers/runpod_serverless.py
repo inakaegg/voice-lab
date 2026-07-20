@@ -361,23 +361,27 @@ class RunpodServerlessPracticeAsrProvider:
         self,
         *,
         attempt_audio_path: Path,
-        model_audio_path: Path,
+        model_audio_path: Path | None,
         source_language: str,
         target_text: str,
     ) -> dict[str, object]:
+        """model_audio_pathがNoneの場合、お手本音声をjobへ含めない。呼び出し側が
+        お手本音声のASR結果を既にキャッシュ済みと判断した場合に使う。RunPod側の
+        handler(_handle_practice_asr)はmodel_audio_base64が無ければお手本側の
+        FunASR推論をスキップし、応答にmodel_transcriptionを含めない。"""
         if source_language != "zh-CN":
             raise ValueError("RunPod FunASR practice ASR only supports zh-CN")
-        return self.client.submit_job(
-            {
-                "operation_mode": "practice_asr",
-                "source_language": source_language,
-                "target_text": str(target_text or ""),
-                "audio_mime_type": _audio_mime_type(attempt_audio_path),
-                "audio_base64": base64.b64encode(attempt_audio_path.read_bytes()).decode("ascii"),
-                "model_audio_mime_type": _audio_mime_type(model_audio_path),
-                "model_audio_base64": base64.b64encode(model_audio_path.read_bytes()).decode("ascii"),
-            }
-        )
+        payload: dict[str, object] = {
+            "operation_mode": "practice_asr",
+            "source_language": source_language,
+            "target_text": str(target_text or ""),
+            "audio_mime_type": _audio_mime_type(attempt_audio_path),
+            "audio_base64": base64.b64encode(attempt_audio_path.read_bytes()).decode("ascii"),
+        }
+        if model_audio_path is not None:
+            payload["model_audio_mime_type"] = _audio_mime_type(model_audio_path)
+            payload["model_audio_base64"] = base64.b64encode(model_audio_path.read_bytes()).decode("ascii")
+        return self.client.submit_job(payload)
 
     def job_status(self, job_id: str) -> dict[str, object]:
         return self.client.job_status(job_id)

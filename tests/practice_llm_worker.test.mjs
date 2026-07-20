@@ -5,16 +5,23 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
-  PRACTICE_LLM_COMPARISON_MODELS,
-  PRACTICE_LLM_PROMPT,
   PracticeLlmError,
   buildPracticeLlmInput,
   callPracticeLlmService,
   comparisonAlignmentsFromLlmResult,
+  practiceLlmComparisonModels,
+  practiceLlmPromptText,
   supportedPracticeComparisonModel,
   validatePlaybackPaddingSeconds,
   validatePracticeLlmResult,
 } from "../cloudflare/worker.mjs";
+
+// worker.mjs deliberately avoids exporting plain const bindings: workerd's
+// module loader errors on any top-level export that isn't a function, class,
+// or the default ExportedHandler (discovered via a real `wrangler dev` run).
+// These two constants are read through function accessors for that reason.
+const PRACTICE_LLM_PROMPT = practiceLlmPromptText();
+const PRACTICE_LLM_COMPARISON_MODELS = practiceLlmComparisonModels();
 
 // This mirrors tests/test_practice_llm.py so the Cloudflare Worker port of
 // src/mo_speech/practice_llm.py stays behaviorally identical to the local
@@ -217,6 +224,93 @@ test("LLM result is exposed to existing phrase playback without changing times",
   assert.ok(Math.abs(attempt.phrases[3].audio_end - 10.26) <= 1e-6);
   assert.ok(Math.abs(reference.phrases[3].audio_start - 6.13675) <= 1e-6);
   assert.ok(Math.abs(reference.phrases[3].audio_end - 7.413083) <= 1e-6);
+});
+
+function minimalValidLlmInputAndResponse() {
+  const words = [
+    { text: "Hello", start: 0.0, end: 0.4 },
+    { text: "world.", start: 0.4, end: 0.9 },
+    { text: "Goodbye", start: 1.0, end: 1.5 },
+    { text: "world.", start: 1.5, end: 2.0 },
+  ];
+  const inputPayload = {
+    target_language: "en-US",
+    target_text: "Hello world. Goodbye world.",
+    padding_seconds: 0.1,
+    reference_audio_duration: 2.1,
+    attempt_audio_duration: 2.1,
+    reference_asr: { recognized_text: "Hello world. Goodbye world.", model: "whisper-1", words },
+    attempt_asr: { recognized_text: "Hello world. Goodbye world.", model: "whisper-1", words },
+  };
+  const modelOutput = {
+    schema_version: 1,
+    overall_score: 100,
+    overall_comment: "ok",
+    phrases: [
+      {
+        phrase_index: 0,
+        target_text: "Hello world.",
+        score: 100,
+        comment: "ok",
+        reference: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+        attempt: { status: "assigned", word_start_index: 0, word_end_index: 2 },
+      },
+      {
+        phrase_index: 1,
+        target_text: "Goodbye world.",
+        score: 100,
+        comment: "ok",
+        reference: { status: "assigned", word_start_index: 2, word_end_index: 4 },
+        attempt: { status: "assigned", word_start_index: 2, word_end_index: 4 },
+      },
+    ],
+  };
+  return { inputPayload, modelOutput };
+}
+
+test("target_text reconstruction tolerates missing boundary whitespace", () => {
+  // A real wrangler dev smoke test (2026-07-19) showed a real model dropping
+  // the single space between sentences at a phrase boundary even though every
+  // word was intact. Concatenating "Hello world." + "Goodbye world." must
+  // still validate against "Hello world. Goodbye world." (one extra space).
+  const { inputPayload, modelOutput } = minimalValidLlmInputAndResponse();
+
+  const validated = validatePracticeLlmResult(modelOutput, inputPayload);
+
+  assert.equal(validated.overall_score, 100);
+});
+
+test("target_text reconstruction still rejects missing words", () => {
+  const { inputPayload, modelOutput } = minimalValidLlmInputAndResponse();
+  modelOutput.phrases[0].target_text = "Hello."; // dropped "world"
+
+  assert.throws(
+    () => validatePracticeLlmResult(modelOutput, inputPayload),
+    (error) => {
+      assert.ok(error instanceof PracticeLlmError);
+      assert.equal(error.stage, "validate_response");
+      return true;
+    },
+  );
+});
+
+test("target_text reconstruction rejects changed English word boundaries", () => {
+  const { inputPayload, modelOutput } = minimalValidLlmInputAndResponse();
+  inputPayload.target_text = "an ice cream";
+  modelOutput.phrases = [{
+    ...modelOutput.phrases[0],
+    phrase_index: 0,
+    target_text: "a nice cream",
+  }];
+
+  assert.throws(
+    () => validatePracticeLlmResult(modelOutput, inputPayload),
+    (error) => {
+      assert.ok(error instanceof PracticeLlmError);
+      assert.equal(error.stage, "validate_response");
+      return true;
+    },
+  );
 });
 
 function fakeOpenAiResponsesEnv(modelOutput) {

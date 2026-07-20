@@ -196,6 +196,33 @@ def test_runpod_practice_asr_provider_submits_dual_audio_async_job(tmp_path: Pat
     ]
 
 
+def test_runpod_practice_asr_provider_omits_model_audio_when_cached(tmp_path: Path) -> None:
+    # お手本音声のASR結果が既にキャッシュ済みの場合、呼び出し側はmodel_audio_path=Noneを
+    # 渡し、jobへお手本音声を含めない(RunPod側のFunASR推論をスキップしGPU時間を節約する)。
+    client = FakeRunpodClient({"id": "practice-job-cache-hit", "status": "IN_QUEUE"})
+    attempt_path = tmp_path / "attempt.webm"
+    attempt_path.write_bytes(b"attempt audio")
+    provider = RunpodServerlessPracticeAsrProvider(client=client)
+
+    snapshot = provider.submit_comparison_job(
+        attempt_audio_path=attempt_path,
+        model_audio_path=None,
+        source_language="zh-CN",
+        target_text="你好吗？",
+    )
+
+    assert snapshot == {"id": "practice-job-cache-hit", "status": "IN_QUEUE"}
+    assert client.job_inputs == [
+        {
+            "operation_mode": "practice_asr",
+            "source_language": "zh-CN",
+            "target_text": "你好吗？",
+            "audio_mime_type": "audio/webm",
+            "audio_base64": base64.b64encode(b"attempt audio").decode("ascii"),
+        }
+    ]
+
+
 def test_runpod_client_submit_sync_always_uses_runsync() -> None:
     client = RunpodServerlessClient(endpoint_id="endpoint", api_key="secret", request_mode="async")
     calls: list[tuple[str, str, object | None]] = []
