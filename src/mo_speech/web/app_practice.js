@@ -1207,9 +1207,7 @@ function playAudioSegmentToEnd(audio, start, end, token) {
 }
 
 function availableComparisonRanges(alignment) {
-  const entries = Array.isArray(alignment?.phrases)
-    ? alignment.phrases
-    : (Array.isArray(alignment?.ranges) ? alignment.ranges : []);
+  const entries = Array.isArray(alignment?.phrases) ? alignment.phrases : [];
   return entries.filter((range) => {
     const start = Number(range?.audio_start);
     const end = Number(range?.audio_end);
@@ -1624,9 +1622,18 @@ function syncPracticeRecordMode() {
 }
 
 function renderRecognizedDiff(payload) {
-  const target = practiceDisplayComparableText(payload.target_text || currentTargetText || "");
-  const recognized = practiceDisplayComparableText(payload.recognized_text || "");
-  const cells = compactPracticeDiffCells(buildPracticeDiffCells(target, recognized));
+  const target = playbackContract.comparableTargetText(payload.target_text || currentTargetText || "");
+  const recognized = playbackContract.comparableTargetText(payload.recognized_text || "");
+  const pinyin = (payload.comparison_target_pinyin?.length && payload.comparison_recognized_pinyin?.length)
+    ? { target: payload.comparison_target_pinyin, recognized: payload.comparison_recognized_pinyin }
+    : null;
+  const cells = playbackContract.compactPracticeDiffCells(
+    playbackContract.buildPracticeDiffCells(target, recognized, pinyin),
+    {
+      targetText: target,
+      alignment: currentAttemptComparisonAlignment,
+    },
+  );
   const grid = document.createElement("span");
   grid.className = "practice-diff-grid";
   const heardForAccessibility = cells.map((cell) => cell.heard).join("");
@@ -1635,13 +1642,10 @@ function renderRecognizedDiff(payload) {
   recognizedText.replaceChildren(grid);
 }
 
-function practiceDisplayComparableText(value) {
-  return String(value || "")
-    .normalize("NFKC")
-    .replace(/[\p{P}\p{S}]+/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-}
+const practiceDiffCellTitles = {
+  delete: "抜けたフレーズを比較再生",
+  tone: "発音は近いですが声調が違います。タップで比較再生",
+};
 
 function renderPracticeDiffCell(cell) {
   const plan = currentComparisonPlaybackPlan();
@@ -1656,7 +1660,7 @@ function renderPracticeDiffCell(cell) {
   const element = document.createElement(comparisonRange ? "button" : "span");
   if (element instanceof HTMLButtonElement) {
     element.type = "button";
-    element.title = cell.type === "delete" ? "抜けたフレーズを比較再生" : "このフレーズを比較再生";
+    element.title = practiceDiffCellTitles[cell.type] || "このフレーズを比較再生";
     element.addEventListener("click", () => {
       playComparisonAudios({ targetOffset: cell.targetOffset }).catch((error) => showError(error.message));
     });
@@ -1670,96 +1674,6 @@ function renderPracticeDiffCell(cell) {
   heard.textContent = displayChineseText(cell.heard || "_");
   element.append(correction, heard);
   return element;
-}
-
-function buildPracticeDiffCells(targetTextValue, recognizedTextValue) {
-  const targetChars = Array.from(targetTextValue || "");
-  const recognizedChars = Array.from(recognizedTextValue || "");
-  const rows = targetChars.length + 1;
-  const columns = recognizedChars.length + 1;
-  const distance = Array.from({ length: rows }, () => new Array(columns).fill(0));
-  for (let targetIndex = targetChars.length; targetIndex >= 0; targetIndex -= 1) {
-    distance[targetIndex][recognizedChars.length] = targetChars.length - targetIndex;
-  }
-  for (let recognizedIndex = recognizedChars.length; recognizedIndex >= 0; recognizedIndex -= 1) {
-    distance[targetChars.length][recognizedIndex] = recognizedChars.length - recognizedIndex;
-  }
-  for (let targetIndex = targetChars.length - 1; targetIndex >= 0; targetIndex -= 1) {
-    for (let recognizedIndex = recognizedChars.length - 1; recognizedIndex >= 0; recognizedIndex -= 1) {
-      if (practiceDisplayCharsEqual(targetChars[targetIndex], recognizedChars[recognizedIndex])) {
-        distance[targetIndex][recognizedIndex] = distance[targetIndex + 1][recognizedIndex + 1];
-      } else {
-        distance[targetIndex][recognizedIndex] = 1 + Math.min(
-          distance[targetIndex + 1][recognizedIndex + 1],
-          distance[targetIndex + 1][recognizedIndex],
-          distance[targetIndex][recognizedIndex + 1],
-        );
-      }
-    }
-  }
-
-  const cells = [];
-  let targetIndex = 0;
-  let recognizedIndex = 0;
-  while (targetIndex < targetChars.length || recognizedIndex < recognizedChars.length) {
-    const targetChar = targetChars[targetIndex];
-    const recognizedChar = recognizedChars[recognizedIndex];
-    if (
-      targetIndex < targetChars.length &&
-      recognizedIndex < recognizedChars.length &&
-      practiceDisplayCharsEqual(targetChar, recognizedChar)
-    ) {
-      cells.push({ type: "equal", correction: "", heard: recognizedChar, targetOffset: targetIndex });
-      targetIndex += 1;
-      recognizedIndex += 1;
-      continue;
-    }
-    const currentDistance = distance[targetIndex][recognizedIndex];
-    if (
-      targetIndex < targetChars.length &&
-      recognizedIndex < recognizedChars.length &&
-      currentDistance === 1 + distance[targetIndex + 1][recognizedIndex + 1]
-    ) {
-      cells.push({ type: "substitute", correction: targetChar, heard: recognizedChar, targetOffset: targetIndex });
-      targetIndex += 1;
-      recognizedIndex += 1;
-      continue;
-    }
-    if (
-      targetIndex < targetChars.length &&
-      currentDistance === 1 + distance[targetIndex + 1][recognizedIndex]
-    ) {
-      cells.push({ type: "delete", correction: targetChar, heard: "_", targetOffset: targetIndex });
-      targetIndex += 1;
-      continue;
-    }
-    cells.push({ type: "insert", correction: "", heard: recognizedChar || "_", targetOffset: targetIndex });
-    recognizedIndex += 1;
-  }
-  return cells.length ? cells : [{ type: "insert", correction: "", heard: "（聞き取れませんでした）" }];
-}
-
-function compactPracticeDiffCells(cells) {
-  const compacted = [];
-  cells.forEach((cell) => {
-    const previous = compacted[compacted.length - 1];
-    if (previous && previous.type === "equal" && cell.type === "equal") {
-      previous.heard += cell.heard;
-      return;
-    }
-    compacted.push({ ...cell });
-  });
-  return compacted;
-}
-
-function practiceDisplayCharsEqual(left, right) {
-  const normalizedLeft = String(left || "").normalize("NFKC").toLocaleLowerCase();
-  const normalizedRight = String(right || "").normalize("NFKC").toLocaleLowerCase();
-  if (normalizedLeft === normalizedRight) {
-    return true;
-  }
-  const punctuationPairs = new Set(["?？", "？?", "!！", "！!", ",，", "，,", ".。", "。."]);
-  return punctuationPairs.has(`${left || ""}${right || ""}`);
 }
 
 loadPracticeSettings();

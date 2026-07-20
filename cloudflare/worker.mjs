@@ -14,6 +14,7 @@ const PRACTICE_ATTEMPT_RESULT_KV_PREFIX = "practice-attempt-result:";
 // 見失う)。
 const PRACTICE_ATTEMPT_POLL_WINDOW_SECONDS = 30 * 60;
 const PRACTICE_LLM_ATTEMPT_OPTIONS_DEFAULT_TTL_SECONDS = PRACTICE_ATTEMPT_POLL_WINDOW_SECONDS + 10 * 60;
+const PRACTICE_MODEL_ASR_CACHE_KV_PREFIX = "practice-model-asr:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
@@ -58,55 +59,10 @@ const VIBEVOICE_OUTPUT_LANGUAGES = {
   "zh-CN": { label: "中国語", speech_name: "Chinese" },
   "ja-JP": { label: "日本語（低品質）", speech_name: "Japanese" },
 };
-const PRACTICE_GRADE_LABELS = {
-  perfect: "できました",
-  ok: "いいかんじ",
-  almost: "まあまあ",
-  retry: "もう一回",
-};
-const PRACTICE_EDGE_FILLERS = {
-  "en-US": new Set(["ah", "er", "erm", "hmm", "mm", "uh", "um", "well"]),
-  "ja-JP": new Set(["あの", "ええと", "えっと", "えー", "うーん"]),
-  "zh-CN": new Set(["啊", "呃", "额", "嗯", "唔"]),
-};
-const PRACTICE_BOUNDARY_FILLER_SEQUENCES = {
-  "en-US": new Set(["youknow", "letmethink", "youknowletmethink"]),
-  "ja-JP": new Set(["あの", "ええと", "えっと", "ちょっとまって"]),
-  "zh-CN": new Set(["那个", "我想一下", "那个我想一下"]),
-};
-const PRACTICE_NON_SPECIFIC_ALIGNMENT_PIECES = {
-  "en-US": new Set(["a", "an", "finally", "next", "please", "the", "then"]),
-  "ja-JP": new Set(["そして", "それから", "つぎ", "次", "最後"]),
-  "zh-CN": new Set(["然后", "最后", "接着", "再", "先", "请", "把"]),
-};
-const PRACTICE_DIAGNOSTIC_STOP_PIECES = {
-  "en-US": new Set([
-    "a", "an", "and", "are", "at", "finally", "for", "from", "i", "in", "is", "it", "my",
-    "next", "of", "on", "or", "please", "the", "then", "to", "was", "were", "with", "your",
-  ]),
-  "ja-JP": new Set(["そして", "それから", "つぎ", "次", "最後", "私", "を", "が", "に", "で", "は"]),
-  "zh-CN": new Set([
-    "然后", "最后", "接着", "再", "先", "请", "把", "我", "你", "的", "到", "在", "上", "下", "要", "还要",
-  ]),
-};
-const PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD = 0.75;
-const PRACTICE_PAUSE_PARTITION_GAP_SECONDS = 0.18;
-const PRACTICE_DETACHED_SPEECH_GAP_SECONDS = 0.65;
-const MAX_ALIGNMENT_CANDIDATES_PER_PHRASE = 4096;
 const MAX_CANONICAL_TARGET_PHRASES = 16;
-const MAX_CANONICAL_TIMESTAMP_UNITS = 256;
-const MAX_CANONICAL_ALIGNMENT_COMPLEXITY = 1024;
 const PRACTICE_HARD_BOUNDARIES = new Set(["。", "！", "？", "!", "?", "；", ";", "\n"]);
 const PRACTICE_CLOSING_PUNCTUATION = new Set([..."\"'”’」』】）》）)]}"]);
 const PRACTICE_PROTECTED_ABBREVIATIONS = new Set(["dr", "jr", "mr", "mrs", "ms", "prof", "sr", "st"]);
-const ENGLISH_SMALL_NUMBERS = [
-  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-  "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
-];
-const ENGLISH_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-const CHINESE_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
-const CHINESE_SMALL_NUMBER_UNITS = ["", "十", "百", "千"];
-const CHINESE_LARGE_NUMBER_UNITS = ["", "万", "亿", "兆", "京", "垓", "秭", "穰", "沟", "涧", "正", "载"];
 const traditionalChineseToSimplified = Converter({ from: "t", to: "cn" });
 
 export class PracticeAlignmentError extends Error {
@@ -141,13 +97,19 @@ export class PracticeLlmError extends Error {
   }
 }
 
-export const PRACTICE_LLM_COMPARISON_MODELS = ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.4-nano"];
+const PRACTICE_LLM_COMPARISON_MODELS = ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.4-nano"];
+
+// workerdは"function or ExportedHandler"以外のトップレベルexportをエントリポイント候補として
+// 扱い、モジュール読み込み時にエラーにする。定数はfunction越しに公開する。
+export function practiceLlmComparisonModels() {
+  return PRACTICE_LLM_COMPARISON_MODELS;
+}
 const DEFAULT_PRACTICE_COMPARISON_MODEL = PRACTICE_LLM_COMPARISON_MODELS[0];
 const DEFAULT_PLAYBACK_PADDING_SECONDS = 0.1;
 const PRACTICE_COMPARISON_ERROR_MESSAGE = "比較結果を作成できませんでした。もう一度お試しください。";
 
 // この文言はローカルFastAPI版(src/mo_speech/practice_llm.py)と同一に保つ。
-export const PRACTICE_LLM_PROMPT = `あなたは発音練習アプリの比較・採点処理です。入力された目標文、お手本ASR、復唱ASRだけを根拠に、UI表示とフレーズ比較再生にそのまま使える完成JSONを返してください。
+const PRACTICE_LLM_PROMPT = `あなたは発音練習アプリの比較・採点処理です。入力された目標文、お手本ASR、復唱ASRだけを根拠に、UI表示とフレーズ比較再生にそのまま使える完成JSONを返してください。
 
 規則:
 - 目標文を意味と文法のまとまりでフレーズ分割する。フレーズのtarget_textを順に連結すると、空白・句読点を含めて元のtarget_textと完全一致すること。
@@ -161,6 +123,10 @@ export const PRACTICE_LLM_PROMPT = `あなたは発音練習アプリの比較�
 - アプリ側で意味判断や採点を作り直す必要がない完成結果を返す。
 - schema以外の説明を出力しない。
 `;
+
+export function practiceLlmPromptText() {
+  return PRACTICE_LLM_PROMPT;
+}
 
 function practiceLlmRangeSchema() {
   return {
@@ -242,6 +208,21 @@ export function buildPracticeLlmInput({
     reference_asr: referenceAsr,
     attempt_asr: attemptAsr,
   };
+}
+
+function practiceLlmPhrasesReconstructTarget(phrases, targetText) {
+  // LLMが各フレーズの先頭・末尾へ空白を配分しない場合だけ許容する。
+  // フレーズ内部は原文と完全一致させ、"an ice"と"a nice"のような
+  // 単語境界の変更を空白除去で同一視しない。
+  let cursor = 0;
+  for (const phrase of phrases) {
+    const phraseCore = String(phrase?.target_text || "").trim();
+    if (!phraseCore) return false;
+    while (cursor < targetText.length && /\s/u.test(targetText[cursor])) cursor += 1;
+    if (!targetText.startsWith(phraseCore, cursor)) return false;
+    cursor += phraseCore.length;
+  }
+  return targetText.slice(cursor).trim() === "";
 }
 
 function practiceLlmRequiredFiniteNumber(value, label) {
@@ -342,8 +323,7 @@ export function validatePracticeLlmResult(value, inputPayload) {
   if (JSON.stringify(indices) !== JSON.stringify(expectedIndices)) {
     throw new PracticeLlmError("phrase_index must be sequential", { stage: "validate_response" });
   }
-  const reconstructed = phrases.map((phrase) => String(phrase?.target_text || "")).join("");
-  if (reconstructed !== String(inputPayload?.target_text || "")) {
+  if (!practiceLlmPhrasesReconstructTarget(phrases, String(inputPayload?.target_text || ""))) {
     throw new PracticeLlmError("target phrases do not reconstruct target_text", { stage: "validate_response" });
   }
 
@@ -543,6 +523,59 @@ async function readPracticeAttemptResult(env, jobId) {
   return ephemeralPracticeAttemptResults.get(jobId) || null;
 }
 
+function practiceModelAsrCacheKey(digest, model, sourceLanguage) {
+  return `${PRACTICE_MODEL_ASR_CACHE_KV_PREFIX}${model}:${sourceLanguage}:${digest}`;
+}
+
+async function lookupPracticeModelAsrCache(env, key) {
+  const kv = stateKv(env);
+  return kv ? await kvGetJson(kv, key, null) : ephemeralPracticeModelAsrCache.get(key) || null;
+}
+
+async function storePracticeModelAsrCache(env, key, transcription) {
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(key, JSON.stringify(transcription), {
+      expirationTtl: numberFromEnv(env.CLOUDFLARE_PRACTICE_MODEL_ASR_CACHE_TTL_SECONDS, 3600),
+    });
+  } else {
+    ephemeralPracticeModelAsrCache.set(key, transcription);
+  }
+}
+
+async function cachedPracticeModelTranscription(env, { audioBytes, audioMimeType, sourceLanguage, filename, model }) {
+  // お手本音声は同じ目標文への再挑戦のたびに同じ内容で送られてくる。同一音声・
+  // 言語・モデルの組で結果は変わらないため、復唱のたびにASRを再実行せず
+  // KV(ローカル開発時はメモリ)キャッシュを再利用する。復唱(attempt)音声は
+  // 毎回新しい録音なのでキャッシュしない。
+  const digest = bufferToHex(await crypto.subtle.digest("SHA-256", audioBytes));
+  const key = practiceModelAsrCacheKey(digest, model, sourceLanguage);
+  const cached = await lookupPracticeModelAsrCache(env, key);
+  if (cached) {
+    return cached;
+  }
+  const transcription = await openAiTranscribeDetail(env, {
+    audioBytes,
+    audioMimeType,
+    sourceLanguage,
+    filename,
+    model,
+    includeTimestamps: true,
+  });
+  await storePracticeModelAsrCache(env, key, transcription);
+  return transcription;
+}
+
+async function lookupRunpodPracticeModelAsrCache(env, { audioBytes, sourceLanguage }) {
+  // 中国語(RunPod FunASR経由)のお手本音声も、OpenAI経路と同じKV(ローカル開発時は
+  // メモリ)キャッシュ空間を使う。modelにはOpenAIのモデル名と衝突しないRunPod
+  // provider名を使い、同じ音声でもproviderが違えば別キーになるようにする。
+  const digest = bufferToHex(await crypto.subtle.digest("SHA-256", audioBytes));
+  const key = practiceModelAsrCacheKey(digest, "runpod-funasr-paraformer-zh", sourceLanguage);
+  const cached = await lookupPracticeModelAsrCache(env, key);
+  return { key, cached };
+}
+
 const DEFAULT_USER_SETTINGS = {
   target_language: "ja-JP",
   joke_text: "",
@@ -605,6 +638,7 @@ let ephemeralPublicAccessSettings = null;
 const ephemeralTranslationJobs = new Map();
 const ephemeralPracticeAttemptLlmOptions = new Map();
 const ephemeralPracticeAttemptResults = new Map();
+const ephemeralPracticeModelAsrCache = new Map();
 const ephemeralPublicUsage = new Map();
 
 export default {
@@ -1142,9 +1176,6 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "POST" && url.pathname === "/api/practice/recordings") {
       return jsonResponse(await createPracticeRecording(request, env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/practice/attempts") {
-      return jsonResponse(await createPracticeAttempt(request, env));
     }
     if (request.method === "POST" && url.pathname === "/api/practice/attempt-jobs") {
       const snapshot = await createPracticeAttemptJob(request, env);
@@ -2903,17 +2934,11 @@ async function createPracticeRecording(request, env) {
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const currentTargetText = stringFormValue(form, "current_target_text", "");
   const recordingIntent = stringFormValue(form, "recording_intent", "").trim();
-  if (recordingIntent !== "prompt" && recordingIntent !== "attempt") {
-    throw httpError(400, "recording_intent must be prompt or attempt");
-  }
-  const attemptTargetText = recordingIntent === "attempt"
-    ? canonicalPracticeText(currentTargetText, targetLanguage)
-    : "";
-  if (recordingIntent === "attempt") {
-    validatePracticeTargetForAlignment(attemptTargetText);
+  if (recordingIntent !== "prompt") {
+    throw httpError(400, "recording_intent must be prompt");
   }
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
-  const useOwnVoice = recordingIntent === "prompt" && optionEnabled(stringFormValue(form, "use_own_voice", "false"));
+  const useOwnVoice = optionEnabled(stringFormValue(form, "use_own_voice", "false"));
   if (useOwnVoice) {
     const separateReferenceFields = [
       "reference_audio",
@@ -2936,46 +2961,6 @@ async function createPracticeRecording(request, env) {
   });
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  if (recordingIntent === "attempt") {
-    const targetText = attemptTargetText;
-    const targetStarted = Date.now();
-    const targetTranscription = await practiceAttemptTranscription(env, {
-      audioBytes,
-      audioMimeType,
-      targetLanguage,
-      filename: audio.name || `practice.${extensionForMimeType(audioMimeType)}`,
-      model: asrModel,
-    });
-    const targetAsrMs = Date.now() - targetStarted;
-    const recognizedText = canonicalPracticeText(targetTranscription.text, targetLanguage);
-    const asrTimestamps = serializeAsrTimestamps(targetTranscription);
-    const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
-    const result = {
-      recording_kind: "attempt",
-      target_language: targetLanguage,
-      target_text: targetText,
-      recognized_text: recognizedText,
-      asr_model: targetTranscription.model,
-      asr_timestamps: asrTimestamps,
-      ...evaluation,
-      comparison_alignment: practiceComparisonAlignmentCanonical({
-        targetText,
-        recognizedText,
-        targetLanguage,
-        asrTimestamps,
-      }),
-      timings_ms: {
-        asr: targetAsrMs,
-        compare: 0,
-        total: targetAsrMs,
-      },
-      providers: {
-        asr: targetTranscription.provider,
-      },
-    };
-    return result;
-  }
 
   const autoStarted = Date.now();
   const autoTranscription = await openAiTranscribeDetail(env, {
@@ -3054,58 +3039,6 @@ function validatePracticeTargetForAlignment(targetText) {
   }
 }
 
-async function createPracticeAttempt(request, env) {
-  const form = await request.formData();
-  const audio = requiredBlob(form, "audio");
-  const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
-  const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
-  const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
-  validatePracticeTargetForAlignment(targetText);
-  await enforcePublicFeatureAccess(request, env, "speakloop", {
-    audioBytes: Number(audio.size || 0),
-    textChars: targetText.length,
-  });
-  const audioBytes = await audio.arrayBuffer();
-  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-
-  const totalStarted = Date.now();
-  const asrStarted = Date.now();
-  const transcription = await practiceAttemptTranscription(env, {
-    audioBytes,
-    audioMimeType,
-    targetLanguage,
-    filename: audio.name || `repeat.${extensionForMimeType(audioMimeType)}`,
-    model: asrModel,
-  });
-  const recognizedText = canonicalPracticeText(transcription.text, targetLanguage);
-  const asrMs = Date.now() - asrStarted;
-  const asrTimestamps = serializeAsrTimestamps(transcription);
-  const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
-  const result = {
-    target_language: targetLanguage,
-    target_text: targetText,
-    recognized_text: recognizedText,
-    asr_model: transcription.model,
-    asr_timestamps: asrTimestamps,
-    ...evaluation,
-    comparison_alignment: practiceComparisonAlignmentCanonical({
-      targetText,
-      recognizedText,
-      targetLanguage,
-      asrTimestamps,
-    }),
-    timings_ms: {
-      asr: asrMs,
-      compare: Math.max(0, Date.now() - totalStarted - asrMs),
-      total: Date.now() - totalStarted,
-    },
-    providers: {
-      asr: transcription.provider,
-    },
-  };
-  return result;
-}
-
 async function createPracticeAttemptJob(request, env) {
   const form = await request.formData();
   const audio = requiredBlob(form, "audio");
@@ -3114,19 +3047,16 @@ async function createPracticeAttemptJob(request, env) {
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const targetText = canonicalPracticeText(stringFormValue(form, "target_text", "").trim(), targetLanguage);
   validatePracticeTargetForAlignment(targetText);
-  const comparisonModelRaw = stringFormValue(form, "comparison_model", "");
-  const playbackPaddingRaw = stringFormValue(form, "playback_padding_seconds", "");
-  const useLlm = Boolean(comparisonModelRaw.trim() || playbackPaddingRaw.trim());
-  const comparisonModel = useLlm ? supportedPracticeComparisonModel(comparisonModelRaw) : "";
-  const playbackPaddingSeconds = useLlm
-    ? validatePlaybackPaddingSeconds(playbackPaddingRaw)
-    : DEFAULT_PLAYBACK_PADDING_SECONDS;
-  if (useLlm && targetLanguage !== "zh-CN" && !OPENAI_TIMESTAMP_ASR_MODELS.has(asrModel)) {
+  if (targetLanguage !== "zh-CN" && !OPENAI_TIMESTAMP_ASR_MODELS.has(asrModel)) {
     throw httpError(
       400,
       `asr_model '${asrModel}' does not return word timestamps, which the LLM comparison requires; use whisper-1 for comparison_model requests`,
     );
   }
+  const comparisonModel = supportedPracticeComparisonModel(stringFormValue(form, "comparison_model", ""));
+  const playbackPaddingSeconds = validatePlaybackPaddingSeconds(
+    stringFormValue(form, "playback_padding_seconds", ""),
+  );
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
     textChars: targetText.length,
@@ -3136,22 +3066,32 @@ async function createPracticeAttemptJob(request, env) {
   const modelAudioMimeType = normalizeMimeType(modelAudio.type || guessAudioMimeType(modelAudio.name));
 
   if (targetLanguage === "zh-CN") {
+    const { key: modelAudioCacheKey, cached: cachedModelTranscription } = await lookupRunpodPracticeModelAsrCache(env, {
+      audioBytes: modelAudioBytes,
+      sourceLanguage: targetLanguage,
+    });
     const body = await submitRunpodJob(env, {
       operation_mode: "practice_asr",
       source_language: targetLanguage,
       target_text: targetText,
       audio_mime_type: audioMimeType || "audio/wav",
       audio_base64: arrayBufferToBase64(audioBytes),
-      model_audio_mime_type: modelAudioMimeType || "audio/wav",
-      model_audio_base64: arrayBufferToBase64(modelAudioBytes),
+      // お手本音声のASR結果が既にキャッシュ済みの場合はmodel_audio_base64を送らない。
+      // RunPod側のhandlerはmodel_audio_base64が無ければお手本側のFunASR推論を省略する。
+      ...(cachedModelTranscription
+        ? {}
+        : {
+          model_audio_mime_type: modelAudioMimeType || "audio/wav",
+          model_audio_base64: arrayBufferToBase64(modelAudioBytes),
+        }),
     });
     const jobId = String(body?.id || body?.job_id || "");
-    if (useLlm) {
-      await savePracticeAttemptLlmOptions(env, jobId, {
-        comparison_model: comparisonModel,
-        playback_padding_seconds: playbackPaddingSeconds,
-      });
-    }
+    await savePracticeAttemptLlmOptions(env, jobId, {
+      comparison_model: comparisonModel,
+      playback_padding_seconds: playbackPaddingSeconds,
+      model_audio_cache_key: modelAudioCacheKey,
+      cached_model_transcription: cachedModelTranscription || null,
+    });
     let health = null;
     if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
       try {
@@ -3170,14 +3110,17 @@ async function createPracticeAttemptJob(request, env) {
     return { transcription, elapsedMs: Date.now() - transcriptionStarted };
   };
   const [modelAsr, attemptAsr] = await Promise.all([
-    transcribeWithTiming({
-      audioBytes: modelAudioBytes,
-      audioMimeType: modelAudioMimeType,
-      sourceLanguage: targetLanguage,
-      filename: modelAudio.name || `model.${extensionForMimeType(modelAudioMimeType)}`,
-      model: asrModel,
-      includeTimestamps: true,
-    }),
+    (async () => {
+      const transcriptionStarted = Date.now();
+      const transcription = await cachedPracticeModelTranscription(env, {
+        audioBytes: modelAudioBytes,
+        audioMimeType: modelAudioMimeType,
+        sourceLanguage: targetLanguage,
+        filename: modelAudio.name || `model.${extensionForMimeType(modelAudioMimeType)}`,
+        model: asrModel,
+      });
+      return { transcription, elapsedMs: Date.now() - transcriptionStarted };
+    })(),
     transcribeWithTiming({
       audioBytes,
       audioMimeType,
@@ -3264,12 +3207,21 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
         "RunPod imageの更新が必要です",
       );
     }
-    if (!output.model_transcription || typeof output.model_transcription !== "object") {
+    const llmOptions = await readPracticeAttemptLlmOptions(env, jobId);
+    const modelTranscriptionReturned = output.model_transcription && typeof output.model_transcription === "object";
+    if (!modelTranscriptionReturned && !llmOptions?.cached_model_transcription) {
       return failedPracticeAttemptJob(jobId, stages, metrics, "RunPod practice job did not return model_transcription");
     }
     const attemptTranscription = runpodPracticeTranscription(output);
-    const modelTranscription = runpodPracticeTranscription(output.model_transcription);
-    const llmOptions = await readPracticeAttemptLlmOptions(env, jobId);
+    const modelTranscription = modelTranscriptionReturned
+      ? runpodPracticeTranscription(output.model_transcription)
+      : llmOptions.cached_model_transcription;
+    if (modelTranscriptionReturned && llmOptions?.model_audio_cache_key) {
+      // このjobはお手本音声ASRのキャッシュが無かったため、model_audio_base64を送って
+      // RunPod側でFunASR推論した。次回以降の同じお手本音声への再挑戦がRunPod側の
+      // 推論を省略できるよう、確定したtranscriptionをキャッシュへ書き込む。
+      await storePracticeModelAsrCache(env, llmOptions.model_audio_cache_key, modelTranscription);
+    }
     let result;
     try {
       result = await practiceAttemptComparisonResult({
@@ -3352,73 +3304,18 @@ async function practiceAttemptComparisonResult({
   const asrTimestamps = serializeAsrTimestamps(attemptTranscription);
   const modelAsrTimestamps = serializeAsrTimestamps(modelTranscription);
 
-  if (comparisonModel) {
-    const referenceNoSpeech =
-      !String(modelRecognizedText || "").trim() &&
-      !(modelAsrTimestamps?.words || []).length &&
-      !(modelAsrTimestamps?.segments || []).length;
-    if (referenceNoSpeech) {
-      throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
-    }
-    const noSpeech =
-      !String(recognizedText || "").trim() &&
-      !(asrTimestamps?.words || []).length &&
-      !(asrTimestamps?.segments || []).length;
-    if (noSpeech) {
-      const attemptMs = Number(timings.asr || 0);
-      const modelMs = Number(timings.model_asr || 0);
-      return {
-        recording_kind: "attempt",
-        target_language: targetLanguage,
-        target_text: targetText,
-        recognized_text: recognizedText,
-        model_recognized_text: modelRecognizedText,
-        asr_model: attemptTranscription.model,
-        asr_timestamps: asrTimestamps,
-        model_asr_timestamps: modelAsrTimestamps,
-        outcome: "no_speech",
-        message: "音声を検出できませんでした。もう一度録音してください。",
-        comparison_alignment: null,
-        model_comparison_alignment: null,
-        comparison_model: comparisonModel,
-        playback_padding_seconds: playbackPaddingSeconds,
-        timings_ms: {
-          asr: attemptMs,
-          model_asr: modelMs,
-          compare: 0,
-          total: attemptMs + modelMs,
-        },
-        providers: {
-          asr: attemptTranscription.provider,
-          model_asr: modelTranscription.provider || attemptTranscription.provider,
-          comparison: "openai-responses",
-        },
-      };
-    }
-    const llmInput = buildPracticeLlmInput({
-      targetLanguage,
-      targetText,
-      paddingSeconds: playbackPaddingSeconds,
-      referenceAudioDuration: practiceAudioDurationSeconds(modelTranscription),
-      attemptAudioDuration: practiceAudioDurationSeconds(attemptTranscription),
-      referenceAsr: {
-        recognized_text: modelRecognizedText,
-        model: modelTranscription.model,
-        words: modelAsrTimestamps.words,
-      },
-      attemptAsr: {
-        recognized_text: recognizedText,
-        model: attemptTranscription.model,
-        words: asrTimestamps.words,
-      },
-    });
-    const compareStarted = Date.now();
-    const { result: llmResult } = await callPracticeLlmService(env, {
-      model: comparisonModel,
-      inputPayload: llmInput,
-    });
-    const [comparisonAlignment, modelComparisonAlignment] = comparisonAlignmentsFromLlmResult(llmResult);
-    const compareMs = Date.now() - compareStarted;
+  const referenceNoSpeech =
+    !String(modelRecognizedText || "").trim() &&
+    !(modelAsrTimestamps?.words || []).length &&
+    !(modelAsrTimestamps?.segments || []).length;
+  if (referenceNoSpeech) {
+    throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
+  }
+  const noSpeech =
+    !String(recognizedText || "").trim() &&
+    !(asrTimestamps?.words || []).length &&
+    !(asrTimestamps?.segments || []).length;
+  if (noSpeech) {
     const attemptMs = Number(timings.asr || 0);
     const modelMs = Number(timings.model_asr || 0);
     return {
@@ -3430,19 +3327,17 @@ async function practiceAttemptComparisonResult({
       asr_model: attemptTranscription.model,
       asr_timestamps: asrTimestamps,
       model_asr_timestamps: modelAsrTimestamps,
-      outcome: "evaluated",
-      overall_score: llmResult.overall_score,
-      overall_comment: llmResult.overall_comment,
-      llm_comparison: llmResult,
-      comparison_alignment: comparisonAlignment,
-      model_comparison_alignment: modelComparisonAlignment,
+      outcome: "no_speech",
+      message: "音声を検出できませんでした。もう一度録音してください。",
+      comparison_alignment: null,
+      model_comparison_alignment: null,
       comparison_model: comparisonModel,
       playback_padding_seconds: playbackPaddingSeconds,
       timings_ms: {
         asr: attemptMs,
         model_asr: modelMs,
-        compare: compareMs,
-        total: attemptMs + modelMs + compareMs,
+        compare: 0,
+        total: attemptMs + modelMs,
       },
       providers: {
         asr: attemptTranscription.provider,
@@ -3451,26 +3346,34 @@ async function practiceAttemptComparisonResult({
       },
     };
   }
-
-  const evaluation = practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps);
-  let modelComparisonAlignment;
-  try {
-    modelComparisonAlignment = practiceComparisonAlignmentCanonical({
-      targetText,
-      recognizedText: modelRecognizedText,
-      targetLanguage,
-      asrTimestamps: modelAsrTimestamps,
-    });
-  } catch (error) {
-    if (!(error instanceof PracticeAlignmentError)) throw error;
-    throw new PracticeAlignmentError(error.reason, {
-      stage: "reference_asr",
-      retryable: error.retryable,
-    });
-  }
-  if (modelComparisonAlignment.outcome === "no_speech") {
-    throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
-  }
+  const llmInput = buildPracticeLlmInput({
+    targetLanguage,
+    targetText,
+    paddingSeconds: playbackPaddingSeconds,
+    referenceAudioDuration: practiceAudioDurationSeconds(modelTranscription),
+    attemptAudioDuration: practiceAudioDurationSeconds(attemptTranscription),
+    referenceAsr: {
+      recognized_text: modelRecognizedText,
+      model: modelTranscription.model,
+      words: modelAsrTimestamps.words,
+    },
+    attemptAsr: {
+      recognized_text: recognizedText,
+      model: attemptTranscription.model,
+      words: asrTimestamps.words,
+    },
+  });
+  const compareStarted = Date.now();
+  const { result: llmResult } = await callPracticeLlmService(env, {
+    model: comparisonModel,
+    inputPayload: llmInput,
+  });
+  const [comparisonAlignment, modelComparisonAlignment] = comparisonAlignmentsFromLlmResult(llmResult);
+  const compareMs = Date.now() - compareStarted;
+  const attemptMs = Number(timings.asr || 0);
+  const modelMs = Number(timings.model_asr || 0);
+  const comparisonTargetPinyin = targetLanguage === "zh-CN" ? practiceDiffPinyinChars(targetText) : [];
+  const comparisonRecognizedPinyin = targetLanguage === "zh-CN" ? practiceDiffPinyinChars(recognizedText) : [];
   return {
     recording_kind: "attempt",
     target_language: targetLanguage,
@@ -3480,23 +3383,26 @@ async function practiceAttemptComparisonResult({
     asr_model: attemptTranscription.model,
     asr_timestamps: asrTimestamps,
     model_asr_timestamps: modelAsrTimestamps,
-    ...evaluation,
-    comparison_alignment: practiceComparisonAlignmentCanonical({
-      targetText,
-      recognizedText,
-      targetLanguage,
-      asrTimestamps,
-    }),
+    outcome: "evaluated",
+    overall_score: llmResult.overall_score,
+    overall_comment: llmResult.overall_comment,
+    llm_comparison: llmResult,
+    comparison_alignment: comparisonAlignment,
     model_comparison_alignment: modelComparisonAlignment,
+    comparison_target_pinyin: comparisonTargetPinyin,
+    comparison_recognized_pinyin: comparisonRecognizedPinyin,
+    comparison_model: comparisonModel,
+    playback_padding_seconds: playbackPaddingSeconds,
     timings_ms: {
-      asr: Number(timings.asr || 0),
-      model_asr: Number(timings.model_asr || 0),
-      compare: Number(timings.compare || 0),
-      total: Number(timings.total || 0),
+      asr: attemptMs,
+      model_asr: modelMs,
+      compare: compareMs,
+      total: attemptMs + modelMs + compareMs,
     },
     providers: {
       asr: attemptTranscription.provider,
-      model_asr: modelTranscription.provider,
+      model_asr: modelTranscription.provider || attemptTranscription.provider,
+      comparison: "openai-responses",
     },
   };
 }
@@ -3961,6 +3867,55 @@ function createChinesePinyinText(text) {
   }
 }
 
+// 「聞こえた言葉」の文字単位diffが使う正規化と同じ結果を返す。
+// フロント側 practiceDisplayComparableText (practice_playback.js) と同じ規則
+// (NFKC正規化、Punctuation/Symbolカテゴリの除去、空白の圧縮)にする。ここで返す
+// 文字列のArray.from()した添字が、practiceDiffPinyinCharsの返り値の添字と一致する。
+function practiceDiffComparableText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\p{P}\p{S}]+/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+// diff比較用の文字ごとの声調つきピンイン配列(非漢字は空文字列)を返す。
+// 連続する漢字は文脈付きでまとめて変換する。非漢字位置を空文字列として残し、
+// Array.from(comparable text)と同じ長さ・同じ添字を保証する。
+function practiceDiffPinyinChars(text) {
+  const comparable = practiceDiffComparableText(text);
+  if (!comparable) return [];
+  try {
+    const chars = Array.from(comparable);
+    const result = chars.map(() => "");
+    const isHan = (char) => /\p{Script=Han}/u.test(char);
+    let index = 0;
+    while (index < chars.length) {
+      if (!isHan(chars[index])) {
+        index += 1;
+        continue;
+      }
+      let end = index + 1;
+      while (end < chars.length && isHan(chars[end])) end += 1;
+      const tokens = pinyin(chars.slice(index, end).join(""), {
+        toneType: "num",
+        type: "array",
+        nonZh: "removed",
+      });
+      if (tokens.length === end - index) {
+        tokens.forEach((token, offset) => {
+          result[index + offset] = token || "";
+        });
+      }
+      index = end;
+    }
+    return result;
+  } catch (error) {
+    console.warn("practice diff pinyin generation failed", error);
+    return Array.from(comparable).map(() => "");
+  }
+}
+
 async function listAudioHistory(env) {
   return {
     settings: cloudflareHistoryDisabledSettings(),
@@ -4001,58 +3956,6 @@ async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage
     includeTimestamps: false,
   });
   return transcription.text;
-}
-
-async function practiceAttemptTranscription(env, {
-  audioBytes,
-  audioMimeType,
-  targetLanguage,
-  filename,
-  model,
-}) {
-  if (targetLanguage === "zh-CN") {
-    return runpodPracticeAsr(env, {
-      audioBytes,
-      audioMimeType,
-      sourceLanguage: targetLanguage,
-    });
-  }
-  const transcription = await openAiTranscribeDetail(env, {
-    audioBytes,
-    audioMimeType,
-    sourceLanguage: targetLanguage,
-    filename,
-    model,
-    includeTimestamps: true,
-  });
-  return {
-    ...transcription,
-    provider: `openai-asr-${transcription.model}`,
-  };
-}
-
-async function runpodPracticeAsr(env, { audioBytes, audioMimeType, sourceLanguage }) {
-  const body = await submitRunpodSyncJob(env, {
-    operation_mode: "practice_asr",
-    source_language: sourceLanguage,
-    audio_mime_type: normalizeMimeType(audioMimeType) || "audio/wav",
-    audio_base64: arrayBufferToBase64(audioBytes),
-  });
-  const output = runpodSyncOutput(body, "RunPod practice ASR");
-  const model = String(output.model || FUNASR_DEFAULT_PRACTICE_ASR_MODEL);
-  const providers = output.providers && typeof output.providers === "object" ? output.providers : {};
-  return {
-    text: String(output.text || "").trim(),
-    model,
-    timestamp_granularities: Array.isArray(output.timestamp_granularities)
-      ? output.timestamp_granularities.map(String)
-      : [],
-    words: normalizedAsrTimingRows(output.words, "text"),
-    segments: normalizedAsrTimingRows(output.segments, "text"),
-    raw_timestamp_word_count: Array.isArray(output.words) ? output.words.length : 0,
-    raw_timestamp_segment_count: Array.isArray(output.segments) ? output.segments.length : 0,
-    provider: String(providers.asr || "funasr-paraformer-zh"),
-  };
 }
 
 async function openAiTranscribeDetail(env, {
@@ -4348,29 +4251,8 @@ async function submitRunpodJob(env, inputPayload) {
   });
 }
 
-async function submitRunpodSyncJob(env, inputPayload) {
-  return runpodRequest(env, "/runsync", {
-    method: "POST",
-    payload: runpodRequestPayload(inputPayload),
-  });
-}
-
 function runpodRequestPayload(inputPayload) {
   return { input: inputPayload };
-}
-
-function runpodSyncOutput(body, label) {
-  if (body && typeof body.output === "object" && body.output !== null) {
-    return body.output;
-  }
-  if (body && typeof body === "object" && body.audio_base64) {
-    return body;
-  }
-  const status = String(body?.status || "").toUpperCase();
-  if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
-    throw httpError(502, runpodErrorMessage(body));
-  }
-  throw httpError(502, `${label} did not return output`);
 }
 
 async function runpodRequest(env, path, { method = "GET", payload = null, timeoutMs = null } = {}) {
@@ -4649,69 +4531,6 @@ function supportedPracticeAsrModel(value) {
   return model;
 }
 
-export function evaluatePracticeAttempt(targetText, recognizedText, targetLanguage) {
-  const normalizedTarget = normalizePracticeText(targetText, targetLanguage);
-  const normalizedRecognized = normalizePracticeText(recognizedText, targetLanguage);
-  const globalSimilarity = practiceSimilarity(normalizedTarget, normalizedRecognized);
-  const phraseMatches = practicePhraseMatches(targetText, recognizedText, targetLanguage);
-  const phraseSimilarity = practicePhraseSimilarity(phraseMatches);
-  const phraseMacroSimilarity = practicePhraseMacroSimilarity(phraseMatches);
-  const lowestPhraseSimilarity = phraseMatches.length
-    ? Math.min(...phraseMatches.map((match) => Number(match.similarity) || 0))
-    : globalSimilarity;
-  const similarity = Math.min(globalSimilarity, phraseMacroSimilarity);
-  const grade = practiceGrade(similarity);
-  return {
-    normalized_target: normalizedTarget,
-    normalized_recognized: normalizedRecognized,
-    global_similarity: Math.round(globalSimilarity * 1000) / 1000,
-    phrase_similarity: Math.round(phraseSimilarity * 1000) / 1000,
-    phrase_macro_similarity: Math.round(phraseMacroSimilarity * 1000) / 1000,
-    lowest_phrase_similarity: Math.round(lowestPhraseSimilarity * 1000) / 1000,
-    similarity: Math.round(similarity * 1000) / 1000,
-    grade,
-    grade_label: PRACTICE_GRADE_LABELS[grade],
-    diff: practiceDiff(normalizedTarget, normalizedRecognized),
-    phrase_matches: phraseMatches,
-    unconsumed_recognized: practiceUnconsumedRecognized(
-      normalizedRecognized,
-      phraseMatches,
-      targetLanguage,
-      recognizedText,
-    ),
-  };
-}
-
-function practiceEvaluationWithOutcome(targetText, recognizedText, targetLanguage, asrTimestamps) {
-  const noSpeech =
-    !String(recognizedText || "").trim() &&
-    !(asrTimestamps?.words || []).length &&
-    !(asrTimestamps?.segments || []).length;
-  if (noSpeech) {
-    return {
-      outcome: "no_speech",
-      message: "音声を検出できませんでした。もう一度録音してください。",
-      normalized_target: normalizePracticeText(targetText, targetLanguage),
-      normalized_recognized: "",
-      global_similarity: null,
-      phrase_similarity: null,
-      phrase_macro_similarity: null,
-      lowest_phrase_similarity: null,
-      similarity: null,
-      grade: null,
-      grade_label: "",
-      diff: [],
-      phrase_matches: [],
-      unconsumed_recognized: [],
-    };
-  }
-  return {
-    outcome: "evaluated",
-    message: "",
-    ...evaluatePracticeAttempt(targetText, recognizedText, targetLanguage),
-  };
-}
-
 export function splitPracticePhrases(text) {
   const normalized = String(text || "").replace(/\r\n?/g, "\n").trim();
   if (!normalized) {
@@ -4789,2770 +4608,6 @@ function isProtectedPhrasePeriod(text, index) {
   return PRACTICE_PROTECTED_ABBREVIATIONS.has(abbreviation) && hasFollowingWord;
 }
 
-export function practiceContentMatches(targetText, matchedText, targetLanguage) {
-  const language = supportedPracticeTargetLanguage(targetLanguage);
-  let targetForComparison = String(targetText || "");
-  let matchedForComparison = String(matchedText || "");
-  if (language === "en-US") {
-    targetForComparison = replaceStandaloneEnglishNumbers(targetForComparison);
-    matchedForComparison = replaceStandaloneEnglishNumbers(matchedForComparison);
-  }
-  const matchedNormalized = normalizePracticeContentText(matchedForComparison, language);
-  if (normalizePracticeContentText(targetForComparison, language) === matchedNormalized) {
-    return true;
-  }
-  if (language !== "en-US") return false;
-  return compactIdentifierVariants(targetForComparison)
-    .some((candidate) => normalizePracticeContentText(candidate, language) === matchedNormalized);
-}
-
-function rawTimestampCount(value, rows) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0
-    ? Math.trunc(parsed)
-    : (Array.isArray(rows) ? rows.length : 0);
-}
-
-function normalizePracticeContentText(text, targetLanguage) {
-  let normalized = String(text || "").normalize("NFKC").trim().toLowerCase();
-  if (targetLanguage === "zh-CN") {
-    normalized = normalizeChineseSpokenForms(normalized);
-    normalized = traditionalChineseToSimplified(normalized);
-  }
-  return [...normalized]
-    .filter((character) => !/^[\p{P}\p{Z}\p{S}]$/u.test(character))
-    .join("");
-}
-
-function replaceStandaloneEnglishNumbers(text) {
-  return String(text || "").normalize("NFKC").replace(
-    /(?<![\w./:+-])\d{1,6}(?![\w./:+-])/gu,
-    (value) => englishIntegerWords(Number(value)) ?? value,
-  );
-}
-
-function compactIdentifierVariants(text) {
-  const source = String(text || "");
-  const matches = [...source.matchAll(/\b([a-z]+)(\d{1,6})\b/giu)];
-  if (!matches.length) return [source];
-  let variants = [""];
-  let cursor = 0;
-  for (const match of matches) {
-    const prefix = source.slice(cursor, match.index);
-    const cardinal = englishIntegerWords(Number(match[2]));
-    const digitWords = [...match[2]].map((digit) => ENGLISH_SMALL_NUMBERS[Number(digit)]).join(" ");
-    const replacements = [`${match[1]} ${digitWords}`];
-    if (cardinal !== null) replacements.push(`${match[1]} ${cardinal}`);
-    variants = variants.flatMap((variant) => replacements.map((replacement) => variant + prefix + replacement));
-    cursor = match.index + match[0].length;
-  }
-  return [source, ...variants.map((variant) => variant + source.slice(cursor))];
-}
-
-function englishIntegerWords(value) {
-  if (!Number.isInteger(value) || value < 0 || value > 999999) return null;
-  if (value < 20) return ENGLISH_SMALL_NUMBERS[value];
-  if (value < 100) {
-    const tens = Math.floor(value / 10);
-    const remainder = value % 10;
-    return ENGLISH_TENS[tens] + (remainder ? ` ${ENGLISH_SMALL_NUMBERS[remainder]}` : "");
-  }
-  if (value < 1000) {
-    const hundreds = Math.floor(value / 100);
-    const remainder = value % 100;
-    return `${ENGLISH_SMALL_NUMBERS[hundreds]} hundred` + (remainder ? ` ${englishIntegerWords(remainder)}` : "");
-  }
-  const thousands = Math.floor(value / 1000);
-  const remainder = value % 1000;
-  return `${englishIntegerWords(thousands)} thousand` + (remainder ? ` ${englishIntegerWords(remainder)}` : "");
-}
-
-function normalizeChineseSpokenForms(text) {
-  let source = String(text || "");
-  source = source.replace(/(?<![a-z0-9.])[-−](?=\d)/gu, "负");
-  const protectedValues = [];
-  const protect = (pattern, replacement) => {
-    source = source.replace(pattern, (...args) => {
-      protectedValues.push(String(replacement(...args)));
-      return String.fromCodePoint(0xE000 + protectedValues.length - 1);
-    });
-  };
-
-  protect(
-    /(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(?:°\s*c|℃)/giu,
-    (_match, value) => `${chineseDecimalWords(value)}度`,
-  );
-  protect(
-    /(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*%/gu,
-    (_match, value) => `百分之${chineseDecimalWords(value)}`,
-  );
-  protect(
-    /(?<![a-z0-9])([01]?\d|2[0-3]):([0-5]\d)(?!\d)/gu,
-    (_match, hour, minute) => `${chineseIntegerWords(String(Number(hour)))}点${Number(minute) === 0 ? "" : chineseIntegerWords(minute)}`,
-  );
-  protect(
-    /(?<![a-z0-9])(\d{4})(?=年)/gu,
-    (_match, value) => chineseDigitWords(value),
-  );
-  protect(
-    /(?<![a-z0-9])(v)(\d+(?:\.\d+)+)(?![a-z0-9])/giu,
-    (_match, prefix, value) => `${prefix.toLowerCase()}${chineseVersionWords(value)}`,
-  );
-  protect(
-    /(?<![a-z0-9])([a-z]+)(\d+)(?![a-z0-9])/giu,
-    (_match, prefix, value) => `${prefix.toLowerCase()}${chineseDigitWords(value)}`,
-  );
-  source = source.replace(
-    /(?<![a-z0-9.])(\d+)\.(\d+)(?![a-z0-9.])/gu,
-    (_match, integer, fraction) => `${chineseIntegerWords(integer)}点${chineseDigitWords(fraction)}`,
-  );
-  source = source.replace(
-    /(?<![a-z0-9])(\d+)(?![a-z0-9])/gu,
-    (_match, value) => chineseIntegerWords(value),
-  );
-  protectedValues.forEach((value, index) => {
-    source = source.replace(String.fromCodePoint(0xE000 + index), value);
-  });
-  return source;
-}
-
-function chineseDecimalWords(value) {
-  const [integer, fraction] = String(value).split(".", 2);
-  return chineseIntegerWords(integer) + (fraction === undefined ? "" : `点${chineseDigitWords(fraction)}`);
-}
-
-function chineseVersionWords(value) {
-  const [first, ...remaining] = String(value).split(".");
-  return [
-    chineseIntegerWords(first),
-    ...remaining.map((component) => chineseDigitWords(component)),
-  ].join("点");
-}
-
-function chineseDigitWords(value) {
-  return [...String(value)].map((digit) => CHINESE_DIGITS[Number(digit)]).join("");
-}
-
-function chineseIntegerWords(value) {
-  const digits = String(value);
-  if (!digits) return "";
-  if (digits.length > 1 && digits.startsWith("0")) return chineseDigitWords(digits);
-  let number = BigInt(digits);
-  if (number === 0n) return CHINESE_DIGITS[0];
-  const groups = [];
-  while (number) {
-    groups.push(Number(number % 10000n));
-    number /= 10000n;
-  }
-  if (groups.length > CHINESE_LARGE_NUMBER_UNITS.length) return chineseDigitWords(digits);
-
-  const output = [];
-  let zeroPending = false;
-  for (let groupIndex = groups.length - 1; groupIndex >= 0; groupIndex -= 1) {
-    const group = groups[groupIndex];
-    if (group === 0) {
-      if (output.length && groups.slice(0, groupIndex).some(Boolean)) zeroPending = true;
-      continue;
-    }
-    if (output.length && (zeroPending || group < 1000)) output.push(CHINESE_DIGITS[0]);
-    output.push(`${chineseSmallIntegerWords(group)}${CHINESE_LARGE_NUMBER_UNITS[groupIndex]}`);
-    zeroPending = false;
-  }
-  const result = output.join("");
-  return result.startsWith("一十") ? result.slice(1) : result;
-}
-
-function chineseSmallIntegerWords(number) {
-  const digits = String(number);
-  const output = [];
-  let zeroPending = false;
-  for (const [position, digitText] of [...digits].entries()) {
-    const digit = Number(digitText);
-    const unitIndex = digits.length - position - 1;
-    if (digit === 0) {
-      if (output.length && [...digits.slice(position + 1)].some((item) => Number(item))) {
-        zeroPending = true;
-      }
-      continue;
-    }
-    if (zeroPending) {
-      output.push(CHINESE_DIGITS[0]);
-      zeroPending = false;
-    }
-    output.push(`${CHINESE_DIGITS[digit]}${CHINESE_SMALL_NUMBER_UNITS[unitIndex]}`);
-  }
-  return output.join("");
-}
-
-function practicePhraseMatches(targetText, recognizedText, targetLanguage) {
-  const phrases = splitPracticePhrases(targetText);
-  const recognized = normalizePracticeText(recognizedText, targetLanguage);
-  const normalizedTargets = phrases.map((phrase) => normalizePracticeText(phrase, targetLanguage));
-  let cursor = 0;
-  return phrases.map((phrase, index) => {
-    const normalizedTarget = normalizedTargets[index];
-    const exactStart = recognized.indexOf(normalizedTarget, cursor);
-    const laterExactStarts = normalizedTargets
-      .slice(index + 1)
-      .filter(Boolean)
-      .map((laterTarget) => recognized.indexOf(laterTarget, cursor))
-      .filter((start) => start >= 0);
-    const nextExactStart = laterExactStarts.length ? Math.min(...laterExactStarts) : -1;
-    const match = exactStart >= 0 && (nextExactStart < 0 || exactStart <= nextExactStart)
-      ? { recognized_start: exactStart, recognized_end: exactStart + normalizedTarget.length, similarity: 1 }
-      : bestPracticePhraseMatch(
-          normalizedTarget,
-          recognized.slice(0, nextExactStart >= cursor ? nextExactStart : recognized.length),
-          cursor,
-        );
-    const matched = Boolean(normalizedTarget) && match.similarity >= 0.45;
-    if (matched) {
-      cursor = match.recognized_end;
-    }
-    return {
-      index,
-      target: phrase,
-      normalized_target: normalizedTarget,
-      recognized_start: match.recognized_start,
-      recognized_end: match.recognized_end,
-      normalized_recognized: recognized.slice(match.recognized_start, match.recognized_end),
-      similarity: Math.round(match.similarity * 1000) / 1000,
-      matched,
-    };
-  });
-}
-
-function practicePhraseSimilarity(matches) {
-  let weightedTotal = 0;
-  let weightSum = 0;
-  for (const match of matches) {
-    const weight = String(match.normalized_target || "").length;
-    if (weight <= 0) {
-      continue;
-    }
-    weightedTotal += weight * (Number(match.similarity) || 0);
-    weightSum += weight;
-  }
-  if (!weightSum) {
-    return 0;
-  }
-  return Math.max(0, Math.min(1, weightedTotal / weightSum));
-}
-
-function practicePhraseMacroSimilarity(matches) {
-  if (!matches.length) return 0;
-  const total = matches.reduce((sum, match) => sum + (Number(match.similarity) || 0), 0);
-  return Math.max(0, Math.min(1, total / matches.length));
-}
-
-function practiceUnconsumedRecognized(recognizedNormalized, matches, targetLanguage, recognizedText) {
-  let intervals = matches
-    .filter((match) => match.matched)
-    .map((match) => [
-      Math.max(0, Number(match.recognized_start) || 0),
-      Math.min(recognizedNormalized.length, Number(match.recognized_end) || 0),
-    ])
-    .filter(([start, end]) => end > start);
-  if (targetLanguage === "en-US") {
-    const tokenRanges = englishNormalizedTokenRanges(recognizedText);
-    intervals = intervals.map(([start, end]) => {
-      const overlaps = tokenRanges.filter(([tokenStart, tokenEnd]) => tokenEnd > start && tokenStart < end);
-      if (!overlaps.length) return [start, end];
-      return [
-        Math.min(...overlaps.map(([tokenStart]) => tokenStart)),
-        Math.max(...overlaps.map(([, tokenEnd]) => tokenEnd)),
-      ];
-    });
-  }
-  intervals.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
-  const merged = [];
-  for (const [start, end] of intervals) {
-    const previous = merged[merged.length - 1];
-    if (previous && start <= previous[1]) {
-      previous[1] = Math.max(previous[1], end);
-    } else {
-      merged.push([start, end]);
-    }
-  }
-  const gaps = [];
-  let cursor = 0;
-  for (const [start, end] of [...merged, [recognizedNormalized.length, recognizedNormalized.length]]) {
-    if (start > cursor) {
-      const text = recognizedNormalized.slice(cursor, start);
-      if (!isNormalizedScoringFiller(text, targetLanguage)) {
-        gaps.push({ start: cursor, end: start, normalized_text: text });
-      }
-    }
-    cursor = Math.max(cursor, end);
-  }
-  return gaps;
-}
-
-function englishNormalizedTokenRanges(text) {
-  const ranges = [];
-  let cursor = 0;
-  for (const match of String(text || "").matchAll(/[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*/gu)) {
-    const normalized = normalizePracticeText(match[0], "en-US");
-    if (!normalized) continue;
-    ranges.push([cursor, cursor + normalized.length]);
-    cursor += normalized.length;
-  }
-  return ranges;
-}
-
-function isNormalizedScoringFiller(text, targetLanguage) {
-  if (!text) return true;
-  return (PRACTICE_EDGE_FILLERS[targetLanguage] || new Set()).has(text)
-    || (PRACTICE_BOUNDARY_FILLER_SEQUENCES[targetLanguage] || new Set()).has(text);
-}
-
-export function practiceComparisonAlignment({ targetText, recognizedText, targetLanguage, asrTimestamps }) {
-  const alignmentStarted = performance.now();
-  const language = supportedPracticeTargetLanguage(targetLanguage);
-  const phrases = comparisonTargetPhrases(targetText, language);
-  const rawTimestampData = asrTimestamps && typeof asrTimestamps === "object" ? asrTimestamps : {};
-  if (rawTimestampData.available === false) {
-    const rawWordCount = rawTimestampCount(rawTimestampData.raw_timestamp_word_count, rawTimestampData.words);
-    const rawSegmentCount = rawTimestampCount(
-      rawTimestampData.raw_timestamp_segment_count,
-      rawTimestampData.segments,
-    );
-    if ((rawWordCount || rawSegmentCount) && !normalizePracticeText(recognizedText, language)) {
-      throw new PracticeAlignmentError("contradictory_timestamp_payload");
-    }
-    return transcriptionOnlyAlignmentResult(phrases, recognizedText, language, {
-      rawWordCount,
-      rawSegmentCount,
-      contradictory: Boolean(rawWordCount || rawSegmentCount),
-      alignmentElapsedMs: performance.now() - alignmentStarted,
-    });
-  }
-  const timestampData = rawTimestampData;
-  const wordSource = asrWordSpans(timestampData.words, language);
-  wordSource.raw_count = rawTimestampCount(timestampData.raw_timestamp_word_count, timestampData.words);
-  const wordSpans = wordSource.source_valid ? wordSource.spans : [];
-  const recognized = wordSource.source_valid ? wordSource.recognized : "";
-  const segmentSource = asrSegments(timestampData.segments);
-  segmentSource.raw_count = rawTimestampCount(
-    timestampData.raw_timestamp_segment_count,
-    timestampData.segments,
-  );
-  excludeDisjointSegmentSource(wordSpans, wordSource.source_valid, segmentSource);
-
-  if (wordSpans.length && recognized) {
-    const aligned = phrases.length === 1
-      ? {
-          ranges: [alignSinglePhraseToWordSpans(phrases[0], recognized, wordSpans, language)],
-          metrics: { candidate_count: 1, score_computation_count: 2 },
-        }
-      : alignPhrasesToWordSpans(phrases, recognized, wordSpans, language);
-    const diagnostics = alignmentDiagnostics(aligned.ranges, phrases, wordSpans, language, {
-      ...aligned.metrics,
-      alignment_elapsed_ms: performance.now() - alignmentStarted,
-      source: wordSource,
-      segmentSource,
-    });
-    let complete = aligned.ranges.length > 0 && aligned.ranges.every((entry) => entry.available);
-    if (diagnostics.unassigned_tokens.some((token) => token.reason === "unexplained_internal_token")) {
-      complete = false;
-    }
-    return {
-      available: aligned.ranges.some((entry) => entry.available),
-      complete,
-      mode: "target_phrase_word_alignment",
-      reason: complete ? "" : "some target phrases could not be mapped to reliable word timestamps",
-      target_language: language,
-      recognized_normalized: recognized,
-      target_phrase_count: phrases.length,
-      ranges: aligned.ranges,
-      diagnostics,
-    };
-  }
-
-  if (segmentSource.raw_count) {
-    if (
-      (!segmentSource.segments.length || !segmentSource.source_valid)
-      && !normalizePracticeText(recognizedText, language)
-    ) {
-      throw new PracticeAlignmentError("invalid_timestamp_payload");
-    }
-    if (!segmentSource.segments.length || !segmentSource.source_valid) {
-      return transcriptionOnlyAlignmentResult(phrases, recognizedText, language, {
-        rawWordCount: wordSource.raw_count,
-        rawSegmentCount: segmentSource.raw_count,
-        diagnosticFlags: [
-          ...wordSource.flags,
-          ...segmentSource.flags,
-          "invalid_timestamp_payload",
-        ],
-        invalidTimestampUnits: [
-          ...wordSource.invalid_units,
-          ...segmentSource.invalid_units,
-        ],
-        unassignedTimestampUnits: phrases.length > 1
-          ? primaryInvalidTimestampUnits(wordSource, segmentSource)
-          : [],
-        alignmentElapsedMs: performance.now() - alignmentStarted,
-      });
-    }
-    return alignPhrasesToSegments(phrases, segmentSource, recognizedText, language, {
-      alignmentElapsedMs: performance.now() - alignmentStarted,
-      discardedWordSource: wordSource,
-    });
-  }
-
-  const rawWordCount = wordSource.raw_count;
-  if (rawWordCount && !normalizePracticeText(recognizedText, language)) {
-    throw new PracticeAlignmentError("invalid_timestamp_payload");
-  }
-  if (normalizePracticeText(recognizedText, language)) {
-    return transcriptionOnlyAlignmentResult(phrases, recognizedText, language, {
-      rawWordCount,
-      rawSegmentCount: 0,
-      diagnosticFlags: [
-        ...wordSource.flags,
-        ...(rawWordCount ? ["invalid_timestamp_payload"] : []),
-      ],
-      invalidTimestampUnits: wordSource.invalid_units,
-      unassignedTimestampUnits: phrases.length > 1 ? [...wordSource.invalid_units] : [],
-      alignmentElapsedMs: performance.now() - alignmentStarted,
-    });
-  }
-
-  return {
-    available: false,
-    complete: false,
-    mode: "unavailable",
-    reason: "word timestamps were unavailable and segments could not be mapped safely",
-    target_language: language,
-    recognized_normalized: normalizePracticeText(recognizedText, language),
-    target_phrase_count: phrases.length,
-    ranges: phrases.map((phrase, index) => ({
-      index,
-      source_index: phrase.source_index,
-      target: phrase.target,
-      normalized_target: phrase.normalized_target,
-      available: false,
-      matched: false,
-      content_matched: null,
-      source: "none",
-      similarity: 0,
-      content_similarity: 0,
-      coverage: 0,
-      recognized_start: null,
-      recognized_end: null,
-      normalized_recognized: "",
-      matched_text: "",
-      audio_start: null,
-      audio_end: null,
-      alignment_confidence: "unavailable",
-      boundary_source: "none",
-      token_start_index: null,
-      token_end_index: null,
-    })),
-    diagnostics: alignmentDiagnostics([], phrases, wordSpans, language, {
-      candidate_count: 0,
-      score_computation_count: 0,
-      alignment_elapsed_ms: performance.now() - alignmentStarted,
-    }),
-  };
-}
-
-export function practiceComparisonAlignmentCanonical(options) {
-  let language;
-  try {
-    language = supportedPracticeTargetLanguage(options.targetLanguage);
-  } catch (error) {
-    throw new PracticeAlignmentInputError("unsupported_target_language");
-  }
-  const phrases = comparisonTargetPhrases(options.targetText, language);
-  if (!phrases.length) throw new PracticeAlignmentInputError("empty_target");
-  const timestampData = options.asrTimestamps && typeof options.asrTimestamps === "object"
-    ? options.asrTimestamps
-    : {};
-  const rawWordCount = rawTimestampCount(timestampData.raw_timestamp_word_count, timestampData.words);
-  const rawSegmentCount = rawTimestampCount(
-    timestampData.raw_timestamp_segment_count,
-    timestampData.segments,
-  );
-  const timestampUnitCount = rawWordCount + rawSegmentCount;
-  if (
-    phrases.length > MAX_CANONICAL_TARGET_PHRASES
-    || timestampUnitCount > MAX_CANONICAL_TIMESTAMP_UNITS
-    || phrases.length * timestampUnitCount > MAX_CANONICAL_ALIGNMENT_COMPLEXITY
-  ) {
-    throw new PracticeAlignmentInputError("alignment_input_too_large");
-  }
-  const legacy = practiceComparisonAlignment(options);
-  return canonicalAlignmentResult(legacy, {
-    rawWordCount,
-    rawSegmentCount,
-  });
-}
-
-export function practiceAlignmentLegacyAdapter(canonical) {
-  const phrases = Array.isArray(canonical?.phrases) ? canonical.phrases : [];
-  return {
-    available: Boolean(canonical?.available),
-    complete: Boolean(canonical?.complete),
-    mode: "canonical_v1_adapter",
-    reason: "",
-    target_language: canonical?.target_language,
-    target_phrase_count: canonical?.target_phrase_count,
-    ranges: phrases.map((phrase) => ({
-      index: phrase.index,
-      source_index: phrase.source_index,
-      target: phrase.target_text,
-      available: phrase.available,
-      matched: phrase.content_matched === true,
-      content_matched: phrase.content_matched,
-      source:
-        phrase.text_source === phrase.timestamp_source || phrase.timestamp_source === "none"
-          ? phrase.text_source
-          : "none",
-      matched_text: phrase.matched_text,
-      audio_start: phrase.audio_start,
-      audio_end: phrase.audio_end,
-      token_start_index: phrase.word_start_index,
-      token_end_index: phrase.word_end_index,
-    })),
-    diagnostics: canonical?.diagnostics || {},
-  };
-}
-
-function canonicalAlignmentResult(legacy, options) {
-  const legacyRanges = Array.isArray(legacy?.ranges) ? legacy.ranges : [];
-  const legacyDiagnostics = legacy?.diagnostics && typeof legacy.diagnostics === "object"
-    ? legacy.diagnostics
-    : {};
-  const unassignedTokens = (Array.isArray(legacyDiagnostics.unassigned_tokens)
-    ? legacyDiagnostics.unassigned_tokens
-    : []).map(canonicalUnassignedToken);
-  let unassignedNonFillerCount = unassignedTokens.filter((token) => token.reason !== "boundary_filler").length;
-  let outcome = String(legacy?.outcome || "evaluated");
-  if (outcome !== "no_speech" && !legacy?.recognized_normalized && !legacyRanges.length) {
-    outcome = "no_speech";
-  }
-  const phrases = outcome === "no_speech" ? [] : legacyRanges.map(canonicalPhraseResult);
-  const playablePhraseCount = phrases.filter((phrase) => phrase.available).length;
-  const targetPhraseCount = Number(legacy?.target_phrase_count || legacyRanges.length);
-  const allPhrasesPlayable = targetPhraseCount > 0 && playablePhraseCount === targetPhraseCount;
-  let complete = allPhrasesPlayable && unassignedNonFillerCount === 0;
-  const rawZeroTokens = Array.isArray(legacyDiagnostics.zero_duration_tokens)
-    ? legacyDiagnostics.zero_duration_tokens
-    : [];
-  const invalidTimestampUnits = Array.isArray(legacyDiagnostics.invalid_timestamp_units)
-    ? legacyDiagnostics.invalid_timestamp_units
-    : [];
-  const zeroDurationTokens = [];
-  for (const token of rawZeroTokens) {
-    const sourceIndex = Number(token.source_index ?? token.index ?? 0);
-    const owner = phrases.find((phrase) =>
-      phrase.word_start_index !== null &&
-      phrase.word_start_index <= sourceIndex &&
-      sourceIndex < phrase.word_end_index
-    )?.index ?? token.owner_phrase_index;
-    if (owner === null || owner === undefined) continue;
-    zeroDurationTokens.push({
-      source: String(token.source || "words"),
-      source_index: sourceIndex,
-      text: String(token.text || ""),
-      start: token.start ?? null,
-      end: token.end ?? null,
-      owner_phrase_index: Number(owner),
-    });
-  }
-  const assignedWordCount = phrases.reduce((total, phrase) => (
-    phrase.word_start_index === null
-      ? total
-      : total + phrase.word_end_index - phrase.word_start_index
-  ), 0);
-  const assignedSegmentCount = phrases.filter((phrase) => phrase.text_source === "segments").length;
-  const diagnostics = {
-    valid_word_count: Number(
-      legacyDiagnostics.valid_word_count ?? legacyDiagnostics.total_timestamp_token_count ?? 0
-    ),
-    valid_segment_count: Number(legacyDiagnostics.valid_segment_count || 0),
-    assigned_word_count: assignedWordCount,
-    assigned_segment_count: Number(legacyDiagnostics.assigned_segment_count ?? assignedSegmentCount),
-    playable_word_count: Number(
-      legacyDiagnostics.playable_word_count ?? legacyDiagnostics.playable_token_count ?? 0
-    ),
-    unassigned_non_filler_count: unassignedNonFillerCount,
-    unassigned_tokens: unassignedTokens,
-    zero_duration_tokens: zeroDurationTokens,
-    diagnostic_flags: [...new Set(legacyDiagnostics.diagnostic_flags || [])].map(String).sort(),
-    invalid_timestamp_units: invalidTimestampUnits
-      .filter((unit) => unit && typeof unit === "object")
-      .map(canonicalInvalidTimestampUnit),
-    raw_timestamp_word_count: Number(legacyDiagnostics.raw_timestamp_word_count ?? options.rawWordCount),
-    raw_timestamp_segment_count: Number(legacyDiagnostics.raw_timestamp_segment_count ?? options.rawSegmentCount),
-    candidate_count: Number(legacyDiagnostics.candidate_count || 0),
-    score_computation_count: Number(legacyDiagnostics.score_computation_count || 0),
-    alignment_elapsed_ms: Number(legacyDiagnostics.alignment_elapsed_ms || 0),
-  };
-  if (outcome === "no_speech") {
-    unassignedNonFillerCount = 0;
-    diagnostics.unassigned_non_filler_count = 0;
-    diagnostics.unassigned_tokens = [];
-    diagnostics.zero_duration_tokens = [];
-    complete = false;
-  }
-  return {
-    alignment_contract_version: 1,
-    outcome,
-    target_language: legacy?.target_language,
-    available: playablePhraseCount > 0,
-    target_phrase_count: targetPhraseCount,
-    playable_phrase_count: playablePhraseCount,
-    all_phrases_playable: outcome === "no_speech" ? false : allPhrasesPlayable,
-    unassigned_non_filler_count: unassignedNonFillerCount,
-    complete,
-    phrases,
-    diagnostics,
-  };
-}
-
-function canonicalPhraseResult(legacy) {
-  const matchedText = String(legacy?.matched_text || "");
-  const available = Boolean(legacy?.available);
-  const assignmentStatus = available ? "assigned" : matchedText ? "text_only" : "unassigned";
-  const source = String(legacy?.source || "none");
-  const wordStart = legacy?.token_start_index ?? null;
-  const wordEnd = legacy?.token_end_index ?? null;
-  const textSource = matchedText && ["words", "segments", "transcription"].includes(source)
-    ? source
-    : matchedText && wordStart !== null
-      ? "words"
-      : "none";
-  const timestampSource = available && ["words", "segments"].includes(source) ? source : "none";
-  let confidence = legacy?.alignment_confidence;
-  if (!["high", "medium", "low"].includes(confidence)) {
-    confidence = assignmentStatus === "text_only" ? "medium" : null;
-  }
-  return {
-    index: Number(legacy?.index || 0),
-    source_index: Number(legacy?.source_index || 0),
-    target_text: String(legacy?.target || ""),
-    assignment_status: assignmentStatus,
-    available,
-    matched_text: matchedText,
-    content_matched: assignmentStatus === "unassigned" ? null : legacy?.content_matched ?? false,
-    alignment_confidence: confidence,
-    boundary_sources: canonicalBoundarySources(String(legacy?.boundary_source || ""), source),
-    text_source: textSource,
-    timestamp_source: timestampSource,
-    word_start_index: wordStart === null ? null : Number(wordStart),
-    word_end_index: wordEnd === null ? null : Number(wordEnd),
-    audio_start: available ? legacy?.audio_start ?? null : null,
-    audio_end: available ? legacy?.audio_end ?? null : null,
-  };
-}
-
-function canonicalBoundarySources(boundarySource, source) {
-  const values = new Set();
-  if (boundarySource.includes("lexical") || source === "words") values.add("text_anchor");
-  if (boundarySource.includes("neighbor")) values.add("neighbor_anchors");
-  if (boundarySource.includes("pause")) values.add("pause");
-  if (boundarySource.includes("segment") || source === "segments") values.add("asr_segment");
-  if (boundarySource.includes("single")) values.add("single_phrase");
-  if (boundarySource.includes("leading") || boundarySource.includes("trailing")) values.add("utterance_edge");
-  return ["text_anchor", "neighbor_anchors", "pause", "asr_segment", "single_phrase", "utterance_edge"]
-    .filter((value) => values.has(value));
-}
-
-function canonicalUnassignedToken(token) {
-  const reasons = {
-    edge_or_boundary_filler: "boundary_filler",
-    unexplained_internal_token: "ambiguous_assignment",
-    no_structural_anchor: "ambiguous_assignment",
-  };
-  const originalReason = String(token?.canonical_reason || token?.reason || "ambiguous_assignment");
-  return {
-    source: String(token?.source || "words"),
-    source_index: Number(token?.source_index ?? token?.index ?? 0),
-    text: String(token?.text || ""),
-    start: token?.start ?? null,
-    end: token?.end ?? null,
-    reason: reasons[originalReason] || originalReason,
-  };
-}
-
-function canonicalInvalidTimestampUnit(token) {
-  return {
-    source: String(token?.source || "words"),
-    source_index: Number(token?.source_index ?? token?.index ?? 0),
-    text: String(token?.text || ""),
-    start: token?.start ?? null,
-    end: token?.end ?? null,
-    reason: String(token?.reason || "non_numeric"),
-  };
-}
-
-function bestPracticePhraseMatch(normalizedTarget, recognized, cursor) {
-  if (!normalizedTarget || !recognized) {
-    return { recognized_start: 0, recognized_end: 0, similarity: 0 };
-  }
-  let best = { recognized_start: cursor, recognized_end: cursor, similarity: 0 };
-  const minLength = Math.max(1, Math.floor(normalizedTarget.length * 0.45));
-  const maxLength = Math.max(minLength, Math.floor(normalizedTarget.length * 1.8) + 3);
-  let bestLengthDelta = Number.POSITIVE_INFINITY;
-  for (let start = Math.max(0, cursor); start < recognized.length; start += 1) {
-    const lastEnd = Math.min(recognized.length, start + maxLength);
-    for (let end = start + minLength; end <= lastEnd; end += 1) {
-      const similarity = practiceSimilarity(normalizedTarget, recognized.slice(start, end));
-      const lengthDelta = Math.abs((end - start) - normalizedTarget.length);
-      const isBetterSimilarity = similarity > best.similarity + 1e-9;
-      const isEqualSimilarityBetterLength = Math.abs(similarity - best.similarity) <= 1e-9 && lengthDelta < bestLengthDelta;
-      if (isBetterSimilarity || isEqualSimilarityBetterLength) {
-        best = { recognized_start: start, recognized_end: end, similarity };
-        bestLengthDelta = lengthDelta;
-      }
-      if (similarity >= 0.999) {
-        return best;
-      }
-    }
-  }
-  return best;
-}
-
-function comparisonTargetPhrases(targetText, targetLanguage) {
-  return splitPracticePhrases(targetText)
-    .map((phrase, sourceIndex) => {
-      const target = String(phrase || "")
-        .replace(/^(speaker\s*\d+|[a-z]\d*|\d+)\s*[：:]\s*/iu, "")
-        .trim();
-      return {
-        source_index: sourceIndex,
-        target,
-        normalized_target: normalizePracticeText(target, targetLanguage),
-      };
-    })
-    .filter((phrase) => phrase.normalized_target && !isComparisonLabelPhrase(phrase.target, phrase.normalized_target));
-}
-
-function isComparisonLabelPhrase(phrase, normalized) {
-  const label = String(phrase || "").trim().replace(/[：:]$/u, "");
-  if (!label) {
-    return true;
-  }
-  if (/^(speaker\s*\d+|[a-z]\d*|\d+)$/iu.test(label)) {
-    return true;
-  }
-  return String(normalized || "").length <= 2 && /[：:]$/u.test(String(phrase || "").trim());
-}
-
-function asrWordSpans(words, targetLanguage) {
-  if (!Array.isArray(words)) {
-    return {
-      spans: [],
-      recognized: "",
-      raw_count: 0,
-      source_valid: true,
-      flags: [],
-      invalid_units: [],
-    };
-  }
-  const spans = [];
-  const pieces = [];
-  const invalidUnits = [];
-  const flags = new Set();
-  let cursor = 0;
-  for (const [rawIndex, item] of words.entries()) {
-    if (!item || typeof item !== "object") {
-      invalidUnits.push(invalidTimestampUnit("words", rawIndex, "", null, null, "non_numeric"));
-      continue;
-    }
-    const text = String(item.text || item.word || "").trim();
-    const { start, end, reason } = timestampUnitValues(item.start, item.end);
-    if (reason) {
-      invalidUnits.push(invalidTimestampUnit("words", rawIndex, text, start, end, reason));
-      continue;
-    }
-    const normalized = normalizePracticeText(text, targetLanguage);
-    if (!normalized) {
-      continue;
-    }
-    pieces.push(normalized);
-    const spanEnd = cursor + normalized.length;
-    spans.push({
-      text,
-      normalized,
-      normalized_start: cursor,
-      normalized_end: spanEnd,
-      audio_start: start,
-      audio_end: end,
-      token_index: rawIndex,
-      zero_duration: end === start,
-    });
-    cursor = spanEnd;
-  }
-  for (let index = 1; index < spans.length; index += 1) {
-    const previous = spans[index - 1];
-    const current = spans[index];
-    const zeroDurationBridge = isZeroDurationOverlapBridge(spans, index);
-    if (current.audio_start < previous.audio_start) {
-      flags.add(zeroDurationBridge ? "zero_duration_overlap_bridge" : "non_monotonic_timestamp_source");
-    }
-    if (
-      current.text === previous.text
-      && current.audio_start === previous.audio_start
-      && current.audio_end === previous.audio_end
-    ) {
-      flags.add("duplicate_timestamp_unit");
-    }
-    if (
-      previous.audio_end > previous.audio_start
-      && current.audio_end > current.audio_start
-      && current.audio_start < previous.audio_end
-    ) {
-      flags.add("overlapping_timestamp_units");
-    }
-  }
-  if (invalidUnits.length) flags.add("invalid_timestamp_unit");
-  const sourceFlags = [
-    "non_monotonic_timestamp_source",
-    "duplicate_timestamp_unit",
-    "overlapping_timestamp_units",
-  ];
-  const sourceValid = !sourceFlags.some((flag) => flags.has(flag));
-  if (!sourceValid) {
-    const sourceReason = sourceFlags.find((flag) => flags.has(flag));
-    invalidUnits.push(...spans.map((span) => invalidTimestampUnit(
-      "words",
-      span.token_index,
-      span.text,
-      span.audio_start,
-      span.audio_end,
-      sourceReason,
-    )));
-  }
-  return {
-    spans,
-    recognized: pieces.join(""),
-    raw_count: words.length,
-    source_valid: sourceValid,
-    flags: [...flags].sort(),
-    invalid_units: invalidUnits,
-  };
-}
-
-function isZeroDurationOverlapBridge(spans, currentIndex) {
-  const current = spans[currentIndex];
-  if (current.audio_end <= current.audio_start) return false;
-  let zeroIndex = currentIndex - 1;
-  const zeroPoints = [];
-  while (zeroIndex >= 0 && spans[zeroIndex].zero_duration) {
-    zeroPoints.push(Number(spans[zeroIndex].audio_start));
-    zeroIndex -= 1;
-  }
-  if (!zeroPoints.length || zeroIndex < 0) return false;
-  const previousPositive = spans[zeroIndex];
-  const previousStart = Number(previousPositive.audio_start);
-  const previousEnd = Number(previousPositive.audio_end);
-  const currentStart = Number(current.audio_start);
-  const currentEnd = Number(current.audio_end);
-  return previousEnd > previousStart
-    && zeroPoints.every((point) => Math.abs(point - previousEnd) <= 1e-9)
-    && previousStart <= currentStart
-    && currentStart < previousEnd
-    && currentEnd > previousEnd;
-}
-
-function transcriptionOnlyAlignmentResult(phrases, recognizedText, targetLanguage, options) {
-  const ranges = phrases.map((phrase, index) => unavailableAlignmentRange(index, phrase, phrase.normalized_target));
-  const recognized = normalizePracticeText(recognizedText, targetLanguage);
-  if (phrases.length === 1 && recognized) {
-    const phrase = phrases[0];
-    const similarity = practiceSimilarity(String(phrase.normalized_target || ""), recognized);
-    const contentMatched = practiceContentMatches(phrase.target, recognizedText, targetLanguage);
-    ranges[0] = {
-      index: 0,
-      source_index: phrase.source_index,
-      target: phrase.target,
-      normalized_target: phrase.normalized_target,
-      available: false,
-      matched: contentMatched,
-      content_matched: contentMatched,
-      source: "transcription",
-      similarity: roundScore(similarity),
-      content_similarity: roundScore(similarity),
-      coverage: roundScore(targetCharacterCoverage(String(phrase.normalized_target || ""), recognized)),
-      recognized_start: 0,
-      recognized_end: recognized.length,
-      normalized_recognized: recognized,
-      matched_text: String(recognizedText || ""),
-      audio_start: null,
-      audio_end: null,
-      alignment_confidence: "high",
-      boundary_source: "single_phrase",
-      token_start_index: null,
-      token_end_index: null,
-    };
-  }
-  const flags = [...new Set(options.diagnosticFlags || [])];
-  if (options.contradictory) flags.push("contradictory_timestamp_payload");
-  flags.sort();
-  const unassignedTokens = (options.unassignedTimestampUnits || []).map((unit) => ({
-    source: String(unit?.source || "words"),
-    source_index: Number(unit?.source_index || 0),
-    index: Number(unit?.source_index || 0),
-    text: String(unit?.text || ""),
-    start: unit?.start ?? null,
-    end: unit?.end ?? null,
-    reason: "ambiguous_assignment",
-  }));
-  return {
-    outcome: recognized ? "evaluated" : "no_speech",
-    available: false,
-    complete: false,
-    mode: recognized ? "transcription_only" : "unavailable",
-    reason: "timestamp payload was unavailable; only formal transcription was retained",
-    target_language: targetLanguage,
-    recognized_normalized: recognized,
-    target_phrase_count: phrases.length,
-    ranges,
-    diagnostics: {
-      total_timestamp_token_count: 0,
-      playable_token_count: 0,
-      unassigned_tokens: unassignedTokens,
-      zero_duration_tokens: [],
-      candidate_count: 0,
-      score_computation_count: 0,
-      alignment_elapsed_ms: roundScore(Math.max(0, options.alignmentElapsedMs)),
-      valid_word_count: 0,
-      valid_segment_count: 0,
-      assigned_word_count: 0,
-      assigned_segment_count: 0,
-      playable_word_count: 0,
-      unassigned_non_filler_count: unassignedTokens.length,
-      diagnostic_flags: flags,
-      invalid_timestamp_units: [...(options.invalidTimestampUnits || [])],
-      raw_timestamp_word_count: options.rawWordCount,
-      raw_timestamp_segment_count: options.rawSegmentCount,
-    },
-  };
-}
-
-function primaryInvalidTimestampUnits(wordSource, segmentSource) {
-  if (Number(wordSource?.raw_count || 0) && wordSource?.invalid_units?.length) {
-    return [...wordSource.invalid_units];
-  }
-  return [...(segmentSource?.invalid_units || [])];
-}
-
-function alignPhrasesToSegments(phrases, source, recognizedText, targetLanguage, options) {
-  const ranges = phrases.map((phrase, index) => unavailableAlignmentRange(index, phrase, phrase.normalized_target));
-  const matchesBySegment = source.segments.map((segment) => phrases
-    .map((phrase, phraseIndex) => (
-      practiceContentMatches(phrase.target, segment.text, targetLanguage) ? phraseIndex : null
-    ))
-    .filter((value) => value !== null));
-  const uniqueSequence = matchesBySegment.filter((matches) => matches.length === 1).map((matches) => matches[0]);
-  const sequenceConflict = uniqueSequence.some((value, index) => index > 0 && value < uniqueSequence[index - 1]);
-  const assignedSegmentIndexes = new Set();
-  const assignedPhraseIndexes = new Set();
-  if (source.source_valid && !sequenceConflict) {
-    for (const [segmentPosition, segment] of source.segments.entries()) {
-      const matches = matchesBySegment[segmentPosition];
-      if (matches.length !== 1 || assignedPhraseIndexes.has(matches[0])) continue;
-      const phraseIndex = matches[0];
-      const phrase = phrases[phraseIndex];
-      const available = segment.end > segment.start;
-      ranges[phraseIndex] = {
-        index: phraseIndex,
-        source_index: phrase.source_index,
-        target: phrase.target,
-        normalized_target: phrase.normalized_target,
-        available,
-        matched: true,
-        content_matched: true,
-        source: "segments",
-        similarity: 1,
-        content_similarity: 1,
-        coverage: 1,
-        recognized_start: null,
-        recognized_end: null,
-        normalized_recognized: normalizePracticeText(segment.text, targetLanguage),
-        matched_text: segment.text,
-        audio_start: available ? segment.start : null,
-        audio_end: available ? segment.end : null,
-        alignment_confidence: "high",
-        boundary_source: "segment",
-        token_start_index: null,
-        token_end_index: null,
-      };
-      assignedPhraseIndexes.add(phraseIndex);
-      assignedSegmentIndexes.add(segment.segment_index);
-    }
-  }
-
-  const unassignedTokens = source.raw_units
-    .filter((unit) => (
-      !assignedSegmentIndexes.has(unit.index)
-      && !source.invalid_units.some((invalid) => (
-        invalid.source === "segments" && invalid.source_index === unit.index
-      ))
-    ))
-    .map((unit) => {
-      const segmentPosition = source.segments.findIndex((segment) => segment.segment_index === unit.index);
-      const matching = segmentPosition >= 0 ? matchesBySegment[segmentPosition] : [];
-      const segmentText = normalizePracticeText(unit.text, targetLanguage);
-      const hasPartialTargetEvidence = phrases.some((phrase) => (
-        targetCharacterCoverage(String(phrase.normalized_target || ""), segmentText) >= 0.25 ||
-        practiceSimilarity(String(phrase.normalized_target || ""), segmentText) >= 0.35
-      ));
-      return {
-        source: "segments",
-        source_index: unit.index,
-        index: unit.index,
-        text: unit.text,
-        start: unit.start,
-        end: unit.end,
-        reason: matching.length || hasPartialTargetEvidence || !source.source_valid
-          ? "ambiguous_assignment"
-          : "unrelated_speech",
-      };
-    });
-  const zeroDurationTokens = [];
-  for (const [phraseIndex, range] of ranges.entries()) {
-    if (range.source !== "segments") continue;
-    for (const segment of source.segments) {
-      if (
-        assignedSegmentIndexes.has(segment.segment_index) &&
-        segment.text === range.matched_text &&
-        segment.start === segment.end
-      ) {
-        zeroDurationTokens.push({
-          source: "segments",
-          source_index: segment.segment_index,
-          index: segment.segment_index,
-          text: segment.text,
-          start: segment.start,
-          end: segment.end,
-          owner_phrase_index: phraseIndex,
-        });
-      }
-    }
-  }
-  const playableCount = ranges.filter((range) => range.available).length;
-  const complete = ranges.length > 0 && playableCount === ranges.length && unassignedTokens.length === 0;
-  return {
-    outcome: "evaluated",
-    available: playableCount > 0,
-    complete,
-    mode: "target_phrase_segment_alignment",
-    reason: complete ? "" : "some segments could not be mapped safely",
-    target_language: targetLanguage,
-    recognized_normalized: normalizePracticeText(recognizedText, targetLanguage),
-    target_phrase_count: phrases.length,
-    ranges,
-    diagnostics: {
-      total_timestamp_token_count: source.raw_count,
-      playable_token_count: playableCount,
-      unassigned_tokens: unassignedTokens,
-      zero_duration_tokens: zeroDurationTokens,
-      candidate_count: matchesBySegment.filter((matches) => matches.length > 0).length,
-      score_computation_count: source.segments.length * phrases.length,
-      alignment_elapsed_ms: roundScore(Math.max(0, options.alignmentElapsedMs)),
-      valid_word_count: 0,
-      valid_segment_count: source.segments.length,
-      assigned_word_count: 0,
-      assigned_segment_count: assignedSegmentIndexes.size,
-      playable_word_count: 0,
-      unassigned_non_filler_count: unassignedTokens.length,
-      diagnostic_flags: [...new Set([
-        ...source.flags,
-        ...(options.discardedWordSource?.flags || []),
-      ])].sort(),
-      invalid_timestamp_units: [
-        ...(options.discardedWordSource?.invalid_units || []),
-        ...source.invalid_units,
-      ],
-      raw_timestamp_word_count: Number(options.discardedWordSource?.raw_count || 0),
-      raw_timestamp_segment_count: source.raw_count,
-    },
-  };
-}
-
-function asrSegments(segments) {
-  if (!Array.isArray(segments)) {
-    return {
-      segments: [],
-      raw_count: 0,
-      source_valid: true,
-      flags: [],
-      raw_units: [],
-      invalid_units: [],
-    };
-  }
-  const normalized = [];
-  const rawUnits = [];
-  const invalidUnits = [];
-  const flags = new Set();
-  for (const [rawIndex, item] of segments.entries()) {
-    const text = String(item?.text || "");
-    const { start, end, reason } = timestampUnitValues(item?.start, item?.end);
-    rawUnits.push({ index: rawIndex, text, start, end });
-    if (reason) {
-      invalidUnits.push(invalidTimestampUnit("segments", rawIndex, text, start, end, reason));
-      continue;
-    }
-    normalized.push({ text, start, end, segment_index: rawIndex });
-  }
-  let sourceValid = true;
-  for (let index = 1; index < normalized.length; index += 1) {
-    const previous = normalized[index - 1];
-    const current = normalized[index];
-    if (current.start < previous.start) {
-      flags.add("non_monotonic_timestamp_source");
-      sourceValid = false;
-    }
-    if (current.text === previous.text && current.start === previous.start && current.end === previous.end) {
-      flags.add("duplicate_timestamp_unit");
-      sourceValid = false;
-    }
-    if (previous.end > previous.start && current.end > current.start && current.start < previous.end) {
-      flags.add("overlapping_timestamp_units");
-      sourceValid = false;
-    }
-  }
-  if (invalidUnits.length) flags.add("invalid_timestamp_unit");
-  if (!sourceValid) {
-    const sourceReason = [
-      "non_monotonic_timestamp_source",
-      "duplicate_timestamp_unit",
-      "overlapping_timestamp_units",
-    ].find((flag) => flags.has(flag));
-    invalidUnits.push(...normalized.map((segment) => invalidTimestampUnit(
-      "segments",
-      segment.segment_index,
-      segment.text,
-      segment.start,
-      segment.end,
-      sourceReason,
-    )));
-  }
-  return {
-    segments: normalized,
-    raw_count: segments.length,
-    source_valid: sourceValid,
-    flags: [...flags].sort(),
-    raw_units: rawUnits,
-    invalid_units: invalidUnits,
-  };
-}
-
-function excludeDisjointSegmentSource(wordSpans, wordSourceValid, segmentSource) {
-  if (!wordSourceValid || !segmentSource.source_valid) return;
-  const positiveWords = wordSpans.filter((span) => span.audio_end > span.audio_start);
-  const positiveSegments = segmentSource.segments.filter((segment) => segment.end > segment.start);
-  if (!positiveWords.length || !positiveSegments.length) return;
-  const wordStart = Math.min(...positiveWords.map((span) => span.audio_start));
-  const wordEnd = Math.max(...positiveWords.map((span) => span.audio_end));
-  const segmentStart = Math.min(...positiveSegments.map((segment) => segment.start));
-  const segmentEnd = Math.max(...positiveSegments.map((segment) => segment.end));
-  if (wordStart < segmentEnd && segmentStart < wordEnd) return;
-  segmentSource.source_valid = false;
-  segmentSource.flags = [...new Set([
-    ...segmentSource.flags,
-    "word_segment_boundary_conflict",
-  ])].sort();
-  segmentSource.invalid_units.push(...segmentSource.segments.map((segment) => invalidTimestampUnit(
-    "segments",
-    segment.segment_index,
-    segment.text,
-    segment.start,
-    segment.end,
-    "word_segment_boundary_conflict",
-  )));
-  segmentSource.segments = [];
-}
-
-function alignPhrasesToWordSpans(phrases, recognized, wordSpans, targetLanguage) {
-  const memo = new Map();
-  const candidatesByPhrase = [];
-  const scoreCache = new Map();
-  let scoreComputationCount = 0;
-
-  function scores(target, candidate) {
-    const key = JSON.stringify([target, candidate]);
-    if (!scoreCache.has(key)) {
-      scoreCache.set(key, {
-        similarity: practiceSimilarity(target, candidate),
-        coverage: targetCharacterCoverage(target, candidate),
-      });
-      scoreComputationCount += 1;
-    }
-    return scoreCache.get(key);
-  }
-
-  for (const [phraseIndex, phrase] of phrases.entries()) {
-    const normalizedTarget = String(phrase.normalized_target || "");
-    const targetLength = normalizedTarget.length;
-    const isLastPhrase = phraseIndex === phrases.length - 1;
-    const minimumLength = Math.max(1, Math.floor(targetLength * (isLastPhrase ? 0.25 : 0.35)));
-    const maximumLength = Math.max(minimumLength, Math.floor(targetLength * 2.2) + 3);
-    let phraseCandidates = [];
-    for (let startWord = 0; startWord < wordSpans.length; startWord += 1) {
-      const start = wordSpans[startWord].normalized_start;
-      for (let endWord = startWord + 1; endWord <= wordSpans.length; endWord += 1) {
-        const end = wordSpans[endWord - 1].normalized_end;
-        const candidate = recognized.slice(start, end);
-        const candidateLength = candidate.length;
-        if (candidateLength < minimumLength) {
-          continue;
-        }
-        if (candidateLength > maximumLength) {
-          break;
-        }
-        const { similarity, coverage } = scores(normalizedTarget, candidate);
-        const isTrailingPartial = isLastPhrase && endWord === wordSpans.length;
-        const prefixLength = commonPrefixLength(normalizedTarget, candidate);
-        const isReliableMatch = similarity >= 0.4 && coverage >= 0.45;
-        const isTolerableTrailingPartial =
-          isTrailingPartial &&
-          similarity >= 0.3 &&
-          coverage >= 0.2 &&
-          prefixLength >= 2 &&
-          prefixLength / Math.min(targetLength, candidateLength) >= 0.35;
-        if (!isReliableMatch && !isTolerableTrailingPartial) {
-          continue;
-        }
-
-        let matchesOtherPhraseBetter = false;
-        for (const [otherIndex, otherPhrase] of phrases.entries()) {
-          if (otherIndex === phraseIndex) {
-            continue;
-          }
-          const other = scores(String(otherPhrase.normalized_target || ""), candidate);
-          if (other.similarity >= 0.85 && other.coverage >= 0.8 && other.similarity > similarity + 0.15) {
-            matchesOtherPhraseBetter = true;
-            break;
-          }
-        }
-        if (matchesOtherPhraseBetter) {
-          continue;
-        }
-
-        let hasOutOfOrderPrefix = false;
-        for (let splitWord = startWord + 1; splitWord < endWord; splitWord += 1) {
-          const split = wordSpans[splitWord].normalized_start;
-          const suffixScores = scores(normalizedTarget, recognized.slice(split, end));
-          if (suffixScores.similarity < 0.85 || suffixScores.coverage < 0.8) {
-            continue;
-          }
-          const prefix = recognized.slice(start, split);
-          for (const [otherIndex, otherPhrase] of phrases.entries()) {
-            if (otherIndex === phraseIndex) {
-              continue;
-            }
-            const prefixScores = scores(String(otherPhrase.normalized_target || ""), prefix);
-            if (prefixScores.similarity >= 0.85 && prefixScores.coverage >= 0.8) {
-              hasOutOfOrderPrefix = true;
-              break;
-            }
-          }
-          if (hasOutOfOrderPrefix) {
-            break;
-          }
-        }
-        if (hasOutOfOrderPrefix) {
-          continue;
-        }
-
-        const lengthDeltaRatio = Math.abs(candidateLength - targetLength) / Math.max(1, targetLength);
-        phraseCandidates.push({
-          start_word: startWord,
-          end_word: endWord,
-          recognized_start: start,
-          recognized_end: end,
-          similarity,
-          coverage,
-          score: coverage + similarity - 0.3 * lengthDeltaRatio,
-          boundary_source: "lexical_anchor",
-          alignment_confidence: alignmentConfidence(similarity, coverage),
-        });
-      }
-    }
-    if (phraseCandidates.some((candidate) => candidate.similarity >= 0.95 && candidate.coverage >= 0.95)) {
-      phraseCandidates = phraseCandidates.filter(
-        (candidate) => candidate.similarity >= 0.95 && candidate.coverage >= 0.95,
-      );
-    }
-    if (phraseCandidates.length > MAX_ALIGNMENT_CANDIDATES_PER_PHRASE) {
-      phraseCandidates = phraseCandidates
-        .sort((left, right) =>
-          right.score - left.score || left.start_word - right.start_word || left.end_word - right.end_word
-        )
-        .slice(0, MAX_ALIGNMENT_CANDIDATES_PER_PHRASE);
-    }
-    candidatesByPhrase.push(phraseCandidates);
-  }
-
-  function solve(phraseIndex, minimumWordIndex) {
-    const key = `${phraseIndex}:${minimumWordIndex}`;
-    if (memo.has(key)) {
-      return memo.get(key);
-    }
-    if (phraseIndex >= phrases.length) {
-      return { score: 0, count: 0, ranges: [] };
-    }
-
-    const skipped = solve(phraseIndex + 1, minimumWordIndex);
-    let best = { score: skipped.score, count: skipped.count, ranges: [null, ...skipped.ranges] };
-    for (const candidate of candidatesByPhrase[phraseIndex]) {
-      if (candidate.start_word < minimumWordIndex) {
-        continue;
-      }
-      const next = solve(phraseIndex + 1, candidate.end_word);
-      const { score: candidateScore, ...candidateRange } = candidate;
-      const option = {
-        score: candidateScore + next.score,
-        count: next.count + 1,
-        ranges: [candidateRange, ...next.ranges],
-      };
-      if (
-        option.score > best.score + 1e-9 ||
-        (
-          Math.abs(option.score - best.score) <= 1e-9 &&
-          (
-            option.count > best.count ||
-            (
-              option.count === best.count &&
-              best.ranges[0] === null &&
-              candidateRange.similarity >= 0.95 &&
-              candidateRange.coverage >= 0.95
-            )
-          )
-        )
-      ) {
-        best = option;
-      }
-    }
-
-    memo.set(key, best);
-    return best;
-  }
-
-  let selected = solve(0, 0).ranges;
-  const lexicalAnchors = selected.map((item) => (item ? { ...item } : null));
-  selected = expandInitialRepetitionRanges(phrases, selected, wordSpans, recognized);
-  selected = expandTrailingAttemptRanges(phrases, selected, wordSpans, recognized, targetLanguage);
-  selected = addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, targetLanguage);
-  selected = applyPausePartitionRanges(phrases, selected, wordSpans, recognized, targetLanguage);
-  selected = assignUnassignedWordGaps(phrases, selected, wordSpans, recognized, targetLanguage);
-  selected = movePrefixBeforeExactRightAnchor(
-    phrases,
-    selected,
-    wordSpans,
-    recognized,
-    targetLanguage,
-  );
-  selected = resolveOutOfOrderGapSuffixes(
-    phrases,
-    lexicalAnchors,
-    selected,
-    wordSpans,
-    recognized,
-    targetLanguage,
-  );
-  selected = trimDetachedSpeechExpansions(
-    phrases,
-    lexicalAnchors,
-    selected,
-    wordSpans,
-    recognized,
-  );
-  selected = trimBoundaryFillersFromRanges(
-    phrases,
-    selected,
-    wordSpans,
-    recognized,
-    targetLanguage,
-  );
-  selected = rejectWeakOneSidedAssignments(phrases, selected, wordSpans, targetLanguage);
-
-  let ranges = phrases.map((phrase, index) => {
-    const normalizedTarget = String(phrase.normalized_target || "");
-    const selection = selected[index];
-    if (!selection) {
-      return unavailableAlignmentRange(index, phrase, normalizedTarget);
-    }
-    const selectedSpans = wordSpans.slice(selection.start_word, selection.end_word);
-    const [audioStart, audioEnd] = safeAlignmentAudioBounds(selectedSpans);
-    if (audioStart === null || audioEnd === null || audioEnd <= audioStart) {
-      return textOnlyAlignmentRange(
-        index,
-        phrase,
-        normalizedTarget,
-        selectedSpans,
-        selection.recognized_start,
-        selection.recognized_end,
-        recognized,
-        targetLanguage,
-        selection.start_word,
-        selection.end_word,
-        selection.similarity,
-        selection.coverage,
-      );
-    }
-    const contentMatched = practiceContentMatches(
-      phrase.target,
-      joinMatchedWords(selectedSpans, targetLanguage),
-      targetLanguage,
-    );
-    return {
-      index,
-      source_index: phrase.source_index,
-      target: phrase.target,
-      normalized_target: normalizedTarget,
-      available: true,
-      matched: contentMatched,
-      content_matched: contentMatched,
-      source: "words",
-      similarity: roundScore(selection.similarity),
-      content_similarity: roundScore(selection.similarity),
-      coverage: roundScore(selection.coverage),
-      recognized_start: selection.recognized_start,
-      recognized_end: selection.recognized_end,
-      normalized_recognized: recognized.slice(selection.recognized_start, selection.recognized_end),
-      matched_text: joinMatchedWords(selectedSpans, targetLanguage),
-      audio_start: audioStart,
-      audio_end: audioEnd,
-      alignment_confidence: selection.alignment_confidence || alignmentConfidence(selection.similarity, selection.coverage),
-      boundary_source: selection.boundary_source || "lexical_anchor",
-      token_start_index: selection.start_word,
-      token_end_index: selection.end_word,
-    };
-  });
-  ranges = demoteOverlappingPhraseRanges(ranges);
-  return {
-    ranges,
-    metrics: {
-      candidate_count: candidatesByPhrase.reduce((total, candidates) => total + candidates.length, 0),
-      score_computation_count: scoreComputationCount,
-    },
-  };
-}
-
-function targetCharacterCoverage(normalizedTarget, candidate) {
-  if (!normalizedTarget || !candidate) {
-    return 0;
-  }
-  return Math.max(
-    0,
-    Math.min(1, sequenceMatcherMatchingLength(normalizedTarget, candidate) / normalizedTarget.length),
-  );
-}
-
-function alignmentConfidence(similarity, coverage) {
-  if (
-    similarity >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
-    coverage >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
-  ) {
-    return "high";
-  }
-  if (similarity >= 0.45 && coverage >= 0.45) {
-    return "medium";
-  }
-  return "low";
-}
-
-function rejectWeakOneSidedAssignments(phrases, selected, wordSpans, targetLanguage) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  const exactIndexes = resolved
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item && Number(item.similarity || 0) >= 0.95 && Number(item.coverage || 0) >= 0.95)
-    .map(({ index }) => index);
-  const assignedIndexes = resolved
-    .map((item, index) => (item ? index : null))
-    .filter((index) => index !== null);
-  if (exactIndexes.length !== 1 || assignedIndexes.length !== 2) return resolved;
-  const exactIndex = exactIndexes[0];
-  const weakIndex = assignedIndexes.find((index) => index !== exactIndex);
-  if (weakIndex === undefined || Math.abs(weakIndex - exactIndex) !== 1) return resolved;
-  const weak = resolved[weakIndex];
-  const target = String(phrases[weakIndex].normalized_target || "");
-  if (!hasOneSidedTargetEvidence(
-    target,
-    wordSpans.slice(weak.start_word, weak.end_word),
-    targetLanguage,
-  )) {
-    resolved[weakIndex] = null;
-  }
-  return resolved;
-}
-
-function matchingTargetPieceCount(target, spans) {
-  const matchingPieces = new Set();
-  for (const span of spans) {
-    const piece = String(span.normalized || "");
-    if (!piece) continue;
-    if (target.includes(piece)) {
-      matchingPieces.add(piece);
-      continue;
-    }
-    if (!/^[\x00-\x7f]*$/u.test(piece) && longestCommonSubsequenceLength(target, piece) >= 2) {
-      matchingPieces.add(piece);
-    }
-  }
-  return matchingPieces.size;
-}
-
-function isAscii(value) {
-  return /^[\x00-\x7f]*$/u.test(value);
-}
-
-function hasOneSidedTargetEvidence(target, spans, targetLanguage) {
-  const candidate = spans.map((span) => String(span.normalized || "")).join("");
-  if (!candidate || !target) return false;
-  const nonSpecific = PRACTICE_NON_SPECIFIC_ALIGNMENT_PIECES[targetLanguage] || new Set();
-  const specificPieces = spans.filter((span) => {
-    const piece = String(span.normalized || "");
-    return !nonSpecific.has(piece) && !(isAscii(piece) && piece.length < 2);
-  });
-  if (matchingTargetPieceCount(target, specificPieces) >= 2) return true;
-  if (
-    spans.length &&
-    nonSpecific.has(String(spans[0].normalized || "")) &&
-    matchingTargetPieceCount(target, specificPieces) >= 1 &&
-    targetCharacterCoverage(target, candidate) >= 0.35
-  ) {
-    return true;
-  }
-  const prefixLength = commonPrefixLength(target, candidate);
-  return (
-    prefixLength >= 2 &&
-    prefixLength / Math.max(1, target.length) >= 0.35 &&
-    prefixLength / Math.max(1, candidate.length) > 0.5
-  );
-}
-
-function hasSpecificDiagnosticOverlap(phrases, spans, targetLanguage) {
-  const stops = PRACTICE_DIAGNOSTIC_STOP_PIECES[targetLanguage] || new Set();
-  for (const span of spans) {
-    const piece = String(span.normalized || "");
-    if (!piece || stops.has(piece) || (isAscii(piece) && piece.length < 2)) continue;
-    for (const phrase of phrases) {
-      const target = String(phrase.normalized_target || "");
-      if (target.includes(piece)) return true;
-      if (!isAscii(piece) && longestCommonSubsequenceLength(target, piece) >= 2) return true;
-    }
-  }
-  return false;
-}
-
-function isExplicitBoundaryFiller(wordSpans, targetLanguage) {
-  if (!wordSpans.length) {
-    return false;
-  }
-  const pieces = wordSpans.map((span) => String(span.normalized || ""));
-  const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-  if (pieces.every((piece) => fillers.has(piece))) {
-    return true;
-  }
-  const sequences = PRACTICE_BOUNDARY_FILLER_SEQUENCES[targetLanguage] || new Set();
-  if (sequences.has(pieces.join(""))) return true;
-  let coreStart = 0;
-  let coreEnd = pieces.length;
-  while (coreStart < coreEnd && fillers.has(pieces[coreStart])) coreStart += 1;
-  while (coreEnd > coreStart && fillers.has(pieces[coreEnd - 1])) coreEnd -= 1;
-  return coreStart < coreEnd && sequences.has(pieces.slice(coreStart, coreEnd).join(""));
-}
-
-function stronglyMatchesOtherTarget(phrases, excludedIndexes, wordSpans, nearlyExact = false) {
-  const candidate = wordSpans.map((span) => String(span.normalized || "")).join("");
-  if (!candidate) {
-    return false;
-  }
-  const similarityThreshold = nearlyExact ? 0.95 : 0.75;
-  const coverageThreshold = nearlyExact ? 0.95 : 0.7;
-  return phrases.some((phrase, index) => {
-    if (excludedIndexes.has(index)) {
-      return false;
-    }
-    const target = String(phrase.normalized_target || "");
-    return (
-      practiceSimilarity(target, candidate) >= similarityThreshold &&
-      targetCharacterCoverage(target, candidate) >= coverageThreshold
-    );
-  });
-}
-
-function addStructuralFallbackRanges(phrases, selected, wordSpans, recognized, targetLanguage) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  let index = 0;
-  while (index < resolved.length) {
-    if (resolved[index]) {
-      index += 1;
-      continue;
-    }
-    const runStart = index;
-    while (index < resolved.length && !resolved[index]) {
-      index += 1;
-    }
-    const runEnd = index;
-    if (runEnd - runStart !== 1) {
-      continue;
-    }
-    const previous = runStart > 0 ? resolved[runStart - 1] : null;
-    const following = runEnd < resolved.length ? resolved[runEnd] : null;
-    if (!previous && !following) {
-      continue;
-    }
-    const oneSidedAnchor = !following ? previous : !previous ? following : null;
-    let lower = previous ? previous.end_word : 0;
-    let upper = following ? following.start_word : wordSpans.length;
-    const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-    while (lower < upper && fillers.has(String(wordSpans[lower].normalized || ""))) {
-      lower += 1;
-    }
-    while (upper > lower && fillers.has(String(wordSpans[upper - 1].normalized || ""))) {
-      upper -= 1;
-    }
-    const candidateSpans = wordSpans.slice(lower, upper);
-    if (!candidateSpans.length || isExplicitBoundaryFiller(candidateSpans, targetLanguage)) {
-      continue;
-    }
-    if (stronglyMatchesOtherTarget(phrases, new Set([runStart]), candidateSpans)) {
-      continue;
-    }
-    const phrase = phrases[runStart];
-    const normalizedTarget = String(phrase.normalized_target || "");
-    if (
-      oneSidedAnchor &&
-      Number(oneSidedAnchor.similarity || 0) >= 0.95 &&
-      Number(oneSidedAnchor.coverage || 0) >= 0.95 &&
-      !hasOneSidedTargetEvidence(normalizedTarget, candidateSpans, targetLanguage)
-    ) {
-      continue;
-    }
-    const candidate = candidateSpans.map((span) => String(span.normalized || "")).join("");
-    const similarity = practiceSimilarity(normalizedTarget, candidate);
-    const coverage = targetCharacterCoverage(normalizedTarget, candidate);
-    const prefixLength = commonPrefixLength(normalizedTarget, candidate);
-    const lengthRatio = candidate.length / Math.max(1, normalizedTarget.length);
-    const pauseBefore = lower === 0 ||
-      wordSpans[lower].audio_start - wordSpans[lower - 1].audio_end >=
-        PRACTICE_PAUSE_PARTITION_GAP_SECONDS;
-    const pauseAfter =
-      upper === wordSpans.length ||
-      wordSpans[upper].audio_start - wordSpans[upper - 1].audio_end >=
-        PRACTICE_PAUSE_PARTITION_GAP_SECONDS;
-    const constrainedByNeighbors = Boolean(
-      previous &&
-      following &&
-      Number(previous.similarity || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
-      Number(previous.coverage || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
-      Number(following.similarity || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD &&
-      Number(following.coverage || 0) >= PRACTICE_HIGH_CONFIDENCE_ALIGNMENT_THRESHOLD
-    );
-    const hasInternalPartition = constrainedByNeighbors && candidateSpans.some(
-      (span, spanIndex) => spanIndex > 0 &&
-        span.audio_start - candidateSpans[spanIndex - 1].audio_end >=
-          PRACTICE_PAUSE_PARTITION_GAP_SECONDS,
-    );
-    if (hasInternalPartition) {
-      continue;
-    }
-    const structuralBoundary = constrainedByNeighbors || pauseBefore || pauseAfter || prefixLength >= 2;
-    const lexicalEvidence = constrainedByNeighbors || (coverage >= 0.3 && similarity >= 0.3);
-    if (!structuralBoundary || !lexicalEvidence || lengthRatio < 0.35) {
-      continue;
-    }
-    const fallback = {};
-    updateSelectedWordRange(
-      fallback,
-      phrase,
-      lower,
-      upper,
-      wordSpans,
-      recognized,
-      constrainedByNeighbors ? "neighbor_anchors" : "pause_fallback",
-    );
-    fallback.alignment_confidence = "low";
-    resolved[runStart] = fallback;
-  }
-  return resolved;
-}
-
-function applyPausePartitionRanges(phrases, selected, wordSpans, recognized, targetLanguage) {
-  if (phrases.length < 2 || wordSpans.length < phrases.length) {
-    return selected;
-  }
-  const boundaries = [0];
-  for (let index = 1; index < wordSpans.length; index += 1) {
-    const gap = wordSpans[index].audio_start - wordSpans[index - 1].audio_end;
-    if (gap >= PRACTICE_PAUSE_PARTITION_GAP_SECONDS) {
-      boundaries.push(index);
-    }
-  }
-  boundaries.push(wordSpans.length);
-  if (boundaries.length - 1 !== phrases.length) {
-    return selected;
-  }
-
-  const expectedBounds = boundaries.slice(0, -1).map((startWord, index) => [startWord, boundaries[index + 1]]);
-  const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-  if (expectedBounds.some(([startWord, endWord]) =>
-    fillers.has(String(wordSpans[startWord].normalized || "")) ||
-    fillers.has(String(wordSpans[endWord - 1].normalized || ""))
-  )) {
-    return selected;
-  }
-  const alreadyAligned = selected.every((item, index) =>
-    item && item.start_word === expectedBounds[index][0] && item.end_word === expectedBounds[index][1]
-  );
-  if (alreadyAligned) {
-    return selected;
-  }
-  const hasZeroDurationOverlapBridge = wordSpans.some(
-    (_span, index) => index > 0 && isZeroDurationOverlapBridge(wordSpans, index),
-  );
-  if (
-    hasZeroDurationOverlapBridge
-    && selected.some((item) => item && Number(item.similarity || 0) >= 0.95 && Number(item.coverage || 0) >= 0.95)
-  ) {
-    return selected;
-  }
-
-  const similarities = [];
-  const coverages = [];
-  for (const [phraseIndex, phrase] of phrases.entries()) {
-    const [startWord, endWord] = expectedBounds[phraseIndex];
-    const chunk = wordSpans.slice(startWord, endWord);
-    if (!chunk.length || isExplicitBoundaryFiller(chunk, targetLanguage)) {
-      return selected;
-    }
-    if (stronglyMatchesOtherTarget(phrases, new Set([phraseIndex]), chunk)) {
-      return selected;
-    }
-    const candidate = chunk.map((span) => String(span.normalized || "")).join("");
-    const target = String(phrase.normalized_target || "");
-    similarities.push(practiceSimilarity(target, candidate));
-    coverages.push(targetCharacterCoverage(target, candidate));
-  }
-  const averageCoverage = coverages.reduce((total, coverage) => total + coverage, 0) / coverages.length;
-  if (Math.max(...coverages, 0) < 0.25 || averageCoverage < 0.2) {
-    return selected;
-  }
-  const selectedCount = selected.filter(Boolean).length;
-  if (selectedCount > 0 && phrases.length !== 2) {
-    return selected;
-  }
-  if (selectedCount === 1) {
-    const anchor = selected.find(Boolean);
-    if (Number(anchor.similarity || 0) >= 0.95 && Number(anchor.coverage || 0) >= 0.95) {
-      return selected;
-    }
-  }
-  if (
-    selectedCount === 1 &&
-    similarities.some((similarity, index) => similarity < 0.3 || coverages[index] < 0.3)
-  ) {
-    return selected;
-  }
-
-  return phrases.map((phrase, phraseIndex) => {
-    const [startWord, endWord] = expectedBounds[phraseIndex];
-    const item = {};
-    updateSelectedWordRange(
-      item,
-      phrase,
-      startWord,
-      endWord,
-      wordSpans,
-      recognized,
-      "pause_partition",
-    );
-    item.alignment_confidence = "low";
-    return item;
-  });
-}
-
-function assignUnassignedWordGaps(phrases, selected, wordSpans, recognized, targetLanguage) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  const availableIndexes = resolved.map((item, index) => (item ? index : -1)).filter((index) => index >= 0);
-  if (!availableIndexes.length) {
-    return resolved;
-  }
-  const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-  const firstIndex = availableIndexes[0];
-  const first = resolved[firstIndex];
-  let leadingStart = 0;
-  const leadingEnd = first.start_word;
-  while (leadingStart < leadingEnd && fillers.has(String(wordSpans[leadingStart].normalized || ""))) {
-    leadingStart += 1;
-  }
-  const leading = wordSpans.slice(leadingStart, leadingEnd);
-  if (
-    firstIndex === 0 &&
-    leading.length &&
-    !isExplicitBoundaryFiller(leading, targetLanguage) &&
-    !stronglyMatchesOtherTarget(phrases, new Set([0]), leading)
-  ) {
-    updateSelectedWordRange(
-      first,
-      phrases[0],
-      leadingStart,
-      first.end_word,
-      wordSpans,
-      recognized,
-      "lexical_anchor+leading_gap",
-    );
-  }
-
-  for (let pairIndex = 0; pairIndex < availableIndexes.length - 1; pairIndex += 1) {
-    const leftIndex = availableIndexes[pairIndex];
-    const rightIndex = availableIndexes[pairIndex + 1];
-    if (rightIndex !== leftIndex + 1) {
-      continue;
-    }
-    const left = resolved[leftIndex];
-    const right = resolved[rightIndex];
-    const gapStart = left.end_word;
-    const gapEnd = right.start_word;
-    const gapSpans = wordSpans.slice(gapStart, gapEnd);
-    if (!gapSpans.length || isExplicitBoundaryFiller(gapSpans, targetLanguage)) {
-      continue;
-    }
-    if (stronglyMatchesOtherTarget(phrases, new Set([leftIndex, rightIndex]), gapSpans)) {
-      continue;
-    }
-    const gapText = gapSpans.map((span) => String(span.normalized || "")).join("");
-    const leftTarget = String(phrases[leftIndex].normalized_target || "");
-    const rightTarget = String(phrases[rightIndex].normalized_target || "");
-    const leftText = recognized.slice(left.recognized_start, left.recognized_end);
-    const rightText = recognized.slice(right.recognized_start, right.recognized_end);
-    const leftGapSimilarity = practiceSimilarity(leftTarget, gapText);
-    const rightGapSimilarity = practiceSimilarity(rightTarget, gapText);
-    const leftGain = practiceSimilarity(leftTarget, leftText + gapText) - practiceSimilarity(leftTarget, leftText);
-    const rightGain = practiceSimilarity(rightTarget, gapText + rightText) - practiceSimilarity(rightTarget, rightText);
-    let assignToRight;
-    if (leftGapSimilarity >= 0.75 && leftGapSimilarity > rightGapSimilarity + 1e-9) {
-      assignToRight = false;
-    } else if (rightGapSimilarity >= 0.75 && rightGapSimilarity > leftGapSimilarity + 1e-9) {
-      assignToRight = true;
-    } else if (gapSpans.length === 1 && gapText.length <= 3 && leftGain <= 0 && rightGain <= 0) {
-      assignToRight = true;
-    } else {
-      assignToRight =
-        rightGain > leftGain + 1e-9 ||
-        (Math.abs(rightGain - leftGain) <= 1e-9 && rightText.length < leftText.length);
-    }
-    if (assignToRight) {
-      updateSelectedWordRange(
-        right,
-        phrases[rightIndex],
-        gapStart,
-        right.end_word,
-        wordSpans,
-        recognized,
-        `${right.boundary_source || "lexical_anchor"}+gap_assignment`,
-      );
-    } else {
-      updateSelectedWordRange(
-        left,
-        phrases[leftIndex],
-        left.start_word,
-        gapEnd,
-        wordSpans,
-        recognized,
-        `${left.boundary_source || "lexical_anchor"}+gap_assignment`,
-      );
-    }
-  }
-  return resolved;
-}
-
-function movePrefixBeforeExactRightAnchor(phrases, selected, wordSpans, recognized, targetLanguage) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  for (let leftIndex = 0; leftIndex < resolved.length - 1; leftIndex += 1) {
-    const left = resolved[leftIndex];
-    const right = resolved[leftIndex + 1];
-    if (!left || !right) continue;
-    const rightStart = right.start_word;
-    const rightEnd = right.end_word;
-    if (rightEnd - rightStart < 2) continue;
-    const rightTarget = String(phrases[leftIndex + 1].normalized_target || "");
-    let split = null;
-    for (let candidateSplit = rightStart + 1; candidateSplit < rightEnd; candidateSplit += 1) {
-      const suffix = wordSpans
-        .slice(candidateSplit, rightEnd)
-        .map((span) => String(span.normalized || ""))
-        .join("");
-      if (
-        practiceSimilarity(rightTarget, suffix) >= 0.95 &&
-        targetCharacterCoverage(rightTarget, suffix) >= 0.95
-      ) {
-        split = candidateSplit;
-        break;
-      }
-    }
-    if (split === null) continue;
-    const leftTarget = String(phrases[leftIndex].normalized_target || "");
-    const leftStart = left.start_word;
-    const leftEnd = left.end_word;
-    const leftText = wordSpans.slice(leftStart, leftEnd).map((span) => String(span.normalized || "")).join("");
-    const expandedLeftText = wordSpans.slice(leftStart, split).map((span) => String(span.normalized || "")).join("");
-    const similarityGain = practiceSimilarity(leftTarget, expandedLeftText) - practiceSimilarity(leftTarget, leftText);
-    const coverageGain = targetCharacterCoverage(leftTarget, expandedLeftText) - targetCharacterCoverage(leftTarget, leftText);
-    const prefixStart = right.start_word;
-    const temporallyAttachedLeft = (
-      prefixStart === leftEnd &&
-      wordSpans[prefixStart].audio_start <= wordSpans[leftEnd - 1].audio_end + 1e-9 &&
-      wordSpans[split].audio_start > wordSpans[split - 1].audio_end
-    );
-    const expandedContentMatches = practiceContentMatches(
-      String(phrases[leftIndex].target || ""),
-      joinMatchedWords(wordSpans.slice(leftStart, split), targetLanguage),
-      targetLanguage,
-    );
-    if (
-      similarityGain <= 0.01 &&
-      coverageGain <= 0.01 &&
-      !temporallyAttachedLeft &&
-      !expandedContentMatches
-    ) {
-      continue;
-    }
-    updateSelectedWordRange(
-      left,
-      phrases[leftIndex],
-      leftStart,
-      split,
-      wordSpans,
-      recognized,
-      "exact_right_anchor",
-    );
-    updateSelectedWordRange(
-      right,
-      phrases[leftIndex + 1],
-      split,
-      rightEnd,
-      wordSpans,
-      recognized,
-      "exact_right_anchor",
-    );
-  }
-  return resolved;
-}
-
-function resolveOutOfOrderGapSuffixes(
-  phrases,
-  lexicalAnchors,
-  selected,
-  wordSpans,
-  recognized,
-  targetLanguage,
-) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  for (let rightIndex = 0; rightIndex < resolved.length; rightIndex += 1) {
-    const anchor = lexicalAnchors[rightIndex];
-    const right = resolved[rightIndex];
-    if (!anchor || !right || rightIndex === 0) continue;
-    const anchorStart = anchor.start_word;
-    const previousAnchor = lexicalAnchors.slice(0, rightIndex).reverse().find(Boolean);
-    const gapStart = previousAnchor ? previousAnchor.end_word : 0;
-    if (gapStart >= anchorStart) continue;
-    let outOfOrderEnd = null;
-    for (let split = gapStart + 1; split <= anchorStart; split += 1) {
-      if (stronglyMatchesOtherTarget(phrases, new Set([rightIndex]), wordSpans.slice(gapStart, split), true)) {
-        outOfOrderEnd = split;
-        break;
-      }
-    }
-    if (outOfOrderEnd === null) continue;
-    const suffix = wordSpans.slice(outOfOrderEnd, anchorStart);
-    let newStart;
-    if (!suffix.length || isExplicitBoundaryFiller(suffix, targetLanguage)) {
-      newStart = anchorStart;
-    } else {
-      const separatedFromConflict = suffix[0].audio_start > wordSpans[outOfOrderEnd - 1].audio_end;
-      const adjacentToAnchor = wordSpans[anchorStart].audio_start <= suffix[suffix.length - 1].audio_end + 1e-9;
-      newStart = separatedFromConflict && adjacentToAnchor ? outOfOrderEnd : anchorStart;
-    }
-    if (newStart === right.start_word) continue;
-    updateSelectedWordRange(
-      right,
-      phrases[rightIndex],
-      newStart,
-      right.end_word,
-      wordSpans,
-      recognized,
-      "out_of_order_gap_guard",
-    );
-  }
-  return resolved;
-}
-
-function trimDetachedSpeechExpansions(phrases, lexicalAnchors, selected, wordSpans, recognized) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  for (let index = 0; index < resolved.length; index += 1) {
-    const anchor = lexicalAnchors[index];
-    const item = resolved[index];
-    if (!anchor || !item) continue;
-    let startWord = item.start_word;
-    let endWord = item.end_word;
-    const anchorStart = anchor.start_word;
-    const anchorEnd = anchor.end_word;
-    if (startWord < anchorStart) {
-      const leadingGap = wordSpans[anchorStart].audio_start - wordSpans[anchorStart - 1].audio_end;
-      if (leadingGap >= PRACTICE_DETACHED_SPEECH_GAP_SECONDS) startWord = anchorStart;
-    }
-    if (endWord > anchorEnd && anchorEnd < wordSpans.length) {
-      const trailingGap = wordSpans[anchorEnd].audio_start - wordSpans[anchorEnd - 1].audio_end;
-      if (trailingGap >= PRACTICE_DETACHED_SPEECH_GAP_SECONDS) endWord = anchorEnd;
-    }
-    if (startWord !== item.start_word || endWord !== item.end_word) {
-      updateSelectedWordRange(
-        item,
-        phrases[index],
-        startWord,
-        endWord,
-        wordSpans,
-        recognized,
-        "detached_speech_guard",
-      );
-    }
-  }
-  return resolved;
-}
-
-function trimBoundaryFillersFromRanges(phrases, selected, wordSpans, recognized, targetLanguage) {
-  const resolved = selected.map((item) => (item ? { ...item } : null));
-  for (let index = 0; index < resolved.length; index += 1) {
-    const item = resolved[index];
-    if (!item) continue;
-    const startWord = item.start_word;
-    const endWord = item.end_word;
-    const target = String(phrases[index].normalized_target || "");
-    let trimmedStart = startWord;
-    for (let cut = startWord + 1; cut < endWord; cut += 1) {
-      const prefix = wordSpans.slice(startWord, cut);
-      const prefixText = prefix.map((span) => String(span.normalized || "")).join("");
-      if (isExplicitBoundaryFiller(prefix, targetLanguage) && !target.startsWith(prefixText)) {
-        trimmedStart = cut;
-      }
-    }
-    let trimmedEnd = endWord;
-    for (let cut = trimmedStart + 1; cut < endWord; cut += 1) {
-      const suffix = wordSpans.slice(cut, endWord);
-      const suffixText = suffix.map((span) => String(span.normalized || "")).join("");
-      if (isExplicitBoundaryFiller(suffix, targetLanguage) && !target.endsWith(suffixText)) {
-        trimmedEnd = cut;
-        break;
-      }
-    }
-    if (trimmedStart !== startWord || trimmedEnd !== endWord) {
-      updateSelectedWordRange(
-        item,
-        phrases[index],
-        trimmedStart,
-        trimmedEnd,
-        wordSpans,
-        recognized,
-        "boundary_filler_guard",
-      );
-    }
-  }
-  return resolved;
-}
-
-function safeAlignmentAudioBounds(selectedSpans) {
-  const timed = selectedSpans.filter((span) => span.audio_end > span.audio_start);
-  if (!timed.length) {
-    return [null, null];
-  }
-  return [
-    Math.min(...timed.map((span) => Number(span.audio_start))),
-    Math.max(...timed.map((span) => Number(span.audio_end))),
-  ];
-}
-
-function demoteOverlappingPhraseRanges(ranges) {
-  const conflictIndexes = new Set();
-  let previousIndex = null;
-  for (const [index, entry] of ranges.entries()) {
-    if (!entry.available) continue;
-    if (previousIndex !== null && Number(entry.audio_start) < Number(ranges[previousIndex].audio_end)) {
-      conflictIndexes.add(previousIndex);
-      conflictIndexes.add(index);
-    }
-    previousIndex = index;
-  }
-  for (const index of conflictIndexes) {
-    const entry = ranges[index];
-    entry.available = false;
-    entry.source = "none";
-    entry.audio_start = null;
-    entry.audio_end = null;
-    entry.boundary_source = `${entry.boundary_source || "lexical_anchor"}+overlapping_phrase_range_guard`;
-    entry.diagnostic_flags = ["overlapping_phrase_ranges"];
-  }
-  return ranges;
-}
-
-function textOnlyAlignmentRange(
-  index,
-  phrase,
-  normalizedTarget,
-  selectedSpans,
-  start,
-  end,
-  recognized,
-  targetLanguage,
-  startWord,
-  endWord,
-  similarity,
-  coverage,
-) {
-  const contentMatched = practiceContentMatches(
-    phrase.target,
-    joinMatchedWords(selectedSpans, targetLanguage),
-    targetLanguage,
-  );
-  return {
-    index,
-    source_index: phrase.source_index,
-    target: phrase.target,
-    normalized_target: normalizedTarget,
-    available: false,
-    matched: contentMatched,
-    content_matched: contentMatched,
-    source: "none",
-    similarity: roundScore(similarity),
-    content_similarity: roundScore(similarity),
-    coverage: roundScore(coverage),
-    recognized_start: start,
-    recognized_end: end,
-    normalized_recognized: recognized.slice(start, end),
-    matched_text: joinMatchedWords(selectedSpans, targetLanguage),
-    audio_start: null,
-    audio_end: null,
-    alignment_confidence: "text_only",
-    boundary_source: "zero_duration_text_only",
-    token_start_index: startWord,
-    token_end_index: endWord,
-  };
-}
-
-function alignmentDiagnostics(ranges, phrases, wordSpans, targetLanguage, metrics) {
-  const source = metrics.source || {
-    raw_count: wordSpans.length,
-    flags: [],
-    invalid_units: [],
-  };
-  const segmentSource = metrics.segmentSource || {
-    raw_count: 0,
-    segments: [],
-    flags: [],
-    invalid_units: [],
-  };
-  const owned = new Set();
-  const playable = new Set();
-  for (const entry of ranges) {
-    if (entry.token_start_index === null || entry.token_start_index === undefined) {
-      continue;
-    }
-    for (let index = entry.token_start_index; index < entry.token_end_index; index += 1) {
-      owned.add(index);
-      if (entry.available) {
-        playable.add(index);
-      }
-    }
-  }
-  const ownedIndexes = [...owned];
-  const ownedMin = ownedIndexes.length ? Math.min(...ownedIndexes) : null;
-  const ownedMax = ownedIndexes.length ? Math.max(...ownedIndexes) : null;
-  const unassignedIndexes = wordSpans.map((_, index) => index).filter((index) => !owned.has(index));
-  const fillerIndexes = new Set();
-  const canonicalReasons = new Map();
-  let runStart = 0;
-  while (runStart < unassignedIndexes.length) {
-    let runEnd = runStart + 1;
-    while (
-      runEnd < unassignedIndexes.length &&
-      unassignedIndexes[runEnd] === unassignedIndexes[runEnd - 1] + 1
-    ) {
-      runEnd += 1;
-    }
-    const runIndexes = unassignedIndexes.slice(runStart, runEnd);
-    const runSpans = runIndexes.map((index) => wordSpans[index]);
-    if (isExplicitBoundaryFiller(runSpans, targetLanguage)) {
-      runIndexes.forEach((index) => fillerIndexes.add(index));
-    }
-    for (const [position, span] of runSpans.entries()) {
-      if (span.zero_duration) canonicalReasons.set(runIndexes[position], "no_positive_duration");
-    }
-
-    let coreStart = 0;
-    let coreEnd = runSpans.length;
-    for (let cut = 1; cut <= runSpans.length; cut += 1) {
-      if (isExplicitBoundaryFiller(runSpans.slice(0, cut), targetLanguage)) coreStart = cut;
-    }
-    for (let cut = coreStart; cut < runSpans.length; cut += 1) {
-      if (isExplicitBoundaryFiller(runSpans.slice(cut), targetLanguage)) {
-        coreEnd = cut;
-        break;
-      }
-    }
-    for (const position of [
-      ...Array.from({ length: coreStart }, (_, index) => index),
-      ...Array.from({ length: runSpans.length - coreEnd }, (_, index) => coreEnd + index),
-    ]) {
-      const index = runIndexes[position];
-      if (!canonicalReasons.has(index)) canonicalReasons.set(index, "boundary_filler");
-    }
-
-    let corePairs = runIndexes
-      .slice(coreStart, coreEnd)
-      .map((index, position) => [index, runSpans[coreStart + position]])
-      .filter(([index]) => !canonicalReasons.has(index));
-    if (corePairs.length) {
-      const [markerIndex, markerSpan] = corePairs[0];
-      const marker = String(markerSpan.normalized || "");
-      if (
-        (PRACTICE_NON_SPECIFIC_ALIGNMENT_PIECES[targetLanguage] || new Set()).has(marker) &&
-        phrases.some((phrase) => String(phrase.normalized_target || "").startsWith(marker)) &&
-        !stronglyMatchesOtherTarget(phrases, new Set(), corePairs.map(([, span]) => span))
-      ) {
-        canonicalReasons.set(markerIndex, "ambiguous_assignment");
-        corePairs = corePairs.slice(1);
-      }
-    }
-    if (corePairs.length) {
-      const coreIndexes = corePairs.map(([index]) => index);
-      const coreSpans = corePairs.map(([, span]) => span);
-      let coreReason;
-      if (stronglyMatchesOtherTarget(phrases, new Set(), coreSpans)) {
-        coreReason = "out_of_order_speech";
-      } else {
-        const candidate = coreSpans.map((span) => String(span.normalized || "")).join("");
-        const isTargetPrefix = phrases.some((phrase) => {
-          const target = String(phrase.normalized_target || "");
-          return target.startsWith(candidate) && candidate.length < target.length;
-        });
-        const strongestSimilarity = Math.max(
-          0,
-          ...phrases.map((phrase) => practiceSimilarity(String(phrase.normalized_target || ""), candidate)),
-        );
-        const strongestCoverage = Math.max(
-          0,
-          ...phrases.map((phrase) => targetCharacterCoverage(String(phrase.normalized_target || ""), candidate)),
-        );
-        const firstIndex = coreIndexes[0];
-        const lastIndex = coreIndexes[coreIndexes.length - 1];
-        const detachedBefore = (
-          firstIndex > 0 &&
-          wordSpans[firstIndex].audio_start - wordSpans[firstIndex - 1].audio_end >=
-            PRACTICE_DETACHED_SPEECH_GAP_SECONDS
-        );
-        const detachedAfter = (
-          lastIndex + 1 < wordSpans.length &&
-          wordSpans[lastIndex + 1].audio_start - wordSpans[lastIndex].audio_end >=
-            PRACTICE_DETACHED_SPEECH_GAP_SECONDS
-        );
-        if (isTargetPrefix) {
-          coreReason = "ambiguous_assignment";
-        } else if (!hasSpecificDiagnosticOverlap(phrases, coreSpans, targetLanguage)) {
-          coreReason = "unrelated_speech";
-        } else {
-          coreReason = (
-            detachedBefore ||
-            detachedAfter ||
-            (strongestSimilarity < 0.35 && strongestCoverage < 0.25)
-          ) ? "unrelated_speech" : "ambiguous_assignment";
-        }
-      }
-      coreIndexes.forEach((index) => canonicalReasons.set(index, coreReason));
-    }
-    runStart = runEnd;
-  }
-  const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-  const unassignedTokens = unassignedIndexes.map((index) => {
-    const span = wordSpans[index];
-    let reason = "no_structural_anchor";
-    if (fillerIndexes.has(index) || fillers.has(String(span.normalized || ""))) {
-      reason = "edge_or_boundary_filler";
-    } else if (ownedMin !== null && ownedMin < index && index < ownedMax) {
-      reason = "unexplained_internal_token";
-    }
-    return {
-      source: "words",
-      source_index: span.token_index,
-      index,
-      text: span.text,
-      start: span.audio_start,
-      end: span.audio_end,
-      reason,
-      canonical_reason: canonicalReasons.get(index) || "ambiguous_assignment",
-    };
-  });
-  return {
-    total_timestamp_token_count: wordSpans.length,
-    playable_token_count: playable.size,
-    unassigned_tokens: unassignedTokens,
-    zero_duration_tokens: wordSpans
-      .map((span, index) => ({ span, index }))
-      .filter(({ span }) => span.zero_duration)
-      .map(({ span, index }) => ({
-        source: "words",
-        source_index: span.token_index,
-        index,
-        text: span.text,
-        start: span.audio_start,
-        end: span.audio_end,
-      })),
-    candidate_count: metrics.candidate_count,
-    score_computation_count: metrics.score_computation_count,
-    alignment_elapsed_ms: roundScore(Math.max(0, metrics.alignment_elapsed_ms)),
-    valid_word_count: wordSpans.length,
-    valid_segment_count: segmentSource.segments.length,
-    assigned_word_count: owned.size,
-    assigned_segment_count: 0,
-    playable_word_count: playable.size,
-    unassigned_non_filler_count: unassignedTokens.filter(
-      (token) => token.reason !== "edge_or_boundary_filler"
-    ).length,
-    diagnostic_flags: [...new Set([
-      ...source.flags,
-      ...segmentSource.flags,
-      ...ranges.flatMap((entry) => entry.diagnostic_flags || []),
-    ])].sort(),
-    invalid_timestamp_units: [...source.invalid_units, ...segmentSource.invalid_units],
-    raw_timestamp_word_count: source.raw_count,
-    raw_timestamp_segment_count: segmentSource.raw_count,
-  };
-}
-
-function expandInitialRepetitionRanges(phrases, selected, wordSpans, recognized) {
-  const expanded = [];
-  let previousEndWord = 0;
-  for (const [index, phrase] of phrases.entries()) {
-    const selection = selected[index];
-    if (!selection) {
-      expanded.push(null);
-      continue;
-    }
-    const item = { ...selection };
-    let startWord = item.start_word;
-    const endWord = item.end_word;
-    const originalStartWord = startWord;
-    for (let candidateStart = startWord - 1; candidateStart >= previousEndWord; candidateStart -= 1) {
-      if (
-        isTargetPrefixAttemptSequence(
-          wordSpans.slice(candidateStart, originalStartWord),
-          String(phrase.normalized_target || ""),
-        )
-      ) {
-        startWord = candidateStart;
-      }
-    }
-    const substantialPrefixStart = earliestSubstantialPrefixAttemptStart(
-      wordSpans,
-      previousEndWord,
-      originalStartWord,
-      String(phrase.normalized_target || ""),
-    );
-    if (
-      substantialPrefixStart !== null &&
-      !stronglyMatchesOtherTarget(
-        phrases,
-        new Set([index]),
-        wordSpans.slice(substantialPrefixStart, originalStartWord),
-        true,
-      )
-    ) {
-      startWord = Math.min(startWord, substantialPrefixStart);
-    }
-
-    if (startWord !== originalStartWord) {
-      updateSelectedWordRange(item, phrase, startWord, endWord, wordSpans, recognized);
-    }
-    expanded.push(item);
-    previousEndWord = endWord;
-  }
-  return expanded;
-}
-
-function isTargetPrefixAttemptSequence(wordSpans, normalizedTarget) {
-  if (!wordSpans.length || !normalizedTarget) {
-    return false;
-  }
-  const pieces = wordSpans.map((span) => String(span.normalized || ""));
-  const memo = new Map();
-  function canPartition(start) {
-    if (start === pieces.length) {
-      return true;
-    }
-    if (memo.has(start)) {
-      return memo.get(start);
-    }
-    let attempt = "";
-    for (let end = start; end < pieces.length; end += 1) {
-      attempt += pieces[end];
-      if (!normalizedTarget.startsWith(attempt)) {
-        break;
-      }
-      if (canPartition(end + 1)) {
-        memo.set(start, true);
-        return true;
-      }
-    }
-    memo.set(start, false);
-    return false;
-  }
-  return canPartition(0);
-}
-
-function earliestSubstantialPrefixAttemptStart(wordSpans, minimumWord, selectedStartWord, normalizedTarget) {
-  if (minimumWord >= selectedStartWord || !normalizedTarget) {
-    return null;
-  }
-  const minimumAttemptLength = Math.min(
-    normalizedTarget.length,
-    Math.max(2, Math.floor(normalizedTarget.length * 0.25)),
-  );
-  for (let candidateStart = minimumWord; candidateStart < selectedStartWord; candidateStart += 1) {
-    let attempt = "";
-    for (let candidateEnd = candidateStart; candidateEnd < selectedStartWord; candidateEnd += 1) {
-      attempt += String(wordSpans[candidateEnd].normalized || "");
-      if (!normalizedTarget.startsWith(attempt)) {
-        break;
-      }
-      if (attempt.length >= minimumAttemptLength) {
-        return candidateStart;
-      }
-    }
-  }
-  return null;
-}
-
-function expandTrailingAttemptRanges(phrases, selected, wordSpans, recognized, targetLanguage) {
-  return phrases.map((phrase, index) => {
-    const selection = selected[index];
-    if (!selection) {
-      return null;
-    }
-    const item = { ...selection };
-    const startWord = item.start_word;
-    const endWord = item.end_word;
-    const nextSelection = selected.slice(index + 1).find(Boolean);
-    const nextStartWord = nextSelection ? nextSelection.start_word : wordSpans.length;
-    let expandedEndWord = endWord;
-    const normalizedTarget = String(phrase.normalized_target || "");
-
-    if (index === phrases.length - 1) {
-      expandedEndWord = nextStartWord;
-      const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-      while (expandedEndWord > endWord) {
-        const token = String(wordSpans[expandedEndWord - 1].normalized || "");
-        if (!fillers.has(token) || normalizedTarget.endsWith(token)) {
-          break;
-        }
-        expandedEndWord -= 1;
-      }
-      const outOfOrderStart = findOutOfOrderTargetStart(
-        phrases,
-        index,
-        wordSpans,
-        endWord,
-        expandedEndWord,
-      );
-      if (outOfOrderStart !== null) {
-        expandedEndWord = outOfOrderStart;
-      }
-    } else {
-      for (let candidateEnd = endWord + 1; candidateEnd <= nextStartWord; candidateEnd += 1) {
-        if (isTargetSuffixAttemptSequence(wordSpans.slice(endWord, candidateEnd), normalizedTarget)) {
-          expandedEndWord = candidateEnd;
-        }
-      }
-    }
-
-    if (expandedEndWord !== endWord) {
-      updateSelectedWordRange(item, phrase, startWord, expandedEndWord, wordSpans, recognized);
-    }
-    return item;
-  });
-}
-
-function findOutOfOrderTargetStart(phrases, currentPhraseIndex, wordSpans, trailingStartWord, trailingEndWord) {
-  const otherTargets = phrases
-    .filter((_, index) => index !== currentPhraseIndex)
-    .map((phrase) => String(phrase.normalized_target || ""));
-  for (let candidateStart = trailingStartWord; candidateStart < trailingEndWord; candidateStart += 1) {
-    let candidate = "";
-    for (let candidateEnd = candidateStart; candidateEnd < trailingEndWord; candidateEnd += 1) {
-      candidate += String(wordSpans[candidateEnd].normalized || "");
-      for (const target of otherTargets) {
-        if (
-          practiceSimilarity(target, candidate) >= 0.75 &&
-          targetCharacterCoverage(target, candidate) >= 0.7
-        ) {
-          return candidateStart;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function isTargetSuffixAttemptSequence(wordSpans, normalizedTarget) {
-  if (!wordSpans.length || !normalizedTarget) {
-    return false;
-  }
-  const pieces = wordSpans.map((span) => String(span.normalized || ""));
-  const memo = new Map();
-  function canPartition(start) {
-    if (start === pieces.length) {
-      return true;
-    }
-    if (memo.has(start)) {
-      return memo.get(start);
-    }
-    let attempt = "";
-    for (let end = start; end < pieces.length; end += 1) {
-      attempt += pieces[end];
-      if (
-        (attempt.length >= Math.min(2, normalizedTarget.length) || !/^[\x00-\x7F]*$/.test(attempt)) &&
-        attempt.length < normalizedTarget.length &&
-        normalizedTarget.endsWith(attempt) &&
-        canPartition(end + 1)
-      ) {
-        memo.set(start, true);
-        return true;
-      }
-    }
-    memo.set(start, false);
-    return false;
-  }
-  return canPartition(0);
-}
-
-function updateSelectedWordRange(item, phrase, startWord, endWord, wordSpans, recognized, boundarySource = null) {
-  const start = wordSpans[startWord].normalized_start;
-  const end = wordSpans[endWord - 1].normalized_end;
-  const candidate = recognized.slice(start, end);
-  const normalizedTarget = String(phrase.normalized_target || "");
-  const updates = {
-    start_word: startWord,
-    end_word: endWord,
-    recognized_start: start,
-    recognized_end: end,
-    similarity: practiceSimilarity(normalizedTarget, candidate),
-    coverage: targetCharacterCoverage(normalizedTarget, candidate),
-  };
-  if (boundarySource) {
-    updates.boundary_source = boundarySource;
-    updates.alignment_confidence = alignmentConfidence(updates.similarity, updates.coverage);
-  }
-  Object.assign(item, updates);
-}
-
-function commonPrefixLength(left, right) {
-  let length = 0;
-  while (length < left.length && length < right.length && left[length] === right[length]) {
-    length += 1;
-  }
-  return length;
-}
-
-function unavailableAlignmentRange(index, phrase, normalizedTarget) {
-  return {
-    index,
-    source_index: phrase.source_index,
-    target: phrase.target,
-    normalized_target: normalizedTarget,
-    available: false,
-    matched: false,
-    content_matched: null,
-    source: "none",
-    similarity: 0,
-    content_similarity: 0,
-    coverage: 0,
-    recognized_start: null,
-    recognized_end: null,
-    normalized_recognized: "",
-    matched_text: "",
-    audio_start: null,
-    audio_end: null,
-    alignment_confidence: "unavailable",
-    boundary_source: "none",
-    token_start_index: null,
-    token_end_index: null,
-  };
-}
-
-function alignSinglePhraseToWordSpans(phrase, recognized, wordSpans, targetLanguage) {
-  const normalizedTarget = String(phrase.normalized_target || "");
-  const selectedSpans = trimEdgeFillerSpans(wordSpans, normalizedTarget, targetLanguage);
-  if (!selectedSpans.length) {
-    return unavailableAlignmentRange(0, phrase, normalizedTarget);
-  }
-  const start = selectedSpans[0].normalized_start;
-  const end = selectedSpans[selectedSpans.length - 1].normalized_end;
-  const startWord = wordSpans.indexOf(selectedSpans[0]);
-  const endWord = wordSpans.indexOf(selectedSpans[selectedSpans.length - 1]) + 1;
-  const selectedNormalized = recognized.slice(start, end);
-  const similarity = practiceSimilarity(normalizedTarget, selectedNormalized);
-  const coverage = targetCharacterCoverage(normalizedTarget, selectedNormalized);
-  const [audioStart, audioEnd] = safeAlignmentAudioBounds(selectedSpans);
-  if (audioStart === null || audioEnd === null || audioEnd <= audioStart) {
-    return textOnlyAlignmentRange(
-      0,
-      phrase,
-      normalizedTarget,
-      selectedSpans,
-      start,
-      end,
-      recognized,
-      targetLanguage,
-      startWord,
-      endWord,
-      similarity,
-      coverage,
-    );
-  }
-  const contentMatched = practiceContentMatches(
-    phrase.target,
-    joinMatchedWords(selectedSpans, targetLanguage),
-    targetLanguage,
-  );
-  return {
-    index: 0,
-    source_index: phrase.source_index,
-    target: phrase.target,
-    normalized_target: normalizedTarget,
-    available: true,
-    matched: contentMatched,
-    content_matched: contentMatched,
-    source: "words",
-    similarity: roundScore(similarity),
-    content_similarity: roundScore(similarity),
-    coverage: roundScore(coverage),
-    recognized_start: start,
-    recognized_end: end,
-    normalized_recognized: selectedNormalized,
-    matched_text: joinMatchedWords(selectedSpans, targetLanguage),
-    audio_start: audioStart,
-    audio_end: audioEnd,
-    alignment_confidence: alignmentConfidence(similarity, coverage),
-    boundary_source: "single_phrase",
-    token_start_index: startWord,
-    token_end_index: endWord,
-  };
-}
-
-function trimEdgeFillerSpans(wordSpans, normalizedTarget, targetLanguage) {
-  const selected = [...wordSpans];
-  const fillers = PRACTICE_EDGE_FILLERS[targetLanguage] || new Set();
-  while (selected.length) {
-    const token = String(selected[0].normalized || "");
-    if (!fillers.has(token) || normalizedTarget.startsWith(token)) {
-      break;
-    }
-    selected.shift();
-  }
-  while (selected.length) {
-    const token = String(selected[selected.length - 1].normalized || "");
-    if (!fillers.has(token) || normalizedTarget.endsWith(token)) {
-      break;
-    }
-    selected.pop();
-  }
-  return selected;
-}
-
-function joinMatchedWords(wordSpans, targetLanguage) {
-  const words = wordSpans.map((span) => String(span.text || "")).filter(Boolean);
-  if (targetLanguage === "ja-JP" || targetLanguage === "zh-CN") {
-    return words.join("");
-  }
-  return words.join(" ");
-}
-
-function safeNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function timestampValue(value) {
-  if (value === null || value === undefined || value === "") {
-    return { value: null, reason: "non_numeric" };
-  }
-  const number = Number(value);
-  if (Number.isNaN(number)) return { value: null, reason: "non_numeric" };
-  if (!Number.isFinite(number)) return { value: null, reason: "non_finite" };
-  return { value: number, reason: null };
-}
-
-function timestampUnitValues(startValue, endValue) {
-  const startResult = timestampValue(startValue);
-  const endResult = timestampValue(endValue);
-  if (startResult.reason || endResult.reason) {
-    return {
-      start: startResult.value,
-      end: endResult.value,
-      reason: [startResult.reason, endResult.reason].includes("non_numeric")
-        ? "non_numeric"
-        : "non_finite",
-    };
-  }
-  if (startResult.value < 0) {
-    return { start: startResult.value, end: endResult.value, reason: "negative_start" };
-  }
-  if (endResult.value < startResult.value) {
-    return { start: startResult.value, end: endResult.value, reason: "end_before_start" };
-  }
-  return { start: startResult.value, end: endResult.value, reason: null };
-}
-
-function invalidTimestampUnit(source, sourceIndex, text, start, end, reason) {
-  return {
-    source,
-    source_index: sourceIndex,
-    text,
-    start,
-    end,
-    reason,
-  };
-}
-
-function roundScore(value) {
-  return Math.round((Number(value) || 0) * 1000) / 1000;
-}
-
-function isHanCharacter(char) {
-  const codePoint = String(char || "").codePointAt(0);
-  return (
-    (codePoint >= 0x3400 && codePoint <= 0x4DBF) ||
-    (codePoint >= 0x4E00 && codePoint <= 0x9FFF) ||
-    (codePoint >= 0x20000 && codePoint <= 0x2A6DF) ||
-    (codePoint >= 0x2A700 && codePoint <= 0x2B73F) ||
-    (codePoint >= 0x2B740 && codePoint <= 0x2B81F) ||
-    (codePoint >= 0x2B820 && codePoint <= 0x2CEAF)
-  );
-}
-
-function normalizePracticeText(text, targetLanguage) {
-  let normalized = String(text || "").normalize("NFKC").trim().toLowerCase();
-  if (targetLanguage === "ja-JP") {
-    normalized = normalized.replace(/[\u30a1-\u30f6]/g, (char) =>
-      String.fromCharCode(char.charCodeAt(0) - 0x60)
-    );
-  }
-  if (targetLanguage === "zh-CN") {
-    normalized = normalizeChineseSpokenForms(normalized);
-    normalized = normalizeChineseVariants(normalized);
-  }
-  return Array.from(normalized)
-    .filter((char) => !/[\p{P}\p{Z}\p{S}]/u.test(char))
-    .join("");
-}
-
 function normalizeChineseVariants(text) {
   return traditionalChineseToSimplified(String(text || ""));
 }
@@ -7561,207 +4616,6 @@ function canonicalPracticeText(text, targetLanguage) {
   return targetLanguage === "zh-CN"
     ? normalizeChineseVariants(text)
     : String(text || "");
-}
-
-function practiceSimilarity(normalizedTarget, normalizedRecognized) {
-  if (!normalizedTarget && !normalizedRecognized) {
-    return 1;
-  }
-  if (!normalizedTarget || !normalizedRecognized) {
-    return 0;
-  }
-  if (normalizedTarget === normalizedRecognized) {
-    return 1;
-  }
-  const commonLength = sequenceMatcherMatchingLength(normalizedTarget, normalizedRecognized);
-  const sequenceScore = (2 * commonLength) / (normalizedTarget.length + normalizedRecognized.length);
-  const containmentScore =
-    normalizedTarget.includes(normalizedRecognized) || normalizedRecognized.includes(normalizedTarget)
-      ? Math.min(normalizedTarget.length, normalizedRecognized.length) /
-        Math.max(normalizedTarget.length, normalizedRecognized.length)
-      : 0;
-  return Math.max(0, Math.min(1, Math.max(sequenceScore, containmentScore)));
-}
-
-function sequenceMatcherMatchingLength(left, right) {
-  const leftChars = Array.from(left);
-  const rightChars = Array.from(right);
-  const rightIndexes = new Map();
-  for (const [index, character] of rightChars.entries()) {
-    const indexes = rightIndexes.get(character) || [];
-    indexes.push(index);
-    rightIndexes.set(character, indexes);
-  }
-
-  function findLongestMatch(leftStart, leftEnd, rightStart, rightEnd) {
-    let bestLeft = leftStart;
-    let bestRight = rightStart;
-    let bestSize = 0;
-    let previousLengths = new Map();
-    for (let leftIndex = leftStart; leftIndex < leftEnd; leftIndex += 1) {
-      const currentLengths = new Map();
-      for (const rightIndex of rightIndexes.get(leftChars[leftIndex]) || []) {
-        if (rightIndex < rightStart) {
-          continue;
-        }
-        if (rightIndex >= rightEnd) {
-          break;
-        }
-        const size = (previousLengths.get(rightIndex - 1) || 0) + 1;
-        currentLengths.set(rightIndex, size);
-        if (size > bestSize) {
-          bestLeft = leftIndex - size + 1;
-          bestRight = rightIndex - size + 1;
-          bestSize = size;
-        }
-      }
-      previousLengths = currentLengths;
-    }
-    return { left: bestLeft, right: bestRight, size: bestSize };
-  }
-
-  const queue = [[0, leftChars.length, 0, rightChars.length]];
-  const matches = [];
-  while (queue.length) {
-    const [leftStart, leftEnd, rightStart, rightEnd] = queue.pop();
-    const match = findLongestMatch(leftStart, leftEnd, rightStart, rightEnd);
-    if (!match.size) {
-      continue;
-    }
-    matches.push(match);
-    if (leftStart < match.left && rightStart < match.right) {
-      queue.push([leftStart, match.left, rightStart, match.right]);
-    }
-    const matchLeftEnd = match.left + match.size;
-    const matchRightEnd = match.right + match.size;
-    if (matchLeftEnd < leftEnd && matchRightEnd < rightEnd) {
-      queue.push([matchLeftEnd, leftEnd, matchRightEnd, rightEnd]);
-    }
-  }
-  return matches.reduce((total, match) => total + match.size, 0);
-}
-
-function practiceGrade(similarity) {
-  if (similarity >= 0.995) {
-    return "perfect";
-  }
-  if (similarity >= 0.95) {
-    return "ok";
-  }
-  if (similarity >= 0.9) {
-    return "almost";
-  }
-  return "retry";
-}
-
-function longestCommonSubsequenceLength(left, right) {
-  const leftChars = Array.from(left);
-  const rightChars = Array.from(right);
-  if (!leftChars.length || !rightChars.length) {
-    return 0;
-  }
-  let previous = new Array(rightChars.length + 1).fill(0);
-  let current = new Array(rightChars.length + 1).fill(0);
-  for (let leftIndex = 1; leftIndex <= leftChars.length; leftIndex += 1) {
-    for (let rightIndex = 1; rightIndex <= rightChars.length; rightIndex += 1) {
-      current[rightIndex] =
-        leftChars[leftIndex - 1] === rightChars[rightIndex - 1]
-          ? previous[rightIndex - 1] + 1
-          : Math.max(previous[rightIndex], current[rightIndex - 1]);
-    }
-    [previous, current] = [current, previous];
-    current.fill(0);
-  }
-  return previous[rightChars.length];
-}
-
-function practiceDiff(normalizedTarget, normalizedRecognized) {
-  const rows = normalizedTarget.length + 1;
-  const cols = normalizedRecognized.length + 1;
-  const lcs = Array.from({ length: rows }, () => Array(cols).fill(0));
-  for (let targetIndex = normalizedTarget.length - 1; targetIndex >= 0; targetIndex -= 1) {
-    for (let recognizedIndex = normalizedRecognized.length - 1; recognizedIndex >= 0; recognizedIndex -= 1) {
-      if (normalizedTarget[targetIndex] === normalizedRecognized[recognizedIndex]) {
-        lcs[targetIndex][recognizedIndex] = lcs[targetIndex + 1][recognizedIndex + 1] + 1;
-      } else {
-        lcs[targetIndex][recognizedIndex] = Math.max(
-          lcs[targetIndex + 1][recognizedIndex],
-          lcs[targetIndex][recognizedIndex + 1],
-        );
-      }
-    }
-  }
-  const entries = [];
-  let targetIndex = 0;
-  let recognizedIndex = 0;
-  while (targetIndex < normalizedTarget.length || recognizedIndex < normalizedRecognized.length) {
-    const targetStart = targetIndex;
-    const recognizedStart = recognizedIndex;
-    let type;
-    if (
-      targetIndex < normalizedTarget.length &&
-      recognizedIndex < normalizedRecognized.length &&
-      normalizedTarget[targetIndex] === normalizedRecognized[recognizedIndex]
-    ) {
-      type = "equal";
-      targetIndex += 1;
-      recognizedIndex += 1;
-    } else if (
-      recognizedIndex < normalizedRecognized.length &&
-      (targetIndex >= normalizedTarget.length || lcs[targetIndex][recognizedIndex + 1] >= lcs[targetIndex + 1][recognizedIndex])
-    ) {
-      type = "insert";
-      recognizedIndex += 1;
-    } else {
-      type = "delete";
-      targetIndex += 1;
-    }
-    const previous = entries[entries.length - 1];
-    if (previous && previous.type === type && previous.target_end === targetStart && previous.recognized_end === recognizedStart) {
-      previous.target_end = targetIndex;
-      previous.recognized_end = recognizedIndex;
-      previous.target = normalizedTarget.slice(previous.target_start, previous.target_end);
-      previous.recognized = normalizedRecognized.slice(previous.recognized_start, previous.recognized_end);
-    } else {
-      entries.push({
-        type,
-        target: normalizedTarget.slice(targetStart, targetIndex),
-        recognized: normalizedRecognized.slice(recognizedStart, recognizedIndex),
-        target_start: targetStart,
-        target_end: targetIndex,
-        recognized_start: recognizedStart,
-        recognized_end: recognizedIndex,
-      });
-    }
-  }
-  return entries.length > 0
-    ? entries
-    : [{
-        type: "equal",
-        target: "",
-        recognized: "",
-        target_start: 0,
-        target_end: 0,
-        recognized_start: 0,
-        recognized_end: 0,
-      }];
-}
-
-function levenshteinDistance(left, right) {
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
-    const current = [leftIndex + 1];
-    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
-      const cost = left[leftIndex] === right[rightIndex] ? 0 : 1;
-      current[rightIndex + 1] = Math.min(
-        current[rightIndex] + 1,
-        previous[rightIndex + 1] + 1,
-        previous[rightIndex] + cost,
-      );
-    }
-    previous.splice(0, previous.length, ...current);
-  }
-  return previous[right.length];
 }
 
 function clampInt(value, min, max, fallback) {

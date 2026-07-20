@@ -121,14 +121,15 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(practiceSource, /recognizedTextMatchesLearningLanguage/);
   assert.doesNotMatch(practiceSource, /hasPairedComparisonAlignment/);
   assert.match(practiceSource, /renderRecognizedDiff/);
-  assert.match(practiceSource, /buildPracticeDiffCells/);
+  assert.match(practiceSource, /playbackContract\.buildPracticeDiffCells/);
+  assert.match(practicePlaybackSource, /function buildPracticeDiffCells/);
   assert.match(practiceSource, /function renderLlmFeedbackText\(payload\) \{\s*renderRecognizedDiff\(payload\)/);
   assert.doesNotMatch(practiceSource, /renderPracticeGrade/);
   assert.match(practiceSource, /practice-diff-correction/);
   assert.doesNotMatch(practiceSource, /抜け:/);
   assert.match(practiceSource, /practice-diff-cell/);
-  assert.match(practiceSource, /heard: "_"/);
-  assert.match(practiceSource, /targetOffset:\s*targetIndex/);
+  assert.match(practicePlaybackSource, /heard: "_"/);
+  assert.match(practicePlaybackSource, /targetOffset:\s*targetIndex/);
   assert.match(practiceSource, /playComparisonAudios\(\{\s*targetOffset:\s*cell\.targetOffset\s*\}\)/);
   assert.doesNotMatch(practiceSource, /element\.addEventListener\("click", playComparisonAudios\)/);
   assert.match(practiceSource, /repeatAudio\.src/);
