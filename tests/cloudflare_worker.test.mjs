@@ -2235,6 +2235,7 @@ test("Cloudflare worker keeps practice attempt LLM options alive for the whole 3
 });
 
 test("Cloudflare worker surfaces an LLM validation failure as a failed job snapshot for Chinese attempts", async () => {
+  let comparisonCalls = 0;
   const env = fakeEnv(async (url, init = {}) => {
     if (url === "https://api.runpod.ai/v2/endpoint/run") {
       return json({ id: "practice-llm-job-fail", status: "IN_QUEUE" });
@@ -2266,6 +2267,7 @@ test("Cloudflare worker surfaces an LLM validation failure as a failed job snaps
       });
     }
     if (url === "https://api.openai.com/v1/responses") {
+      comparisonCalls += 1;
       // word_end_index is out of range for a 2-word ASR result: an invalid LLM response.
       return json({
         output_text: JSON.stringify({
@@ -2313,6 +2315,14 @@ test("Cloudflare worker surfaces an LLM validation failure as a failed job snaps
   assert.equal(snapshot.error.stage, "validate_response");
   assert.equal(snapshot.error.message, "比較結果を作成できませんでした。もう一度お試しください。");
   assert.equal(snapshot.result, null);
+
+  const repeated = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs/practice-llm-job-fail"),
+    env,
+  );
+  assert.equal(repeated.status, 200);
+  assert.deepEqual(await repeated.json(), snapshot);
+  assert.equal(comparisonCalls, 1);
 });
 
 test("Cloudflare worker explains when the RunPod practice image predates the dual-audio contract", async () => {

@@ -3276,22 +3276,26 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
       });
     } catch (error) {
       if (error instanceof PracticeLlmError) {
-        return failedPracticeAttemptJob(
+        const snapshot = failedPracticeAttemptJob(
           jobId,
           stages,
           metrics,
           practiceLlmErrorEnvelope(error).error,
           "比較結果を作成できませんでした",
         );
+        await savePracticeAttemptResult(env, jobId, snapshot);
+        return snapshot;
       }
       if (!(error instanceof PracticeAlignmentError)) throw error;
-      return failedPracticeAttemptJob(
+      const snapshot = failedPracticeAttemptJob(
         jobId,
         stages,
         metrics,
         practiceAlignmentErrorEnvelope(error).error,
         "音声の解析結果を確認できませんでした",
       );
+      await savePracticeAttemptResult(env, jobId, snapshot);
+      return snapshot;
     }
     const snapshot = {
       job_id: jobId,
