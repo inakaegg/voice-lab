@@ -3341,6 +3341,48 @@ async function practiceAttemptComparisonResult({
   const modelAsrTimestamps = serializeAsrTimestamps(modelTranscription);
 
   if (comparisonModel) {
+    const referenceNoSpeech =
+      !String(modelRecognizedText || "").trim() &&
+      !(modelAsrTimestamps?.words || []).length &&
+      !(modelAsrTimestamps?.segments || []).length;
+    if (referenceNoSpeech) {
+      throw new PracticeAlignmentError("empty_reference_asr", { stage: "reference_asr" });
+    }
+    const noSpeech =
+      !String(recognizedText || "").trim() &&
+      !(asrTimestamps?.words || []).length &&
+      !(asrTimestamps?.segments || []).length;
+    if (noSpeech) {
+      const attemptMs = Number(timings.asr || 0);
+      const modelMs = Number(timings.model_asr || 0);
+      return {
+        recording_kind: "attempt",
+        target_language: targetLanguage,
+        target_text: targetText,
+        recognized_text: recognizedText,
+        model_recognized_text: modelRecognizedText,
+        asr_model: attemptTranscription.model,
+        asr_timestamps: asrTimestamps,
+        model_asr_timestamps: modelAsrTimestamps,
+        outcome: "no_speech",
+        message: "音声を検出できませんでした。もう一度録音してください。",
+        comparison_alignment: null,
+        model_comparison_alignment: null,
+        comparison_model: comparisonModel,
+        playback_padding_seconds: playbackPaddingSeconds,
+        timings_ms: {
+          asr: attemptMs,
+          model_asr: modelMs,
+          compare: 0,
+          total: attemptMs + modelMs,
+        },
+        providers: {
+          asr: attemptTranscription.provider,
+          model_asr: modelTranscription.provider || attemptTranscription.provider,
+          comparison: "openai-responses",
+        },
+      };
+    }
     const llmInput = buildPracticeLlmInput({
       targetLanguage,
       targetText,
