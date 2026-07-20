@@ -7,6 +7,13 @@ const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const USER_SETTINGS_KV_KEY = "user-settings";
 const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX = "practice-attempt-llm-options:";
+const PRACTICE_ATTEMPT_RESULT_KV_PREFIX = "practice-attempt-result:";
+// フロントエンド(app_practice.js)のattempt-jobsポーリング締め切りは30分。RunPodジョブが
+// 完了するまでこの時間だけ待たれ得るため、comparison_model等を保持するKVのTTLは
+// その締め切りに余裕を持たせた長さが必要(短いと完了時にoptionsが消えて選択したモデルを
+// 見失う)。
+const PRACTICE_ATTEMPT_POLL_WINDOW_SECONDS = 30 * 60;
+const PRACTICE_LLM_ATTEMPT_OPTIONS_DEFAULT_TTL_SECONDS = PRACTICE_ATTEMPT_POLL_WINDOW_SECONDS + 10 * 60;
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
@@ -485,7 +492,10 @@ async function savePracticeAttemptLlmOptions(env, jobId, options) {
   const kv = stateKv(env);
   if (kv) {
     await kv.put(`${PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX}${jobId}`, JSON.stringify(options), {
-      expirationTtl: numberFromEnv(env.CLOUDFLARE_PRACTICE_LLM_OPTIONS_TTL_SECONDS, 900),
+      expirationTtl: numberFromEnv(
+        env.CLOUDFLARE_PRACTICE_LLM_OPTIONS_TTL_SECONDS,
+        PRACTICE_LLM_ATTEMPT_OPTIONS_DEFAULT_TTL_SECONDS,
+      ),
     });
   } else {
     ephemeralPracticeAttemptLlmOptions.set(jobId, options);
@@ -498,6 +508,31 @@ async function readPracticeAttemptLlmOptions(env, jobId) {
     return kvGetJson(kv, `${PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX}${jobId}`, null);
   }
   return ephemeralPracticeAttemptLlmOptions.get(jobId) || null;
+}
+
+async function savePracticeAttemptResult(env, jobId, result) {
+  if (!jobId) {
+    return;
+  }
+  const kv = stateKv(env);
+  if (kv) {
+    await kv.put(`${PRACTICE_ATTEMPT_RESULT_KV_PREFIX}${jobId}`, JSON.stringify(result), {
+      expirationTtl: numberFromEnv(
+        env.CLOUDFLARE_PRACTICE_LLM_OPTIONS_TTL_SECONDS,
+        PRACTICE_LLM_ATTEMPT_OPTIONS_DEFAULT_TTL_SECONDS,
+      ),
+    });
+  } else {
+    ephemeralPracticeAttemptResults.set(jobId, result);
+  }
+}
+
+async function readPracticeAttemptResult(env, jobId) {
+  const kv = stateKv(env);
+  if (kv) {
+    return kvGetJson(kv, `${PRACTICE_ATTEMPT_RESULT_KV_PREFIX}${jobId}`, null);
+  }
+  return ephemeralPracticeAttemptResults.get(jobId) || null;
 }
 
 const DEFAULT_USER_SETTINGS = {
@@ -561,6 +596,7 @@ let ephemeralUserSettings = null;
 let ephemeralPublicAccessSettings = null;
 const ephemeralTranslationJobs = new Map();
 const ephemeralPracticeAttemptLlmOptions = new Map();
+const ephemeralPracticeAttemptResults = new Map();
 const ephemeralPublicUsage = new Map();
 
 export default {
@@ -3194,6 +3230,12 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
   const metrics = runpodPracticeMetrics(body);
   const stages = practiceAttemptJobStages();
   if (status === "COMPLETED") {
+    // このjobIdが既に確定済みなら、再ポーリングのたびにLLM比較を再実行して
+    // 二重課金・スコアの揺れが起きないよう、確定済みsnapshotをそのまま返す。
+    const cachedSnapshot = await readPracticeAttemptResult(env, jobId);
+    if (cachedSnapshot) {
+      return cachedSnapshot;
+    }
     const output = body?.output;
     if (!output || typeof output !== "object") {
       return failedPracticeAttemptJob(jobId, stages, metrics, "RunPod job completed without an output object");
@@ -3245,7 +3287,7 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
         "音声の解析結果を確認できませんでした",
       );
     }
-    return {
+    const snapshot = {
       job_id: jobId,
       status: "succeeded",
       current_stage: {
@@ -3259,6 +3301,8 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
       result,
       error: null,
     };
+    await savePracticeAttemptResult(env, jobId, snapshot);
+    return snapshot;
   }
   if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
     return failedPracticeAttemptJob(jobId, stages, metrics, runpodUserErrorMessage(body));

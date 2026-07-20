@@ -2116,6 +2116,59 @@ test("Cloudflare worker scores a Chinese practice attempt using the LLM comparis
   assert.equal(llmCalls.length, 1);
   assert.equal(llmCalls[0].model, "gpt-5.6-luna");
   assert.equal(llmCalls[0].text.format.strict, true);
+
+  const repolled = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs/practice-llm-job-1"),
+    env,
+  );
+  const repolledSnapshot = await repolled.json();
+
+  assert.equal(repolled.status, 200);
+  assert.equal(repolledSnapshot.status, "succeeded");
+  assert.equal(repolledSnapshot.result.overall_score, 95);
+  assert.equal(
+    llmCalls.length,
+    1,
+    "re-polling a completed RunPod job must reuse the cached comparison instead of calling OpenAI again",
+  );
+});
+
+test("Cloudflare worker keeps practice attempt LLM options alive for the whole 30-minute attempt poll window", async () => {
+  const putCalls = [];
+  const kv = fakeKv();
+  const recordingKv = {
+    ...kv,
+    async put(key, value, options) {
+      putCalls.push({ key, options });
+      return kv.put(key, value, options);
+    },
+  };
+  const env = fakeEnv(async (url) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") {
+      return json({ id: "practice-llm-ttl-job", status: "IN_QUEUE" });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/health") {
+      return json({ workers: { idle: 1, running: 0, initializing: 0 } });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: recordingKv });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "zh-CN");
+  form.append("target_text", "你好。");
+  form.append("comparison_model", "gpt-5.6-luna");
+
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }), env);
+
+  const optionsPut = putCalls.find((call) => call.key.startsWith("practice-attempt-llm-options:"));
+  assert.ok(optionsPut, "expected the worker to persist practice attempt LLM options to KV");
+  // フロントエンドのattempt-jobsポーリング締め切り(30分 = 1800秒)より長くないと、
+  // RunPodジョブが15分超で完了したときにcomparison_modelを見失う。
+  assert.ok(
+    optionsPut.options.expirationTtl > 30 * 60,
+    `expected LLM options TTL to exceed the 30-minute poll window, got ${optionsPut.options.expirationTtl}`,
+  );
 });
 
 test("Cloudflare worker surfaces an LLM validation failure as a failed job snapshot for Chinese attempts", async () => {
