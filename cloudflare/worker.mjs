@@ -527,12 +527,25 @@ function practiceModelAsrCacheKey(digest, model, sourceLanguage) {
   return `${PRACTICE_MODEL_ASR_CACHE_KV_PREFIX}${model}:${sourceLanguage}:${digest}`;
 }
 
+function practiceAsrHasSpeech(transcription) {
+  const timestamps = serializeAsrTimestamps(transcription || {});
+  return Boolean(
+    String(transcription?.text || "").trim()
+    || (timestamps?.words || []).length
+    || (timestamps?.segments || []).length
+  );
+}
+
 async function lookupPracticeModelAsrCache(env, key) {
   const kv = stateKv(env);
-  return kv ? await kvGetJson(kv, key, null) : ephemeralPracticeModelAsrCache.get(key) || null;
+  const cached = kv ? await kvGetJson(kv, key, null) : ephemeralPracticeModelAsrCache.get(key) || null;
+  return practiceAsrHasSpeech(cached) ? cached : null;
 }
 
 async function storePracticeModelAsrCache(env, key, transcription) {
+  if (!practiceAsrHasSpeech(transcription)) {
+    return;
+  }
   const kv = stateKv(env);
   if (kv) {
     await kv.put(key, JSON.stringify(transcription), {

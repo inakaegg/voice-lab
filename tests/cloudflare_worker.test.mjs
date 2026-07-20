@@ -1903,6 +1903,78 @@ test("Cloudflare worker reuses cached model ASR across Chinese attempt retries",
   assert.equal(runCalls[1].model_audio_base64, undefined, "the second submission must reuse the cached model ASR");
 });
 
+test("Cloudflare worker retries an empty Chinese model ASR instead of caching it", async () => {
+  const runCalls = [];
+  const env = fakeEnv(async (url, init = {}) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") {
+      const body = parseJsonBody(init.body);
+      runCalls.push(body.input);
+      return json({ id: `empty-reference-retry-${runCalls.length}`, status: "IN_QUEUE" });
+    }
+    if (url === "https://api.runpod.ai/v2/endpoint/health") {
+      return json({ workers: { idle: 1, running: 0, initializing: 0 } });
+    }
+    if (url.startsWith("https://api.runpod.ai/v2/endpoint/status/empty-reference-retry-")) {
+      const jobIndex = Number(url.split("-").at(-1)) - 1;
+      const output = {
+        practice_asr_contract_version: 2,
+        target_text: "你好。",
+        text: "",
+        model: "funasr/paraformer-zh",
+        words: [],
+        segments: [],
+      };
+      if (runCalls[jobIndex].model_audio_base64) {
+        output.model_transcription = jobIndex === 0
+          ? { text: "", model: "funasr/paraformer-zh", words: [], segments: [] }
+          : {
+            text: "你好",
+            model: "funasr/paraformer-zh",
+            words: [{ text: "你好", start: 0.0, end: 0.7 }],
+            segments: [],
+          };
+      }
+      return json({ id: `empty-reference-retry-${jobIndex + 1}`, status: "COMPLETED", output });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+
+  const submitAttempt = async () => {
+    const form = new FormData();
+    form.append("audio", new Blob(["silent repeat"], { type: "audio/wav" }), "silent.wav");
+    form.append("model_audio", new Blob(["model retry after empty"], { type: "audio/wav" }), "model.wav");
+    form.append("target_language", "zh-CN");
+    form.append("target_text", "你好。");
+    form.append("comparison_model", "gpt-5.6-terra");
+    const response = await handleRequest(
+      new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+      env,
+    );
+    assert.equal(response.status, 202);
+    return (await response.json()).job_id;
+  };
+
+  const firstJobId = await submitAttempt();
+  const firstCompleted = await handleRequest(
+    new Request(`https://example.com/api/practice/attempt-jobs/${firstJobId}`),
+    env,
+  );
+  const firstSnapshot = await firstCompleted.json();
+  const secondJobId = await submitAttempt();
+  const secondCompleted = await handleRequest(
+    new Request(`https://example.com/api/practice/attempt-jobs/${secondJobId}`),
+    env,
+  );
+  const secondSnapshot = await secondCompleted.json();
+
+  assert.equal(firstSnapshot.status, "failed");
+  assert.equal(firstSnapshot.error.reason, "empty_reference_asr");
+  assert.equal(secondSnapshot.status, "succeeded", JSON.stringify(secondSnapshot));
+  assert.equal(secondSnapshot.result.outcome, "no_speech");
+  assert.ok(runCalls[0].model_audio_base64);
+  assert.ok(runCalls[1].model_audio_base64);
+});
+
 test("Cloudflare worker returns no_speech for a silent English attempt without calling the LLM", async () => {
   const llmCalls = [];
   const env = fakeEnv(async (url, init) => {
@@ -2014,6 +2086,52 @@ test("Cloudflare worker reuses cached model ASR across English attempt retries",
   // audio and must always be transcribed.
   assert.equal(transcriptionCallsByFilename["model.wav"], 1);
   assert.equal(transcriptionCallsByFilename["repeat.webm"], 2);
+});
+
+test("Cloudflare worker retries an empty English model ASR instead of caching it", async () => {
+  const transcriptionCallsByFilename = {};
+  const env = fakeEnv(async (url, init) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      const filename = init.body.get("file")?.name || "";
+      transcriptionCallsByFilename[filename] = (transcriptionCallsByFilename[filename] || 0) + 1;
+      if (filename === "model.wav") {
+        if (transcriptionCallsByFilename[filename] === 1) {
+          return json({ text: "", words: [], segments: [] });
+        }
+        return json({
+          text: "Hello world",
+          words: [{ word: "Hello world", start: 0.0, end: 0.9 }],
+          segments: [],
+        });
+      }
+      return json({ text: "", words: [], segments: [] });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+
+  const submitAttempt = async () => {
+    const form = new FormData();
+    form.append("audio", new Blob(["silent repeat"], { type: "audio/wav" }), "repeat.wav");
+    form.append("model_audio", new Blob(["model retry after empty"], { type: "audio/wav" }), "model.wav");
+    form.append("target_language", "en-US");
+    form.append("target_text", "Hello world.");
+    form.append("comparison_model", "gpt-5.4-nano");
+    return handleRequest(
+      new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+      env,
+    );
+  };
+
+  const failed = await submitAttempt();
+  const failedSnapshot = await failed.json();
+  const retried = await submitAttempt();
+  const retriedSnapshot = await retried.json();
+
+  assert.equal(failed.status, 502);
+  assert.equal(failedSnapshot.error.reason, "empty_reference_asr");
+  assert.equal(retried.status, 200);
+  assert.equal(retriedSnapshot.result.outcome, "no_speech");
+  assert.equal(transcriptionCallsByFilename["model.wav"], 2);
 });
 
 test("Cloudflare worker scores an English practice attempt using the LLM comparison", async () => {

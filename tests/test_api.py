@@ -436,6 +436,58 @@ def test_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp_path) -
     assert asr.calls_by_content[b"attempt take two"] == 1
 
 
+def test_practice_attempt_job_retries_empty_model_asr_instead_of_caching_it() -> None:
+    class EmptyThenValidReferenceAsr:
+        name = "empty-then-valid-reference-asr"
+
+        def __init__(self) -> None:
+            self.model_calls = 0
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            if audio_path.read_bytes() == b"model audio retry after empty":
+                self.model_calls += 1
+                if self.model_calls == 1:
+                    return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
+                return AsrTranscription(
+                    text="Please close the window.",
+                    model="whisper-1",
+                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
+
+    asr = EmptyThenValidReferenceAsr()
+    pipeline = SpeechTranslationPipeline(
+        asr=asr,
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline))
+
+    def submit_attempt():
+        return client.post(
+            "/api/practice/attempt-jobs",
+            data={
+                "target_language": "en-US",
+                "target_text": "Please close the window.",
+                "comparison_model": "gpt-5.4-nano",
+            },
+            files={
+                "audio": ("silent.wav", b"silent attempt after empty reference", "audio/wav"),
+                "model_audio": ("model.wav", b"model audio retry after empty", "audio/wav"),
+            },
+        )
+
+    failed = submit_attempt()
+    retried = submit_attempt()
+
+    assert failed.status_code == 502
+    assert failed.json()["error"]["reason"] == "empty_reference_asr"
+    assert retried.status_code == 200
+    assert retried.json()["result"]["outcome"] == "no_speech"
+    assert asr.model_calls == 2
+
+
 def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> None:
     class TimestampAsr:
         name = "timestamp-asr"
@@ -1195,6 +1247,99 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
     assert practice_llm.paddings[-1] == 0.25
     # 永続化先が無効なら、再起動後にお手本ASRを失うjobを作らないよう音声を含める。
     assert runpod.submissions[-1] == {"model_audio_included": True}
+
+
+def test_chinese_practice_attempt_job_retries_empty_model_asr_instead_of_caching_it(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class EmptyThenValidRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def __init__(self) -> None:
+            self.submissions: list[dict[str, object]] = []
+
+        def submit_comparison_job(self, **kwargs):
+            job_id = f"empty-reference-retry-{len(self.submissions) + 1}"
+            self.submissions.append({"model_audio_included": kwargs["model_audio_path"] is not None})
+            return {"id": job_id, "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 1, "initializing": 0}}
+
+        def job_status(self, job_id):
+            job_index = int(job_id.rsplit("-", 1)[-1]) - 1
+            output = {
+                "practice_asr_contract_version": 2,
+                "target_text": "你好。",
+                "text": "",
+                "model": "funasr/paraformer-zh",
+                "words": [],
+                "segments": [],
+            }
+            if self.submissions[job_index]["model_audio_included"]:
+                output["model_transcription"] = (
+                    {
+                        "text": "",
+                        "model": "funasr/paraformer-zh",
+                        "words": [],
+                        "segments": [],
+                    }
+                    if job_index == 0
+                    else {
+                        "text": "你好",
+                        "model": "funasr/paraformer-zh",
+                        "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                        "segments": [],
+                    }
+                )
+            return {"id": job_id, "status": "COMPLETED", "output": output}
+
+    runpod = EmptyThenValidRunpodAsr()
+    history_store = AudioHistoryStore(root=tmp_path / "practice-history", limit=10, enabled=True)
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
+    client = TestClient(
+        create_app(
+            openai_pipeline=SpeechTranslationPipeline(
+                asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+                translator=FakeTranslationProvider({}),
+                tts=FakeTtsProvider(),
+            ),
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=history_store,
+        )
+    )
+
+    def submit_attempt():
+        return client.post(
+            "/api/practice/attempt-jobs",
+            data={
+                "target_language": "zh-CN",
+                "target_text": "你好。",
+                "comparison_model": "gpt-5.6-terra",
+            },
+            files={
+                "audio": ("silent.wav", b"silent Chinese attempt", "audio/wav"),
+                "model_audio": ("model.wav", b"Chinese model audio retry after empty", "audio/wav"),
+            },
+        )
+
+    first_job_id = submit_attempt().json()["job_id"]
+    first_completed = client.get(f"/api/practice/attempt-jobs/{first_job_id}").json()
+    second_job_id = submit_attempt().json()["job_id"]
+    second_completed = client.get(f"/api/practice/attempt-jobs/{second_job_id}").json()
+
+    assert first_completed["status"] == "failed"
+    assert first_completed["error"]["reason"] == "empty_reference_asr"
+    assert second_completed["status"] == "succeeded", second_completed
+    assert second_completed["result"]["outcome"] == "no_speech"
+    assert runpod.submissions == [
+        {"model_audio_included": True},
+        {"model_audio_included": True},
+    ]
 
 
 def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback() -> None:

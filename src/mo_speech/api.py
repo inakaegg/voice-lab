@@ -235,14 +235,17 @@ def _transcribe_practice_model_audio(
     with _practice_model_asr_cache_lock:
         cached = _practice_model_asr_cache.get(key)
         if cached is not None:
-            _practice_model_asr_cache.move_to_end(key)
-            return cached
+            if _practice_asr_has_speech(cached):
+                _practice_model_asr_cache.move_to_end(key)
+                return cached
+            _practice_model_asr_cache.pop(key, None)
     transcription = _transcribe_practice_audio(asr_provider, audio_path, source_language)
-    with _practice_model_asr_cache_lock:
-        _practice_model_asr_cache[key] = transcription
-        _practice_model_asr_cache.move_to_end(key)
-        while len(_practice_model_asr_cache) > _PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES:
-            _practice_model_asr_cache.popitem(last=False)
+    if _practice_asr_has_speech(transcription):
+        with _practice_model_asr_cache_lock:
+            _practice_model_asr_cache[key] = transcription
+            _practice_model_asr_cache.move_to_end(key)
+            while len(_practice_model_asr_cache) > _PRACTICE_MODEL_ASR_CACHE_MAX_ENTRIES:
+                _practice_model_asr_cache.popitem(last=False)
     return transcription
 
 
@@ -272,6 +275,15 @@ def _serialize_asr_timestamps(result: AsrTranscription) -> dict[str, object]:
         "raw_timestamp_word_count": len(raw_words),
         "raw_timestamp_segment_count": len(raw_segments),
     }
+
+
+def _practice_asr_has_speech(result: AsrTranscription) -> bool:
+    timestamps = _serialize_asr_timestamps(result)
+    return bool(
+        str(result.text or "").strip()
+        or timestamps.get("words")
+        or timestamps.get("segments")
+    )
 
 
 def _asr_transcription_from_runpod_output(
@@ -2082,7 +2094,11 @@ def create_app(
             if isinstance(model_payload, dict):
                 model_transcription = _asr_transcription_from_runpod_output(model_payload)
                 model_audio_cache_key = (llm_options or {}).get("model_audio_cache_key")
-                if isinstance(model_audio_cache_key, str) and model_audio_cache_key:
+                if (
+                    isinstance(model_audio_cache_key, str)
+                    and model_audio_cache_key
+                    and _practice_asr_has_speech(model_transcription)
+                ):
                     with _practice_model_asr_cache_lock:
                         _practice_model_asr_cache[model_audio_cache_key] = model_transcription
                         _practice_model_asr_cache.move_to_end(model_audio_cache_key)
@@ -2287,7 +2303,11 @@ def create_app(
                     with _practice_model_asr_cache_lock:
                         cached_model_transcription = _practice_model_asr_cache.get(model_audio_cache_key)
                         if cached_model_transcription is not None:
-                            _practice_model_asr_cache.move_to_end(model_audio_cache_key)
+                            if _practice_asr_has_speech(cached_model_transcription):
+                                _practice_model_asr_cache.move_to_end(model_audio_cache_key)
+                            else:
+                                _practice_model_asr_cache.pop(model_audio_cache_key, None)
+                                cached_model_transcription = None
                     reuse_cached_model_transcription = (
                         cached_model_transcription is not None and recording_entry is not None
                     )
