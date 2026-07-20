@@ -210,11 +210,19 @@ export function buildPracticeLlmInput({
   };
 }
 
-function practiceLlmWhitespaceInsensitive(text) {
-  // フレーズ境界の空白は失われたり増えたりしうる(例: 文末ピリオド直後に次フレーズが
-  // 続き、文間の半角スペースがゼロ個になる)。空白の有無・個数を丸ごと無視して比較する。
-  // 単語や文字そのものの欠落・誤りは空白除去では隠れない。
-  return text.replace(/\s+/g, "");
+function practiceLlmPhrasesReconstructTarget(phrases, targetText) {
+  // LLMが各フレーズの先頭・末尾へ空白を配分しない場合だけ許容する。
+  // フレーズ内部は原文と完全一致させ、"an ice"と"a nice"のような
+  // 単語境界の変更を空白除去で同一視しない。
+  let cursor = 0;
+  for (const phrase of phrases) {
+    const phraseCore = String(phrase?.target_text || "").trim();
+    if (!phraseCore) return false;
+    while (cursor < targetText.length && /\s/u.test(targetText[cursor])) cursor += 1;
+    if (!targetText.startsWith(phraseCore, cursor)) return false;
+    cursor += phraseCore.length;
+  }
+  return targetText.slice(cursor).trim() === "";
 }
 
 function practiceLlmRequiredFiniteNumber(value, label) {
@@ -315,11 +323,7 @@ export function validatePracticeLlmResult(value, inputPayload) {
   if (JSON.stringify(indices) !== JSON.stringify(expectedIndices)) {
     throw new PracticeLlmError("phrase_index must be sequential", { stage: "validate_response" });
   }
-  const reconstructed = phrases.map((phrase) => String(phrase?.target_text || "")).join("");
-  if (
-    practiceLlmWhitespaceInsensitive(reconstructed) !==
-    practiceLlmWhitespaceInsensitive(String(inputPayload?.target_text || ""))
-  ) {
+  if (!practiceLlmPhrasesReconstructTarget(phrases, String(inputPayload?.target_text || ""))) {
     throw new PracticeLlmError("target phrases do not reconstruct target_text", { stage: "validate_response" });
   }
 

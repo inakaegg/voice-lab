@@ -5,7 +5,6 @@ import json
 import logging
 import math
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -213,12 +212,8 @@ def validate_practice_llm_result(
     indices = [phrase.get("phrase_index") if isinstance(phrase, dict) else None for phrase in phrases]
     if indices != expected_indices:
         raise PracticeLlmError("phrase_index must be sequential", stage="validate_response")
-    reconstructed = "".join(str(phrase.get("target_text") or "") for phrase in phrases)
     target_text = str(input_payload.get("target_text") or "")
-    # フレーズ境界の空白配分はLLMごとにばらつく(例: 文末のピリオド直後に次フレーズが
-    # 続き、文間の半角スペースが失われる)。単語の欠落・誤りは連続空白の正規化では
-    # 隠れないため、空白run単位で比較する。
-    if _normalize_reconstruction_whitespace(reconstructed) != _normalize_reconstruction_whitespace(target_text):
+    if not _phrases_reconstruct_target_text(phrases, target_text):
         raise PracticeLlmError("target phrases do not reconstruct target_text", stage="validate_response")
 
     padding = _required_finite_number(input_payload.get("padding_seconds"), "padding_seconds")
@@ -249,11 +244,29 @@ def validate_practice_llm_result(
     return result
 
 
-def _normalize_reconstruction_whitespace(text: str) -> str:
-    # フレーズ境界の空白は失われたり増えたりしうる(例: 文末ピリオド直後に次フレーズが
-    # 続き、文間の半角スペースがゼロ個になる)。空白の有無・個数を丸ごと無視して比較する。
-    # 単語や文字そのものの欠落・誤りは空白除去では隠れない。
-    return re.sub(r"\s+", "", text)
+def _phrases_reconstruct_target_text(
+    phrases: list[object],
+    target_text: str,
+) -> bool:
+    # LLMが各フレーズの先頭・末尾へ空白を配分しない場合だけ許容する。
+    # フレーズ内部は原文と完全一致させ、"an ice"と"a nice"のような
+    # 単語境界の変更を空白除去で同一視しない。
+    cursor = 0
+    for phrase in phrases:
+        phrase_text = (
+            str(phrase.get("target_text") or "")
+            if isinstance(phrase, dict)
+            else ""
+        )
+        phrase_core = phrase_text.strip()
+        if not phrase_core:
+            return False
+        while cursor < len(target_text) and target_text[cursor].isspace():
+            cursor += 1
+        if not target_text.startswith(phrase_core, cursor):
+            return False
+        cursor += len(phrase_core)
+    return not target_text[cursor:].strip()
 
 
 def _validate_score(value: object, label: str) -> None:

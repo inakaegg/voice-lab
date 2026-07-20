@@ -276,6 +276,23 @@ def test_target_text_reconstruction_still_rejects_missing_words() -> None:
     assert raised.value.stage == "validate_response"
 
 
+def test_target_text_reconstruction_rejects_changed_english_word_boundaries() -> None:
+    input_payload, model_output = _minimal_valid_llm_input_and_response()
+    input_payload["target_text"] = "an ice cream"
+    model_output["phrases"] = [
+        {
+            **model_output["phrases"][0],
+            "phrase_index": 0,
+            "target_text": "a nice cream",
+        }
+    ]
+
+    with pytest.raises(PracticeLlmError) as raised:
+        validate_practice_llm_result(model_output, input_payload)
+
+    assert raised.value.stage == "validate_response"
+
+
 class FakeResponses:
     def __init__(self, output: dict[str, object]) -> None:
         self.output = output

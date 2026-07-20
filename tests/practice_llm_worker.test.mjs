@@ -294,6 +294,25 @@ test("target_text reconstruction still rejects missing words", () => {
   );
 });
 
+test("target_text reconstruction rejects changed English word boundaries", () => {
+  const { inputPayload, modelOutput } = minimalValidLlmInputAndResponse();
+  inputPayload.target_text = "an ice cream";
+  modelOutput.phrases = [{
+    ...modelOutput.phrases[0],
+    phrase_index: 0,
+    target_text: "a nice cream",
+  }];
+
+  assert.throws(
+    () => validatePracticeLlmResult(modelOutput, inputPayload),
+    (error) => {
+      assert.ok(error instanceof PracticeLlmError);
+      assert.equal(error.stage, "validate_response");
+      return true;
+    },
+  );
+});
+
 function fakeOpenAiResponsesEnv(modelOutput) {
   const calls = [];
   const env = {
