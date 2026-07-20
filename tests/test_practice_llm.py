@@ -158,6 +158,17 @@ def test_missing_range_computes_empty_matched_text_and_null_timestamps() -> None
     }
 
 
+def test_overlapping_phrase_word_ranges_are_rejected() -> None:
+    fixture = load_fixture()
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    model_output["phrases"][1]["reference"]["word_start_index"] = 0
+
+    with pytest.raises(PracticeLlmError) as raised:
+        validate_practice_llm_result(model_output, fixture["input"])
+
+    assert raised.value.stage == "validate_response"
+
+
 @pytest.mark.parametrize(
     ("path", "value"),
     [
@@ -269,6 +280,34 @@ def test_service_sends_strict_schema_and_writes_a_complete_diagnostic_log(tmp_pa
     _assert_deep_close(log["final_result"], fixture["llm_response"])
     assert log["billing"]["estimated_cost_usd"] == pytest.approx(0.000564)
     assert "api_key" not in json.dumps(log).lower()
+
+
+def test_service_returns_evaluation_when_diagnostic_log_is_unwritable(
+    tmp_path,
+    monkeypatch,
+    caplog,
+) -> None:
+    fixture = load_fixture()
+    model_output = _strip_llm_supplied_timestamps(fixture["llm_response"])
+    responses = FakeResponses(model_output)
+    service = PracticeLlmService(
+        client=SimpleNamespace(responses=responses),
+        log_dir=tmp_path,
+        pricing={},
+    )
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("disk is full")
+
+    monkeypatch.setattr(Path, "write_text", fail_write)
+
+    evaluated = service.evaluate(
+        model="gpt-5.6-terra",
+        input_payload=fixture["input"],
+    )
+
+    assert evaluated.result["overall_score"] == fixture["llm_response"]["overall_score"]
+    assert "practice LLM diagnostic log" in caplog.text
 
 
 def test_service_ignores_a_stray_matched_text_field_from_the_model(tmp_path) -> None:

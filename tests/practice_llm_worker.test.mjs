@@ -159,6 +159,21 @@ test("missing range computes empty matched_text and null timestamps", () => {
   });
 });
 
+test("overlapping phrase word ranges are rejected", () => {
+  const fixture = loadFixture();
+  const modelOutput = stripLlmSuppliedTimestamps(fixture.llm_response);
+  modelOutput.phrases[1].reference.word_start_index = 0;
+
+  assert.throws(
+    () => validatePracticeLlmResult(modelOutput, fixture.input),
+    (error) => {
+      assert.ok(error instanceof PracticeLlmError);
+      assert.equal(error.stage, "validate_response");
+      return true;
+    },
+  );
+});
+
 const INVALID_RESULT_CASES = [
   { path: ["phrases", 0, "reference", "word_start_index"], value: -1 },
   { path: ["phrases", 3, "reference", "word_end_index"], value: 24 },

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import logging
 import math
 import os
 import subprocess
@@ -11,6 +12,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
+
+LOGGER = logging.getLogger("mo_speech")
 
 PRACTICE_COMPARISON_MODELS = (
     "gpt-5.6-terra",
@@ -28,6 +31,7 @@ PRACTICE_LLM_PROMPT = """\
 規則:
 - 目標文を意味と文法のまとまりでフレーズ分割する。フレーズのtarget_textを順に連結すると、空白・句読点を含めて元のtarget_textと完全一致すること。
 - reference_asr.wordsとattempt_asr.wordsの配列位置を使う。word_start_indexは0始まりinclusive、word_end_indexはexclusive。
+- referenceとattemptの各範囲はフレーズ順に並べ、前のフレーズと重複させない。
 - 対応できる連続範囲だけをassignedまたはpartialにする。対応できない場合はmissingとし、word_start_indexとword_end_indexをnullにする。
 - 復唱が目標と異なる場合も、誤って発話した語を含む対応発話全体を選ぶ。目標と一致した末尾だけへ狭めない。
 - 一致文字列と再生時刻はアプリ側が選択した位置番号から直接計算するため、返す必要はない。word_start_index/word_end_indexで対応範囲を正確に選ぶことだけに集中する。
@@ -215,26 +219,30 @@ def validate_practice_llm_result(
         raise PracticeLlmError("target phrases do not reconstruct target_text", stage="validate_response")
 
     padding = _required_finite_number(input_payload.get("padding_seconds"), "padding_seconds")
+    previous_word_ends = {"reference": 0, "attempt": 0}
     for phrase in phrases:
         if not isinstance(phrase, dict) or not str(phrase.get("target_text") or ""):
             raise PracticeLlmError("phrase is invalid", stage="validate_response")
         _validate_score(phrase.get("score"), "phrase score")
         if not isinstance(phrase.get("comment"), str):
             raise PracticeLlmError("phrase comment is invalid", stage="validate_response")
-        _validate_range(
-            phrase.get("reference"),
-            input_payload.get("reference_asr"),
-            duration=input_payload.get("reference_audio_duration"),
-            padding=padding,
-            label="reference",
-        )
-        _validate_range(
-            phrase.get("attempt"),
-            input_payload.get("attempt_asr"),
-            duration=input_payload.get("attempt_audio_duration"),
-            padding=padding,
-            label="attempt",
-        )
+        for side in ("reference", "attempt"):
+            range_value = phrase.get(side)
+            _validate_range(
+                range_value,
+                input_payload.get(f"{side}_asr"),
+                duration=input_payload.get(f"{side}_audio_duration"),
+                padding=padding,
+                label=side,
+            )
+            if isinstance(range_value, dict) and range_value.get("status") != "missing":
+                start_index = range_value["word_start_index"]
+                if start_index < previous_word_ends[side]:
+                    raise PracticeLlmError(
+                        f"{side} word ranges overlap or are out of order",
+                        stage="validate_response",
+                    )
+                previous_word_ends[side] = range_value["word_end_index"]
     return result
 
 
@@ -489,11 +497,18 @@ class PracticeLlmService:
         self._write_log(path, log)
 
     def _write_log(self, path: Path, value: dict[str, object]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n",
-            encoding="utf-8",
-        )
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            LOGGER.warning(
+                "failed to write practice LLM diagnostic log: path=%s",
+                path,
+                exc_info=True,
+            )
 
 
 def _usage_dict(value: object) -> dict[str, int]:
