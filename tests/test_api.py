@@ -30,6 +30,10 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
     monkeypatch.setenv("MO_VIBEVOICE_DEBUG_RESULT_DIR", str(tmp_path / "vibevoice-debug"))
     monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(tmp_path / "public-sample-audios.json"))
+    monkeypatch.setenv(
+        "MO_PRACTICE_ATTEMPT_STATE_DIR",
+        str(tmp_path / "practice-attempt-state"),
+    )
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
@@ -1022,9 +1026,13 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
     class FixedPracticeLlm:
         def __init__(self) -> None:
             self.calls = 0
+            self.models: list[str] = []
+            self.paddings: list[float] = []
 
         def evaluate(self, *, model, input_payload):
             self.calls += 1
+            self.models.append(model)
+            self.paddings.append(float(input_payload["padding_seconds"]))
             return PracticeLlmEvaluation(
                 result={
                     "schema_version": 1,
@@ -1138,12 +1146,13 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
         {"model_audio_included": False},
     ]
 
+    disabled_history_root = tmp_path / "disabled-history"
     disabled_history_client = TestClient(
         create_app(
             openai_pipeline=pipeline,
             runpod_practice_asr_provider=runpod,
             audio_history_store=AudioHistoryStore(
-                root=tmp_path / "disabled-history",
+                root=disabled_history_root,
                 limit=10,
                 enabled=False,
             ),
@@ -1155,8 +1164,8 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
         data={
             "target_language": "zh-CN",
             "target_text": "你好。",
-            "comparison_model": "gpt-5.6-terra",
-            "playback_padding_seconds": "0.10",
+            "comparison_model": "gpt-5.4-nano",
+            "playback_padding_seconds": "0.25",
         },
         files={
             "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
@@ -1164,10 +1173,26 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
         },
     )
     assert submitted.status_code == 202
+    disabled_history_client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=runpod,
+            audio_history_store=AudioHistoryStore(
+                root=disabled_history_root,
+                limit=10,
+                enabled=False,
+            ),
+            practice_llm_service=practice_llm,
+        )
+    )
     completed = disabled_history_client.get(
         f"/api/practice/attempt-jobs/{submitted.json()['job_id']}"
     )
     assert completed.json()["status"] == "succeeded", completed.json()
+    assert completed.json()["result"]["comparison_model"] == "gpt-5.4-nano"
+    assert completed.json()["result"]["playback_padding_seconds"] == 0.25
+    assert practice_llm.models[-1] == "gpt-5.4-nano"
+    assert practice_llm.paddings[-1] == 0.25
     # 永続化先が無効なら、再起動後にお手本ASRを失うjobを作らないよう音声を含める。
     assert runpod.submissions[-1] == {"model_audio_included": True}
 

@@ -64,6 +64,7 @@ from .practice import (
     supported_practice_target_language,
     validate_practice_alignment_target,
 )
+from .practice_attempt_state import PracticeAttemptStateStore
 from .practice_llm import (
     PRACTICE_COMPARISON_ERROR_MESSAGE,
     PracticeLlmError,
@@ -1136,6 +1137,7 @@ def create_app(
     user_settings_store: UserSettingsStore | None = None,
     public_sample_audio_store: PublicSampleAudioStore | None = None,
     practice_llm_service: PracticeLlmService | None = None,
+    practice_attempt_state_store: PracticeAttemptStateStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Voice Lab")
 
@@ -1183,11 +1185,23 @@ def create_app(
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
     active_practice_llm_service = practice_llm_service or PracticeLlmService()
+    active_practice_attempt_state_store = (
+        practice_attempt_state_store or PracticeAttemptStateStore.from_env()
+    )
     practice_prompt_job_store = PracticeJobStore()
     practice_attempt_job_store = PracticeJobStore()
     practice_attempt_llm_options: dict[str, dict[str, object]] = {}
     practice_attempt_result_cache: dict[str, dict[str, object]] = {}
     practice_attempt_finalization_jobs: dict[str, dict[str, object]] = {}
+
+    def track_practice_attempt_snapshot(
+        entry: AudioHistoryEntry | None,
+        snapshot: dict[str, object],
+    ) -> None:
+        _update_practice_attempt_history(active_audio_history_store, entry, snapshot)
+        job_id = str(snapshot.get("job_id") or "")
+        if job_id:
+            active_practice_attempt_state_store.save_terminal_snapshot(job_id, snapshot)
     practice_attempt_finalization_lock = Lock()
     job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
@@ -2307,12 +2321,16 @@ def create_app(
             }
             if job_id:
                 practice_attempt_llm_options[job_id] = llm_options
+                active_practice_attempt_state_store.save_options(
+                    job_id,
+                    _practice_attempt_llm_options_metadata(llm_options),
+                )
             snapshot = _practice_attempt_job_snapshot(
                 body,
                 health=health,
                 llm_options=llm_options,
             )
-            _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+            track_practice_attempt_snapshot(recording_entry, snapshot)
             if job_id:
                 active_audio_history_store.update_metadata(
                     recording_entry,
@@ -2502,7 +2520,7 @@ def create_app(
             "result": result,
             "error": None,
         }
-        _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+        track_practice_attempt_snapshot(recording_entry, snapshot)
         return snapshot
 
     @app.get("/api/practice/attempt-jobs/{job_id}")
@@ -2521,12 +2539,13 @@ def create_app(
                 active_audio_history_store,
                 job_id,
             )
-            _update_practice_attempt_history(
-                active_audio_history_store,
-                recording_entry,
-                snapshot,
-            )
+            track_practice_attempt_snapshot(recording_entry, snapshot)
             return snapshot
+        persisted_snapshot = active_practice_attempt_state_store.load_terminal_snapshot(
+            job_id
+        )
+        if persisted_snapshot is not None:
+            return persisted_snapshot
         recording_entry = _practice_attempt_history_entry(
             active_audio_history_store,
             job_id,
@@ -2548,6 +2567,19 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=_runpod_practice_error_message({"error": str(exc)})) from exc
         llm_options = practice_attempt_llm_options.get(job_id)
+        if llm_options is None:
+            llm_options = active_practice_attempt_state_store.load_options(job_id)
+            if llm_options is not None:
+                cached_model_transcription = llm_options.get(
+                    "cached_model_transcription"
+                )
+                if isinstance(cached_model_transcription, dict):
+                    llm_options["cached_model_transcription"] = (
+                        _asr_transcription_from_runpod_output(
+                            cached_model_transcription
+                        )
+                    )
+                practice_attempt_llm_options[job_id] = llm_options
         if llm_options is None:
             llm_options = _practice_attempt_llm_options_from_history(recording_entry)
             if llm_options is not None:
@@ -2601,18 +2633,14 @@ def create_app(
             )
             snapshot["job_id"] = job_id
             snapshot["metrics"] = finalization.get("metrics") or {}
-            _update_practice_attempt_history(
-                active_audio_history_store,
-                recording_entry,
-                snapshot,
-            )
+            track_practice_attempt_snapshot(recording_entry, snapshot)
             return snapshot
         snapshot = _practice_attempt_job_snapshot(
             body,
             health=health,
             llm_options=llm_options,
         )
-        _update_practice_attempt_history(active_audio_history_store, recording_entry, snapshot)
+        track_practice_attempt_snapshot(recording_entry, snapshot)
         return snapshot
 
     @app.post("/api/practice/recordings")
