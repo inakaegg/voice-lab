@@ -314,6 +314,98 @@ test("SpeakLoop shows prompt ASR, translation, and speech generation stages", as
   await expect(page.locator("#practice-target-text")).toContainText("Where are you going today?");
 });
 
+test("SpeakLoop handles terminal initial prompt job snapshots", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const dataEvent = new Event("dataavailable") as Event & { data: Blob };
+        dataEvent.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(dataEvent);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.route("**/api/practice/recordings", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "prompt-already-finished",
+        status: "succeeded",
+        current_stage: { stage: "complete", label: "完了しました", provider: "", model: "" },
+        result: {
+          recording_kind: "prompt",
+          transcript: "今日はどこへ行きますか",
+          target_text: "Where are you going today?",
+          target_language: "en-US",
+          display_text: { primary_text: "Where are you going today?" },
+          audio_base64: "UklGRg==",
+          audio_mime_type: "audio/wav",
+        },
+      }),
+    });
+  });
+
+  await page.goto("/speakloop");
+  const native = page.locator("#practice-native-record-button");
+  await native.click();
+  await native.click();
+
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible();
+  await expect(page.locator("#practice-target-text")).toContainText("Where are you going today?");
+  await expect(page.locator("#practice-model-audio")).toHaveAttribute("src", /^blob:/);
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({
+      path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-terminal-prompt.png`,
+      fullPage: true,
+    });
+    await page.locator("html").evaluate((element) => element.setAttribute("data-theme", "dark"));
+    await page.screenshot({
+      path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-terminal-prompt.png`,
+      fullPage: true,
+    });
+  }
+
+  await page.unroute("**/api/practice/recordings");
+  await page.route("**/api/practice/recordings", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "prompt-already-failed",
+        status: "failed",
+        current_stage: { stage: "failed", label: "お手本を作成できませんでした" },
+        result: null,
+        error: {
+          code: "practice_prompt_failed",
+          message: "お手本を作成できませんでした。もう一度お試しください。",
+        },
+      }),
+    });
+  });
+  await page.reload();
+  await native.click();
+  await native.click();
+  await expect(page.locator("#practice-prompt-panel")).toBeHidden();
+  await expect(page.locator("#practice-error")).toHaveText(
+    "お手本を作成できませんでした。もう一度お試しください。",
+  );
+});
+
 test("SpeakLoop switches Chinese text display without resubmitting audio", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {

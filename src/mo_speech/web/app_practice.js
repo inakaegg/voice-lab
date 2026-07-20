@@ -333,7 +333,7 @@ async function submitPracticeRecording(blob, kind) {
     return;
   }
   let payload = await postPracticeForm("/api/practice/recordings", form);
-  if (payload?.status === "queued" || payload?.status === "running") {
+  if (["queued", "running", "succeeded", "failed"].includes(payload?.status)) {
     renderPracticeJobStatus(payload);
     progress.hidden = true;
     setStatus("");
