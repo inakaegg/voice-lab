@@ -3876,17 +3876,36 @@ function practiceDiffComparableText(value) {
 }
 
 // diff比較用の文字ごとの声調つきピンイン配列(非漢字は空文字列)を返す。
-// 文字列全体をまとめて変換すると、非漢字の扱いや多音字の文脈判定でトークン数が
-// ずれる恐れがあるため、1文字ずつ変換してArray.from(comparable text)と同じ長さ・
-// 同じ添字を保証する。
+// 連続する漢字は文脈付きでまとめて変換する。非漢字位置を空文字列として残し、
+// Array.from(comparable text)と同じ長さ・同じ添字を保証する。
 function practiceDiffPinyinChars(text) {
   const comparable = practiceDiffComparableText(text);
   if (!comparable) return [];
   try {
-    return Array.from(comparable).map((char) => {
-      const result = pinyin(char, { toneType: "num", type: "array", nonZh: "removed" });
-      return result[0] || "";
-    });
+    const chars = Array.from(comparable);
+    const result = chars.map(() => "");
+    const isHan = (char) => /\p{Script=Han}/u.test(char);
+    let index = 0;
+    while (index < chars.length) {
+      if (!isHan(chars[index])) {
+        index += 1;
+        continue;
+      }
+      let end = index + 1;
+      while (end < chars.length && isHan(chars[end])) end += 1;
+      const tokens = pinyin(chars.slice(index, end).join(""), {
+        toneType: "num",
+        type: "array",
+        nonZh: "removed",
+      });
+      if (tokens.length === end - index) {
+        tokens.forEach((token, offset) => {
+          result[index + offset] = token || "";
+        });
+      }
+      index = end;
+    }
+    return result;
   } catch (error) {
     console.warn("practice diff pinyin generation failed", error);
     return Array.from(comparable).map(() => "");

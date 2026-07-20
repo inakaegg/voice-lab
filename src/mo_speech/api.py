@@ -824,9 +824,8 @@ def _practice_diff_comparable_text(text: str) -> str:
 def _practice_diff_pinyin_chars(text: str) -> list[str]:
     """diff比較用の文字ごとの声調つきピンイン配列(非漢字は空文字列)を返す。
 
-    文字列全体をまとめて変換すると、非漢字の扱いや多音字の文脈判定でトークン数が
-    ずれる恐れがあるため、1文字ずつ変換してArray.from(comparable text)と同じ長さ・
-    同じ添字を保証する。
+    連続する漢字は文脈付きでまとめて変換する。非漢字位置を空文字列として残し、
+    Array.from(comparable text)と同じ長さ・同じ添字を保証する。
     """
     comparable = _practice_diff_comparable_text(text)
     if not comparable:
@@ -835,10 +834,24 @@ def _practice_diff_pinyin_chars(text: str) -> list[str]:
         from pypinyin import Style, lazy_pinyin
     except ImportError:
         return ["" for _ in comparable]
-    result: list[str] = []
-    for char in comparable:
-        tokens = lazy_pinyin(char, style=Style.TONE3, neutral_tone_with_five=True, errors="ignore")
-        result.append(tokens[0] if tokens else "")
+    result = ["" for _ in comparable]
+    index = 0
+    while index < len(comparable):
+        if not _contains_han_text(comparable[index]):
+            index += 1
+            continue
+        end = index + 1
+        while end < len(comparable) and _contains_han_text(comparable[end]):
+            end += 1
+        tokens = lazy_pinyin(
+            comparable[index:end],
+            style=Style.TONE3,
+            neutral_tone_with_five=True,
+            errors="ignore",
+        )
+        if len(tokens) == end - index:
+            result[index:end] = tokens
+        index = end
     return result
 
 
