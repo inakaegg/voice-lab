@@ -3096,6 +3096,37 @@ def test_audio_history_excludes_practice_entries_and_practice_history_lists_them
     assert len(practice_history["outputs"]) == 0
 
 
+def test_practice_history_locally_adds_missing_pinyin_without_rewriting_metadata(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    entry = history_store.save_recording(
+        b"practice attempt",
+        suffix=".wav",
+        metadata={
+            "endpoint": "practice-attempts",
+            "recording_intent": "attempt",
+            "practice_job_status": "succeeded",
+            "practice_diagnostics": {
+                "recording_kind": "attempt",
+                "target_language": "zh-CN",
+                "target_text": "银行",
+                "recognized_text": "银杏",
+                "outcome": "evaluated",
+            },
+        },
+    )
+    assert entry is not None
+    original_metadata = entry.metadata_path.read_text(encoding="utf-8")
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get("/api/practice-history")
+
+    assert response.status_code == 200
+    diagnostics = response.json()["recordings"][0]["metadata"]["practice_diagnostics"]
+    assert diagnostics["comparison_target_pinyin"] == ["yin2", "hang2"]
+    assert diagnostics["comparison_recognized_pinyin"] == ["yin2", "xing4"]
+    assert entry.metadata_path.read_text(encoding="utf-8") == original_metadata
+
+
 def test_admin_serves_browser_ui() -> None:
     client = TestClient(create_app())
 
@@ -3403,9 +3434,15 @@ def test_static_assets_are_served() -> None:
     assert ".error-message" in css_response.text
 
 
-def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None:
+def test_runtime_api_returns_active_mode_and_provider_names(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
+    history_store = AudioHistoryStore(tmp_path / "history", enabled=True)
+    client = TestClient(
+        create_app(
+            voice_conversion_service=_fake_voice_conversion_service(),
+            audio_history_store=history_store,
+        )
+    )
 
     response = client.get("/api/runtime")
 
@@ -3452,6 +3489,10 @@ def test_runtime_api_returns_active_mode_and_provider_names(monkeypatch) -> None
             "settings": {},
         }
     ]
+    assert payload["ui_capabilities"] == {
+        "practice_developer_settings": True,
+        "practice_history_preview": True,
+    }
 
 
 def test_user_settings_api_defaults_to_japanese(tmp_path, monkeypatch) -> None:

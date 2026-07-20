@@ -197,6 +197,84 @@ test("SpeakLoop defaults to English and normalizes a saved Japanese target", asy
   await expect(language).toHaveValue("en-US");
 });
 
+test("SpeakLoop locally restores a saved result without starting audio processing", async ({ page }, testInfo) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { historyState: "practice-preview", practiceUiMode: "local" });
+  await page.goto("/speakloop");
+  const preview = page.locator("#practice-history-preview");
+  await expect(preview).toBeVisible();
+  await preview.locator("summary").click();
+  await expect(page.locator("#practice-history-preview-status")).toContainText("1件");
+
+  const requestsAfterDisplay: Array<{ method: string; path: string }> = [];
+  page.on("request", (request) => {
+    requestsAfterDisplay.push({
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+    });
+  });
+  await page.locator("#practice-history-preview-button").click();
+
+  await expect(page.locator("#practice-saved-result-notice")).toBeVisible();
+  await expect.poll(() => page.locator("#practice-target-text").evaluate((element) =>
+    Array.from(element.childNodes).map((node) =>
+      node.nodeName === "RUBY" ? node.firstChild?.textContent || "" : node.textContent || ""
+    ).join("")
+  )).toContain("银行周末也营业吗");
+  await expect(page.locator("#practice-target-text ruby")).toHaveCount(8);
+  await expect(page.locator("#practice-recognized-text .practice-diff-grid"))
+    .toHaveAttribute("aria-label", /银杏周末也营业吗/);
+  await expect(page.locator("#practice-score")).toHaveText("82点");
+  await expect(page.locator("#practice-overall-comment")).toHaveText("最初の単語をもう一度確認しましょう。");
+  await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
+  await expect(page.locator("#practice-play-model-button")).toBeEnabled();
+  await expect(page.locator("#practice-play-model-button")).toContainText("復唱音声を再生");
+  expect(requestsAfterDisplay.every((request) =>
+    request.method === "GET" && request.path === "/api/audio-history/recordings/practice-preview.wav"
+  )).toBe(true);
+  await assertNoHorizontalOverflow(page);
+
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-saved-result.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-saved-result.png`, fullPage: true });
+  }
+});
+
+test("SpeakLoop Cloudflare mode hides developer controls and ignores stale saved values", async ({ page }, testInfo) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { practiceUiMode: "cloudflare" });
+  await page.addInitScript(() => {
+    localStorage.setItem("mo:practice-settings", JSON.stringify({
+      comparison_model: "gpt-5.4-nano",
+      playback_padding_seconds: 0.1,
+    }));
+  });
+
+  await page.goto("/speakloop");
+
+  await expect(page.locator("#practice-comparison-model-setting")).toBeHidden();
+  await expect(page.locator("#practice-playback-padding-setting")).toBeHidden();
+  await expect(page.locator("#practice-history-preview")).toBeHidden();
+  await expect(page.locator("#practice-comparison-model-select")).toHaveValue("gpt-5.6-terra");
+  await expect(page.locator("#practice-playback-padding-slider")).toHaveValue("0.3");
+  await expect(page.locator("#practice-playback-padding-value")).toHaveText("0.30秒");
+  await assertNoHorizontalOverflow(page);
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-cloudflare-fixed-settings.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-cloudflare-fixed-settings.png`, fullPage: true });
+  }
+});
+
 test("SpeakLoop shows prompt ASR, translation, and speech generation stages", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     class FakeMediaRecorder extends EventTarget {

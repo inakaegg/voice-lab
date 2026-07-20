@@ -131,12 +131,17 @@ test("SpeakLoop keeps comparison playback simple without an auto-play preference
   assert.match(speakloop, /practice-speed-slider/);
 });
 
-test("SpeakLoop exposes LLM comparison model and common before-after padding settings", () => {
+test("SpeakLoop keeps local developer settings hidden until runtime capability is confirmed", () => {
   for (const model of ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.4-nano"]) {
     assert.match(speakloop, new RegExp(`<option value="${model}"`));
   }
+  assert.match(speakloop, /id="practice-comparison-model-setting"[\s\S]*hidden/);
+  assert.match(speakloop, /id="practice-playback-padding-setting"[\s\S]*hidden/);
   assert.match(speakloop, /id="practice-comparison-model-select"[\s\S]*defaultValue="gpt-5\.6-terra"/);
-  assert.match(speakloop, /id="practice-playback-padding-slider"[\s\S]*min="0"[\s\S]*max="0\.5"[\s\S]*step="0\.05"[\s\S]*defaultValue="0\.1"/);
+  assert.match(speakloop, /id="practice-playback-padding-slider"[\s\S]*min="0"[\s\S]*max="0\.5"[\s\S]*step="0\.05"[\s\S]*defaultValue="0\.3"/);
+  assert.match(speakloop, /id="practice-history-preview"[\s\S]*hidden/);
+  assert.match(speakloop, /過去の結果で表示確認/);
+  assert.match(speakloop, /id="practice-saved-result-notice"/);
   assert.match(speakloop, /前後余白/);
   assert.match(speakloop, /LLM採点/);
   assert.doesNotMatch(speakloop, /99\.5%以上/);

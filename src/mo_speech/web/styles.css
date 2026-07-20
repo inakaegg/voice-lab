@@ -1710,6 +1710,83 @@ audio {
   text-align: right;
 }
 
+.practice-history-preview {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid #dbe8f7;
+  border-radius: 16px;
+  color: #24435f;
+  padding: 0 16px;
+}
+
+.practice-history-preview summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 12px 0;
+}
+
+.practice-history-preview-controls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0 0 10px;
+}
+
+.practice-history-preview-controls label {
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 5px;
+  min-width: 0;
+}
+
+.practice-history-preview-controls select {
+  background: #fff;
+  border: 1px solid #c7d9ee;
+  border-radius: 10px;
+  color: #173a59;
+  font: inherit;
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.practice-history-preview-controls button {
+  background: #1769d2;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+.practice-history-preview-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.practice-history-preview > p {
+  color: #52677f;
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+
+.practice-saved-result-notice {
+  background: #e9f4ff;
+  border: 1px solid #b9d9fa;
+  border-radius: 10px;
+  color: #24557d;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 12px;
+  padding: 9px 11px;
+}
+
 .practice-inline-setting {
   align-items: center;
   background: rgba(255, 255, 255, 0.82);
@@ -4734,6 +4811,8 @@ html[data-tab-audio-available="false"] .react-public-body[data-layout="compact"]
   .react-public-body[data-layout="compact"] .practice-script-toggle button { min-height: 36px; padding-inline: 10px; }
   .react-public-body[data-layout="compact"] .practice-own-voice-control { min-height: 42px; }
   .react-public-body[data-layout="compact"] .practice-own-voice-tooltip { width: min(300px, calc(100vw - 32px)); }
+  .react-public-body[data-layout="compact"] .practice-history-preview-controls { align-items: stretch; grid-template-columns: 1fr; }
+  .react-public-body[data-layout="compact"] .practice-history-preview-controls button { width: 100%; }
   .react-public-body[data-layout="compact"] .react-flow-card { padding: 12px; }
   .react-public-body[data-layout="compact"] .practice-step-number { height: 22px; width: 22px; }
   .react-public-body[data-layout="compact"] .practice-record-orb { height: 78px; width: 78px; }
@@ -4807,6 +4886,7 @@ html[data-theme="dark"] .react-public-body .react-sample-card,
 html[data-theme="dark"] .react-public-body .practice-current-language,
 html[data-theme="dark"] .react-public-body .practice-inline-setting,
 html[data-theme="dark"] .react-public-body .practice-script-setting,
+html[data-theme="dark"] .react-public-body .practice-history-preview,
 html[data-theme="dark"] .react-public-body .react-flow-card,
 html[data-theme="dark"] .react-public-body .react-work-card,
 html[data-theme="dark"] .react-public-body .react-result-card { background: var(--react-paper); border-color: var(--react-border); color: var(--react-ink); }
@@ -4837,6 +4917,12 @@ html[data-theme="dark"] .react-public-body[data-layout="compact"] .react-generat
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { background: transparent; }
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-language-select select { color: #bdcaf0; }
 html[data-theme="dark"] .react-public-body .practice-playback-padding output { color: #bdcaf0; }
+html[data-theme="dark"] .react-public-body .practice-history-preview > p { color: var(--react-muted); }
+html[data-theme="dark"] .react-public-body .practice-saved-result-notice {
+  background: rgba(94, 159, 240, 0.13);
+  border-color: rgba(126, 174, 236, 0.28);
+  color: #b7d6ff;
+}
 html[data-theme="dark"] .react-public-body[data-layout="compact"] .practice-script-toggle button[aria-pressed="true"] {
   background: transparent;
   color: #dce5ff;

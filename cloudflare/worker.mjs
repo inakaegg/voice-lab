@@ -1341,6 +1341,10 @@ async function runtimePayload(env) {
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     supported_voice_modes: ["default", "convert"],
+    ui_capabilities: {
+      practice_developer_settings: false,
+      practice_history_preview: false,
+    },
     translation_backends: [
       {
         id: "openai",

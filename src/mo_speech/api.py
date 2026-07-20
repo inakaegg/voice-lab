@@ -484,6 +484,8 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "phrase_matches": result.get("phrase_matches") or [],
         "comparison_alignment": result.get("comparison_alignment") or {},
         "model_comparison_alignment": result.get("model_comparison_alignment") or {},
+        "comparison_target_pinyin": result.get("comparison_target_pinyin") or [],
+        "comparison_recognized_pinyin": result.get("comparison_recognized_pinyin") or [],
         "asr_timestamps": _compact_asr_timestamps_for_metadata(asr_timestamps),
         "model_asr_timestamps": _compact_asr_timestamps_for_metadata(model_asr_timestamps),
         "timings_ms": result.get("timings_ms") or {},
@@ -1127,11 +1129,29 @@ def _serialized_audio_history_entries(
     *,
     practice: bool,
 ) -> list[dict[str, object]]:
-    return [
-        _serialize_audio_history_entry(kind, entry)
-        for entry in store.list_entries(kind)
-        if _is_practice_history_entry(entry) is practice
-    ]
+    serialized_entries: list[dict[str, object]] = []
+    for entry in store.list_entries(kind):
+        if _is_practice_history_entry(entry) is not practice:
+            continue
+        serialized = _serialize_audio_history_entry(kind, entry)
+        if practice:
+            metadata = dict(serialized.get("metadata") or {})
+            source_diagnostics = metadata.get("practice_diagnostics")
+            if isinstance(source_diagnostics, dict):
+                diagnostics = dict(source_diagnostics)
+                if str(diagnostics.get("target_language") or "") == "zh-CN":
+                    if not diagnostics.get("comparison_target_pinyin"):
+                        diagnostics["comparison_target_pinyin"] = _practice_diff_pinyin_chars(
+                            str(diagnostics.get("target_text") or "")
+                        )
+                    if not diagnostics.get("comparison_recognized_pinyin"):
+                        diagnostics["comparison_recognized_pinyin"] = _practice_diff_pinyin_chars(
+                            str(diagnostics.get("recognized_text") or "")
+                        )
+                metadata["practice_diagnostics"] = diagnostics
+                serialized["metadata"] = metadata
+        serialized_entries.append(serialized)
+    return serialized_entries
 
 
 def create_app(
@@ -1286,6 +1306,10 @@ def create_app(
             ),
             "text_tts_backends": text_tts_backend_statuses(active_text_tts_providers),
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
+            "ui_capabilities": {
+                "practice_developer_settings": True,
+                "practice_history_preview": bool(active_audio_history_store.enabled),
+            },
         }
 
     @app.get("/api/vibevoice/status")
