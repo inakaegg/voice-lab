@@ -1991,6 +1991,109 @@ def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
     assert llm.calls == 1, "re-polling a completed RunPod job must reuse the cached comparison instead of calling the LLM again"
 
 
+def test_practice_attempt_job_falls_back_to_asr_word_ends_when_duration_probe_failed(monkeypatch) -> None:
+    # ffprobeが無い/対応できない環境では、提出時点のaudio_duration probeが0.0のまま
+    # 保存される。0.0がそのままLLM検証のplayback_end = min(duration, end+padding)へ
+    # 渡ると、有効な単語範囲でもplayback_endが0になり誤ってpractice_llm_failedになる
+    # (Codexレビュー指摘)。実際のPracticeLlmService.evaluate/validate_practice_llm_result
+    # を通してこの回帰を検出するため、practice_llm_serviceはfakeにせずopenaiクライアント
+    # だけをモックする。
+    class FakeAsyncRunpodAsr:
+        name = "runpod-funasr-paraformer-zh"
+
+        def submit_comparison_job(self, **kwargs):
+            return {"id": "practice-duration-fallback-job", "status": "IN_QUEUE"}
+
+        def health(self):
+            return {"workers": {"idle": 0, "running": 0, "initializing": 1}}
+
+        def job_status(self, job_id):
+            return {
+                "id": job_id,
+                "status": "COMPLETED",
+                "output": {
+                    "practice_asr_contract_version": 2,
+                    "target_text": "你好。",
+                    "text": "你好。",
+                    "model": "funasr/paraformer-zh",
+                    "timestamp_granularities": ["word"],
+                    "words": [{"text": "你好", "start": 0.1, "end": 0.8}],
+                    "segments": [],
+                    "model_transcription": {
+                        "text": "你好。",
+                        "model": "funasr/paraformer-zh",
+                        "timestamp_granularities": ["word"],
+                        "words": [{"text": "你好", "start": 0.0, "end": 0.7}],
+                        "segments": [],
+                    },
+                    "providers": {"asr": "funasr-paraformer-zh"},
+                },
+            }
+
+    class Responses:
+        @staticmethod
+        def create(**kwargs):
+            return SimpleNamespace(
+                output_text=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "overall_score": 100,
+                        "overall_comment": "正確です。",
+                        "phrases": [
+                            {
+                                "phrase_index": 0,
+                                "target_text": "你好。",
+                                "score": 100,
+                                "comment": "正確です。",
+                                "reference": {"status": "assigned", "word_start_index": 0, "word_end_index": 1},
+                                "attempt": {"status": "assigned", "word_start_index": 0, "word_end_index": 1},
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                usage=None,
+            )
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    monkeypatch.setattr(
+        "mo_speech.api_audio_history.prepare_audio_history_wav",
+        lambda audio_bytes, suffix: (audio_bytes, ".wav", {"audio_mime_type": "audio/wav"}),
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: SimpleNamespace(responses=Responses())))
+    client = TestClient(
+        create_app(
+            openai_pipeline=pipeline,
+            runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
+        )
+    )
+
+    client.post(
+        "/api/practice/attempt-jobs",
+        data={"target_language": "zh-CN", "target_text": "你好。", "comparison_model": "gpt-5.6-terra"},
+        files={
+            # ffprobeでは音声として解析できない中身にして、提出時点のduration probeを
+            # 0.0(probe失敗)にする。
+            "audio": ("attempt.webm", b"not a real audio file", "audio/webm"),
+            "model_audio": ("model.wav", b"not a real audio file either", "audio/wav"),
+        },
+    )
+
+    response = client.get("/api/practice/attempt-jobs/practice-duration-fallback-job")
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["status"] == "succeeded", snapshot.get("error")
+    assert snapshot["result"]["outcome"] == "evaluated"
+    assert snapshot["result"]["comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(0.8)
+    assert snapshot["result"]["model_comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(0.7)
+
+
 def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
     class OutdatedRunpodAsr:
         name = "runpod-funasr-paraformer-zh"

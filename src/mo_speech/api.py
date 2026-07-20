@@ -68,6 +68,7 @@ from .practice_llm import (
     PRACTICE_COMPARISON_ERROR_MESSAGE,
     PracticeLlmError,
     PracticeLlmService,
+    audio_duration_from_asr_words,
     build_practice_llm_input,
     comparison_alignments_from_llm_result,
     probe_audio_duration_seconds,
@@ -2030,6 +2031,17 @@ def create_app(
             providers = output.get("providers") if isinstance(output.get("providers"), dict) else {}
             provider_name = str(providers.get("asr") or active_runpod_practice_asr_provider.name)
             timings = output.get("timings_ms") if isinstance(output.get("timings_ms"), dict) else {}
+            # 提出時点(RunPodがまだ結果を返す前)のffprobe計測がffprobe不在等で失敗すると
+            # audio_durationは0.0のまま保存される。0.0のままLLM検証(playback_end =
+            # min(duration, end+padding))へ渡すと、有効な単語範囲でもplayback_endが0に
+            # なり誤って失敗扱いになるため、その場合はRunPodが返した単語の最終end時刻を
+            # 音声長の代わりに使う。
+            reference_audio_duration = float((llm_options or {}).get("reference_audio_duration") or 0.0)
+            if reference_audio_duration <= 0:
+                reference_audio_duration = audio_duration_from_asr_words(model_transcription.words)
+            attempt_audio_duration = float((llm_options or {}).get("attempt_audio_duration") or 0.0)
+            if attempt_audio_duration <= 0:
+                attempt_audio_duration = audio_duration_from_asr_words(attempt_transcription.words)
             try:
                 result = _create_practice_attempt_result_from_transcriptions(
                     practice_target_language="zh-CN",
@@ -2044,12 +2056,8 @@ def create_app(
                     playback_padding_seconds=float(
                         (llm_options or {}).get("playback_padding_seconds") or 0.1
                     ),
-                    reference_audio_duration=float(
-                        (llm_options or {}).get("reference_audio_duration") or 0.0
-                    ),
-                    attempt_audio_duration=float(
-                        (llm_options or {}).get("attempt_audio_duration") or 0.0
-                    ),
+                    reference_audio_duration=reference_audio_duration,
+                    attempt_audio_duration=attempt_audio_duration,
                 )
             except (PracticeAlignmentError, PracticeLlmError) as error:
                 if isinstance(error, PracticeLlmError):

@@ -155,6 +155,19 @@ def probe_audio_duration_seconds(path: Path, *, fallback_words: list[dict[str, o
     )
 
 
+def audio_duration_from_asr_words(words: list[dict[str, object]] | None) -> float:
+    """RunPod提出時点のffprobe計測が失敗/未計測(0.0)だった場合のフォールバック。
+
+    ASRが返した単語タイムスタンプの最終end時刻を音声長の代わりに使う。probe自体が
+    失敗した場合の音声長0.0をそのままLLM検証(playback_end = min(duration, end+padding))
+    へ渡すと、有効な単語範囲でもplayback_endが0になり誤って失敗扱いになるため。
+    """
+    return max(
+        (float(word.get("end") or 0.0) for word in (words or []) if isinstance(word, dict)),
+        default=0.0,
+    )
+
+
 def build_practice_llm_input(
     *,
     target_language: str,
