@@ -1768,6 +1768,47 @@ def create_app(
         if comparison_model:
             if model_transcription is None:
                 raise PracticeLlmError("reference ASR is missing", stage="prepare_input")
+            reference_no_speech = (
+                not model_recognized_text.strip()
+                and not model_asr_timestamps.get("words")
+                and not model_asr_timestamps.get("segments")
+            )
+            if reference_no_speech:
+                raise PracticeAlignmentError("empty_reference_asr", stage="reference_asr")
+            no_speech = (
+                not recognized_text.strip()
+                and not asr_timestamps.get("words")
+                and not asr_timestamps.get("segments")
+            )
+            if no_speech:
+                compare_ms = _elapsed_ms(compare_started)
+                return {
+                    "recording_kind": "attempt",
+                    "target_language": practice_target_language,
+                    "target_text": target_text,
+                    "recognized_text": recognized_text,
+                    "model_recognized_text": model_recognized_text,
+                    "asr_model": attempt_transcription.model,
+                    "asr_timestamps": asr_timestamps,
+                    "model_asr_timestamps": model_asr_timestamps,
+                    "outcome": "no_speech",
+                    "message": "音声を検出できませんでした。もう一度録音してください。",
+                    "comparison_alignment": None,
+                    "model_comparison_alignment": None,
+                    "comparison_model": comparison_model,
+                    "playback_padding_seconds": playback_padding_seconds,
+                    "timings_ms": {
+                        "asr": attempt_asr_ms,
+                        "model_asr": model_asr_ms,
+                        "compare": compare_ms,
+                        "total": attempt_asr_ms + model_asr_ms + compare_ms,
+                    },
+                    "providers": {
+                        "asr": attempt_provider_name,
+                        "model_asr": model_provider_name or attempt_provider_name,
+                        "comparison": "openai-responses",
+                    },
+                }
             llm_input = build_practice_llm_input(
                 target_language=practice_target_language,
                 target_text=target_text,

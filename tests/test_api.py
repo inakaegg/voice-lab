@@ -2278,6 +2278,67 @@ def test_practice_attempt_job_returns_no_speech_without_scoring_or_alignment() -
     assert snapshot["result"]["model_comparison_alignment"]["available"] is True
 
 
+def test_practice_attempt_job_returns_no_speech_for_llm_comparison_without_calling_llm() -> None:
+    class NoSpeechAttemptAsr:
+        name = "fake-whisper"
+
+        def transcribe_detail(self, audio_path, source_language, *, include_timestamps):
+            if audio_path.read_bytes() == b"model audio":
+                return AsrTranscription(
+                    text="Please close the window.",
+                    model="whisper-1",
+                    words=[{"text": "Please close the window", "start": 0.1, "end": 1.2}],
+                    timestamp_granularities=["word"],
+                )
+            return AsrTranscription(
+                text="",
+                model="whisper-1",
+                words=[],
+                segments=[],
+                timestamp_granularities=["word", "segment"],
+            )
+
+    class FakePracticeLlm:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def evaluate(self, *, model, input_payload):
+            self.calls.append({"model": model, "input": input_payload})
+            raise AssertionError("LLM must not be called for a silent attempt recording")
+
+    pipeline = SpeechTranslationPipeline(
+        asr=NoSpeechAttemptAsr(),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    llm = FakePracticeLlm()
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=llm))
+
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "en-US",
+            "target_text": "Please close the window.",
+            "comparison_model": "gpt-5.4-nano",
+            "playback_padding_seconds": "0.1",
+        },
+        files={
+            "audio": ("silent.wav", b"0.72 seconds of silence", "audio/wav"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["result"]["outcome"] == "no_speech"
+    assert snapshot["result"]["message"] == "音声を検出できませんでした。もう一度録音してください。"
+    assert snapshot["result"]["comparison_alignment"] is None
+    assert snapshot["result"]["model_comparison_alignment"] is None
+    assert snapshot["result"]["comparison_model"] == "gpt-5.4-nano"
+    assert llm.calls == []
+
+
 def test_practice_recording_api_uses_explicit_attempt_intent() -> None:
     class FakeRunpodAsr:
         name = "runpod-funasr-paraformer-zh"
