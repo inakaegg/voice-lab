@@ -77,6 +77,7 @@ from .practice_llm import (
 from .practice_jobs import PracticeJobFailure, PracticeJobStore
 from .public_sample_audio import PublicSampleAudioStore
 from .providers.openai_api import (
+    OPENAI_TIMESTAMP_ASR_MODELS,
     AsrTranscription,
     OpenAiAsrProvider,
     create_openai_realtime_translation_client_secret,
@@ -2130,6 +2131,14 @@ def create_app(
         validate_practice_alignment_target(normalized_target_text, practice_target_language)
         use_llm = bool(str(comparison_model or "").strip() or str(playback_padding_seconds or "").strip())
         if use_llm:
+            if practice_target_language != "zh-CN" and practice_asr_model not in OPENAI_TIMESTAMP_ASR_MODELS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"asr_model '{practice_asr_model}' does not return word timestamps, "
+                        "which the LLM comparison requires; use whisper-1 for comparison_model requests"
+                    ),
+                )
             try:
                 selected_comparison_model = supported_practice_comparison_model(comparison_model)
                 selected_playback_padding = validate_playback_padding_seconds(

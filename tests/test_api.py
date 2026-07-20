@@ -450,6 +450,36 @@ def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> 
     assert llm.calls[0]["input"]["attempt_asr"]["recognized_text"] == "Hello word"
 
 
+def test_practice_attempt_job_rejects_non_timestamp_asr_model_for_llm_comparison() -> None:
+    class FakePracticeLlm:
+        def evaluate(self, *, model, input_payload):
+            raise AssertionError("LLM must not be called when asr_model can't provide timestamps")
+
+    pipeline = SpeechTranslationPipeline(
+        asr=FakeAsrProvider({"auto": "unused"}),
+        translator=FakeTranslationProvider({}),
+        tts=FakeTtsProvider(),
+    )
+    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
+
+    response = client.post(
+        "/api/practice/attempt-jobs",
+        data={
+            "target_language": "en-US",
+            "target_text": "Hello world.",
+            "asr_model": "gpt-4o-transcribe",
+            "comparison_model": "gpt-5.4-nano",
+        },
+        files={
+            "audio": ("attempt.webm", b"attempt audio", "audio/webm"),
+            "model_audio": ("model.wav", b"model audio", "audio/wav"),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "does not return word timestamps" in response.json()["detail"]
+
+
 def test_local_practice_attempt_job_reports_both_asr_and_llm_stages(tmp_path) -> None:
     reference_entered = Event()
     release_reference = Event()
