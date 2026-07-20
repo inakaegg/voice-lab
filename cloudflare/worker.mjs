@@ -3113,6 +3113,12 @@ async function createPracticeAttemptJob(request, env) {
   const playbackPaddingSeconds = useLlm
     ? validatePlaybackPaddingSeconds(playbackPaddingRaw)
     : DEFAULT_PLAYBACK_PADDING_SECONDS;
+  if (useLlm && targetLanguage !== "zh-CN" && !OPENAI_TIMESTAMP_ASR_MODELS.has(asrModel)) {
+    throw httpError(
+      400,
+      `asr_model '${asrModel}' does not return word timestamps, which the LLM comparison requires; use whisper-1 for comparison_model requests`,
+    );
+  }
   await enforcePublicFeatureAccess(request, env, "speakloop", {
     audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
     textChars: targetText.length,

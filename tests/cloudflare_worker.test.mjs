@@ -2025,6 +2025,28 @@ test("Cloudflare worker surfaces an LLM validation failure as the generic compar
   assert.equal(payload.error.fallback_to_legacy, false);
 });
 
+test("Cloudflare worker rejects non-timestamp ASR models for English LLM comparison attempts", async () => {
+  const env = fakeEnv(async (url) => {
+    throw new Error(`unexpected url: ${url}`);
+  });
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "en-US");
+  form.append("target_text", "Hello world.");
+  form.append("asr_model", "gpt-4o-transcribe");
+  form.append("comparison_model", "gpt-5.4-nano");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.match(payload.detail, /does not return word timestamps/);
+});
+
 test("Cloudflare worker scores a Chinese practice attempt using the LLM comparison after RunPod ASR completes", async () => {
   const llmCalls = [];
   const env = fakeEnv(async (url, init = {}) => {
