@@ -360,3 +360,15 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
     assert "1120px以上" in spec
     assert "D1" in spec
     assert "R2" in spec
+
+
+def test_runpod_practice_contract_documents_the_cached_reference_asr_exception() -> None:
+    spec = read_text("docs/speech-translation/SPEC.md")
+    cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
+    roadmap = read_text("docs/speech-translation/ROADMAP.md")
+
+    assert "お手本ASRのキャッシュがある場合は `model_audio_base64` を省略できる" in spec
+    assert "`model_transcription` も返さない" in spec
+    assert "`model_audio_base64` を省略したjob" in cloudflare
+    assert "旧imageとは判定しない" in cloudflare
+    assert "音声履歴と独立した短期job state" in roadmap

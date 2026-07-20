@@ -212,6 +212,87 @@ def test_llm_result_is_exposed_to_existing_phrase_playback_without_changing_time
     assert reference["phrases"][3]["audio_end"] == pytest.approx(7.413083)
 
 
+def _minimal_valid_llm_input_and_response() -> tuple[dict[str, object], dict[str, object]]:
+    words = [
+        {"text": "Hello", "start": 0.0, "end": 0.4},
+        {"text": "world.", "start": 0.4, "end": 0.9},
+        {"text": "Goodbye", "start": 1.0, "end": 1.5},
+        {"text": "world.", "start": 1.5, "end": 2.0},
+    ]
+    input_payload = {
+        "target_language": "en-US",
+        "target_text": "Hello world. Goodbye world.",
+        "padding_seconds": 0.1,
+        "reference_audio_duration": 2.1,
+        "attempt_audio_duration": 2.1,
+        "reference_asr": {"recognized_text": "Hello world. Goodbye world.", "model": "whisper-1", "words": words},
+        "attempt_asr": {"recognized_text": "Hello world. Goodbye world.", "model": "whisper-1", "words": words},
+    }
+    model_output = {
+        "schema_version": 1,
+        "overall_score": 100,
+        "overall_comment": "ok",
+        "phrases": [
+            {
+                "phrase_index": 0,
+                "target_text": "Hello world.",
+                "score": 100,
+                "comment": "ok",
+                "reference": {"status": "assigned", "word_start_index": 0, "word_end_index": 2},
+                "attempt": {"status": "assigned", "word_start_index": 0, "word_end_index": 2},
+            },
+            {
+                "phrase_index": 1,
+                "target_text": "Goodbye world.",
+                "score": 100,
+                "comment": "ok",
+                "reference": {"status": "assigned", "word_start_index": 2, "word_end_index": 4},
+                "attempt": {"status": "assigned", "word_start_index": 2, "word_end_index": 4},
+            },
+        ],
+    }
+    return input_payload, model_output
+
+
+def test_target_text_reconstruction_tolerates_missing_boundary_whitespace() -> None:
+    """A real wrangler dev smoke test (2026-07-19) showed a real model dropping
+    the single space between sentences at a phrase boundary even though every
+    word was intact. Concatenating "Hello world." + "Goodbye world." must
+    still validate against "Hello world. Goodbye world." (one extra space)."""
+    input_payload, model_output = _minimal_valid_llm_input_and_response()
+
+    validated = validate_practice_llm_result(model_output, input_payload)
+
+    assert validated["overall_score"] == 100
+
+
+def test_target_text_reconstruction_still_rejects_missing_words() -> None:
+    input_payload, model_output = _minimal_valid_llm_input_and_response()
+    model_output["phrases"][0]["target_text"] = "Hello."  # dropped "world"
+
+    with pytest.raises(PracticeLlmError) as raised:
+        validate_practice_llm_result(model_output, input_payload)
+
+    assert raised.value.stage == "validate_response"
+
+
+def test_target_text_reconstruction_rejects_changed_english_word_boundaries() -> None:
+    input_payload, model_output = _minimal_valid_llm_input_and_response()
+    input_payload["target_text"] = "an ice cream"
+    model_output["phrases"] = [
+        {
+            **model_output["phrases"][0],
+            "phrase_index": 0,
+            "target_text": "a nice cream",
+        }
+    ]
+
+    with pytest.raises(PracticeLlmError) as raised:
+        validate_practice_llm_result(model_output, input_payload)
+
+    assert raised.value.stage == "validate_response"
+
+
 class FakeResponses:
     def __init__(self, output: dict[str, object]) -> None:
         self.output = output

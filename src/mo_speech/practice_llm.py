@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any
 from uuid import uuid4
 
 LOGGER = logging.getLogger("mo_speech")
@@ -213,9 +212,8 @@ def validate_practice_llm_result(
     indices = [phrase.get("phrase_index") if isinstance(phrase, dict) else None for phrase in phrases]
     if indices != expected_indices:
         raise PracticeLlmError("phrase_index must be sequential", stage="validate_response")
-    if "".join(str(phrase.get("target_text") or "") for phrase in phrases) != str(
-        input_payload.get("target_text") or ""
-    ):
+    target_text = str(input_payload.get("target_text") or "")
+    if not _phrases_reconstruct_target_text(phrases, target_text):
         raise PracticeLlmError("target phrases do not reconstruct target_text", stage="validate_response")
 
     padding = _required_finite_number(input_payload.get("padding_seconds"), "padding_seconds")
@@ -244,6 +242,31 @@ def validate_practice_llm_result(
                     )
                 previous_word_ends[side] = range_value["word_end_index"]
     return result
+
+
+def _phrases_reconstruct_target_text(
+    phrases: list[object],
+    target_text: str,
+) -> bool:
+    # LLMが各フレーズの先頭・末尾へ空白を配分しない場合だけ許容する。
+    # フレーズ内部は原文と完全一致させ、"an ice"と"a nice"のような
+    # 単語境界の変更を空白除去で同一視しない。
+    cursor = 0
+    for phrase in phrases:
+        phrase_text = (
+            str(phrase.get("target_text") or "")
+            if isinstance(phrase, dict)
+            else ""
+        )
+        phrase_core = phrase_text.strip()
+        if not phrase_core:
+            return False
+        while cursor < len(target_text) and target_text[cursor].isspace():
+            cursor += 1
+        if not target_text.startswith(phrase_core, cursor):
+            return False
+        cursor += len(phrase_core)
+    return not target_text[cursor:].strip()
 
 
 def _validate_score(value: object, label: str) -> None:
