@@ -372,6 +372,44 @@ test("Cloudflare worker records an admin Google email in the public user table",
   assert.equal(db.__tables.users.get(hash).email, "admin@example.com");
 });
 
+test("Cloudflare worker keeps the public user email fresh when quota is consumed", async () => {
+  const kv = fakeKv();
+  const db = fakeD1();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    admin_google_emails: ["admin@example.com"],
+    features: { speakloop: { daily_limit: 5, total_limit: 5, audio_max_bytes: 8000000, text_max_chars: 800 } },
+  }));
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "viewer@example.com", email_verified: true });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv, db, adminGoogleEmails: "admin@example.com" });
+
+  const cookie = await publicCookie(env, "/speakloop");
+  const hash = await publicIdentityHashForTest("viewer@example.com");
+  db.__tables.users.get(hash).email = null;
+  db.__tables.users.get(hash).last_seen_at = "2026-01-01T00:00:00.000Z";
+
+  const form = new FormData();
+  form.append("audio", new Blob(["attempt"], { type: "audio/webm" }), "recording.webm");
+  form.append("target_language", "ja-JP");
+  form.append("recording_intent", "prompt");
+  await handleRequest(
+    new Request("https://example.com/api/practice/recordings", { method: "POST", body: form, headers: { cookie } }),
+    env,
+  );
+
+  const stored = db.__tables.users.get(hash);
+  assert.equal(stored.email, "viewer@example.com");
+  assert.notEqual(stored.last_seen_at, "2026-01-01T00:00:00.000Z");
+  assert.equal(db.__tables.total.get(`${hash}:speakloop`).usage_count, 1);
+});
+
 test("Cloudflare worker refuses VibeVoice when admin authentication is not configured", async () => {
   const env = publicAuthEnv(async () => {
     throw new Error("unexpected fetch");

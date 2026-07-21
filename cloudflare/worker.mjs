@@ -1980,8 +1980,8 @@ async function consumePublicQuotaD1(env, feature, email, featureSettings, reques
   const now = new Date().toISOString();
   await env.MO_SPEECH_DB.batch([
     env.MO_SPEECH_DB.prepare(
-      "INSERT INTO public_users (email_hash, created_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET last_seen_at = excluded.last_seen_at",
-    ).bind(emailHash, now, now),
+      "INSERT INTO public_users (email_hash, email, created_at, last_seen_at, last_login_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET email = excluded.email, last_seen_at = excluded.last_seen_at",
+    ).bind(emailHash, normalizeEmail(email), now, now, null),
     env.MO_SPEECH_DB.prepare(
       "INSERT INTO quota_usage_daily (email_hash, feature, usage_date, usage_count, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash, feature, usage_date) DO UPDATE SET usage_count = quota_usage_daily.usage_count + 1, updated_at = excluded.updated_at",
     ).bind(emailHash, feature, today, dailyUsed + 1, now),
