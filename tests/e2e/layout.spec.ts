@@ -314,11 +314,17 @@ test("SpeakLoop drops an in-flight recomputation once recording starts", async (
   await page.goto("/speakloop");
   await page.locator("#practice-history-preview summary").click();
   await page.locator("#practice-history-preview-button").click();
-  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
+  const source = page.locator("#practice-history-preview-source-select");
+  const recomputeResponse = page.waitForResponse((response) => response.url().includes("/recomputed-comparison"));
+  await source.selectOption("recomputed");
   await page.locator("#practice-native-record-button").click();
 
-  await page.waitForTimeout(2200);
-  await expect(page.locator("#practice-history-preview-status")).not.toContainText("計算し直した比較区間");
+  await expect(page.locator("#practice-native-record-button")).toHaveAttribute("aria-label", "録音中");
+  await recomputeResponse;
+  await expect(source).toHaveValue("saved");
+  await expect(page.locator("#practice-history-preview-status")).toContainText("保存時の比較区間");
+  await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
+  await page.locator("#practice-native-cancel-button").click();
 });
 
 test("SpeakLoop refuses recomputation when the prompt audio failed to load", async ({ page }) => {
@@ -327,18 +333,19 @@ test("SpeakLoop refuses recomputation when the prompt audio failed to load", asy
     historyState: "practice-preview",
     practiceUiMode: "local",
     practicePreviewModelAudioMissing: true,
-    practicePreviewRecomputeDelayMs: 400,
+    practicePreviewModelAudioDelayMs: 350,
+    practicePreviewRecomputeDelayMs: 1200,
   });
   await page.goto("/speakloop");
   await page.locator("#practice-history-preview summary").click();
   await page.locator("#practice-history-preview-button").click();
+  const source = page.locator("#practice-history-preview-source-select");
+  const recomputeResponse = page.waitForResponse((response) => response.url().includes("/recomputed-comparison"));
+  await source.selectOption("recomputed");
+
   await expect(page.locator("#practice-history-preview-status")).toContainText("お手本音声を読み込めなかった");
-
-  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
-
-  await page.waitForTimeout(900);
-  await expect(page.locator("#practice-history-preview-status")).not.toContainText("計算し直した比較区間");
-  await expect(page.locator("#practice-history-preview-source-select")).toHaveValue("saved");
+  await recomputeResponse;
+  await expect(source).toHaveValue("saved");
   await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
 });
 

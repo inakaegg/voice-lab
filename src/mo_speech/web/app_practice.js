@@ -235,6 +235,12 @@ async function startRecording(slot) {
     showError(error instanceof Error ? error.message : "マイクを使えません。");
     return;
   }
+  if (isSavedHistoryPreview && historyPreviewSourceSelect.value === "recomputed") {
+    const diagnostics = currentHistoryPreviewEntry?.metadata?.practice_diagnostics;
+    restoreCurrentSavedComparison(
+      `録音を開始したため、保存時の比較区間へ戻しました。保存時の余白は${formatSavedPadding(diagnostics?.playback_padding_seconds)}です。`,
+    );
+  }
   const mimeType = preferredRecordingMimeType();
   recordingStream = stream;
   recordingKind = slot;
@@ -978,10 +984,11 @@ function handleModelAudioLoadError() {
     return;
   }
   stopModelAudio();
-  // 応答待ちの再計算があれば無効にする。お手本音声を失った後に適用されると、
-  // 比較再生できないのに「再計算済み」と表示される。
-  historyPreviewRecomputeToken += 1;
-  historyPreviewStatus.textContent = "保存済みの結果を表示しました。お手本音声を読み込めなかったため、比較再生はできません。";
+  // 応答待ちの再計算を無効にし、selectorと比較区間も保存値へ戻す。
+  // お手本音声を失った後に再計算状態だけ残ると、表示と再生内容が一致しない。
+  restoreCurrentSavedComparison(
+    "保存済みの結果を表示しました。お手本音声を読み込めなかったため、比較再生はできません。",
+  );
 }
 
 function handleRepeatAudioPlay() {
@@ -1909,6 +1916,19 @@ function restoreSavedComparisonAlignments(diagnostics) {
     diagnostics.comparison_alignment || null,
     diagnostics.model_comparison_alignment || null,
   );
+}
+
+// 再計算中に録音開始や音声読み込み失敗が起きた場合は、遅延応答を捨てるだけでなく、
+// 現在の履歴に保存されたselector・比較区間・状態文言を同じ遷移で復元する。
+function restoreCurrentSavedComparison(statusMessage) {
+  const diagnostics = currentHistoryPreviewEntry?.metadata?.practice_diagnostics;
+  if (!isSavedHistoryPreview || !diagnostics) {
+    historyPreviewRecomputeToken += 1;
+    historyPreviewStatus.textContent = statusMessage;
+    return;
+  }
+  restoreSavedComparisonAlignments(diagnostics);
+  historyPreviewStatus.textContent = statusMessage;
 }
 
 function syncPinyinSettingVisibility() {

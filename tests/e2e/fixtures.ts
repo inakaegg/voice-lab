@@ -6,6 +6,7 @@ type UiFixtureOptions = {
   practicePreviewModelAudio?: boolean;
   practicePreviewRecompute?: boolean;
   practicePreviewModelAudioMissing?: boolean;
+  practicePreviewModelAudioDelayMs?: number;
   practicePreviewRecomputeUnavailableAtMaxPadding?: boolean;
   practicePreviewSavedPaddingMissing?: boolean;
   practicePreviewRecomputeDelayMs?: number;
@@ -68,6 +69,9 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
       return json(publicSamples);
     }
     if (path === "/api/audio-history/outputs/practice-preview-model.wav") {
+      if (options.practicePreviewModelAudioDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.practicePreviewModelAudioDelayMs));
+      }
       if (options.practicePreviewModelAudioMissing) {
         return json({ detail: "not found" }, 404);
       }
