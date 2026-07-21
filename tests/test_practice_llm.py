@@ -87,6 +87,7 @@ def test_model_and_padding_settings_are_restricted() -> None:
     with pytest.raises(ValueError):
         supported_practice_comparison_model("gpt-4o")
 
+    assert validate_playback_padding_seconds("") == pytest.approx(0.3)
     assert validate_playback_padding_seconds("0.1") == pytest.approx(0.1)
     assert validate_playback_padding_seconds("0.50") == pytest.approx(0.5)
     for value in ("-0.05", "0.03", "0.55", "not-a-number"):

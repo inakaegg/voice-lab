@@ -1380,6 +1380,7 @@ function syncRecordSlotVisuals() {
   nativeRecordButton.disabled = isBusy || (Boolean(activeRecordingKind) && activeRecordingKind !== "native");
   nativeCancelButton.hidden = activeRecordingKind !== "native";
   repeatCancelButton.hidden = activeRecordingKind !== "repeat";
+  syncHistoryPreviewButton();
   if (!repeatAvailable && activeRecordSlot === "repeat") {
     activeRecordSlot = "native";
   }
@@ -1702,10 +1703,16 @@ function practiceHistoryPreviewLabel(entry, diagnostics) {
 
 function syncHistoryPreviewButton() {
   const index = Number.parseInt(historyPreviewSelect.value, 10);
-  historyPreviewButton.disabled = !Number.isInteger(index) || !practiceHistoryPreviewEntries[index];
+  historyPreviewButton.disabled = isBusy
+    || mediaRecorder?.state === "recording"
+    || !Number.isInteger(index)
+    || !practiceHistoryPreviewEntries[index];
 }
 
 function displaySelectedPracticeHistory() {
+  if (isBusy || mediaRecorder?.state === "recording") {
+    return;
+  }
   const index = Number.parseInt(historyPreviewSelect.value, 10);
   const entry = practiceHistoryPreviewEntries[index];
   const diagnostics = entry?.metadata?.practice_diagnostics;

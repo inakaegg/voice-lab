@@ -246,6 +246,72 @@ test("SpeakLoop locally restores a saved result without starting audio processin
   }
 });
 
+test("SpeakLoop prevents restoring saved history while recording or processing", async ({ page }) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const event = new Event("dataavailable") as Event & { data: Blob };
+        event.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(event);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { historyState: "practice-preview", practiceUiMode: "local" });
+  let releasePromptResponse: (() => void) | undefined;
+  const promptResponseGate = new Promise<void>((resolve) => {
+    releasePromptResponse = resolve;
+  });
+  await page.route("**/api/practice/recordings", async (route) => {
+    await promptResponseGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        recording_kind: "prompt",
+        transcript: "今日は何をしますか",
+        target_text: "What are you doing today?",
+        target_language: "en-US",
+        display_text: { primary_text: "What are you doing today?" },
+        audio_base64: "UklGRg==",
+        audio_mime_type: "audio/wav",
+      }),
+    });
+  });
+  await page.goto("/speakloop");
+  const preview = page.locator("#practice-history-preview");
+  await preview.locator("summary").click();
+  await expect(page.locator("#practice-history-preview-status")).toContainText("1件");
+
+  const historyPreviewButton = page.locator("#practice-history-preview-button");
+  await expect(historyPreviewButton).toBeEnabled();
+  await page.locator("#practice-native-record-button").click();
+  await expect(historyPreviewButton).toBeDisabled();
+  await expect(page.locator("#practice-saved-result-notice")).toBeHidden();
+  await page.locator("#practice-native-cancel-button").click();
+  await expect(historyPreviewButton).toBeEnabled();
+
+  await page.locator("#practice-native-record-button").click();
+  await page.locator("#practice-native-record-button").click();
+  await expect(historyPreviewButton).toBeDisabled();
+  releasePromptResponse?.();
+  await expect(page.locator("#practice-prompt-panel")).toBeVisible();
+  await expect(historyPreviewButton).toBeEnabled();
+});
+
 test("SpeakLoop Cloudflare mode hides developer controls and ignores stale saved values", async ({ page }, testInfo) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, { practiceUiMode: "cloudflare" });

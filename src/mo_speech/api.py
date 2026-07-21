@@ -66,6 +66,7 @@ from .practice import (
 )
 from .practice_attempt_state import PracticeAttemptStateStore
 from .practice_llm import (
+    DEFAULT_PLAYBACK_PADDING_SECONDS,
     PRACTICE_COMPARISON_ERROR_MESSAGE,
     PracticeLlmError,
     PracticeLlmService,
@@ -1935,7 +1936,7 @@ def create_app(
         model_provider_name: str = "",
         model_asr_ms: float = 0.0,
         comparison_model: str = "",
-        playback_padding_seconds: float = 0.1,
+        playback_padding_seconds: float = DEFAULT_PLAYBACK_PADDING_SECONDS,
         reference_audio_duration: float = 0.0,
         attempt_audio_duration: float = 0.0,
     ) -> dict[str, object]:
@@ -2171,7 +2172,9 @@ def create_app(
                     model_asr_ms=float(timings.get("model_asr") or 0.0),
                     comparison_model=str((llm_options or {}).get("comparison_model") or ""),
                     playback_padding_seconds=float(
-                        (llm_options or {}).get("playback_padding_seconds") or 0.1
+                        DEFAULT_PLAYBACK_PADDING_SECONDS
+                        if (llm_options or {}).get("playback_padding_seconds") is None
+                        else (llm_options or {})["playback_padding_seconds"]
                     ),
                     reference_audio_duration=reference_audio_duration,
                     attempt_audio_duration=attempt_audio_duration,
