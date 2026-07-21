@@ -177,6 +177,7 @@ modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
 modelAudio.addEventListener("play", handleModelAudioPlay);
 modelAudio.addEventListener("playing", handleModelAudioPlay);
+modelAudio.addEventListener("error", handleModelAudioLoadError);
 repeatAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 repeatAudio.addEventListener("ended", syncPlayButton);
 repeatAudio.addEventListener("pause", syncPlayButton);
@@ -968,6 +969,16 @@ function applyPlaybackSpeed(audio, speed = normalizedPlaybackSpeed(speedSlider.v
 function handleModelAudioPlay() {
   syncModelAudioSpeed();
   syncPlayButton();
+}
+
+// 履歴一覧はURLを返すが、その後の自動prune・管理画面からの削除で実体が消えていること
+// がある。URLの有無だけで比較再生を有効と判断せず、読み込み失敗時は復唱音声だけに戻す。
+function handleModelAudioLoadError() {
+  if (!isSavedHistoryPreview || modelAudioUsesObjectUrl || !modelAudioUrl) {
+    return;
+  }
+  stopModelAudio();
+  historyPreviewStatus.textContent = "保存済みの結果を表示しました。お手本音声を読み込めなかったため、比較再生はできません。";
 }
 
 function handleRepeatAudioPlay() {

@@ -316,6 +316,25 @@ test("SpeakLoop returns to the saved ranges when recomputation is not possible",
   await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
 });
 
+test("SpeakLoop falls back to repeat-only playback when the saved prompt audio cannot be loaded", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, {
+    historyState: "practice-preview",
+    practiceUiMode: "local",
+    practicePreviewModelAudioMissing: true,
+  });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+
+  await expect(page.locator("#practice-saved-result-notice")).toBeVisible();
+  // 履歴一覧はURLを返すが、実際の取得は404。読み込み失敗を検知して復唱音声だけにする。
+  await expect(page.locator("#practice-history-preview-status")).toContainText("お手本音声を読み込めなかった");
+  await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
+  await expect(page.locator("#practice-play-model-button")).toContainText("復唱音声を再生");
+  await expect(page.locator("#practice-play-model-only-button")).toBeHidden();
+});
+
 test("SpeakLoop falls back to repeat-only playback when the saved prompt audio is gone", async ({ page }) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, {

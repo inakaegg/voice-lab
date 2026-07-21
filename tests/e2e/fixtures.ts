@@ -5,6 +5,7 @@ type UiFixtureOptions = {
   practiceUiMode?: "local" | "cloudflare";
   practicePreviewModelAudio?: boolean;
   practicePreviewRecompute?: boolean;
+  practicePreviewModelAudioMissing?: boolean;
 };
 
 const accessSettings = {
@@ -17,6 +18,29 @@ const accessSettings = {
     skitvoice: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, script_max_chars: 2_000 },
   },
 };
+
+// 無音WAVを組み立てて返す。音声を配信しないと、読み込み失敗のまま比較再生できると
+// 判定していても気づけない。長さは比較区間より十分長くしてクリップを避ける。
+function silentWav(seconds = 3): Buffer {
+  const sampleRate = 8000;
+  const samples = Math.round(sampleRate * seconds);
+  const buffer = Buffer.alloc(44 + samples);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + samples, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate, 28);
+  buffer.writeUInt16LE(1, 32);
+  buffer.writeUInt16LE(8, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(samples, 40);
+  buffer.fill(128, 44);
+  return buffer;
+}
 
 export async function installUiApiFixtures(page: Page, options: UiFixtureOptions = {}) {
   let publicSamples: Record<string, unknown> = {
@@ -39,6 +63,15 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         publicSamples = request.postDataJSON();
       }
       return json(publicSamples);
+    }
+    if (path === "/api/audio-history/outputs/practice-preview-model.wav") {
+      if (options.practicePreviewModelAudioMissing) {
+        return json({ detail: "not found" }, 404);
+      }
+      return route.fulfill({ status: 200, contentType: "audio/wav", body: silentWav() });
+    }
+    if (path === "/api/audio-history/recordings/practice-preview.wav") {
+      return route.fulfill({ status: 200, contentType: "audio/wav", body: silentWav() });
     }
     if (path.endsWith("/recomputed-comparison")) {
       if (options.practicePreviewRecompute === false) {

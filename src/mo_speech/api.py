@@ -1137,7 +1137,7 @@ def _practice_prompt_audio_index(
     またいで一致しうるため、学習言語も鍵に含める。値は`(created_at, url,
     media_type)`を作成時刻の昇順で並べたリスト。
     """
-    index: dict[str, list[tuple[str, str, str]]] = {}
+    index: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
     for entry in store.list_entries("outputs"):
         metadata = entry.metadata or {}
         if metadata.get("endpoint") != "practice-prompts":
