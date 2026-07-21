@@ -3246,6 +3246,7 @@ def _recompute_history_fixture(
     store: AudioHistoryStore,
     *,
     llm_phrases: list[dict[str, object]] | None = None,
+    attempt_asr_overrides: dict[str, object] | None = None,
 ) -> AudioHistoryEntry:
     _save_practice_prompt_output(store, _RECOMPUTE_TARGET_TEXT)
     phrases = llm_phrases if llm_phrases is not None else [
@@ -3272,8 +3273,19 @@ def _recompute_history_fixture(
                 "target_text": _RECOMPUTE_TARGET_TEXT,
                 "recognized_text": _RECOMPUTE_TARGET_TEXT,
                 "playback_padding_seconds": 0.1,
-                "asr_timestamps": {"available": True, "words": _RECOMPUTE_ATTEMPT_WORDS, "truncated": False},
-                "model_asr_timestamps": {"available": True, "words": _RECOMPUTE_REFERENCE_WORDS, "truncated": False},
+                "asr_timestamps": {
+                    "available": True,
+                    "words": _RECOMPUTE_ATTEMPT_WORDS,
+                    "word_count": len(_RECOMPUTE_ATTEMPT_WORDS),
+                    "truncated": False,
+                    **(attempt_asr_overrides or {}),
+                },
+                "model_asr_timestamps": {
+                    "available": True,
+                    "words": _RECOMPUTE_REFERENCE_WORDS,
+                    "word_count": len(_RECOMPUTE_REFERENCE_WORDS),
+                    "truncated": False,
+                },
                 "llm_comparison": {
                     "schema_version": 1,
                     "overall_score": 90,
@@ -3355,6 +3367,44 @@ def test_recomputed_comparison_prefers_the_stored_audio_durations(tmp_path) -> N
     # 保存済みの音声長を使うため、終了側も余白分だけ広がる。
     assert payload["comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(1.8)
     assert payload["model_comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(1.5)
+
+
+def test_recomputed_comparison_allows_histories_truncated_only_in_segments(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    # `truncated`は単語と区間のどちらかが打ち切られた時点で真になる。区間だけが
+    # 打ち切られた履歴は単語が揃っているため、再計算できる。
+    entry = _recompute_history_fixture(
+        history_store,
+        attempt_asr_overrides={"truncated": True, "segment_count": 80},
+    )
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.10"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+
+
+def test_recomputed_comparison_is_unavailable_when_words_were_truncated(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    entry = _recompute_history_fixture(
+        history_store,
+        attempt_asr_overrides={"truncated": True, "word_count": len(_RECOMPUTE_ATTEMPT_WORDS) + 5},
+    )
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.10"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["unavailable_reason"]
 
 
 def test_recomputed_comparison_is_unavailable_without_stored_word_indexes(tmp_path) -> None:

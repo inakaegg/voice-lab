@@ -1192,15 +1192,23 @@ def _practice_history_entry_by_filename(
 
 
 def _stored_asr_words(timestamps: object) -> list[dict[str, object]] | None:
-    """保存済みASRの単語配列を返す。切り詰められている場合はNoneを返す。
+    """保存済みASRの単語配列を返す。単語が切り詰められている場合はNoneを返す。
 
-    `_compact_asr_timestamps_for_metadata`は単語を120件で打ち切る。打ち切られた
-    履歴では位置番号が配列長を超えるため、再計算に使えない。
+    `_compact_asr_timestamps_for_metadata`は単語を120件、区間を40件で打ち切り、
+    どちらかが打ち切られると`truncated`を真にする。再計算が使うのは単語だけなので、
+    区間だけが打ち切られた履歴は再計算できる。単語の欠落は`word_count`と実際の
+    配列長の差で判定する。`word_count`を持たない古い履歴は`truncated`で判定する。
     """
-    if not isinstance(timestamps, dict) or timestamps.get("truncated") is True:
+    if not isinstance(timestamps, dict):
         return None
     words = timestamps.get("words")
     if not isinstance(words, list) or not words:
+        return None
+    word_count = timestamps.get("word_count")
+    if isinstance(word_count, int) and not isinstance(word_count, bool):
+        if word_count > len(words):
+            return None
+    elif timestamps.get("truncated") is True:
         return None
     return [word for word in words if isinstance(word, dict)]
 
