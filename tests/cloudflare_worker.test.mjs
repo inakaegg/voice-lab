@@ -410,6 +410,73 @@ test("Cloudflare worker keeps the public user email fresh when quota is consumed
   assert.equal(db.__tables.total.get(`${hash}:speakloop`).usage_count, 1);
 });
 
+test("Cloudflare worker protects the public user list with the admin boundary", async () => {
+  const db = fakeD1();
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv(), db, googleEmail: "viewer@example.com" });
+
+  const anonymous = await handleRequest(new Request("https://example.com/api/public-users"), env);
+  const viewerCookie = await publicCookie(env, "/speakloop");
+  const viewer = await handleRequest(
+    new Request("https://example.com/api/public-users", { headers: { cookie: viewerCookie } }),
+    env,
+  );
+
+  assert.equal(anonymous.status, 401);
+  assert.equal(viewer.status, 403);
+});
+
+test("Cloudflare worker lists signed-in users with emails times and usage for an admin", async () => {
+  const kv = fakeKv();
+  const db = fakeD1();
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv, db });
+  const viewerHash = await publicIdentityHashForTest("viewer@example.com");
+  db.__tables.users.set(viewerHash, {
+    email_hash: viewerHash,
+    email: "viewer@example.com",
+    created_at: "2026-07-01T00:00:00.000Z",
+    last_seen_at: "2026-07-02T00:00:00.000Z",
+    last_login_at: "2026-07-02T00:00:00.000Z",
+  });
+  db.__tables.total.set(`${viewerHash}:speakloop`, { usage_count: 4 });
+
+  const cookie = await adminCookie(env, "/admin");
+  const response = await handleRequest(
+    new Request("https://example.com/api/public-users", { headers: { cookie } }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.users.length, 2);
+  assert.equal(payload.users[0].email, "admin@example.com");
+  assert.equal(payload.users[0].is_admin, true);
+  assert.equal(payload.users[0].last_seen_at, "");
+  assert.equal(payload.users[1].email, "viewer@example.com");
+  assert.equal(payload.users[1].is_admin, false);
+  assert.equal(payload.users[1].last_seen_at, "2026-07-02T00:00:00.000Z");
+  assert.deepEqual(payload.users[1].usage, { speakloop: 4 });
+  assert.equal(payload.stored, 2);
+});
+
+test("Cloudflare worker returns an empty public user list without a D1 binding", async () => {
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv() });
+
+  const cookie = await adminCookie(env, "/admin");
+  const response = await handleRequest(
+    new Request("https://example.com/api/public-users", { headers: { cookie } }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { users: [], limit: 200, stored: 0 });
+});
+
 test("Cloudflare worker refuses VibeVoice when admin authentication is not configured", async () => {
   const env = publicAuthEnv(async () => {
     throw new Error("unexpected fetch");
@@ -3563,6 +3630,23 @@ function fakeD1Statement(db, sql, args) {
     bind(...values) { return fakeD1Statement(db, sql, values); },
     async all() {
       if (sql.includes("FROM public_sample_audios")) return { results: [...db.__tables.samples.values()] };
+      if (sql.includes("FROM public_users")) {
+        const limit = Number(args[0] || 200);
+        return {
+          results: [...db.__tables.users.values()]
+            .sort((a, b) => String(b.last_login_at || "").localeCompare(String(a.last_login_at || "")))
+            .slice(0, limit),
+        };
+      }
+      if (sql.includes("FROM quota_usage_total")) {
+        return {
+          results: [...db.__tables.total.entries()].map(([key, row]) => ({
+            email_hash: key.split(":")[0],
+            feature: key.split(":")[1],
+            usage_count: Number(row.usage_count || 0),
+          })),
+        };
+      }
       if (sql.includes("FROM audit_events")) {
         const limit = Number(args[0] || 100);
         return { results: [...db.__tables.audit].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, limit) };
@@ -3572,6 +3656,7 @@ function fakeD1Statement(db, sql, args) {
     async first() {
       if (sql.includes("quota_usage_daily")) return db.__tables.daily.get(`${args[0]}:${args[1]}:${args[2]}`) || null;
       if (sql.includes("quota_usage_total")) return db.__tables.total.get(`${args[0]}:${args[1]}`) || null;
+      if (sql.includes("COUNT(*)") && sql.includes("public_users")) return { count: db.__tables.users.size };
       if (sql.includes("COUNT(*)") && sql.includes("audit_events")) return { count: db.__tables.audit.length };
       return null;
     },

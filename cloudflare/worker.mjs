@@ -20,6 +20,8 @@ const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
 const PUBLIC_AUDIT_D1_MIGRATED_KV_KEY = "public-audit-log:d1-migrated";
 const PUBLIC_AUDIT_LOG_DEFAULT_LIMIT = 500;
+const PUBLIC_USERS_DEFAULT_LIMIT = 200;
+const PUBLIC_USERS_MAX_LIMIT = 2000;
 const PUBLIC_AUDIT_RETENTION_SECONDS = 60 * 60 * 24 * 90;
 const PUBLIC_DAILY_QUOTA_RETENTION_SECONDS = 60 * 60 * 48;
 const PUBLIC_SAMPLE_AUDIOS_KV_KEY = "public-sample-audios";
@@ -734,6 +736,9 @@ function isProtectedAdminApiRequest(method, pathname) {
   if (method === "GET" && pathname === "/api/public-audit-log") {
     return true;
   }
+  if (method === "GET" && pathname === "/api/public-users") {
+    return true;
+  }
   if (method === "POST" && pathname === "/api/warmup") {
     return true;
   }
@@ -1136,6 +1141,9 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "GET" && url.pathname === "/api/public-audit-log") {
       return jsonResponse(await readPublicAuditLog(env, url));
+    }
+    if (request.method === "GET" && url.pathname === "/api/public-users") {
+      return jsonResponse(await readPublicUsers(env, url));
     }
     if (request.method === "PUT" && url.pathname === "/api/public-sample-audios") {
       const payload = await request.json();
@@ -1995,6 +2003,45 @@ async function consumePublicQuotaD1(env, feature, email, featureSettings, reques
     total_used: totalUsed + 1, total_limit: totalLimit,
     ...requestAuditContext(request),
   });
+}
+
+async function readPublicUsers(env, url = null) {
+  // limit未指定を0として渡すとclampIntが下限1へ丸めるため、未指定はnullのままfallbackさせる。
+  const requestedLimit = url ? new URL(url).searchParams.get("limit") : null;
+  const limit = clampInt(requestedLimit, 1, PUBLIC_USERS_MAX_LIMIT, PUBLIC_USERS_DEFAULT_LIMIT);
+  if (!env.MO_SPEECH_DB) {
+    return { users: [], limit, stored: 0 };
+  }
+  const settings = await readPublicAccessSettings(env);
+  const rows = await env.MO_SPEECH_DB.prepare(
+    "SELECT email_hash, email, created_at, last_seen_at, last_login_at FROM public_users ORDER BY last_login_at IS NULL, last_login_at DESC LIMIT ?",
+  ).bind(limit).all();
+  const usageRows = await env.MO_SPEECH_DB.prepare(
+    "SELECT email_hash, feature, usage_count FROM quota_usage_total",
+  ).all();
+  const stored = await env.MO_SPEECH_DB.prepare("SELECT COUNT(*) AS count FROM public_users").first();
+  const usageByHash = new Map();
+  for (const row of usageRows.results || []) {
+    const usage = usageByHash.get(row.email_hash) || {};
+    usage[String(row.feature)] = Number(row.usage_count || 0);
+    usageByHash.set(row.email_hash, usage);
+  }
+  const users = (rows.results || []).map((row) => {
+    const usage = usageByHash.get(row.email_hash) || {};
+    const usedTotal = Object.values(usage).reduce((sum, value) => sum + value, 0);
+    const email = normalizeEmail(row.email);
+    return {
+      email,
+      email_hash: String(row.email_hash || ""),
+      created_at: String(row.created_at || ""),
+      last_login_at: String(row.last_login_at || ""),
+      // ログインだけの利用者はlast_seen_atが初回記録時刻と同じになる。実利用がない時刻を最終利用として見せない。
+      last_seen_at: usedTotal > 0 ? String(row.last_seen_at || "") : "",
+      is_admin: Boolean(email) && isPublicAdminEmail(email, settings),
+      usage,
+    };
+  });
+  return { users, limit, stored: Number(stored?.count || 0) };
 }
 
 async function readPublicAuditLog(env, url = null) {
