@@ -50,6 +50,8 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         });
       }
       const padding = Number(new URL(route.request().url()).searchParams.get("playback_padding_seconds") || 0);
+      // 余白が小さいほど遅く返す。古い要求の応答が新しい応答より後に届く状況を再現する。
+      await new Promise((resolve) => setTimeout(resolve, Math.round((0.5 - padding) * 400)));
       const shift = (phrases: Array<{ index: number; audio_start: number; audio_end: number }>) => ({
         available: true,
         complete: true,

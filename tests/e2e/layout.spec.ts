@@ -282,6 +282,23 @@ test("SpeakLoop recomputes the saved comparison ranges with the current implemen
   await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
 });
 
+test("SpeakLoop ignores a stale recomputation response after the padding changes", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { historyState: "practice-preview", practiceUiMode: "local" });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+  await expect(page.locator("#practice-saved-result-notice")).toBeVisible();
+
+  // 0.30秒の要求(遅い)を出した直後に0.50秒(速い)へ変える。後着の古い応答を捨てること。
+  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
+  await page.locator("#practice-playback-padding-slider").fill("0.5");
+
+  await expect(page.locator("#practice-history-preview-status")).toContainText("余白は0.50秒");
+  await page.waitForTimeout(500);
+  await expect(page.locator("#practice-history-preview-status")).toContainText("余白は0.50秒");
+});
+
 test("SpeakLoop returns to the saved ranges when recomputation is not possible", async ({ page }) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, {

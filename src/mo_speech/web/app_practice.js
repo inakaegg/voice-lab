@@ -137,6 +137,7 @@ let repeatAudioUsesObjectUrl = false;
 let modelAudioUsesObjectUrl = false;
 let isSavedHistoryPreview = false;
 let currentHistoryPreviewEntry = null;
+let historyPreviewRecomputeToken = 0;
 
 targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
 comparisonModelSelect.addEventListener("change", savePracticeSettings);
@@ -1768,6 +1769,7 @@ function displaySelectedPracticeHistory() {
   renderTargetDisplay();
   promptPanel.hidden = false;
   isSavedHistoryPreview = true;
+  historyPreviewRecomputeToken += 1;
   currentHistoryPreviewEntry = entry;
   setRepeatAudioSource(entry.url);
   if (entry.model_audio_url) {
@@ -1793,6 +1795,7 @@ function handleHistoryPreviewSourceChange() {
     return;
   }
   if (historyPreviewSourceSelect.value === "saved") {
+    historyPreviewRecomputeToken += 1;
     applyPracticeComparisonAlignments(
       diagnostics.comparison_alignment || null,
       diagnostics.model_comparison_alignment || null,
@@ -1820,9 +1823,16 @@ function applyPracticeComparisonAlignments(attemptAlignment, modelAlignment) {
   syncPlayButton();
 }
 
+// 余白スライダーのinputは連続発火するため、応答の到着順は要求順と一致しない。
+// 最新の要求以外、または表示対象・表示方法が変わった後の応答は捨てる。
 async function applyRecomputedComparison(entry) {
   const diagnostics = entry.metadata.practice_diagnostics;
   const padding = normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2);
+  const token = ++historyPreviewRecomputeToken;
+  const isCurrentRequest = () => token === historyPreviewRecomputeToken
+    && isSavedHistoryPreview
+    && currentHistoryPreviewEntry === entry
+    && historyPreviewSourceSelect.value === "recomputed";
   historyPreviewStatus.textContent = "現在の実装で比較区間を計算し直しています。";
   try {
     const response = await fetch(
@@ -1830,6 +1840,9 @@ async function applyRecomputedComparison(entry) {
         + `?playback_padding_seconds=${encodeURIComponent(padding)}`,
     );
     const payload = await response.json();
+    if (!isCurrentRequest()) {
+      return;
+    }
     if (!response.ok) {
       throw new Error(apiErrorMessage(payload, "比較区間を計算し直せませんでした。"));
     }
@@ -1844,6 +1857,9 @@ async function applyRecomputedComparison(entry) {
     );
     historyPreviewStatus.textContent = `現在の実装で計算し直した比較区間を表示しています。余白は${Number(payload.playback_padding_seconds).toFixed(2)}秒、保存時は${formatSavedPadding(payload.saved_playback_padding_seconds)}です。`;
   } catch (error) {
+    if (!isCurrentRequest()) {
+      return;
+    }
     historyPreviewSourceSelect.value = "saved";
     applyPracticeComparisonAlignments(
       diagnostics.comparison_alignment || null,
