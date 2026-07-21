@@ -101,6 +101,7 @@ test("practice LLM model and padding settings are restricted", () => {
   assert.equal(supportedPracticeComparisonModel("gpt-5.4-nano"), "gpt-5.4-nano");
   assert.throws(() => supportedPracticeComparisonModel("gpt-4o"));
 
+  assert.equal(validatePlaybackPaddingSeconds(""), 0.3);
   assert.equal(validatePlaybackPaddingSeconds("0.1"), 0.1);
   assert.equal(validatePlaybackPaddingSeconds("0.50"), 0.5);
   for (const value of ["-0.05", "0.03", "0.55", "not-a-number"]) {

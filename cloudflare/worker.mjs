@@ -105,7 +105,7 @@ export function practiceLlmComparisonModels() {
   return PRACTICE_LLM_COMPARISON_MODELS;
 }
 const DEFAULT_PRACTICE_COMPARISON_MODEL = PRACTICE_LLM_COMPARISON_MODELS[0];
-const DEFAULT_PLAYBACK_PADDING_SECONDS = 0.1;
+const DEFAULT_PLAYBACK_PADDING_SECONDS = 0.3;
 const PRACTICE_COMPARISON_ERROR_MESSAGE = "比較結果を作成できませんでした。もう一度お試しください。";
 
 // この文言はローカルFastAPI版(src/mo_speech/practice_llm.py)と同一に保つ。
@@ -1341,6 +1341,10 @@ async function runtimePayload(env) {
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
     supported_voice_modes: ["default", "convert"],
+    ui_capabilities: {
+      practice_developer_settings: false,
+      practice_history_preview: false,
+    },
     translation_backends: [
       {
         id: "openai",

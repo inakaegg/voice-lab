@@ -81,6 +81,13 @@ test("SpeakLoop controller keeps pronunciation training separate from conversion
   assert.match(practiceSource, /function practiceAsrModel\(\)\s*\{[^}]*return "whisper-1"/s);
   assert.match(practiceSource, /form\.append\("comparison_model", comparisonModelSelect\.value\)/);
   assert.match(practiceSource, /form\.append\("playback_padding_seconds", normalizedPlaybackPadding/);
+  assert.match(practiceSource, /const defaultComparisonModel = "gpt-5\.6-terra"/);
+  assert.match(practiceSource, /const defaultPlaybackPaddingSeconds = 0\.3/);
+  assert.match(practiceSource, /\/api\/runtime/);
+  assert.match(practiceSource, /practice_developer_settings/);
+  assert.match(practiceSource, /practice_history_preview/);
+  assert.match(practiceSource, /\/api\/practice-history/);
+  assert.match(practiceSource, /renderAttemptResult\(diagnostics\)/);
   assert.match(practiceSource, /form\.append\("progress_mode", "job"\)/);
   assert.match(practiceSource, /\/api\/practice\/prompt-jobs\//);
   assert.match(practiceSource, /case "transcribing_prompt":[\s\S]*録音を文字にしています/);

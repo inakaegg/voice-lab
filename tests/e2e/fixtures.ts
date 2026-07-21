@@ -1,7 +1,9 @@
 import type { Page } from "@playwright/test";
 
 type UiFixtureOptions = {
-  historyState?: "empty" | "long" | "error" | "disabled";
+  historyState?: "empty" | "long" | "error" | "disabled" | "practice-preview";
+  practiceUiMode?: "local" | "cloudflare";
+  practicePreviewModelAudio?: boolean;
 };
 
 const accessSettings = {
@@ -51,6 +53,66 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
           outputs: [{ label: `お手本_${longLabel}`, filename: `model_${longLabel}.wav`, url: "/fixtures/model.wav", details: ["お手本", longLabel], created_at: "2026-07-10T10:00:00Z" }],
         });
       }
+      if (options.historyState === "practice-preview") {
+        return json({
+          settings: { enabled: true },
+          recordings: [{
+            label: "中国語の復唱",
+            filename: "practice-preview.wav",
+            url: "/api/audio-history/recordings/practice-preview.wav",
+            model_audio_url: options.practicePreviewModelAudio === false
+              ? ""
+              : "/api/audio-history/outputs/practice-preview-model.wav",
+            model_audio_media_type: options.practicePreviewModelAudio === false ? "" : "audio/wav",
+            text_preview: "银行周末也营业吗？",
+            created_at: "20260720T101500000000Z",
+            metadata: {
+              endpoint: "practice-attempts",
+              recording_intent: "attempt",
+              practice_job_status: "succeeded",
+              practice_diagnostics: {
+                recording_kind: "attempt",
+                target_language: "zh-CN",
+                target_text: "银行周末也营业吗？",
+                recognized_text: "银杏周末也营业吗？",
+                outcome: "evaluated",
+                overall_score: 82,
+                overall_comment: "最初の単語をもう一度確認しましょう。",
+                comparison_target_pinyin: ["yin2", "hang2", "zhou1", "mo4", "ye3", "ying2", "ye4", "ma5"],
+                comparison_recognized_pinyin: ["yin2", "xing4", "zhou1", "mo4", "ye3", "ying2", "ye4", "ma5"],
+                llm_comparison: {
+                  overall_score: 82,
+                  overall_comment: "最初の単語をもう一度確認しましょう。",
+                  phrases: [{ target_text: "银行", score: 62, comment: "「行」の発音を確認してください。" }],
+                },
+                comparison_alignment: {
+                  available: true,
+                  complete: true,
+                  all_phrases_playable: true,
+                  target_phrase_count: 2,
+                  playable_phrase_count: 2,
+                  phrases: [
+                    { index: 0, available: true, audio_start: 0, audio_end: 1.2 },
+                    { index: 1, available: true, audio_start: 1.2, audio_end: 2.4 },
+                  ],
+                },
+                model_comparison_alignment: {
+                  available: true,
+                  complete: true,
+                  all_phrases_playable: true,
+                  target_phrase_count: 2,
+                  playable_phrase_count: 2,
+                  phrases: [
+                    { index: 0, available: true, audio_start: 0, audio_end: 1.1 },
+                    { index: 1, available: true, audio_start: 1.1, audio_end: 2.2 },
+                  ],
+                },
+              },
+            },
+          }],
+          outputs: [],
+        });
+      }
       return json({ recordings: [], outputs: [] });
     }
     if (path === "/api/audio-history") {
@@ -78,7 +140,19 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
       return json({ recordings: [], outputs: [], settings: { enabled: false } });
     }
     if (path === "/api/user-settings") return json({ theme: "blue", joke_text: "", joke_pool: [], effect_audio_files: [] });
-    if (path === "/api/runtime") return json({ provider_mode: "fake", providers: ["fake"], voice_conversion_backends: [], runpod_serverless: { available: false } });
+    if (path === "/api/runtime") {
+      const local = options.practiceUiMode !== "cloudflare";
+      return json({
+        provider_mode: local ? "fake" : "cloudflare",
+        providers: ["fake"],
+        voice_conversion_backends: [],
+        runpod_serverless: { available: false },
+        ui_capabilities: {
+          practice_developer_settings: local,
+          practice_history_preview: local,
+        },
+      });
+    }
     if (path === "/api/vibevoice/status") return json({ available: true, backends: { local: { available: true }, runpod_serverless: { available: false } } });
     return route.continue();
   });

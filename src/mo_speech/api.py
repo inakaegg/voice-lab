@@ -66,6 +66,7 @@ from .practice import (
 )
 from .practice_attempt_state import PracticeAttemptStateStore
 from .practice_llm import (
+    DEFAULT_PLAYBACK_PADDING_SECONDS,
     PRACTICE_COMPARISON_ERROR_MESSAGE,
     PracticeLlmError,
     PracticeLlmService,
@@ -484,6 +485,8 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "phrase_matches": result.get("phrase_matches") or [],
         "comparison_alignment": result.get("comparison_alignment") or {},
         "model_comparison_alignment": result.get("model_comparison_alignment") or {},
+        "comparison_target_pinyin": result.get("comparison_target_pinyin") or [],
+        "comparison_recognized_pinyin": result.get("comparison_recognized_pinyin") or [],
         "asr_timestamps": _compact_asr_timestamps_for_metadata(asr_timestamps),
         "model_asr_timestamps": _compact_asr_timestamps_for_metadata(model_asr_timestamps),
         "timings_ms": result.get("timings_ms") or {},
@@ -1121,17 +1124,97 @@ def _is_practice_history_entry(entry: object) -> bool:
     return str(metadata.get("endpoint") or "").startswith("practice-")
 
 
+def _practice_prompt_audio_index(
+    store: AudioHistoryStore,
+) -> dict[tuple[str, str], list[tuple[str, str, str]]]:
+    """お手本TTS音声を学習言語と目標文で引くための索引を返す。
+
+    お手本生成時の`tts_text`は復唱結果の`target_text`と同じ文字列なので、
+    推測ではなく完全一致で対応付けられる。ただし`OK`のような短い目標文は言語を
+    またいで一致しうるため、学習言語も鍵に含める。値は`(created_at, url,
+    media_type)`を作成時刻の昇順で並べたリスト。
+    """
+    index: dict[str, list[tuple[str, str, str]]] = {}
+    for entry in store.list_entries("outputs"):
+        metadata = entry.metadata or {}
+        if metadata.get("endpoint") != "practice-prompts":
+            continue
+        tts_text = str(metadata.get("tts_text") or "").strip()
+        if not tts_text:
+            continue
+        target_language = str(metadata.get("target_language") or "")
+        index.setdefault((target_language, tts_text), []).append(
+            (
+                str(metadata.get("created_at") or ""),
+                f"/api/audio-history/outputs/{entry.audio_path.name}",
+                str(metadata.get("audio_mime_type") or ""),
+            )
+        )
+    for candidates in index.values():
+        candidates.sort(key=lambda candidate: candidate[0])
+    return index
+
+
+def _practice_model_audio_for_attempt(
+    index: dict[tuple[str, str], list[tuple[str, str, str]]],
+    diagnostics: dict[str, object],
+    created_at: str,
+) -> tuple[str, str]:
+    """復唱より前に作られた、同じ学習言語・同じ目標文のお手本音声を返す。
+
+    同じ目標文で複数回お手本を作った場合は、その復唱の直前に作られたものを選ぶ。
+    候補がなければ空文字列を返し、比較再生は無効のままにする。
+    """
+    target_text = str(diagnostics.get("target_text") or "").strip()
+    if not target_text:
+        return "", ""
+    target_language = str(diagnostics.get("target_language") or "")
+    candidates = index.get((target_language, target_text), [])
+    earlier = [candidate for candidate in candidates if candidate[0] <= created_at]
+    if not earlier:
+        return "", ""
+    _, url, media_type = earlier[-1]
+    return url, media_type
+
+
 def _serialized_audio_history_entries(
     store: AudioHistoryStore,
     kind: str,
     *,
     practice: bool,
 ) -> list[dict[str, object]]:
-    return [
-        _serialize_audio_history_entry(kind, entry)
-        for entry in store.list_entries(kind)
-        if _is_practice_history_entry(entry) is practice
-    ]
+    serialized_entries: list[dict[str, object]] = []
+    prompt_audio_index = _practice_prompt_audio_index(store) if practice and kind == "recordings" else {}
+    for entry in store.list_entries(kind):
+        if _is_practice_history_entry(entry) is not practice:
+            continue
+        serialized = _serialize_audio_history_entry(kind, entry)
+        if practice:
+            metadata = dict(serialized.get("metadata") or {})
+            source_diagnostics = metadata.get("practice_diagnostics")
+            if isinstance(source_diagnostics, dict):
+                diagnostics = dict(source_diagnostics)
+                if str(diagnostics.get("target_language") or "") == "zh-CN":
+                    if not diagnostics.get("comparison_target_pinyin"):
+                        diagnostics["comparison_target_pinyin"] = _practice_diff_pinyin_chars(
+                            str(diagnostics.get("target_text") or "")
+                        )
+                    if not diagnostics.get("comparison_recognized_pinyin"):
+                        diagnostics["comparison_recognized_pinyin"] = _practice_diff_pinyin_chars(
+                            str(diagnostics.get("recognized_text") or "")
+                        )
+                metadata["practice_diagnostics"] = diagnostics
+                serialized["metadata"] = metadata
+                if kind == "recordings":
+                    model_audio_url, model_audio_media_type = _practice_model_audio_for_attempt(
+                        prompt_audio_index,
+                        diagnostics,
+                        str(serialized.get("created_at") or ""),
+                    )
+                    serialized["model_audio_url"] = model_audio_url
+                    serialized["model_audio_media_type"] = model_audio_media_type
+        serialized_entries.append(serialized)
+    return serialized_entries
 
 
 def create_app(
@@ -1286,6 +1369,10 @@ def create_app(
             ),
             "text_tts_backends": text_tts_backend_statuses(active_text_tts_providers),
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
+            "ui_capabilities": {
+                "practice_developer_settings": True,
+                "practice_history_preview": bool(active_audio_history_store.enabled),
+            },
         }
 
     @app.get("/api/vibevoice/status")
@@ -1911,7 +1998,7 @@ def create_app(
         model_provider_name: str = "",
         model_asr_ms: float = 0.0,
         comparison_model: str = "",
-        playback_padding_seconds: float = 0.1,
+        playback_padding_seconds: float = DEFAULT_PLAYBACK_PADDING_SECONDS,
         reference_audio_duration: float = 0.0,
         attempt_audio_duration: float = 0.0,
     ) -> dict[str, object]:
@@ -2147,7 +2234,9 @@ def create_app(
                     model_asr_ms=float(timings.get("model_asr") or 0.0),
                     comparison_model=str((llm_options or {}).get("comparison_model") or ""),
                     playback_padding_seconds=float(
-                        (llm_options or {}).get("playback_padding_seconds") or 0.1
+                        DEFAULT_PLAYBACK_PADDING_SECONDS
+                        if (llm_options or {}).get("playback_padding_seconds") is None
+                        else (llm_options or {})["playback_padding_seconds"]
                     ),
                     reference_audio_duration=reference_audio_duration,
                     attempt_audio_duration=attempt_audio_duration,

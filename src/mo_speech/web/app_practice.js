@@ -1,7 +1,13 @@
 const targetLanguageSelect = document.querySelector("#practice-target-language-select");
 const comparisonModelSelect = document.querySelector("#practice-comparison-model-select");
+const comparisonModelSetting = document.querySelector("#practice-comparison-model-setting");
 const playbackPaddingSlider = document.querySelector("#practice-playback-padding-slider");
 const playbackPaddingValue = document.querySelector("#practice-playback-padding-value");
+const playbackPaddingSetting = document.querySelector("#practice-playback-padding-setting");
+const historyPreview = document.querySelector("#practice-history-preview");
+const historyPreviewSelect = document.querySelector("#practice-history-preview-select");
+const historyPreviewButton = document.querySelector("#practice-history-preview-button");
+const historyPreviewStatus = document.querySelector("#practice-history-preview-status");
 const nativePanel = document.querySelector("#practice-native-panel");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
 const nativeCancelButton = document.querySelector("#practice-native-cancel-button");
@@ -49,6 +55,7 @@ const scoreBar = document.querySelector("#practice-result-panel .practice-score-
 const comparisonNote = document.querySelector("#practice-comparison-note");
 const overallComment = document.querySelector("#practice-overall-comment");
 const phraseFeedback = document.querySelector("#practice-phrase-feedback");
+const savedResultNotice = document.querySelector("#practice-saved-result-notice");
 const playbackContract = window.voiceLabPracticePlayback;
 
 const languageLabels = {
@@ -81,6 +88,8 @@ const nativeUiLabels = {
 };
 const practiceSettingsStorageKey = "mo:practice-settings";
 const defaultPracticeTargetLanguage = "en-US";
+const defaultComparisonModel = "gpt-5.6-terra";
+const defaultPlaybackPaddingSeconds = 0.3;
 const selectablePracticeTargetLanguages = new Set(["zh-CN", "en-US"]);
 const selectableComparisonModels = new Set([
   "gpt-5.6-terra",
@@ -122,10 +131,16 @@ let progressDisplayed = 0;
 let progressTarget = 0;
 let isComparisonPlaying = false;
 let comparisonPlaybackToken = 0;
+let practiceHistoryPreviewEntries = [];
+let repeatAudioUsesObjectUrl = false;
+let modelAudioUsesObjectUrl = false;
+let isSavedHistoryPreview = false;
 
 targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
 comparisonModelSelect.addEventListener("change", savePracticeSettings);
 playbackPaddingSlider.addEventListener("input", handlePlaybackPaddingChange);
+historyPreviewSelect.addEventListener("change", syncHistoryPreviewButton);
+historyPreviewButton.addEventListener("click", displaySelectedPracticeHistory);
 nativeRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("native");
   toggleRecording("native");
@@ -159,8 +174,10 @@ modelAudio.addEventListener("pause", syncPlayButton);
 modelAudio.addEventListener("play", handleModelAudioPlay);
 modelAudio.addEventListener("playing", handleModelAudioPlay);
 repeatAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
-repeatAudio.addEventListener("play", syncModelAudioSpeed);
-repeatAudio.addEventListener("playing", syncModelAudioSpeed);
+repeatAudio.addEventListener("ended", syncPlayButton);
+repeatAudio.addEventListener("pause", syncPlayButton);
+repeatAudio.addEventListener("play", handleRepeatAudioPlay);
+repeatAudio.addEventListener("playing", handleRepeatAudioPlay);
 
 function selectTargetLanguage(language) {
   if (isBusy || mediaRecorder) {
@@ -617,6 +634,7 @@ function renderPromptResult(payload, { deferModelAudio = false } = {}) {
   currentAttemptPayload = null;
   currentAttemptComparisonAlignment = null;
   currentModelComparisonAlignment = null;
+  isSavedHistoryPreview = false;
   recognizedText.textContent = "";
   syncPracticeRecordMode();
   syncModelAudioSpeed();
@@ -736,6 +754,8 @@ function resetPractice() {
   recognizedText.textContent = "";
   overallComment.textContent = "";
   phraseFeedback.replaceChildren();
+  savedResultNotice.hidden = true;
+  isSavedHistoryPreview = false;
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
@@ -753,6 +773,18 @@ function setModelAudio(audioBase64, mimeType, { updateAsrSource = true } = {}) {
     currentModelAsrAudioBlob = blob;
   }
   modelAudioUrl = URL.createObjectURL(blob);
+  modelAudioUsesObjectUrl = true;
+  modelAudio.src = modelAudioUrl;
+  modelAudio.load();
+  syncModelAudioSpeed();
+  playModelButton.disabled = isBusy;
+  playModelOnlyButton.disabled = isBusy;
+}
+
+function setModelAudioSource(url) {
+  stopModelAudio();
+  modelAudioUrl = String(url || "");
+  modelAudioUsesObjectUrl = false;
   modelAudio.src = modelAudioUrl;
   modelAudio.load();
   syncModelAudioSpeed();
@@ -764,12 +796,37 @@ function setRepeatAudio(blob) {
   stopComparisonPlayback();
   stopRepeatAudio();
   repeatAudioUrl = URL.createObjectURL(blob);
+  repeatAudioUsesObjectUrl = true;
   repeatAudio.src = repeatAudioUrl;
   repeatAudio.load();
   syncModelAudioSpeed();
 }
 
+function setRepeatAudioSource(url) {
+  stopComparisonPlayback();
+  stopRepeatAudio();
+  repeatAudioUrl = String(url || "");
+  repeatAudioUsesObjectUrl = false;
+  repeatAudio.src = repeatAudioUrl;
+  repeatAudio.load();
+  syncModelAudioSpeed();
+}
+
+// 保存履歴の表示確認でお手本音声を特定できなかった場合だけ、復唱音声の単独再生へ落とす。
+// お手本音声を特定できた履歴は、通常の比較再生と同じ経路で扱う。
+function isRepeatOnlyPreview() {
+  return isSavedHistoryPreview && !modelAudio.src;
+}
+
 function toggleModelAudio() {
+  if (isRepeatOnlyPreview() && repeatAudio.src) {
+    if (repeatAudio.paused) {
+      playAudioWithCurrentSpeed(repeatAudio).catch((error) => showError(error.message));
+    } else {
+      repeatAudio.pause();
+    }
+    return;
+  }
   if (isComparisonPlaying) {
     stopComparisonPlayback();
     return;
@@ -805,10 +862,11 @@ function toggleModelOnlyAudio() {
 
 function stopModelAudio({ clearAsrSource = true } = {}) {
   stopComparisonPlayback();
-  if (modelAudioUrl) {
+  if (modelAudioUrl && modelAudioUsesObjectUrl) {
     URL.revokeObjectURL(modelAudioUrl);
-    modelAudioUrl = "";
   }
+  modelAudioUrl = "";
+  modelAudioUsesObjectUrl = false;
   modelAudio.pause();
   modelAudio.removeAttribute("src");
   modelAudio.load();
@@ -821,16 +879,26 @@ function stopModelAudio({ clearAsrSource = true } = {}) {
 }
 
 function stopRepeatAudio() {
-  if (repeatAudioUrl) {
+  if (repeatAudioUrl && repeatAudioUsesObjectUrl) {
     URL.revokeObjectURL(repeatAudioUrl);
-    repeatAudioUrl = "";
   }
+  repeatAudioUrl = "";
+  repeatAudioUsesObjectUrl = false;
   repeatAudio.pause();
   repeatAudio.removeAttribute("src");
   repeatAudio.load();
 }
 
 function syncPlayButton() {
+  if (isRepeatOnlyPreview()) {
+    const repeatIsPlaying = !repeatAudio.paused;
+    playModelButton.disabled = !repeatAudio.src || isBusy;
+    playModelButton.classList.toggle("is-playing", repeatIsPlaying);
+    playModelButton.querySelector("span:last-child").textContent = repeatIsPlaying ? "停止" : "復唱音声を再生";
+    playModelOnlyButton.hidden = true;
+    syncComparisonNote();
+    return;
+  }
   const isModelOnlyPlaying = !modelAudio.paused && !isComparisonPlaying;
   const comparisonPlan = currentComparisonPlaybackPlan();
   const primaryButtonIsPlaying = isComparisonPlaying || (comparisonPlan.mode === "model" && isModelOnlyPlaying);
@@ -847,6 +915,12 @@ function syncPlayButton() {
 }
 
 function syncComparisonNote() {
+  if (isRepeatOnlyPreview()) {
+    comparisonNote.textContent = "この履歴のお手本音声が残っていないため、比較再生は利用できません。復唱音声だけを再生できます。";
+    comparisonNote.dataset.mode = "saved_attempt";
+    comparisonNote.hidden = false;
+    return;
+  }
   const plan = currentComparisonPlaybackPlan();
   comparisonNote.textContent = plan.description;
   comparisonNote.dataset.mode = plan.mode;
@@ -887,6 +961,11 @@ function applyPlaybackSpeed(audio, speed = normalizedPlaybackSpeed(speedSlider.v
 }
 
 function handleModelAudioPlay() {
+  syncModelAudioSpeed();
+  syncPlayButton();
+}
+
+function handleRepeatAudioPlay() {
   syncModelAudioSpeed();
   syncPlayButton();
 }
@@ -1315,10 +1394,14 @@ function levelForRecordSlot(slot) {
 function syncRecordSlotVisuals() {
   const repeatAvailable = Boolean(currentTargetText) && !promptPanel.hidden;
   const activeRecordingKind = mediaRecorder?.state === "recording" ? recordingKind : "";
-  repeatRecordButton.disabled = isBusy || !repeatAvailable || (Boolean(activeRecordingKind) && activeRecordingKind !== "repeat");
+  repeatRecordButton.disabled = isBusy
+    || isSavedHistoryPreview
+    || !repeatAvailable
+    || (Boolean(activeRecordingKind) && activeRecordingKind !== "repeat");
   nativeRecordButton.disabled = isBusy || (Boolean(activeRecordingKind) && activeRecordingKind !== "native");
   nativeCancelButton.hidden = activeRecordingKind !== "native";
   repeatCancelButton.hidden = activeRecordingKind !== "repeat";
+  syncHistoryPreviewButton();
   if (!repeatAvailable && activeRecordSlot === "repeat") {
     activeRecordSlot = "native";
   }
@@ -1495,7 +1578,7 @@ function clearError() {
   errorText.textContent = "";
 }
 
-function loadPracticeSettings() {
+function loadPracticeSettings({ developerSettings = false } = {}) {
   const settings = readPracticeSettings();
   selectedTargetLanguage = selectablePracticeTargetLanguages.has(settings.target_language)
     ? settings.target_language
@@ -1503,12 +1586,12 @@ function loadPracticeSettings() {
   pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : settings.show_pinyin !== false;
   selectedChineseScript = settings.chinese_script === "traditional" ? "traditional" : "simplified";
   ownVoiceToggle.checked = settings.own_voice === true;
-  comparisonModelSelect.value = selectableComparisonModels.has(settings.comparison_model)
+  comparisonModelSelect.value = developerSettings && selectableComparisonModels.has(settings.comparison_model)
     ? settings.comparison_model
-    : "gpt-5.6-terra";
-  playbackPaddingSlider.value = String(
-    normalizedPlaybackPadding(settings.playback_padding_seconds),
-  );
+    : defaultComparisonModel;
+  playbackPaddingSlider.value = String(developerSettings
+    ? normalizedPlaybackPadding(settings.playback_padding_seconds)
+    : defaultPlaybackPaddingSeconds);
   playbackPaddingValue.textContent = `${normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2)}秒`;
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageSelect.value = selectedTargetLanguage;
@@ -1562,9 +1645,130 @@ function practiceAsrModel() {
 function normalizedPlaybackPadding(value) {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed)) {
-    return 0.1;
+    return defaultPlaybackPaddingSeconds;
   }
   return Math.max(0, Math.min(0.5, Math.round(parsed / 0.05) * 0.05));
+}
+
+async function initializePracticeDeveloperUi() {
+  comparisonModelSetting.hidden = true;
+  playbackPaddingSetting.hidden = true;
+  historyPreview.hidden = true;
+  try {
+    const response = await fetch("/api/runtime");
+    const payload = await response.json();
+    if (!response.ok) {
+      return;
+    }
+    const capabilities = payload.ui_capabilities || {};
+    if (capabilities.practice_developer_settings === true) {
+      comparisonModelSetting.hidden = false;
+      playbackPaddingSetting.hidden = false;
+      loadPracticeSettings({ developerSettings: true });
+    }
+    if (capabilities.practice_history_preview === true) {
+      historyPreview.hidden = false;
+      await loadPracticeHistoryPreview();
+    }
+  } catch (_error) {
+    // 実行環境を確認できない場合は、公開版と同じ固定値・非表示を保つ。
+  }
+}
+
+async function loadPracticeHistoryPreview() {
+  historyPreviewStatus.textContent = "履歴を読み込んでいます。";
+  historyPreviewButton.disabled = true;
+  try {
+    const response = await fetch("/api/practice-history");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(payload, "履歴を読み込めませんでした。"));
+    }
+    practiceHistoryPreviewEntries = (Array.isArray(payload.recordings) ? payload.recordings : [])
+      .filter((entry) => {
+        const metadata = entry?.metadata || {};
+        return metadata.recording_intent === "attempt"
+          && metadata.practice_job_status === "succeeded"
+          && metadata.practice_diagnostics?.recording_kind === "attempt";
+      });
+    historyPreviewSelect.replaceChildren();
+    practiceHistoryPreviewEntries.forEach((entry, index) => {
+      const diagnostics = entry.metadata.practice_diagnostics;
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = practiceHistoryPreviewLabel(entry, diagnostics);
+      historyPreviewSelect.append(option);
+    });
+    if (!practiceHistoryPreviewEntries.length) {
+      historyPreviewStatus.textContent = "表示できる成功済みの復唱履歴がありません。";
+      return;
+    }
+    historyPreviewStatus.textContent = `${practiceHistoryPreviewEntries.length}件の保存結果を表示できます。`;
+    syncHistoryPreviewButton();
+  } catch (error) {
+    practiceHistoryPreviewEntries = [];
+    historyPreviewSelect.replaceChildren();
+    historyPreviewStatus.textContent = error instanceof Error ? error.message : "履歴を読み込めませんでした。";
+  }
+}
+
+function practiceHistoryPreviewLabel(entry, diagnostics) {
+  const language = languageLabels[diagnostics.target_language] || diagnostics.target_language || "言語不明";
+  const score = Number.isFinite(Number(diagnostics.overall_score))
+    ? `${Math.round(Number(diagnostics.overall_score))}点`
+    : "採点なし";
+  const target = String(diagnostics.target_text || entry.text_preview || "").trim();
+  const preview = target.length > 36 ? `${target.slice(0, 36)}…` : target;
+  return `${language}・${score}${preview ? `・${preview}` : ""}`;
+}
+
+function syncHistoryPreviewButton() {
+  const index = Number.parseInt(historyPreviewSelect.value, 10);
+  historyPreviewButton.disabled = isBusy
+    || mediaRecorder?.state === "recording"
+    || !Number.isInteger(index)
+    || !practiceHistoryPreviewEntries[index];
+}
+
+function displaySelectedPracticeHistory() {
+  if (isBusy || mediaRecorder?.state === "recording") {
+    return;
+  }
+  const index = Number.parseInt(historyPreviewSelect.value, 10);
+  const entry = practiceHistoryPreviewEntries[index];
+  const diagnostics = entry?.metadata?.practice_diagnostics;
+  if (!entry || !diagnostics) {
+    return;
+  }
+  resetPractice();
+  selectedTargetLanguage = selectablePracticeTargetLanguages.has(diagnostics.target_language)
+    ? diagnostics.target_language
+    : defaultPracticeTargetLanguage;
+  targetLanguageSelect.value = selectedTargetLanguage;
+  pinyinToggle.checked = selectedTargetLanguage === "zh-CN" ? true : pinyinToggle.checked;
+  syncPinyinSettingVisibility();
+  syncCurrentLanguageLabel();
+  currentTargetText = String(diagnostics.target_text || "");
+  currentTargetDisplayText = currentTargetText;
+  currentTargetSecondaryText = "";
+  const targetPinyin = Array.isArray(diagnostics.comparison_target_pinyin)
+    ? diagnostics.comparison_target_pinyin.filter(Boolean).join(" ")
+    : "";
+  currentTargetPinyinText = targetPinyin;
+  currentTargetPinyinStatus = targetPinyin ? "ready" : "unavailable";
+  targetLabel.textContent = `${languageLabels[selectedTargetLanguage] || ""} の保存済みお手本`;
+  renderTargetDisplay();
+  promptPanel.hidden = false;
+  isSavedHistoryPreview = true;
+  setRepeatAudioSource(entry.url);
+  if (entry.model_audio_url) {
+    setModelAudioSource(entry.model_audio_url);
+  }
+  renderAttemptResult(diagnostics);
+  savedResultNotice.hidden = false;
+  historyPreviewStatus.textContent = entry.model_audio_url
+    ? "保存済みの結果を表示しました。比較再生も確認できます。外部APIや音声処理は呼び出していません。"
+    : "保存済みの結果を表示しました。お手本音声が残っていないため比較再生はできません。";
 }
 
 function syncPinyinSettingVisibility() {
@@ -1678,3 +1882,4 @@ function renderPracticeDiffCell(cell) {
 
 loadPracticeSettings();
 resetPractice();
+initializePracticeDeveloperUi();

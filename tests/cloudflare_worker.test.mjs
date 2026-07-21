@@ -3114,6 +3114,10 @@ test("Cloudflare worker reports RunPod runtime availability and warm health", as
   assert.equal(seedVc.settings.warmup.ready, false);
   assert.equal(seedVc.settings.warmup.auto_on_user_page_load, false);
   assert.equal(seedVc.settings.health.warm, true);
+  assert.deepEqual(payload.ui_capabilities, {
+    practice_developer_settings: false,
+    practice_history_preview: false,
+  });
 });
 
 test("Cloudflare worker only enables user-page warmup when explicitly opted in", async () => {
