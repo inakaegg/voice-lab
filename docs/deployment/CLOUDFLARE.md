@@ -54,9 +54,14 @@ Google OAuth clientの「承認済みのリダイレクトURI」には `https://
 
 1. 新Workerへ上記secretをすべて登録する。
 2. Google OAuth clientへ新しい承認済みリダイレクトURIを追加する。
-3. `npx wrangler deploy` で新Workerをデプロイする。
-4. 新URLでトップページ、Googleログイン、SpeakLoop、公開 `/skitvoice` の非生成表示、許可済みGoogle管理者による `/skitvoice/admin` の研究用生成をそれぞれsmoke確認する。
-5. 利用箇所を新URLへ切り替えた後、旧Workerと旧OAuth redirect URIを削除する。
+3. `npx wrangler d1 migrations apply mo-speech-demo-db --remote` で未適用のD1 migrationを本番databaseへ適用する。
+4. `npx wrangler deploy` で新Workerをデプロイする。
+5. 新URLで次をsmoke確認する。
+   - トップページとGoogleログイン
+   - SpeakLoop
+   - 公開 `/skitvoice` の非生成表示
+   - 許可済みGoogle管理者による `/skitvoice/admin` の研究用生成
+6. 利用箇所を新URLへ切り替えた後、旧Workerと旧OAuth redirect URIを削除する。
 
 新Workerのsmoke確認が終わるまで旧Workerを削除しない。secretが不足した状態で新Workerを本番移行先として公開しない。
 
@@ -166,6 +171,8 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 現在は単一Workerを正とする。分割は利用量、障害、secret、デプロイ頻度を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
 
+D1 migrationはWorkerより先に本番databaseへ適用する。`--remote`を省略するとlocal databaseが対象になるため省略しない。
+
 ```sh
 wrangler secret put RUNPOD_API_KEY
 wrangler secret put RUNPOD_ENDPOINT_ID
@@ -175,6 +182,7 @@ wrangler secret put GOOGLE_CLIENT_SECRET
 openssl rand -base64 32
 wrangler secret put PUBLIC_SESSION_SECRET
 wrangler secret put ADMIN_GOOGLE_EMAILS
+npx wrangler d1 migrations apply mo-speech-demo-db --remote
 wrangler deploy
 ```
 

@@ -318,6 +318,16 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     assert "last_login_at TEXT" in storage
 
 
+def test_cloudflare_deploy_applies_remote_d1_migrations_before_worker() -> None:
+    cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
+    deployment = cloudflare.split("## デプロイ", 1)[1].split("## 制限", 1)[0]
+    migration_command = "npx wrangler d1 migrations apply mo-speech-demo-db --remote"
+    deploy_command = "wrangler deploy"
+
+    assert migration_command in deployment
+    assert deployment.index(migration_command) < deployment.index(deploy_command)
+
+
 def test_cloudflare_worker_uses_the_voice_lab_public_name() -> None:
     wrangler = read_text("wrangler.toml")
     cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
