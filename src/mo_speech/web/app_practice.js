@@ -136,6 +136,7 @@ let practiceHistoryPreviewEntries = [];
 let repeatAudioUsesObjectUrl = false;
 let modelAudioUsesObjectUrl = false;
 let isSavedHistoryPreview = false;
+let currentHistoryPreviewEntry = null;
 
 targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
 comparisonModelSelect.addEventListener("change", savePracticeSettings);
@@ -758,6 +759,7 @@ function resetPractice() {
   phraseFeedback.replaceChildren();
   savedResultNotice.hidden = true;
   isSavedHistoryPreview = false;
+  currentHistoryPreviewEntry = null;
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
@@ -982,6 +984,10 @@ function handlePlaybackPaddingChange() {
   playbackPaddingSlider.value = String(padding);
   playbackPaddingValue.textContent = `${padding.toFixed(2)}秒`;
   savePracticeSettings();
+  // 再計算は「画面で選んでいる余白を使う」契約なので、余白を変えたら計算し直す。
+  if (isSavedHistoryPreview && historyPreviewSourceSelect.value === "recomputed" && currentHistoryPreviewEntry) {
+    applyRecomputedComparison(currentHistoryPreviewEntry);
+  }
 }
 
 function handlePinyinSettingChange() {
@@ -1762,6 +1768,7 @@ function displaySelectedPracticeHistory() {
   renderTargetDisplay();
   promptPanel.hidden = false;
   isSavedHistoryPreview = true;
+  currentHistoryPreviewEntry = entry;
   setRepeatAudioSource(entry.url);
   if (entry.model_audio_url) {
     setModelAudioSource(entry.model_audio_url);
@@ -1780,7 +1787,7 @@ function handleHistoryPreviewSourceChange() {
   if (!isSavedHistoryPreview) {
     return;
   }
-  const entry = practiceHistoryPreviewEntries[Number.parseInt(historyPreviewSelect.value, 10)];
+  const entry = currentHistoryPreviewEntry;
   const diagnostics = entry?.metadata?.practice_diagnostics;
   if (!entry || !diagnostics) {
     return;
@@ -1806,8 +1813,8 @@ function applyPracticeComparisonAlignments(attemptAlignment, modelAlignment) {
   currentAttemptComparisonAlignment = attemptAlignment;
   currentModelComparisonAlignment = modelAlignment;
   if (currentAttemptPayload) {
-    currentAttemptPayload.comparison_alignment = attemptAlignment;
-    currentAttemptPayload.model_comparison_alignment = modelAlignment;
+    // currentAttemptPayloadは履歴一覧のdiagnosticsそのものなので、ここへ再計算結果を
+    // 書き戻すと保存値が失われ、保存値へ戻せなくなる。表示は各globalの区間を使う。
     renderRecognizedDiff(currentAttemptPayload);
   }
   syncPlayButton();

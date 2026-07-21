@@ -70,11 +70,13 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         saved_playback_padding_seconds: 0.1,
         comparison_alignment: shift([
           { index: 0, audio_start: 0.5, audio_end: 1.2 },
-          { index: 1, audio_start: 1.2, audio_end: 2.4 },
+          { index: 1, audio_start: 1.2, audio_end: 2.0 },
+          { index: 2, audio_start: 2.0, audio_end: 2.4 },
         ]),
         model_comparison_alignment: shift([
           { index: 0, audio_start: 0.4, audio_end: 1.1 },
-          { index: 1, audio_start: 1.1, audio_end: 2.2 },
+          { index: 1, audio_start: 1.1, audio_end: 1.8 },
+          { index: 2, audio_start: 1.8, audio_end: 2.2 },
         ]),
         reference_audio_duration: 3.0,
         attempt_audio_duration: 3.0,

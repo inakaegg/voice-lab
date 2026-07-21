@@ -269,11 +269,17 @@ test("SpeakLoop recomputes the saved comparison ranges with the current implemen
   await expect(page.locator("#practice-history-preview-status"))
     .toContainText("現在の実装で計算し直した比較区間");
   await expect(page.locator("#practice-history-preview-status")).toContainText("保存時は0.10秒");
-  await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
+  // 再計算結果は3フレーズ、保存値は2フレーズ。切り替えで実際に区間が入れ替わることを見る。
+  await expect(page.locator("#practice-comparison-note")).toContainText("3/3フレーズを順番に比較できます");
   await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
+
+  // 前後余白を変えたら、現在選んでいる余白で計算し直す。
+  await page.locator("#practice-playback-padding-slider").fill("0.5");
+  await expect(page.locator("#practice-history-preview-status")).toContainText("余白は0.50秒");
 
   await source.selectOption("saved");
   await expect(page.locator("#practice-history-preview-status")).toContainText("保存時の比較区間");
+  await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
 });
 
 test("SpeakLoop returns to the saved ranges when recomputation is not possible", async ({ page }) => {
