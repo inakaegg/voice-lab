@@ -741,6 +741,57 @@ html[data-theme="dark"] .react-generate-card .vibevoice-generate-button {
   gap: 12px;
 }
 
+.voice-lab-admin-body .public-users-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.voice-lab-admin-body .public-users-item {
+  background: #f8f9fb;
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.voice-lab-admin-body .public-users-email {
+  color: var(--admin-ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.voice-lab-admin-body .public-users-meta {
+  display: grid;
+  gap: 2px 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+}
+
+.voice-lab-admin-body .public-users-meta dt {
+  color: var(--admin-muted);
+  font-size: 11px;
+}
+
+.voice-lab-admin-body .public-users-meta dd {
+  color: var(--admin-ink);
+  font-size: 11.5px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.voice-lab-admin-body .public-users-admin-badge {
+  background: var(--admin-accent-soft);
+  border-radius: 999px;
+  color: var(--admin-accent-strong);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+}
+
 .voice-lab-admin-body .history-grid article,
 .voice-lab-admin-body .history-item {
   background: #f8f9fb;

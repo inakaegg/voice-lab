@@ -106,3 +106,10 @@ test("portal product accents distinguish creation from learning", () => {
   assert.match(portalStyles, /\.portal-product-link-skit\s*\{[^}]*--product-accent:\s*#a85d2d/s);
   assert.match(portalStyles, /\.portal-product-link-speak\s*\{[^}]*--product-accent:\s*#3e68ad/s);
 });
+
+test("the overview admin page exposes the signed-in user list panel", () => {
+  assert.match(adminHtml, /id="public-users-panel"/);
+  assert.match(adminHtml, /data-public-users-body/);
+  assert.match(adminHtml, /data-public-users-status/);
+  assert.match(adminHtml, /\/static\/app_public_users\.js/);
+});
