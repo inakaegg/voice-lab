@@ -893,6 +893,7 @@ async function handleGoogleCallback(request, env, url) {
     picture: String(userInfo.picture || ""),
   });
   const settings = await readPublicAccessSettings(env);
+  await recordPublicUserLogin(env, email);
   await appendPublicAuditEvent(env, {
     action: "google_login_success",
     email,
@@ -2134,6 +2135,21 @@ async function retainedPublicAuditEvents(events, now = new Date()) {
     const occurredAt = Date.parse(String(entry.created_at || ""));
     return Number.isFinite(occurredAt) && occurredAt >= cutoff;
   });
+}
+
+async function recordPublicUserLogin(env, email) {
+  if (!env.MO_SPEECH_DB) {
+    return;
+  }
+  const now = new Date().toISOString();
+  const emailHash = await publicIdentityHash(email);
+  try {
+    await env.MO_SPEECH_DB.prepare(
+      "INSERT INTO public_users (email_hash, email, created_at, last_seen_at, last_login_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET email = excluded.email, last_login_at = excluded.last_login_at",
+    ).bind(emailHash, normalizeEmail(email), now, now, now).run();
+  } catch (_error) {
+    // 利用者記録の失敗でログインを止めない。
+  }
 }
 
 async function publicIdentityHash(email) {

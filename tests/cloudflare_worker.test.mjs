@@ -339,6 +339,39 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
   assert.equal(audit[0].next, "/speakloop");
 });
 
+test("Cloudflare worker records a signed-in Google email with its login time", async () => {
+  const db = fakeD1();
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://oauth2.googleapis.com/token") {
+      return json({ access_token: "google-access-token" });
+    }
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "Viewer@Example.com", email_verified: true });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv(), db });
+
+  await publicCookie(env, "/speakloop");
+
+  const hash = await publicIdentityHashForTest("viewer@example.com");
+  const stored = db.__tables.users.get(hash);
+  assert.equal(stored.email, "viewer@example.com");
+  assert.match(stored.last_login_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(stored.created_at, stored.last_seen_at);
+});
+
+test("Cloudflare worker records an admin Google email in the public user table", async () => {
+  const db = fakeD1();
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv(), db });
+
+  await adminCookie(env, "/admin");
+
+  const hash = await publicIdentityHashForTest("admin@example.com");
+  assert.equal(db.__tables.users.get(hash).email, "admin@example.com");
+});
+
 test("Cloudflare worker refuses VibeVoice when admin authentication is not configured", async () => {
   const env = publicAuthEnv(async () => {
     throw new Error("unexpected fetch");
@@ -3519,7 +3552,24 @@ function fakeD1Statement(db, sql, args) {
           audio_mime_type: args[5], audio_r2_key: args[6], size_bytes: args[7], updated_at: args[8],
         });
       } else if (sql.startsWith("INSERT INTO public_users")) {
-        db.__tables.users.set(args[0], { email_hash: args[0], created_at: args[1], last_seen_at: args[2] });
+        const previous = db.__tables.users.get(args[0]);
+        const tracksLogin = sql.includes("last_login_at = excluded.last_login_at");
+        if (previous) {
+          previous.email = args[1];
+          if (tracksLogin) {
+            previous.last_login_at = args[4];
+          } else {
+            previous.last_seen_at = args[3];
+          }
+        } else {
+          db.__tables.users.set(args[0], {
+            email_hash: args[0],
+            email: args[1],
+            created_at: args[2],
+            last_seen_at: args[3],
+            last_login_at: args[4] ?? null,
+          });
+        }
       } else if (sql.startsWith("INSERT INTO quota_usage_daily")) {
         const key = `${args[0]}:${args[1]}:${args[2]}`;
         const previous = db.__tables.daily.get(key);
