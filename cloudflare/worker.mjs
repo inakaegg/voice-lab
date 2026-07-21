@@ -2013,21 +2013,40 @@ async function readPublicUsers(env, url = null) {
     return { users: [], limit, stored: 0 };
   }
   const settings = await readPublicAccessSettings(env);
-  const rows = await env.MO_SPEECH_DB.prepare(
-    "SELECT email_hash, email, created_at, last_seen_at, last_login_at FROM public_users ORDER BY last_login_at IS NULL, last_login_at DESC LIMIT ?",
-  ).bind(limit).all();
-  const usageRows = await env.MO_SPEECH_DB.prepare(
-    "SELECT email_hash, feature, usage_count FROM quota_usage_total",
-  ).all();
+  const rows = await env.MO_SPEECH_DB.prepare(`
+    WITH selected_users AS (
+      SELECT email_hash, email, created_at, last_seen_at, last_login_at
+      FROM public_users
+      ORDER BY last_login_at IS NULL, last_login_at DESC
+      LIMIT ?
+    )
+    SELECT
+      selected_users.email_hash,
+      selected_users.email,
+      selected_users.created_at,
+      selected_users.last_seen_at,
+      selected_users.last_login_at,
+      quota_usage_total.feature,
+      quota_usage_total.usage_count
+    FROM selected_users
+    LEFT JOIN quota_usage_total
+      ON quota_usage_total.email_hash = selected_users.email_hash
+    ORDER BY selected_users.last_login_at IS NULL, selected_users.last_login_at DESC, quota_usage_total.feature
+  `).bind(limit).all();
   const stored = await env.MO_SPEECH_DB.prepare("SELECT COUNT(*) AS count FROM public_users").first();
-  const usageByHash = new Map();
-  for (const row of usageRows.results || []) {
-    const usage = usageByHash.get(row.email_hash) || {};
-    usage[String(row.feature)] = Number(row.usage_count || 0);
-    usageByHash.set(row.email_hash, usage);
+  const usersByHash = new Map();
+  for (const row of rows.results || []) {
+    let user = usersByHash.get(row.email_hash);
+    if (!user) {
+      user = { ...row, usage: {} };
+      usersByHash.set(row.email_hash, user);
+    }
+    if (row.feature !== null && row.feature !== undefined) {
+      user.usage[String(row.feature)] = Number(row.usage_count || 0);
+    }
   }
-  const users = (rows.results || []).map((row) => {
-    const usage = usageByHash.get(row.email_hash) || {};
+  const users = [...usersByHash.values()].map((row) => {
+    const usage = row.usage;
     const usedTotal = Object.values(usage).reduce((sum, value) => sum + value, 0);
     const email = normalizeEmail(row.email);
     return {

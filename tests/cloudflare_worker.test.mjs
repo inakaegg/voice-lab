@@ -462,6 +462,23 @@ test("Cloudflare worker lists signed-in users with emails times and usage for an
   assert.equal(payload.stored, 2);
 });
 
+test("Cloudflare worker limits quota reads to users selected for the response", async () => {
+  const db = fakeD1();
+  db.__rejectUnboundedQuotaScan = true;
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv(), db });
+
+  const cookie = await adminCookie(env, "/admin");
+  const response = await handleRequest(
+    new Request("https://example.com/api/public-users?limit=1", { headers: { cookie } }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).users.length, 1);
+});
+
 test("Cloudflare worker returns an empty public user list without a D1 binding", async () => {
   const env = adminAuthEnv(async () => {
     throw new Error("unexpected fetch");
@@ -3644,6 +3661,7 @@ function fakeD1() {
   };
   const db = {
     __tables: tables,
+    __rejectUnboundedQuotaScan: false,
     prepare(sql) {
       return fakeD1Statement(db, String(sql), []);
     },
@@ -3659,6 +3677,24 @@ function fakeD1Statement(db, sql, args) {
     bind(...values) { return fakeD1Statement(db, sql, values); },
     async all() {
       if (sql.includes("FROM public_sample_audios")) return { results: [...db.__tables.samples.values()] };
+      if (sql.includes("WITH selected_users") && sql.includes("LEFT JOIN quota_usage_total")) {
+        const limit = Number(args[0] || 200);
+        const users = [...db.__tables.users.values()]
+          .sort((a, b) => String(b.last_login_at || "").localeCompare(String(a.last_login_at || "")))
+          .slice(0, limit);
+        return {
+          results: users.flatMap((user) => {
+            const usage = [...db.__tables.total.entries()]
+              .filter(([key]) => key.startsWith(`${user.email_hash}:`))
+              .map(([key, row]) => ({
+                ...user,
+                feature: key.slice(user.email_hash.length + 1),
+                usage_count: Number(row.usage_count || 0),
+              }));
+            return usage.length > 0 ? usage : [{ ...user, feature: null, usage_count: null }];
+          }),
+        };
+      }
       if (sql.includes("FROM public_users")) {
         const limit = Number(args[0] || 200);
         return {
@@ -3668,6 +3704,9 @@ function fakeD1Statement(db, sql, args) {
         };
       }
       if (sql.includes("FROM quota_usage_total")) {
+        if (db.__rejectUnboundedQuotaScan) {
+          throw new Error("quota_usage_total must be limited to the selected public users");
+        }
         return {
           results: [...db.__tables.total.entries()].map(([key, row]) => ({
             email_hash: key.split(":")[0],
