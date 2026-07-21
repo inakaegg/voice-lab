@@ -1,4 +1,5 @@
 const publicUsersRoots = [...document.querySelectorAll("[data-public-users]")];
+const PUBLIC_USERS_REQUEST_LIMIT = 2000;
 
 if (publicUsersRoots.length > 0) {
   for (const root of publicUsersRoots) {
@@ -10,24 +11,33 @@ if (publicUsersRoots.length > 0) {
 async function loadPublicUsers() {
   setPublicUsersStatus("読み込み中です。");
   try {
-    const response = await fetch("/api/public-users");
+    const response = await fetch(`/api/public-users?limit=${PUBLIC_USERS_REQUEST_LIMIT}`);
     if (!response.ok) {
       throw new Error(publicUsersResponseMessage(response.status));
     }
     const payload = await response.json();
     const users = Array.isArray(payload.users) ? payload.users : [];
+    const stored = Math.max(users.length, Number(payload.stored) || 0);
     for (const root of publicUsersRoots) {
       renderPublicUsers(root, users);
     }
-    setPublicUsersStatus(
-      users.length > 0 ? `${users.length}件を表示しています。` : "まだ記録がありません。",
-    );
+    setPublicUsersStatus(publicUsersLoadedStatus(users.length, stored));
   } catch (error) {
     for (const root of publicUsersRoots) {
       renderPublicUsers(root, []);
     }
     setPublicUsersStatus(error instanceof Error ? error.message : String(error), "error");
   }
+}
+
+function publicUsersLoadedStatus(displayed, stored) {
+  if (stored === 0) {
+    return "まだ記録がありません。";
+  }
+  if (stored > displayed) {
+    return `全${stored}件中${displayed}件を表示しています。`;
+  }
+  return `${displayed}件を表示しています。`;
 }
 
 function renderPublicUsers(root, users) {
