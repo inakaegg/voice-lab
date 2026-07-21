@@ -1373,7 +1373,10 @@ function levelForRecordSlot(slot) {
 function syncRecordSlotVisuals() {
   const repeatAvailable = Boolean(currentTargetText) && !promptPanel.hidden;
   const activeRecordingKind = mediaRecorder?.state === "recording" ? recordingKind : "";
-  repeatRecordButton.disabled = isBusy || !repeatAvailable || (Boolean(activeRecordingKind) && activeRecordingKind !== "repeat");
+  repeatRecordButton.disabled = isBusy
+    || isSavedHistoryPreview
+    || !repeatAvailable
+    || (Boolean(activeRecordingKind) && activeRecordingKind !== "repeat");
   nativeRecordButton.disabled = isBusy || (Boolean(activeRecordingKind) && activeRecordingKind !== "native");
   nativeCancelButton.hidden = activeRecordingKind !== "native";
   repeatCancelButton.hidden = activeRecordingKind !== "repeat";

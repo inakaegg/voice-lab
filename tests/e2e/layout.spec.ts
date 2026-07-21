@@ -227,6 +227,7 @@ test("SpeakLoop locally restores a saved result without starting audio processin
   await expect(page.locator("#practice-score")).toHaveText("82点");
   await expect(page.locator("#practice-overall-comment")).toHaveText("最初の単語をもう一度確認しましょう。");
   await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
+  await expect(page.locator("#practice-repeat-record-button")).toBeDisabled();
   await expect(page.locator("#practice-play-model-button")).toBeEnabled();
   await expect(page.locator("#practice-play-model-button")).toContainText("復唱音声を再生");
   expect(requestsAfterDisplay.every((request) =>
