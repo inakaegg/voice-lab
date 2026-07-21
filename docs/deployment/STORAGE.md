@@ -45,7 +45,9 @@ D1 database `mo-speech-demo-db` とbinding `MO_SPEECH_DB` は作成済みで、s
 CREATE TABLE public_users (
   email_hash TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL
+  last_seen_at TEXT NOT NULL,
+  email TEXT,
+  last_login_at TEXT
 );
 
 CREATE TABLE quota_usage_daily (
@@ -77,6 +79,8 @@ CREATE TABLE audit_events (
 
 CREATE INDEX audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
 ```
+
+`email` と `last_login_at` は `migrations/0003_public_user_email.sql` で追加した。管理画面の利用者一覧だけが読み、quotaと監査ログは従来どおりhashで識別する。この列を追加する前の行はNULLのままで、過去の利用者は復元しない。
 
 音声、台本、入力本文、OAuth token、raw IP addressはauditへ保存しない。emailを保存する必要がある場合も用途と保持期間を決め、表示用情報と台帳用識別子を分ける。
 
