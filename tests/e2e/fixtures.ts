@@ -6,6 +6,7 @@ type UiFixtureOptions = {
   practicePreviewModelAudio?: boolean;
   practicePreviewRecompute?: boolean;
   practicePreviewModelAudioMissing?: boolean;
+  practicePreviewRecomputeUnavailableAtMaxPadding?: boolean;
 };
 
 const accessSettings = {
@@ -83,6 +84,14 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         });
       }
       const padding = Number(new URL(route.request().url()).searchParams.get("playback_padding_seconds") || 0);
+      if (options.practicePreviewRecomputeUnavailableAtMaxPadding && padding >= 0.5) {
+        return json({
+          available: false,
+          unavailable_reason: "位置番号を持つ比較結果が保存されていないため、再計算できません。",
+          comparison_alignment: {},
+          model_comparison_alignment: {},
+        });
+      }
       // 余白が小さいほど遅く返す。古い要求の応答が新しい応答より後に届く状況を再現する。
       await new Promise((resolve) => setTimeout(resolve, Math.round((0.5 - padding) * 400)));
       const shift = (phrases: Array<{ index: number; audio_start: number; audio_end: number }>) => ({
