@@ -3127,13 +3127,18 @@ def test_practice_history_locally_adds_missing_pinyin_without_rewriting_metadata
     assert entry.metadata_path.read_text(encoding="utf-8") == original_metadata
 
 
-def _save_practice_prompt_output(store: AudioHistoryStore, tts_text: str) -> AudioHistoryEntry:
+def _save_practice_prompt_output(
+    store: AudioHistoryStore,
+    tts_text: str,
+    *,
+    target_language: str = "zh-CN",
+) -> AudioHistoryEntry:
     entry = store.save_output(
         b"model audio",
         suffix=".wav",
         metadata={
             "endpoint": "practice-prompts",
-            "target_language": "zh-CN",
+            "target_language": target_language,
             "audio_mime_type": "audio/wav",
             "tts_text": tts_text,
         },
@@ -3142,7 +3147,12 @@ def _save_practice_prompt_output(store: AudioHistoryStore, tts_text: str) -> Aud
     return entry
 
 
-def _save_practice_attempt_recording(store: AudioHistoryStore, target_text: str) -> AudioHistoryEntry:
+def _save_practice_attempt_recording(
+    store: AudioHistoryStore,
+    target_text: str,
+    *,
+    target_language: str = "zh-CN",
+) -> AudioHistoryEntry:
     entry = store.save_recording(
         b"practice attempt",
         suffix=".wav",
@@ -3152,7 +3162,7 @@ def _save_practice_attempt_recording(store: AudioHistoryStore, target_text: str)
             "practice_job_status": "succeeded",
             "practice_diagnostics": {
                 "recording_kind": "attempt",
-                "target_language": "zh-CN",
+                "target_language": target_language,
                 "target_text": target_text,
                 "recognized_text": target_text,
                 "outcome": "evaluated",
@@ -3179,6 +3189,23 @@ def test_practice_history_links_the_prompt_audio_recorded_before_the_attempt(tmp
     assert entry["model_audio_url"] == f"/api/audio-history/outputs/{earlier_prompt.audio_path.name}"
     assert entry["model_audio_media_type"] == "audio/wav"
     assert later_prompt.audio_path.name not in entry["model_audio_url"]
+
+
+def test_practice_history_does_not_link_a_prompt_recorded_for_another_language(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    english_prompt = _save_practice_prompt_output(history_store, "OK", target_language="en-US")
+    _save_practice_prompt_output(history_store, "OK", target_language="zh-CN")
+    attempt = _save_practice_attempt_recording(history_store, "OK", target_language="en-US")
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get("/api/practice-history")
+
+    assert response.status_code == 200
+    entry = next(
+        item for item in response.json()["recordings"] if item["filename"] == attempt.audio_path.name
+    )
+    # 目標文だけで引くと、後から保存された中国語のお手本音声が選ばれてしまう。
+    assert entry["model_audio_url"] == f"/api/audio-history/outputs/{english_prompt.audio_path.name}"
 
 
 def test_practice_history_leaves_model_audio_empty_when_no_prompt_text_matches(tmp_path) -> None:

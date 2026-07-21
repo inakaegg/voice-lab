@@ -1124,12 +1124,15 @@ def _is_practice_history_entry(entry: object) -> bool:
     return str(metadata.get("endpoint") or "").startswith("practice-")
 
 
-def _practice_prompt_audio_index(store: AudioHistoryStore) -> dict[str, list[tuple[str, str, str]]]:
-    """お手本TTS音声を目標文で引くための索引を返す。
+def _practice_prompt_audio_index(
+    store: AudioHistoryStore,
+) -> dict[tuple[str, str], list[tuple[str, str, str]]]:
+    """お手本TTS音声を学習言語と目標文で引くための索引を返す。
 
     お手本生成時の`tts_text`は復唱結果の`target_text`と同じ文字列なので、
-    推測ではなく完全一致で対応付けられる。値は`(created_at, url, media_type)`
-    を作成時刻の昇順で並べたリスト。
+    推測ではなく完全一致で対応付けられる。ただし`OK`のような短い目標文は言語を
+    またいで一致しうるため、学習言語も鍵に含める。値は`(created_at, url,
+    media_type)`を作成時刻の昇順で並べたリスト。
     """
     index: dict[str, list[tuple[str, str, str]]] = {}
     for entry in store.list_entries("outputs"):
@@ -1139,7 +1142,8 @@ def _practice_prompt_audio_index(store: AudioHistoryStore) -> dict[str, list[tup
         tts_text = str(metadata.get("tts_text") or "").strip()
         if not tts_text:
             continue
-        index.setdefault(tts_text, []).append(
+        target_language = str(metadata.get("target_language") or "")
+        index.setdefault((target_language, tts_text), []).append(
             (
                 str(metadata.get("created_at") or ""),
                 f"/api/audio-history/outputs/{entry.audio_path.name}",
@@ -1152,11 +1156,11 @@ def _practice_prompt_audio_index(store: AudioHistoryStore) -> dict[str, list[tup
 
 
 def _practice_model_audio_for_attempt(
-    index: dict[str, list[tuple[str, str, str]]],
+    index: dict[tuple[str, str], list[tuple[str, str, str]]],
     diagnostics: dict[str, object],
     created_at: str,
 ) -> tuple[str, str]:
-    """復唱より前に作られた同じ目標文のお手本音声を返す。
+    """復唱より前に作られた、同じ学習言語・同じ目標文のお手本音声を返す。
 
     同じ目標文で複数回お手本を作った場合は、その復唱の直前に作られたものを選ぶ。
     候補がなければ空文字列を返し、比較再生は無効のままにする。
@@ -1164,7 +1168,9 @@ def _practice_model_audio_for_attempt(
     target_text = str(diagnostics.get("target_text") or "").strip()
     if not target_text:
         return "", ""
-    earlier = [candidate for candidate in index.get(target_text, []) if candidate[0] <= created_at]
+    target_language = str(diagnostics.get("target_language") or "")
+    candidates = index.get((target_language, target_text), [])
+    earlier = [candidate for candidate in candidates if candidate[0] <= created_at]
     if not earlier:
         return "", ""
     _, url, media_type = earlier[-1]
