@@ -130,6 +130,9 @@ def test_public_privacy_policy_and_retention_are_fixed() -> None:
     assert "音声や入力内容はこの記録に含まれません" in policy
     assert "日ごとの利用回数は、利用日から3日以内に削除します" in policy
     assert "操作ログは、約90日間保存します" in policy
+    assert "ログインしたメールアドレスと日時は、運営者が管理画面で確認できる形で保存します" in policy
+    assert "ログインしたメールアドレスと日時" in privacy
+    assert "public_users" in privacy
     assert "最大3日" not in policy
     assert "最大91日" not in policy
     assert "48時間" in privacy

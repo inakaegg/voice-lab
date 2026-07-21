@@ -21,6 +21,7 @@
 
 - Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しない。
 - Google emailはquotaと監査の識別に使う前にSHA-256 hash化する。D1と現在のKV fallbackは、quota keyとaudit eventへ平文emailを新規保存しない。
+- ログインしたメールアドレスと日時は `public_users` テーブルへ平文で保存し、管理者だけが `GET /api/public-users` と `/admin` の利用者一覧で読む。quota keyとaudit eventは従来どおりhashだけを保存する。平文emailは公開デモの運用中に限り保持し、公開デモ終了時に削除する。
 - 2026-07-16より前に作られた平文emailを含むlegacy KV quota keyは、新Workerのproduction反映後に2件を削除した。2026-07-17の再検査で、legacy KVの平文email keyは0件である。
 - Googleログイン後のブラウザには、email、発行時刻、有効期限を含む署名cookieを `HttpOnly`、`Secure`、`SameSite=Lax` で保存する。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
 - D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
