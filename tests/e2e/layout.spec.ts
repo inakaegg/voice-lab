@@ -282,6 +282,66 @@ test("SpeakLoop recomputes the saved comparison ranges with the current implemen
   await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
 });
 
+test("SpeakLoop drops an in-flight recomputation once recording starts", async ({ page }) => {
+  await page.addInitScript(() => {
+    class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const event = new Event("dataavailable") as Event & { data: Blob };
+        event.data = new Blob(["fake recording"], { type: this.mimeType });
+        this.dispatchEvent(event);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
+    Object.defineProperty(window, "AudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(window, "webkitAudioContext", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+      configurable: true,
+    });
+  });
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, {
+    historyState: "practice-preview",
+    practiceUiMode: "local",
+    practicePreviewRecomputeDelayMs: 1500,
+  });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
+  await page.locator("#practice-native-record-button").click();
+
+  await page.waitForTimeout(2200);
+  await expect(page.locator("#practice-history-preview-status")).not.toContainText("計算し直した比較区間");
+});
+
+test("SpeakLoop refuses recomputation when the prompt audio failed to load", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, {
+    historyState: "practice-preview",
+    practiceUiMode: "local",
+    practicePreviewModelAudioMissing: true,
+    practicePreviewRecomputeDelayMs: 400,
+  });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+  await expect(page.locator("#practice-history-preview-status")).toContainText("お手本音声を読み込めなかった");
+
+  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
+
+  await page.waitForTimeout(900);
+  await expect(page.locator("#practice-history-preview-status")).not.toContainText("計算し直した比較区間");
+  await expect(page.locator("#practice-history-preview-source-select")).toHaveValue("saved");
+  await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
+});
+
 test("SpeakLoop reports an unrecorded saved padding as missing instead of zero", async ({ page }) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, {

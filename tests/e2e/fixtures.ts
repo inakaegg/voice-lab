@@ -8,6 +8,7 @@ type UiFixtureOptions = {
   practicePreviewModelAudioMissing?: boolean;
   practicePreviewRecomputeUnavailableAtMaxPadding?: boolean;
   practicePreviewSavedPaddingMissing?: boolean;
+  practicePreviewRecomputeDelayMs?: number;
 };
 
 const accessSettings = {
@@ -94,7 +95,8 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         });
       }
       // 余白が小さいほど遅く返す。古い要求の応答が新しい応答より後に届く状況を再現する。
-      await new Promise((resolve) => setTimeout(resolve, Math.round((0.5 - padding) * 400)));
+      const delayMs = options.practicePreviewRecomputeDelayMs ?? Math.round((0.5 - padding) * 400);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
       const shift = (phrases: Array<{ index: number; audio_start: number; audio_end: number }>) => ({
         available: true,
         complete: true,

@@ -978,6 +978,9 @@ function handleModelAudioLoadError() {
     return;
   }
   stopModelAudio();
+  // 応答待ちの再計算があれば無効にする。お手本音声を失った後に適用されると、
+  // 比較再生できないのに「再計算済み」と表示される。
+  historyPreviewRecomputeToken += 1;
   historyPreviewStatus.textContent = "保存済みの結果を表示しました。お手本音声を読み込めなかったため、比較再生はできません。";
 }
 
@@ -1847,15 +1850,25 @@ function applyPracticeComparisonAlignments(attemptAlignment, modelAlignment) {
 }
 
 // 余白スライダーのinputは連続発火するため、応答の到着順は要求順と一致しない。
-// 最新の要求以外、または表示対象・表示方法が変わった後の応答は捨てる。
+// 最新の要求以外、表示対象・表示方法が変わった後、録音や音声処理が始まった後、
+// お手本音声を失った後の応答は捨てる。応答待ちの間に状態が変わりうるため、
+// 要求時ではなく適用時の状態で判定する。
 async function applyRecomputedComparison(entry) {
   const diagnostics = entry.metadata.practice_diagnostics;
+  if (isRepeatOnlyPreview()) {
+    restoreSavedComparisonAlignments(diagnostics);
+    historyPreviewStatus.textContent = "お手本音声を読み込めなかったため、比較区間を計算し直しても確認できません。";
+    return;
+  }
   const padding = normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2);
   const token = ++historyPreviewRecomputeToken;
   const isCurrentRequest = () => token === historyPreviewRecomputeToken
     && isSavedHistoryPreview
     && currentHistoryPreviewEntry === entry
-    && historyPreviewSourceSelect.value === "recomputed";
+    && historyPreviewSourceSelect.value === "recomputed"
+    && !isBusy
+    && mediaRecorder?.state !== "recording"
+    && !isRepeatOnlyPreview();
   historyPreviewStatus.textContent = "現在の実装で比較区間を計算し直しています。";
   try {
     const response = await fetch(
