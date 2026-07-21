@@ -65,9 +65,9 @@ Cloudflareの本番リソースへ接続しない。公開版は同じHonoとWor
 同じjob IDのLLM比較を直列に処理し、複数の結果確定を防ぐ。
 お手本ASR cacheはKVへ保存し、同じ音声への再ASRを避ける。
 
-`yt-dlp`、`ffmpeg`、ローカルモデル、ローカルファイル保存は、
-ローカル専用のPython補助APIに残す。Cloudflare Workerではこれらを実行せず、
-現在の実行環境の責任を維持する。
+ローカル専用のPython補助APIに残す処理は次のとおり。
+`yt-dlp`、`ffmpeg`、ローカルモデル、ローカルファイル保存である。
+Cloudflare Workerではこれらを実行せず、現在の実行環境の責任を維持する。
 
 1. Cloudflare Worker側のAPI処理をHonoへ移す。
 2. job単位のDurable Objectと、お手本ASR cache用のKVを分離する。

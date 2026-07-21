@@ -1046,11 +1046,6 @@ function parseCookies(cookieHeader) {
   return cookies;
 }
 
-async function sha256Hex(value) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
-  return bufferToHex(digest);
-}
-
 async function hmacSha256Hex(message, secret) {
   const key = await crypto.subtle.importKey(
     "raw",

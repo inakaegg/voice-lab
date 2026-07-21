@@ -793,74 +793,6 @@ SAMPLE_RATE = 24000
 LINE_CACHE_ROOT = Path(os.getenv("VIBEVOICE_LINE_CACHE_DIR", Path.cwd() / ".cache" / "vibevoice" / "line_segments")).expanduser()
 
 
-def _ensure_module(module_name: str, friendly_name: str):
-    try:
-        __import__(module_name)
-    except ImportError as exc:
-        raise ImportError(f"{friendly_name}を使用するには {module_name} が必要です。pip install {module_name} を実行してください。") from exc
-
-
-def _build_public_url(base_url: Optional[str], default: str, object_name: str) -> str:
-    if base_url:
-        return f"{base_url.rstrip('/')}/{object_name}"
-    return default
-
-
-def _upload_file_to_target(
-    file_path: str,
-    *,
-    target: str,
-    bucket: str,
-    object_name: Optional[str] = None,
-    base_url: Optional[str] = None,
-    endpoint_url: Optional[str] = None,
-) -> Dict[str, str]:
-    file_path_obj = Path(file_path).expanduser()
-    if not file_path_obj.is_file():
-        raise FileNotFoundError(f"アップロード対象ファイルが見つかりません: {file_path}")
-    object_name = object_name or file_path_obj.name
-
-    if target in {"s3", "runpod"}:
-        _ensure_module("boto3", "S3/RunPodアップロード")
-        import boto3  # type: ignore
-
-        client_kwargs: Dict[str, Any] = {}
-        if endpoint_url:
-            client_kwargs["endpoint_url"] = endpoint_url
-        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        if region and target == "s3":
-            client_kwargs["region_name"] = region
-        s3_client = boto3.client("s3", **client_kwargs)
-        s3_client.upload_file(file_path_obj.as_posix(), bucket, object_name)
-        default_url = (
-            f"https://{bucket}.s3{'' if not region or region == 'us-east-1' else f'-{region}'}.amazonaws.com/{object_name}" if target == "s3" else f"s3://{bucket}/{object_name}"
-        )
-        url = _build_public_url(base_url, default_url, object_name)
-        return {"url": url, "bucket": bucket, "object": object_name}
-
-    if target == "gcs":
-        _ensure_module("google.cloud.storage", "GCSアップロード")
-        from google.cloud import storage  # type: ignore
-
-        storage_client = storage.Client()
-        bucket_obj = storage_client.bucket(bucket)
-        blob = bucket_obj.blob(object_name)
-        blob.upload_from_filename(file_path_obj.as_posix())
-        default_url = f"https://storage.googleapis.com/{bucket}/{object_name}"
-        url = _build_public_url(base_url, default_url, object_name)
-        return {"url": url, "bucket": bucket, "object": object_name}
-
-    raise ValueError(f"未対応のuploadターゲットです: {target}")
-
-
-def _raise_upload_error(target: str, exc: Exception):
-    message = str(exc).lower()
-    if target == "gcs" and "default credentials" in message:
-        raise RuntimeError(
-            "GCSアップロードに必要なGoogle Application Default Credentialsが見つかりません。"
-            "GOOGLE_APPLICATION_CREDENTIALSを設定するか、--upload_targetの指定を外して実行してください。"
-        ) from exc
-    raise exc
 
 
 class VibeVoice:
@@ -1632,24 +1564,6 @@ def resolve_output_path(output_arg: str) -> str:
         return output_arg
 
 
-def _resolve_upload_config(args) -> Optional[Dict[str, Any]]:
-    target = args.upload_target
-    if not target:
-        return None
-    bucket = args.upload_bucket or os.getenv("VIBEVOICE_UPLOAD_BUCKET")
-    if not bucket:
-        raise ValueError("--upload_bucket もしくは VIBEVOICE_UPLOAD_BUCKET を指定してください")
-    return {
-        "target": target,
-        "bucket": bucket,
-        "base_url": args.upload_base_url or os.getenv("VIBEVOICE_UPLOAD_BASE_URL"),
-        "endpoint_url": args.upload_endpoint or os.getenv("VIBEVOICE_UPLOAD_ENDPOINT"),
-        "object_name": args.upload_object,
-        "metadata_object": args.upload_metadata_object,
-        "upload_metadata": args.upload_metadata,
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="VibeVoice 音声生成ツール - スクリプトから音声を直接生成します",
@@ -1701,13 +1615,6 @@ def main():
     parser.add_argument("--line_output_dir", default=None, help="line-by-lineモードで行別音声を書き出すディレクトリ")
     parser.add_argument("--line_metadata", default=None, help="line-by-lineモードのメタデータ(JSON)を書き出すパス")
     parser.add_argument("--force", action="store_true", help="キャッシュを無視して再生成")
-    parser.add_argument("--upload_target", choices=["s3", "gcs", "runpod"], help="生成結果をクラウドストレージへアップロード")
-    parser.add_argument("--upload_bucket", help="アップロード先のバケット名（S3/GCS共通）")
-    parser.add_argument("--upload_object", help="アップロード時のリモートファイル名（未指定時は出力ファイル名）")
-    parser.add_argument("--upload_metadata", action="store_true", help="line-by-lineのメタデータJSONもアップロードする")
-    parser.add_argument("--upload_metadata_object", help="メタデータ用のリモートファイル名（未指定時はoutput名+.json）")
-    parser.add_argument("--upload_base_url", help="公開URLを生成するためのベースURL（CDN経由など任意）")
-    parser.add_argument("--upload_endpoint", help="S3互換のエンドポイントURL（RunPod Storage等）")
     parser.add_argument("-O", "--open", action="store_true", help="処理終了後、生成された音声ファイルを自動で開きます。")
 
     args = parser.parse_args()
@@ -1776,16 +1683,11 @@ def main():
     resolved_output_path = resolve_output_path(args.output)
 
     try:
-        upload_config = _resolve_upload_config(args)
-
         # Initialize VibeVoice
         vibevoice = VibeVoice(model_path=args.model_path, max_voice_seconds=args.max_voice_seconds)
         vibevoice.load_model(attention_mode=args.attention_mode)
 
         metadata_path = None
-        upload_result = None
-        metadata_upload_result = None
-        default_remote_name = Path(resolved_output_path).name
         if args.line_by_line:
             line_mode = args.line_by_line or "concat"
             result = vibevoice.generate_audio_line_by_line(
@@ -1825,43 +1727,6 @@ def main():
         logger.info(f"音声生成が完了しました: {output_path}")
         if metadata_path:
             logger.info(f"メタデータ: {metadata_path}")
-
-        if upload_config:
-            upload_object = upload_config.get("object_name") or default_remote_name
-            try:
-                upload_result = _upload_file_to_target(
-                    output_path,
-                    target=upload_config["target"],
-                    bucket=upload_config["bucket"],
-                    object_name=upload_object,
-                    base_url=upload_config.get("base_url"),
-                    endpoint_url=upload_config.get("endpoint_url"),
-                )
-            except Exception as exc:
-                _raise_upload_error(upload_config["target"], exc)
-            logger.info("クラウドにアップロードしました: %s", upload_result["url"])
-            if metadata_path and upload_config.get("upload_metadata"):
-                metadata_object = upload_config.get("metadata_object") or f"{upload_object}.json"
-                try:
-                    metadata_upload_result = _upload_file_to_target(
-                        metadata_path,
-                        target=upload_config["target"],
-                        bucket=upload_config["bucket"],
-                        object_name=metadata_object,
-                        base_url=upload_config.get("base_url"),
-                        endpoint_url=upload_config.get("endpoint_url"),
-                    )
-                except Exception as exc:
-                    _raise_upload_error(upload_config["target"], exc)
-                logger.info("メタデータをアップロードしました: %s", metadata_upload_result["url"])
-            if args.line_by_line:
-                uploaded_map = {}
-                if upload_result:
-                    uploaded_map["audio"] = upload_result["url"]
-                if metadata_upload_result:
-                    uploaded_map["metadata"] = metadata_upload_result["url"]
-                if uploaded_map:
-                    result["uploaded"] = uploaded_map
 
         # 音声ファイルを自動で開くオプション
         if args.open:
