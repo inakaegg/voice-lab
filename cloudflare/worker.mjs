@@ -2045,7 +2045,8 @@ async function readPublicUsers(env, url = null) {
 }
 
 async function readPublicAuditLog(env, url = null) {
-  const requestedLimit = url ? Number(new URL(url).searchParams.get("limit") || "") : 0;
+  // limit未指定を0として渡すとclampIntが下限1へ丸めるため、未指定はnullのままfallbackさせる。
+  const requestedLimit = url ? new URL(url).searchParams.get("limit") : null;
   const limit = clampInt(requestedLimit, 1, publicAuditLogLimit(env), 100);
   if (env.MO_SPEECH_DB) {
     await migrateLegacyAuditEventsToD1(env);

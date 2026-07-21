@@ -477,6 +477,35 @@ test("Cloudflare worker returns an empty public user list without a D1 binding",
   assert.deepEqual(await response.json(), { users: [], limit: 200, stored: 0 });
 });
 
+test("Cloudflare worker returns a full audit log page when no limit is requested", async () => {
+  const db = fakeD1();
+  const env = adminAuthEnv(async () => {
+    throw new Error("unexpected fetch");
+  }, { kv: fakeKv(), db });
+  for (const index of [1, 2, 3]) {
+    db.__tables.audit.push({
+      id: `event-${index}`,
+      occurred_at: `2026-07-0${index}T00:00:00.000Z`,
+      actor_email_hash: "a".repeat(64),
+      action: "google_login_success",
+      feature: null,
+      path: "/auth/google/callback",
+      detail_json: "{}",
+    });
+  }
+
+  const cookie = await adminCookie(env, "/admin");
+  const response = await handleRequest(
+    new Request("https://example.com/api/public-audit-log", { headers: { cookie } }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.limit, 100);
+  assert.equal(payload.events.length, 4);
+});
+
 test("Cloudflare worker refuses VibeVoice when admin authentication is not configured", async () => {
   const env = publicAuthEnv(async () => {
     throw new Error("unexpected fetch");
