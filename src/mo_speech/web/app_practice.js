@@ -133,6 +133,7 @@ let isComparisonPlaying = false;
 let comparisonPlaybackToken = 0;
 let practiceHistoryPreviewEntries = [];
 let repeatAudioUsesObjectUrl = false;
+let modelAudioUsesObjectUrl = false;
 let isSavedHistoryPreview = false;
 
 targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
@@ -754,6 +755,7 @@ function resetPractice() {
   overallComment.textContent = "";
   phraseFeedback.replaceChildren();
   savedResultNotice.hidden = true;
+  isSavedHistoryPreview = false;
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
@@ -771,6 +773,18 @@ function setModelAudio(audioBase64, mimeType, { updateAsrSource = true } = {}) {
     currentModelAsrAudioBlob = blob;
   }
   modelAudioUrl = URL.createObjectURL(blob);
+  modelAudioUsesObjectUrl = true;
+  modelAudio.src = modelAudioUrl;
+  modelAudio.load();
+  syncModelAudioSpeed();
+  playModelButton.disabled = isBusy;
+  playModelOnlyButton.disabled = isBusy;
+}
+
+function setModelAudioSource(url) {
+  stopModelAudio();
+  modelAudioUrl = String(url || "");
+  modelAudioUsesObjectUrl = false;
   modelAudio.src = modelAudioUrl;
   modelAudio.load();
   syncModelAudioSpeed();
@@ -798,8 +812,14 @@ function setRepeatAudioSource(url) {
   syncModelAudioSpeed();
 }
 
+// 保存履歴の表示確認でお手本音声を特定できなかった場合だけ、復唱音声の単独再生へ落とす。
+// お手本音声を特定できた履歴は、通常の比較再生と同じ経路で扱う。
+function isRepeatOnlyPreview() {
+  return isSavedHistoryPreview && !modelAudio.src;
+}
+
 function toggleModelAudio() {
-  if (isSavedHistoryPreview && repeatAudio.src) {
+  if (isRepeatOnlyPreview() && repeatAudio.src) {
     if (repeatAudio.paused) {
       playAudioWithCurrentSpeed(repeatAudio).catch((error) => showError(error.message));
     } else {
@@ -842,10 +862,11 @@ function toggleModelOnlyAudio() {
 
 function stopModelAudio({ clearAsrSource = true } = {}) {
   stopComparisonPlayback();
-  if (modelAudioUrl) {
+  if (modelAudioUrl && modelAudioUsesObjectUrl) {
     URL.revokeObjectURL(modelAudioUrl);
-    modelAudioUrl = "";
   }
+  modelAudioUrl = "";
+  modelAudioUsesObjectUrl = false;
   modelAudio.pause();
   modelAudio.removeAttribute("src");
   modelAudio.load();
@@ -869,7 +890,7 @@ function stopRepeatAudio() {
 }
 
 function syncPlayButton() {
-  if (isSavedHistoryPreview) {
+  if (isRepeatOnlyPreview()) {
     const repeatIsPlaying = !repeatAudio.paused;
     playModelButton.disabled = !repeatAudio.src || isBusy;
     playModelButton.classList.toggle("is-playing", repeatIsPlaying);
@@ -894,8 +915,8 @@ function syncPlayButton() {
 }
 
 function syncComparisonNote() {
-  if (isSavedHistoryPreview) {
-    comparisonNote.textContent = "保存履歴からお手本音声を特定できないため、比較再生は利用できません。復唱音声だけを再生できます。";
+  if (isRepeatOnlyPreview()) {
+    comparisonNote.textContent = "この履歴のお手本音声が残っていないため、比較再生は利用できません。復唱音声だけを再生できます。";
     comparisonNote.dataset.mode = "saved_attempt";
     comparisonNote.hidden = false;
     return;
@@ -1740,9 +1761,14 @@ function displaySelectedPracticeHistory() {
   promptPanel.hidden = false;
   isSavedHistoryPreview = true;
   setRepeatAudioSource(entry.url);
+  if (entry.model_audio_url) {
+    setModelAudioSource(entry.model_audio_url);
+  }
   renderAttemptResult(diagnostics);
   savedResultNotice.hidden = false;
-  historyPreviewStatus.textContent = "保存済みの結果を表示しました。外部APIや音声処理は呼び出していません。";
+  historyPreviewStatus.textContent = entry.model_audio_url
+    ? "保存済みの結果を表示しました。比較再生も確認できます。外部APIや音声処理は呼び出していません。"
+    : "保存済みの結果を表示しました。お手本音声が残っていないため比較再生はできません。";
 }
 
 function syncPinyinSettingVisibility() {

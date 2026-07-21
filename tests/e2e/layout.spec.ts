@@ -197,7 +197,7 @@ test("SpeakLoop defaults to English and normalizes a saved Japanese target", asy
   await expect(language).toHaveValue("en-US");
 });
 
-test("SpeakLoop locally restores a saved result without starting audio processing", async ({ page }, testInfo) => {
+test("SpeakLoop locally restores a saved result with comparison playback and no audio processing", async ({ page }, testInfo) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, { historyState: "practice-preview", practiceUiMode: "local" });
   await page.goto("/speakloop");
@@ -226,12 +226,20 @@ test("SpeakLoop locally restores a saved result without starting audio processin
     .toHaveAttribute("aria-label", /银杏周末也营业吗/);
   await expect(page.locator("#practice-score")).toHaveText("82点");
   await expect(page.locator("#practice-overall-comment")).toHaveText("最初の単語をもう一度確認しましょう。");
-  await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
+  await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
   await expect(page.locator("#practice-repeat-record-button")).toBeDisabled();
   await expect(page.locator("#practice-play-model-button")).toBeEnabled();
-  await expect(page.locator("#practice-play-model-button")).toContainText("復唱音声を再生");
+  await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
+  await expect(page.locator("#practice-play-model-only-button")).toBeVisible();
+  const savedAudioPaths = new Set([
+    "/api/audio-history/recordings/practice-preview.wav",
+    "/api/audio-history/outputs/practice-preview-model.wav",
+  ]);
   expect(requestsAfterDisplay.every((request) =>
-    request.method === "GET" && request.path === "/api/audio-history/recordings/practice-preview.wav"
+    request.method === "GET" && savedAudioPaths.has(request.path)
+  )).toBe(true);
+  expect(requestsAfterDisplay.some((request) =>
+    request.path === "/api/audio-history/outputs/practice-preview-model.wav"
   )).toBe(true);
   await assertNoHorizontalOverflow(page);
 
@@ -244,6 +252,24 @@ test("SpeakLoop locally restores a saved result without starting audio processin
     });
     await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-saved-result.png`, fullPage: true });
   }
+});
+
+test("SpeakLoop falls back to repeat-only playback when the saved prompt audio is gone", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, {
+    historyState: "practice-preview",
+    practiceUiMode: "local",
+    practicePreviewModelAudio: false,
+  });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+
+  await expect(page.locator("#practice-saved-result-notice")).toBeVisible();
+  await expect(page.locator("#practice-history-preview-status")).toContainText("比較再生はできません");
+  await expect(page.locator("#practice-comparison-note")).toContainText("比較再生は利用できません");
+  await expect(page.locator("#practice-play-model-button")).toContainText("復唱音声を再生");
+  await expect(page.locator("#practice-play-model-only-button")).toBeHidden();
 });
 
 test("SpeakLoop prevents restoring saved history while recording or processing", async ({ page }) => {

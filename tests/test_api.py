@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mo_speech.api import create_app
-from mo_speech.audio_history import AudioHistoryStore
+from mo_speech.audio_history import AudioHistoryEntry, AudioHistoryStore
 from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from mo_speech.practice_llm import PracticeLlmError, PracticeLlmEvaluation
@@ -3125,6 +3125,76 @@ def test_practice_history_locally_adds_missing_pinyin_without_rewriting_metadata
     assert diagnostics["comparison_target_pinyin"] == ["yin2", "hang2"]
     assert diagnostics["comparison_recognized_pinyin"] == ["yin2", "xing4"]
     assert entry.metadata_path.read_text(encoding="utf-8") == original_metadata
+
+
+def _save_practice_prompt_output(store: AudioHistoryStore, tts_text: str) -> AudioHistoryEntry:
+    entry = store.save_output(
+        b"model audio",
+        suffix=".wav",
+        metadata={
+            "endpoint": "practice-prompts",
+            "target_language": "zh-CN",
+            "audio_mime_type": "audio/wav",
+            "tts_text": tts_text,
+        },
+    )
+    assert entry is not None
+    return entry
+
+
+def _save_practice_attempt_recording(store: AudioHistoryStore, target_text: str) -> AudioHistoryEntry:
+    entry = store.save_recording(
+        b"practice attempt",
+        suffix=".wav",
+        metadata={
+            "endpoint": "practice-attempt-jobs",
+            "recording_intent": "attempt",
+            "practice_job_status": "succeeded",
+            "practice_diagnostics": {
+                "recording_kind": "attempt",
+                "target_language": "zh-CN",
+                "target_text": target_text,
+                "recognized_text": target_text,
+                "outcome": "evaluated",
+            },
+        },
+    )
+    assert entry is not None
+    return entry
+
+
+def test_practice_history_links_the_prompt_audio_recorded_before_the_attempt(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    earlier_prompt = _save_practice_prompt_output(history_store, "银行周末也营业吗？")
+    _save_practice_prompt_output(history_store, "别的句子。")
+    attempt = _save_practice_attempt_recording(history_store, "银行周末也营业吗？")
+    later_prompt = _save_practice_prompt_output(history_store, "银行周末也营业吗？")
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get("/api/practice-history")
+
+    assert response.status_code == 200
+    recordings = response.json()["recordings"]
+    entry = next(item for item in recordings if item["filename"] == attempt.audio_path.name)
+    assert entry["model_audio_url"] == f"/api/audio-history/outputs/{earlier_prompt.audio_path.name}"
+    assert entry["model_audio_media_type"] == "audio/wav"
+    assert later_prompt.audio_path.name not in entry["model_audio_url"]
+
+
+def test_practice_history_leaves_model_audio_empty_when_no_prompt_text_matches(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    _save_practice_prompt_output(history_store, "まったく違うお手本。")
+    attempt = _save_practice_attempt_recording(history_store, "银行周末也营业吗？")
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get("/api/practice-history")
+
+    assert response.status_code == 200
+    entry = next(
+        item for item in response.json()["recordings"] if item["filename"] == attempt.audio_path.name
+    )
+    assert entry["model_audio_url"] == ""
+    assert entry["model_audio_media_type"] == ""
 
 
 def test_admin_serves_browser_ui() -> None:

@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 type UiFixtureOptions = {
   historyState?: "empty" | "long" | "error" | "disabled" | "practice-preview";
   practiceUiMode?: "local" | "cloudflare";
+  practicePreviewModelAudio?: boolean;
 };
 
 const accessSettings = {
@@ -59,6 +60,10 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
             label: "中国語の復唱",
             filename: "practice-preview.wav",
             url: "/api/audio-history/recordings/practice-preview.wav",
+            model_audio_url: options.practicePreviewModelAudio === false
+              ? ""
+              : "/api/audio-history/outputs/practice-preview-model.wav",
+            model_audio_media_type: options.practicePreviewModelAudio === false ? "" : "audio/wav",
             text_preview: "银行周末也营业吗？",
             created_at: "20260720T101500000000Z",
             metadata: {
@@ -80,8 +85,28 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
                   overall_comment: "最初の単語をもう一度確認しましょう。",
                   phrases: [{ target_text: "银行", score: 62, comment: "「行」の発音を確認してください。" }],
                 },
-                comparison_alignment: { available: false, complete: false, phrases: [] },
-                model_comparison_alignment: { available: false, complete: false, phrases: [] },
+                comparison_alignment: {
+                  available: true,
+                  complete: true,
+                  all_phrases_playable: true,
+                  target_phrase_count: 2,
+                  playable_phrase_count: 2,
+                  phrases: [
+                    { index: 0, available: true, audio_start: 0, audio_end: 1.2 },
+                    { index: 1, available: true, audio_start: 1.2, audio_end: 2.4 },
+                  ],
+                },
+                model_comparison_alignment: {
+                  available: true,
+                  complete: true,
+                  all_phrases_playable: true,
+                  target_phrase_count: 2,
+                  playable_phrase_count: 2,
+                  phrases: [
+                    { index: 0, available: true, audio_start: 0, audio_end: 1.1 },
+                    { index: 1, available: true, audio_start: 1.1, audio_end: 2.2 },
+                  ],
+                },
               },
             },
           }],

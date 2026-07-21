@@ -1124,6 +1124,53 @@ def _is_practice_history_entry(entry: object) -> bool:
     return str(metadata.get("endpoint") or "").startswith("practice-")
 
 
+def _practice_prompt_audio_index(store: AudioHistoryStore) -> dict[str, list[tuple[str, str, str]]]:
+    """お手本TTS音声を目標文で引くための索引を返す。
+
+    お手本生成時の`tts_text`は復唱結果の`target_text`と同じ文字列なので、
+    推測ではなく完全一致で対応付けられる。値は`(created_at, url, media_type)`
+    を作成時刻の昇順で並べたリスト。
+    """
+    index: dict[str, list[tuple[str, str, str]]] = {}
+    for entry in store.list_entries("outputs"):
+        metadata = entry.metadata or {}
+        if metadata.get("endpoint") != "practice-prompts":
+            continue
+        tts_text = str(metadata.get("tts_text") or "").strip()
+        if not tts_text:
+            continue
+        index.setdefault(tts_text, []).append(
+            (
+                str(metadata.get("created_at") or ""),
+                f"/api/audio-history/outputs/{entry.audio_path.name}",
+                str(metadata.get("audio_mime_type") or ""),
+            )
+        )
+    for candidates in index.values():
+        candidates.sort(key=lambda candidate: candidate[0])
+    return index
+
+
+def _practice_model_audio_for_attempt(
+    index: dict[str, list[tuple[str, str, str]]],
+    diagnostics: dict[str, object],
+    created_at: str,
+) -> tuple[str, str]:
+    """復唱より前に作られた同じ目標文のお手本音声を返す。
+
+    同じ目標文で複数回お手本を作った場合は、その復唱の直前に作られたものを選ぶ。
+    候補がなければ空文字列を返し、比較再生は無効のままにする。
+    """
+    target_text = str(diagnostics.get("target_text") or "").strip()
+    if not target_text:
+        return "", ""
+    earlier = [candidate for candidate in index.get(target_text, []) if candidate[0] <= created_at]
+    if not earlier:
+        return "", ""
+    _, url, media_type = earlier[-1]
+    return url, media_type
+
+
 def _serialized_audio_history_entries(
     store: AudioHistoryStore,
     kind: str,
@@ -1131,6 +1178,7 @@ def _serialized_audio_history_entries(
     practice: bool,
 ) -> list[dict[str, object]]:
     serialized_entries: list[dict[str, object]] = []
+    prompt_audio_index = _practice_prompt_audio_index(store) if practice and kind == "recordings" else {}
     for entry in store.list_entries(kind):
         if _is_practice_history_entry(entry) is not practice:
             continue
@@ -1151,6 +1199,14 @@ def _serialized_audio_history_entries(
                         )
                 metadata["practice_diagnostics"] = diagnostics
                 serialized["metadata"] = metadata
+                if kind == "recordings":
+                    model_audio_url, model_audio_media_type = _practice_model_audio_for_attempt(
+                        prompt_audio_index,
+                        diagnostics,
+                        str(serialized.get("created_at") or ""),
+                    )
+                    serialized["model_audio_url"] = model_audio_url
+                    serialized["model_audio_media_type"] = model_audio_media_type
         serialized_entries.append(serialized)
     return serialized_entries
 
