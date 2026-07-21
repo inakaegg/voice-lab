@@ -7,6 +7,7 @@ type UiFixtureOptions = {
   practicePreviewRecompute?: boolean;
   practicePreviewModelAudioMissing?: boolean;
   practicePreviewRecomputeUnavailableAtMaxPadding?: boolean;
+  practicePreviewSavedPaddingMissing?: boolean;
 };
 
 const accessSettings = {
@@ -111,7 +112,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         available: true,
         unavailable_reason: "",
         playback_padding_seconds: padding,
-        saved_playback_padding_seconds: 0.1,
+        saved_playback_padding_seconds: options.practicePreviewSavedPaddingMissing ? null : 0.1,
         comparison_alignment: shift([
           { index: 0, audio_start: 0.5, audio_end: 1.2 },
           { index: 1, audio_start: 1.2, audio_end: 2.0 },
@@ -163,6 +164,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
                 target_text: "银行周末也营业吗？",
                 recognized_text: "银杏周末也营业吗？",
                 outcome: "evaluated",
+                playback_padding_seconds: options.practicePreviewSavedPaddingMissing ? null : 0.1,
                 overall_score: 82,
                 overall_comment: "最初の単語をもう一度確認しましょう。",
                 comparison_target_pinyin: ["yin2", "hang2", "zhou1", "mo4", "ye3", "ying2", "ye4", "ma5"],

@@ -282,6 +282,27 @@ test("SpeakLoop recomputes the saved comparison ranges with the current implemen
   await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
 });
 
+test("SpeakLoop reports an unrecorded saved padding as missing instead of zero", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, {
+    historyState: "practice-preview",
+    practiceUiMode: "local",
+    practicePreviewSavedPaddingMissing: true,
+  });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+
+  const status = page.locator("#practice-history-preview-status");
+  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
+  // 0.00秒は有効な設定値なので、未記録と区別できなければならない。
+  await expect(status).toContainText("保存時は記録なしです");
+  await expect(status).not.toContainText("保存時は0.00秒");
+
+  await page.locator("#practice-history-preview-source-select").selectOption("saved");
+  await expect(status).toContainText("保存時の余白は記録なしです");
+});
+
 test("SpeakLoop restores the saved ranges when recomputation becomes unavailable", async ({ page }) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, {

@@ -1823,8 +1823,14 @@ function handleHistoryPreviewSourceChange() {
   applyRecomputedComparison(entry);
 }
 
+// 0.00秒は有効な設定値なので、未記録と区別する。Number(null)は0になるため、
+// 数値変換の前にnull・undefined・空文字を落とす。
 function formatSavedPadding(value) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}秒` : "記録なし";
+  if (value === null || value === undefined || value === "") {
+    return "記録なし";
+  }
+  const padding = Number(value);
+  return Number.isFinite(padding) ? `${padding.toFixed(2)}秒` : "記録なし";
 }
 
 // 保存済みの再生区間を差し替え、diff表示と再生ボタンを現在の区間へ合わせ直す。
