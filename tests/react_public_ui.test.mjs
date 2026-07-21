@@ -145,6 +145,8 @@ test("SpeakLoop keeps local developer settings hidden until runtime capability i
   assert.match(speakloop, /id="practice-history-preview"[\s\S]*hidden/);
   assert.match(speakloop, /過去の結果で表示確認/);
   assert.match(speakloop, /id="practice-saved-result-notice"/);
+  assert.match(speakloop, /id="practice-history-preview-source-select"[\s\S]*defaultValue="saved"/);
+  assert.match(speakloop, /<option value="recomputed">現行ロジックで再計算<\/option>/);
   assert.match(speakloop, /前後余白/);
   assert.match(speakloop, /LLM採点/);
   assert.doesNotMatch(speakloop, /99\.5%以上/);

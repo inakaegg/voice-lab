@@ -4,6 +4,7 @@ type UiFixtureOptions = {
   historyState?: "empty" | "long" | "error" | "disabled" | "practice-preview";
   practiceUiMode?: "local" | "cloudflare";
   practicePreviewModelAudio?: boolean;
+  practicePreviewRecompute?: boolean;
 };
 
 const accessSettings = {
@@ -38,6 +39,46 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         publicSamples = request.postDataJSON();
       }
       return json(publicSamples);
+    }
+    if (path.endsWith("/recomputed-comparison")) {
+      if (options.practicePreviewRecompute === false) {
+        return json({
+          available: false,
+          unavailable_reason: "位置番号を持つ比較結果が保存されていないため、再計算できません。",
+          comparison_alignment: {},
+          model_comparison_alignment: {},
+        });
+      }
+      const padding = Number(new URL(route.request().url()).searchParams.get("playback_padding_seconds") || 0);
+      const shift = (phrases: Array<{ index: number; audio_start: number; audio_end: number }>) => ({
+        available: true,
+        complete: true,
+        all_phrases_playable: true,
+        target_phrase_count: phrases.length,
+        playable_phrase_count: phrases.length,
+        phrases: phrases.map((phrase) => ({
+          ...phrase,
+          available: true,
+          audio_start: Math.max(0, phrase.audio_start - padding),
+          audio_end: phrase.audio_end + padding,
+        })),
+      });
+      return json({
+        available: true,
+        unavailable_reason: "",
+        playback_padding_seconds: padding,
+        saved_playback_padding_seconds: 0.1,
+        comparison_alignment: shift([
+          { index: 0, audio_start: 0.5, audio_end: 1.2 },
+          { index: 1, audio_start: 1.2, audio_end: 2.4 },
+        ]),
+        model_comparison_alignment: shift([
+          { index: 0, audio_start: 0.4, audio_end: 1.1 },
+          { index: 1, audio_start: 1.1, audio_end: 2.2 },
+        ]),
+        reference_audio_duration: 3.0,
+        attempt_audio_duration: 3.0,
+      });
     }
     if (path === "/api/practice-history") {
       if (options.historyState === "disabled") return json({ settings: { enabled: false }, recordings: [], outputs: [] });

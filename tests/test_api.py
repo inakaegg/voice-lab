@@ -2399,6 +2399,11 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     assert diagnostics["model_recognized_text"] == "你好吗？你今天去哪里？"
     assert diagnostics["asr_timestamps"]["words"][0] == {"text": "你哈吗", "start": 0.1, "end": 0.8}
     assert diagnostics["model_asr_timestamps"]["words"][0] == {"text": "你好吗", "start": 0.1, "end": 0.8}
+    # 履歴へ保存する音声は再エンコードされるため、後から測り直すと元音声と長さがずれる。
+    # 再計算で同じ再生区間を得られるよう、比較時に使った音声長をそのまま残す。
+    # このRunPod経路はffprobe結果を持たないため、音声長はASR単語の最終end時刻になる。
+    assert diagnostics["attempt_audio_duration"] == pytest.approx(2.3)
+    assert diagnostics["reference_audio_duration"] == pytest.approx(2.4)
 
 
 @pytest.mark.parametrize("llm_fails", [False, True])
@@ -3222,6 +3227,177 @@ def test_practice_history_leaves_model_audio_empty_when_no_prompt_text_matches(t
     )
     assert entry["model_audio_url"] == ""
     assert entry["model_audio_media_type"] == ""
+
+
+_RECOMPUTE_TARGET_TEXT = "你好"
+# 音声はダミーbytesでffprobeが失敗するため、音声長はASR単語の終了時刻へフォールバックする。
+# 実装本体と同じ順序なので、期待値も reference=1.2 / attempt=1.5 で決まる。
+_RECOMPUTE_REFERENCE_WORDS = [
+    {"text": "你", "start": 0.2, "end": 0.7},
+    {"text": "好", "start": 0.7, "end": 1.2},
+]
+_RECOMPUTE_ATTEMPT_WORDS = [
+    {"text": "你", "start": 0.5, "end": 1.0},
+    {"text": "好", "start": 1.0, "end": 1.5},
+]
+
+
+def _recompute_history_fixture(
+    store: AudioHistoryStore,
+    *,
+    llm_phrases: list[dict[str, object]] | None = None,
+) -> AudioHistoryEntry:
+    _save_practice_prompt_output(store, _RECOMPUTE_TARGET_TEXT)
+    phrases = llm_phrases if llm_phrases is not None else [
+        {
+            "phrase_index": 0,
+            "target_text": _RECOMPUTE_TARGET_TEXT,
+            "score": 90,
+            "comment": "よくできています。",
+            "reference": {"status": "assigned", "word_start_index": 0, "word_end_index": 2},
+            "attempt": {"status": "assigned", "word_start_index": 0, "word_end_index": 2},
+        }
+    ]
+    entry = store.save_recording(
+        b"practice attempt",
+        suffix=".wav",
+        metadata={
+            "endpoint": "practice-attempt-jobs",
+            "recording_intent": "attempt",
+            "practice_job_status": "succeeded",
+            "practice_diagnostics": {
+                "recording_kind": "attempt",
+                "outcome": "evaluated",
+                "target_language": "zh-CN",
+                "target_text": _RECOMPUTE_TARGET_TEXT,
+                "recognized_text": _RECOMPUTE_TARGET_TEXT,
+                "playback_padding_seconds": 0.1,
+                "asr_timestamps": {"available": True, "words": _RECOMPUTE_ATTEMPT_WORDS, "truncated": False},
+                "model_asr_timestamps": {"available": True, "words": _RECOMPUTE_REFERENCE_WORDS, "truncated": False},
+                "llm_comparison": {
+                    "schema_version": 1,
+                    "overall_score": 90,
+                    "overall_comment": "よくできています。",
+                    "phrases": phrases,
+                },
+            },
+        },
+    )
+    assert entry is not None
+    return entry
+
+
+def test_recomputed_comparison_reproduces_the_saved_ranges_with_the_saved_padding(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    entry = _recompute_history_fixture(history_store)
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.10"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["playback_padding_seconds"] == pytest.approx(0.1)
+    assert payload["saved_playback_padding_seconds"] == pytest.approx(0.1)
+    attempt_phrase = payload["comparison_alignment"]["phrases"][0]
+    model_phrase = payload["model_comparison_alignment"]["phrases"][0]
+    assert attempt_phrase["audio_start"] == pytest.approx(0.4)
+    assert attempt_phrase["audio_end"] == pytest.approx(1.5)
+    assert model_phrase["audio_start"] == pytest.approx(0.1)
+    assert model_phrase["audio_end"] == pytest.approx(1.2)
+
+
+def test_recomputed_comparison_applies_the_requested_padding(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    entry = _recompute_history_fixture(history_store)
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.30"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["playback_padding_seconds"] == pytest.approx(0.3)
+    attempt_phrase = payload["comparison_alignment"]["phrases"][0]
+    model_phrase = payload["model_comparison_alignment"]["phrases"][0]
+    # 開始は余白分だけ前へ広がり、終了は音声長でクリップされる。
+    assert attempt_phrase["audio_start"] == pytest.approx(0.2)
+    assert attempt_phrase["audio_end"] == pytest.approx(1.5)
+    assert model_phrase["audio_start"] == pytest.approx(0.0)
+    assert model_phrase["audio_end"] == pytest.approx(1.2)
+
+
+def test_recomputed_comparison_prefers_the_stored_audio_durations(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    entry = _recompute_history_fixture(history_store)
+    diagnostics = dict(entry.metadata["practice_diagnostics"])
+    diagnostics["reference_audio_duration"] = 3.0
+    diagnostics["attempt_audio_duration"] = 3.0
+    history_store.update_metadata(entry, {"practice_diagnostics": diagnostics})
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.30"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["attempt_audio_duration"] == pytest.approx(3.0)
+    assert payload["reference_audio_duration"] == pytest.approx(3.0)
+    # 保存済みの音声長を使うため、終了側も余白分だけ広がる。
+    assert payload["comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(1.8)
+    assert payload["model_comparison_alignment"]["phrases"][0]["audio_end"] == pytest.approx(1.5)
+
+
+def test_recomputed_comparison_is_unavailable_without_stored_word_indexes(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    entry = _recompute_history_fixture(
+        history_store,
+        llm_phrases=[
+            {
+                "phrase_index": 0,
+                "target_text": _RECOMPUTE_TARGET_TEXT,
+                "score": 90,
+                "comment": "よくできています。",
+                "reference": {"status": "assigned"},
+                "attempt": {"status": "assigned"},
+            }
+        ],
+    )
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.30"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["unavailable_reason"]
+    assert payload["comparison_alignment"] == {}
+    assert payload["model_comparison_alignment"] == {}
+
+
+def test_recomputed_comparison_rejects_an_unsupported_padding(tmp_path) -> None:
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=50, enabled=True)
+    entry = _recompute_history_fixture(history_store)
+    client = TestClient(create_app(audio_history_store=history_store))
+
+    response = client.get(
+        f"/api/practice-history/recordings/{entry.audio_path.name}/recomputed-comparison",
+        params={"playback_padding_seconds": "0.03"},
+    )
+
+    assert response.status_code == 400
 
 
 def test_admin_serves_browser_ui() -> None:

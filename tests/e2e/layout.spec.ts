@@ -254,6 +254,45 @@ test("SpeakLoop locally restores a saved result with comparison playback and no 
   }
 });
 
+test("SpeakLoop recomputes the saved comparison ranges with the current implementation", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, { historyState: "practice-preview", practiceUiMode: "local" });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+  await expect(page.locator("#practice-saved-result-notice")).toBeVisible();
+
+  const source = page.locator("#practice-history-preview-source-select");
+  await expect(source).toHaveValue("saved");
+  await source.selectOption("recomputed");
+
+  await expect(page.locator("#practice-history-preview-status"))
+    .toContainText("現在の実装で計算し直した比較区間");
+  await expect(page.locator("#practice-history-preview-status")).toContainText("保存時は0.10秒");
+  await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
+  await expect(page.locator("#practice-play-model-button")).toContainText("フレーズごと比較再生");
+
+  await source.selectOption("saved");
+  await expect(page.locator("#practice-history-preview-status")).toContainText("保存時の比較区間");
+});
+
+test("SpeakLoop returns to the saved ranges when recomputation is not possible", async ({ page }) => {
+  await page.unroute("**/api/**");
+  await installUiApiFixtures(page, {
+    historyState: "practice-preview",
+    practiceUiMode: "local",
+    practicePreviewRecompute: false,
+  });
+  await page.goto("/speakloop");
+  await page.locator("#practice-history-preview summary").click();
+  await page.locator("#practice-history-preview-button").click();
+  await page.locator("#practice-history-preview-source-select").selectOption("recomputed");
+
+  await expect(page.locator("#practice-history-preview-status")).toContainText("再計算できません");
+  await expect(page.locator("#practice-history-preview-source-select")).toHaveValue("saved");
+  await expect(page.locator("#practice-comparison-note")).toContainText("2/2フレーズを順番に比較できます");
+});
+
 test("SpeakLoop falls back to repeat-only playback when the saved prompt audio is gone", async ({ page }) => {
   await page.unroute("**/api/**");
   await installUiApiFixtures(page, {

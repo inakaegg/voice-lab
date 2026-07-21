@@ -8,6 +8,7 @@ const historyPreview = document.querySelector("#practice-history-preview");
 const historyPreviewSelect = document.querySelector("#practice-history-preview-select");
 const historyPreviewButton = document.querySelector("#practice-history-preview-button");
 const historyPreviewStatus = document.querySelector("#practice-history-preview-status");
+const historyPreviewSourceSelect = document.querySelector("#practice-history-preview-source-select");
 const nativePanel = document.querySelector("#practice-native-panel");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
 const nativeCancelButton = document.querySelector("#practice-native-cancel-button");
@@ -141,6 +142,7 @@ comparisonModelSelect.addEventListener("change", savePracticeSettings);
 playbackPaddingSlider.addEventListener("input", handlePlaybackPaddingChange);
 historyPreviewSelect.addEventListener("change", syncHistoryPreviewButton);
 historyPreviewButton.addEventListener("click", displaySelectedPracticeHistory);
+historyPreviewSourceSelect.addEventListener("change", handleHistoryPreviewSourceChange);
 nativeRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("native");
   toggleRecording("native");
@@ -1769,6 +1771,79 @@ function displaySelectedPracticeHistory() {
   historyPreviewStatus.textContent = entry.model_audio_url
     ? "保存済みの結果を表示しました。比較再生も確認できます。外部APIや音声処理は呼び出していません。"
     : "保存済みの結果を表示しました。お手本音声が残っていないため比較再生はできません。";
+  if (historyPreviewSourceSelect.value === "recomputed") {
+    applyRecomputedComparison(entry);
+  }
+}
+
+function handleHistoryPreviewSourceChange() {
+  if (!isSavedHistoryPreview) {
+    return;
+  }
+  const entry = practiceHistoryPreviewEntries[Number.parseInt(historyPreviewSelect.value, 10)];
+  const diagnostics = entry?.metadata?.practice_diagnostics;
+  if (!entry || !diagnostics) {
+    return;
+  }
+  if (historyPreviewSourceSelect.value === "saved") {
+    applyPracticeComparisonAlignments(
+      diagnostics.comparison_alignment || null,
+      diagnostics.model_comparison_alignment || null,
+    );
+    historyPreviewStatus.textContent = `保存時の比較区間を表示しています。保存時の余白は${formatSavedPadding(diagnostics.playback_padding_seconds)}です。`;
+    return;
+  }
+  applyRecomputedComparison(entry);
+}
+
+function formatSavedPadding(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}秒` : "記録なし";
+}
+
+// 保存済みの再生区間を差し替え、diff表示と再生ボタンを現在の区間へ合わせ直す。
+function applyPracticeComparisonAlignments(attemptAlignment, modelAlignment) {
+  stopComparisonPlayback();
+  currentAttemptComparisonAlignment = attemptAlignment;
+  currentModelComparisonAlignment = modelAlignment;
+  if (currentAttemptPayload) {
+    currentAttemptPayload.comparison_alignment = attemptAlignment;
+    currentAttemptPayload.model_comparison_alignment = modelAlignment;
+    renderRecognizedDiff(currentAttemptPayload);
+  }
+  syncPlayButton();
+}
+
+async function applyRecomputedComparison(entry) {
+  const diagnostics = entry.metadata.practice_diagnostics;
+  const padding = normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2);
+  historyPreviewStatus.textContent = "現在の実装で比較区間を計算し直しています。";
+  try {
+    const response = await fetch(
+      `/api/practice-history/recordings/${encodeURIComponent(entry.filename)}/recomputed-comparison`
+        + `?playback_padding_seconds=${encodeURIComponent(padding)}`,
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(payload, "比較区間を計算し直せませんでした。"));
+    }
+    if (!payload.available) {
+      historyPreviewSourceSelect.value = "saved";
+      historyPreviewStatus.textContent = payload.unavailable_reason || "この履歴は再計算できません。";
+      return;
+    }
+    applyPracticeComparisonAlignments(
+      payload.comparison_alignment || null,
+      payload.model_comparison_alignment || null,
+    );
+    historyPreviewStatus.textContent = `現在の実装で計算し直した比較区間を表示しています。余白は${Number(payload.playback_padding_seconds).toFixed(2)}秒、保存時は${formatSavedPadding(payload.saved_playback_padding_seconds)}です。`;
+  } catch (error) {
+    historyPreviewSourceSelect.value = "saved";
+    applyPracticeComparisonAlignments(
+      diagnostics.comparison_alignment || null,
+      diagnostics.model_comparison_alignment || null,
+    );
+    historyPreviewStatus.textContent = error instanceof Error ? error.message : "比較区間を計算し直せませんでした。";
+  }
 }
 
 function syncPinyinSettingVisibility() {

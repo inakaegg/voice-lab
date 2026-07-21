@@ -46,6 +46,7 @@ function SpeakLoop() {
       <summary>過去の結果で表示確認</summary>
       <div className="practice-history-preview-controls">
         <label><span>復唱履歴</span><select id="practice-history-preview-select" aria-label="表示確認に使う過去の復唱履歴"/></label>
+        <label className="practice-history-preview-source"><span>比較区間</span><select id="practice-history-preview-source-select" aria-label="比較区間の求め方" defaultValue="saved"><option value="saved">保存値</option><option value="recomputed">現行ロジックで再計算</option></select></label>
         <button id="practice-history-preview-button" type="button" disabled>表示する</button>
       </div>
       <p id="practice-history-preview-status" role="status" aria-live="polite">履歴を読み込んでいます。</p>
