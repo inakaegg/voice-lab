@@ -34,11 +34,13 @@ def test_staging_uses_separate_cloudflare_data_resources() -> None:
     assert staging_r2["bucket_name"] != production_r2["bucket_name"]
 
 
-def test_staging_repeats_vars_and_disables_the_production_cron() -> None:
+def test_staging_repeats_vars_requires_login_and_disables_the_production_cron() -> None:
     config = load_wrangler_config()
     staging = config["env"]["staging"]
 
-    assert staging["vars"] == config["vars"]
+    for name, value in config["vars"].items():
+        assert staging["vars"][name] == value
+    assert staging["vars"]["PUBLIC_GOOGLE_AUTH_REQUIRED"] == "1"
     assert staging["triggers"]["crons"] == []
 
 
@@ -89,6 +91,21 @@ def test_staging_deploy_is_manual_and_targets_only_staging() -> None:
     )
     deploy = "npx wrangler deploy --env staging"
     assert workflow.index(migration) < workflow.index(deploy)
+
+
+def test_deploy_workflows_build_the_frontend_before_wrangler() -> None:
+    workflows = [
+        ROOT / ".github/workflows/deploy.yml",
+        ROOT / ".github/workflows/deploy-staging.yml",
+    ]
+
+    for path in workflows:
+        workflow = path.read_text(encoding="utf-8")
+        build = "npm run build:web"
+        migration = "npx wrangler d1 migrations apply"
+        deploy = "npx wrangler deploy"
+        assert workflow.index(build) < workflow.index(migration)
+        assert workflow.index(build) < workflow.index(deploy)
 
 
 def test_docs_keep_staging_worker_pending_until_the_first_manual_deploy() -> None:

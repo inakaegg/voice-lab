@@ -57,6 +57,7 @@ binding = "MO_SPEECH_AUDIO_R2"
 bucket_name = "mo-speech-audio-preview"
 
 [env.staging.vars]
+PUBLIC_GOOGLE_AUTH_REQUIRED = "1"
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
 RUNPOD_RUNTIME_HEALTH_CHECK = "1"
