@@ -6,7 +6,7 @@
 
 ## 公開境界と構成分離
 
-- production内では単一Workerを正とする。stagingは同じ構成の検証環境として別Workerへ配備する。
+- production内では単一Workerを正とする。staging用resourceと設定は準備済みだが、staging Workerの初回手動deployは未実施である。
 - SkitVoice/VibeVoiceは一般公開せず、同一Worker内でも管理者研究境界へ閉じる。
 - secret、障害、デプロイ権限の物理分離が必要になった場合だけ、SpeakLoopと研究用SkitVoiceのWorker分割を再検討する。
 

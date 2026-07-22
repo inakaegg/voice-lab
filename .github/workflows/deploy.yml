@@ -14,10 +14,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  current-main:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      deploy: ${{ steps.compare.outputs.deploy }}
+
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Compare tested revision with current main
+        id: compare
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          current_main_sha="$(git rev-parse HEAD)"
+          if [[ "${TESTED_SHA}" == "${current_main_sha}" ]]; then
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "deploy=false" >> "${GITHUB_OUTPUT}"
+          echo "::notice::Skipping stale tested revision ${TESTED_SHA}; current main is ${current_main_sha}."
+
+  deploy:
+    needs: current-main
+    if: needs.current-main.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

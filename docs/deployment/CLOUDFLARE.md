@@ -167,7 +167,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 `/fun`を含む公開生成APIも同じGoogleセッションを使う。`/fun`のテキスト・音声生成APIとSeed-VC APIは、公開生成のGoogleログイン必須設定にかかわらず管理者だけに許可する。許可範囲はjob作成、status polling、結果取得を含む。管理者メールに含まれるアカウントはquotaを消費しないが、入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
-現在はproductionとstagingの2 Workerを同じrepoから配備する。製品分割は利用量や障害を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
+production Workerは配備済みである。staging用のKV・D1・R2と設定は準備済みだが、staging Workerは未配備である。初回の手動deploy後は2 Workerを同じrepoから配備する。製品分割は利用量や障害を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
 
 ### production
 

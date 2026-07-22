@@ -59,6 +59,22 @@ def test_production_deploy_waits_for_successful_main_ci() -> None:
     assert workflow.index(migration) < workflow.index(deploy)
 
 
+def test_production_deploy_skips_a_tested_revision_older_than_main() -> None:
+    workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+
+    assert "current-main:" in workflow
+    assert "ref: main" in workflow
+    assert "current_main_sha=\"$(git rev-parse HEAD)\"" in workflow
+    assert 'TESTED_SHA: ${{ github.event.workflow_run.head_sha }}' in workflow
+    assert 'echo "deploy=false" >> "${GITHUB_OUTPUT}"' in workflow
+    assert "needs: current-main" in workflow
+    assert "needs.current-main.outputs.deploy == 'true'" in workflow
+
+    revision_check = "current_main_sha=\"$(git rev-parse HEAD)\""
+    migration = "npx wrangler d1 migrations apply mo-speech-demo-db --remote"
+    assert workflow.index(revision_check) < workflow.index(migration)
+
+
 def test_staging_deploy_is_manual_and_targets_only_staging() -> None:
     workflow = (ROOT / ".github/workflows/deploy-staging.yml").read_text(encoding="utf-8")
 
@@ -73,3 +89,10 @@ def test_staging_deploy_is_manual_and_targets_only_staging() -> None:
     )
     deploy = "npx wrangler deploy --env staging"
     assert workflow.index(migration) < workflow.index(deploy)
+
+
+def test_docs_keep_staging_worker_pending_until_the_first_manual_deploy() -> None:
+    cloudflare = (ROOT / "docs/deployment/CLOUDFLARE.md").read_text(encoding="utf-8")
+
+    assert "staging Workerは未配備" in cloudflare
+    assert "現在はproductionとstagingの2 Workerを同じrepoから配備する" not in cloudflare
