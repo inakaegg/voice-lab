@@ -11,6 +11,7 @@ const script = await readFile(
 async function runPublicUsersScript(payload) {
   const fetchCalls = [];
   const panelListeners = new Map();
+  const reloadListeners = new Map();
   const status = { textContent: "", dataset: {} };
   const body = {
     children: [],
@@ -27,7 +28,11 @@ async function runPublicUsersScript(payload) {
     },
     querySelector(selector) {
       if (selector === "[data-public-users-reload]") {
-        return { addEventListener() {} };
+        return {
+          addEventListener(type, listener) {
+            reloadListeners.set(type, listener);
+          },
+        };
       }
       if (selector === "[data-public-users-body]") {
         return body;
@@ -64,7 +69,10 @@ async function runPublicUsersScript(payload) {
     document,
     fetch: async (url) => {
       fetchCalls.push(url);
-      return { ok: true, json: async () => payload };
+      const responsePayload = typeof payload === "function"
+        ? await payload(fetchCalls.length - 1)
+        : payload;
+      return { ok: true, json: async () => responsePayload };
     },
     console,
     Date,
@@ -83,6 +91,10 @@ async function runPublicUsersScript(payload) {
     async openPanel() {
       panel.open = true;
       panelListeners.get("toggle")?.();
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+    async reload() {
+      reloadListeners.get("click")?.();
       await new Promise((resolve) => setImmediate(resolve));
     },
   };
@@ -111,4 +123,33 @@ test("public user list reports omitted users when the stored total exceeds the r
   await result.openPanel();
 
   assert.equal(result.status.textContent, "全2450件中1件を表示しています。");
+});
+
+test("public user list ignores an older response that finishes after a reload", async () => {
+  const pendingResponses = [];
+  const result = await runPublicUsersScript(() => new Promise((resolve) => {
+    pendingResponses.push(resolve);
+  }));
+
+  await result.openPanel();
+  await result.reload();
+  assert.equal(pendingResponses.length, 2);
+
+  pendingResponses[1]({
+    users: [{ email: "latest@example.com", usage: {} }],
+    limit: 2000,
+    stored: 1,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(result.status.textContent, "1件を表示しています。");
+  assert.equal(result.body.children[0].children[0].textContent, "latest@example.com");
+
+  pendingResponses[0]({
+    users: [{ email: "stale@example.com", usage: {} }],
+    limit: 2000,
+    stored: 99,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(result.status.textContent, "1件を表示しています。");
+  assert.equal(result.body.children[0].children[0].textContent, "latest@example.com");
 });

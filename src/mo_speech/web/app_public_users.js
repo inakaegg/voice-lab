@@ -1,6 +1,7 @@
 const publicUsersRoots = [...document.querySelectorAll("[data-public-users]")];
 const PUBLIC_USERS_REQUEST_LIMIT = 2000;
 let publicUsersInitialLoadStarted = false;
+let publicUsersRequestGeneration = 0;
 
 if (publicUsersRoots.length > 0) {
   const panels = new Set();
@@ -34,13 +35,20 @@ function loadPublicUsersOnce() {
 }
 
 async function loadPublicUsers() {
+  const requestGeneration = ++publicUsersRequestGeneration;
   setPublicUsersStatus("読み込み中です。");
   try {
     const response = await fetch(`/api/public-users?limit=${PUBLIC_USERS_REQUEST_LIMIT}`);
+    if (requestGeneration !== publicUsersRequestGeneration) {
+      return;
+    }
     if (!response.ok) {
       throw new Error(publicUsersResponseMessage(response.status));
     }
     const payload = await response.json();
+    if (requestGeneration !== publicUsersRequestGeneration) {
+      return;
+    }
     const users = Array.isArray(payload.users) ? payload.users : [];
     const stored = Math.max(users.length, Number(payload.stored) || 0);
     for (const root of publicUsersRoots) {
@@ -48,6 +56,9 @@ async function loadPublicUsers() {
     }
     setPublicUsersStatus(publicUsersLoadedStatus(users.length, stored));
   } catch (error) {
+    if (requestGeneration !== publicUsersRequestGeneration) {
+      return;
+    }
     for (const root of publicUsersRoots) {
       renderPublicUsers(root, []);
     }
