@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-07-17
+更新日: 2026-07-22
 
 ## 目的
 
@@ -167,9 +167,25 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 `/fun`を含む公開生成APIも同じGoogleセッションを使う。`/fun`のテキスト・音声生成APIとSeed-VC APIは、公開生成のGoogleログイン必須設定にかかわらず管理者だけに許可する。許可範囲はjob作成、status polling、結果取得を含む。管理者メールに含まれるアカウントはquotaを消費しないが、入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
-現在は単一Workerを正とする。分割は利用量、障害、secret、デプロイ頻度を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
+production Workerは配備済みである。staging用のKV・D1・R2と設定は準備済みだが、staging Workerは未配備である。初回の手動deploy後は2 Workerを同じrepoから配備する。製品分割は利用量や障害を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
 
-D1 migrationはWorkerより先に本番databaseへ適用する。`--remote`を省略するとlocal databaseが対象になるため省略しない。
+### production
+
+mainへのpushではGitHub Actionsの `CI` を先に実行する。`Deploy Cloudflare Production` はpush起点のCIが成功した場合だけ動く。CIが検証したcommit SHAをcheckoutし、React成果物を再生成してから次の順で本番へ反映する。
+
+1. `npx wrangler d1 migrations apply mo-speech-demo-db --remote`
+2. `npx wrangler deploy --env=""`
+
+D1 migrationはWorkerより先に適用する。`--remote`を省略するとlocal databaseが対象になるため省略しない。RunPod imageはこの自動deployへ含めず、既存の手動workflowを維持する。
+
+GitHub repositoryには次のActions secretsを登録する。未登録の場合はworkflowが対象名を示して失敗する。
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+API tokenはCloudflareの `Edit Cloudflare Workers` templateを基にする。対象accountだけへscopeを絞り、Accountの `D1 Edit` 権限を追加する。D1 migrationはdatabaseへのwriteを伴うため、この権限が必要である。
+
+production Workerのsecretは次のコマンドで環境未指定のWorkerへ登録する。secret値はコマンド引数やリポジトリへ書かず、対話入力する。
 
 ```sh
 wrangler secret put RUNPOD_API_KEY
@@ -180,18 +196,51 @@ wrangler secret put GOOGLE_CLIENT_SECRET
 openssl rand -base64 32
 wrangler secret put PUBLIC_SESSION_SECRET
 wrangler secret put ADMIN_GOOGLE_EMAILS
-npx wrangler d1 migrations apply mo-speech-demo-db --remote
-wrangler deploy
 ```
 
-公開サンプル音声blobをR2へ保存するため、bucket作成後に次のbindingを `wrangler.toml` へ追加する。bucket名は環境ごとに決め、リポジトリへ実アカウント固有値を固定しない。
+### staging
 
-```toml
-[[r2_buckets]]
-binding = "MO_SPEECH_AUDIO_R2"
-bucket_name = "mo-speech-audio"
-preview_bucket_name = "mo-speech-audio-preview"
+`[env.staging]` は `voice-lab-staging` として配備する。productionの利用者データへ触れないよう、永続resourceを次のように分ける。
+
+| binding | production | staging |
+| --- | --- | --- |
+| `MO_SPEECH_KV` | `MO_SPEECH_KV` | `MO_SPEECH_KV_STAGING` |
+| `MO_SPEECH_DB` | `mo-speech-demo-db` | `mo-speech-staging-db` |
+| `MO_SPEECH_AUDIO_R2` | `mo-speech-audio` | `mo-speech-audio-preview` |
+
+stagingはproductionのCron Triggerを継承しないよう、`crons = []` を明示する。通常のWorker設定値は `[env.staging.vars]` へ複製する。初回配備から課金APIを匿名公開しないよう、`PUBLIC_GOOGLE_AUTH_REQUIRED=1` を既定にする。Worker secretも環境間で継承されない。
+
+`Deploy Cloudflare Staging` は `workflow_dispatch` 専用である。GitHub Actionsの実行画面でbranchを選び、そのrevisionのReact成果物を再生成する。その後に次の順でstagingへ反映する。
+
+1. `npx wrangler d1 migrations apply mo-speech-staging-db --env staging --remote`
+2. `npx wrangler deploy --env staging`
+
+staging Workerには次のsecretを環境指定で登録する。`PUBLIC_SESSION_SECRET` はproductionと別の値を生成する。
+
+```sh
+wrangler secret put RUNPOD_API_KEY --env staging
+wrangler secret put RUNPOD_ENDPOINT_ID --env staging
+wrangler secret put OPENAI_API_KEY --env staging
+wrangler secret put GOOGLE_CLIENT_ID --env staging
+wrangler secret put GOOGLE_CLIENT_SECRET --env staging
+openssl rand -base64 32
+wrangler secret put PUBLIC_SESSION_SECRET --env staging
+wrangler secret put ADMIN_GOOGLE_EMAILS --env staging
 ```
+
+Google OAuth clientの承認済みリダイレクトURIには、`https://voice-lab-staging.inakaegg.workers.dev/auth/google/callback` を追加する。
+
+初回staging確認は次の順で行う。
+
+1. GitHub Actions secretsとstaging Worker secretsを登録する。
+2. Google OAuth clientへstagingのリダイレクトURIを追加する。
+3. `Deploy Cloudflare Staging` で確認対象branchを選ぶ。
+4. D1 migrationとWorker deployの成功を確認する。
+5. `https://voice-lab-staging.inakaegg.workers.dev/` と `/speakloop` を開く。
+6. Googleログインと管理画面の認可を確認する。
+7. 最小入力でOpenAI経路とRunPod経路を個別に確認する。
+
+GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する。Worker secretが無い初回deployでは静的画面を配信できるが、対応する生成APIは503でfail closedする。Google OAuth用secretまたは管理者メールが無い場合も、ログインと管理機能は503でfail closedする。
 
 ## 制限
 
