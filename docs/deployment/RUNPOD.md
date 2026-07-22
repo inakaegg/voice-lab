@@ -470,7 +470,7 @@ python scripts/runpod_smoke_serverless.py \
   --request-mode async
 ```
 
-`--model-audio` と `--target-text` を省略すると復唱音声単体のFunASR確認になる。SpeakLoopの比較経路を確認する場合は省略しない。両音声を指定したsmokeは `practice_asr_contract_version=3` と `model_transcription` も検査する。旧imageまたは不完全なhandler応答では終了コード1にする。
+`--model-audio` と `--target-text` を省略すると復唱音声単体のFunASR確認になる。この場合は `align_timestamps=false` を送り、`fa-zh` を読み込まない。SpeakLoopの比較経路では `align_timestamps=true` を送る。両音声を指定したsmokeは `practice_asr_contract_version=3` と `model_transcription` も検査する。旧imageまたは不完全なhandler応答では終了コード1にする。
 
 保存済みSpeakLoop音声で整列とVADの整合性を回帰確認する場合は `scripts/evaluate_fa_zh_alignment.py` を使う。このスクリプトは従来timestampと `fa-zh` + VADスナップ後について、同じ発話島との距離を記録する。VADスナップ後の値はVAD境界を使うため、手動正解境界に対する精度や製品上の改善を示さない。境界品質の採否には、別に固定した手動正解境界または聴取評価を使う。既定では結果をgit管理外の `tmp/fa-zh-alignment-results.json` へ保存する。
 

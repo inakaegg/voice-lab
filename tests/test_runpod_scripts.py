@@ -283,6 +283,7 @@ def test_runpod_smoke_script_supports_chinese_practice_asr() -> None:
     assert 'parser.add_argument("--model-audio")' in script
     assert 'parser.add_argument("--target-text"' in script
     assert '"operation_mode": "practice_asr"' in script
+    assert 'input_payload["align_timestamps"] = bool(args.model_audio)' in script
     assert '"source_language": "zh-CN"' in script
     assert 'input_payload["model_audio_base64"]' in script
     assert 'input_payload["target_text"] = args.target_text' in script

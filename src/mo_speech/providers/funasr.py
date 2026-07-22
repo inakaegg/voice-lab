@@ -93,10 +93,11 @@ class FunAsrPracticeProvider:
     def loaded(self) -> bool:
         return self._model_instance is not None
 
-    def preload(self) -> None:
+    def preload(self, *, include_alignment: bool = True) -> None:
         with self._lock:
             self._load_model()
-            self._load_alignment_model()
+            if include_alignment:
+                self._load_alignment_model()
 
     def release(self) -> None:
         with self._lock:

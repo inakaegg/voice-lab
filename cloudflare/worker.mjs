@@ -3192,6 +3192,7 @@ async function createPracticeAttemptJob(request, env) {
     });
     const body = await submitRunpodJob(env, {
       operation_mode: "practice_asr",
+      align_timestamps: true,
       source_language: targetLanguage,
       target_text: targetText,
       audio_mime_type: audioMimeType || "audio/wav",

@@ -84,6 +84,27 @@ def test_funasr_provider_loads_once_and_releases_model(tmp_path: Path) -> None:
     assert provider.loaded is False
 
 
+def test_funasr_provider_can_preload_asr_without_alignment_model() -> None:
+    factory_calls: list[str] = []
+
+    def asr_factory(**_kwargs):
+        factory_calls.append("asr")
+        return object()
+
+    def alignment_factory(**_kwargs):
+        factory_calls.append("alignment")
+        return object()
+
+    provider = FunAsrPracticeProvider(
+        auto_model_factory=asr_factory,
+        alignment_model_factory=alignment_factory,
+    )
+
+    provider.preload(include_alignment=False)
+
+    assert factory_calls == ["asr"]
+
+
 def test_funasr_provider_rejects_non_chinese_input(tmp_path: Path) -> None:
     audio_path = tmp_path / "attempt.wav"
     audio_path.write_bytes(b"fake audio")

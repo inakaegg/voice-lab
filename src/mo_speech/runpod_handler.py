@@ -346,6 +346,9 @@ def _handle_practice_asr(
         if isinstance(model_audio_base64, str) and model_audio_base64
         else None
     )
+    align_timestamps = _optional_bool(payload.get("align_timestamps"))
+    if align_timestamps is None:
+        align_timestamps = model_audio_bytes is not None
     audio_decode_ms = _elapsed_ms(decode_started)
     _release_voice_conversion_before_funasr()
     if _FUNASR_PRACTICE_PROVIDER is None:
@@ -357,7 +360,7 @@ def _handle_practice_asr(
                 model_name,
             ),
         )
-    provider, provider_load_ms = _funasr_practice_provider()
+    provider, provider_load_ms = _funasr_practice_provider(preload_alignment=align_timestamps)
     model_name = str(getattr(provider, "model", model_name) or model_name)
 
     temp_write_ms = 0.0
@@ -386,12 +389,13 @@ def _handle_practice_asr(
                 include_timestamps=True,
             )
             model_asr_ms = _elapsed_ms(model_asr_started)
-            model_alignment_started = perf_counter()
-            model_transcription = provider.force_align_detail(
-                Path(model_temp_audio.name),
-                model_transcription,
-            )
-            model_alignment_ms = _elapsed_ms(model_alignment_started)
+            if align_timestamps:
+                model_alignment_started = perf_counter()
+                model_transcription = provider.force_align_detail(
+                    Path(model_temp_audio.name),
+                    model_transcription,
+                )
+                model_alignment_ms = _elapsed_ms(model_alignment_started)
 
     _report_runpod_progress(
         event,
@@ -413,9 +417,11 @@ def _handle_practice_asr(
             include_timestamps=True,
         )
         asr_ms = _elapsed_ms(asr_started)
-        alignment_started = perf_counter()
-        transcription = provider.force_align_detail(Path(temp_audio.name), transcription)
-        alignment_ms = _elapsed_ms(alignment_started)
+        alignment_ms = 0.0
+        if align_timestamps:
+            alignment_started = perf_counter()
+            transcription = provider.force_align_detail(Path(temp_audio.name), transcription)
+            alignment_ms = _elapsed_ms(alignment_started)
 
     _report_runpod_progress(
         event,
@@ -799,12 +805,15 @@ def _voice_conversion_service() -> tuple[VoiceConversionService, float | None]:
     return _VOICE_CONVERSION_SERVICE, None
 
 
-def _funasr_practice_provider() -> tuple[FunAsrPracticeProvider, float | None]:
+def _funasr_practice_provider(
+    *,
+    preload_alignment: bool = True,
+) -> tuple[FunAsrPracticeProvider, float | None]:
     global _FUNASR_PRACTICE_PROVIDER, _FUNASR_PRACTICE_PROVIDER_LOAD_MS
     if _FUNASR_PRACTICE_PROVIDER is None:
         started = perf_counter()
         _FUNASR_PRACTICE_PROVIDER = FunAsrPracticeProvider()
-        _FUNASR_PRACTICE_PROVIDER.preload()
+        _FUNASR_PRACTICE_PROVIDER.preload(include_alignment=preload_alignment)
         _FUNASR_PRACTICE_PROVIDER_LOAD_MS = _elapsed_ms(started)
         return _FUNASR_PRACTICE_PROVIDER, _FUNASR_PRACTICE_PROVIDER_LOAD_MS
     return _FUNASR_PRACTICE_PROVIDER, None

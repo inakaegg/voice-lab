@@ -1994,6 +1994,7 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(queued.current_stage.model, "funasr/paraformer-zh");
   assert.equal(calls[0].url, "https://api.runpod.ai/v2/endpoint/run");
   assert.equal(calls[0].body.input.operation_mode, "practice_asr");
+  assert.equal(calls[0].body.input.align_timestamps, true);
   assert.equal(calls[0].body.input.target_text, "你好吗？你今天去哪里？");
   assert.ok(calls[0].body.input.audio_base64);
   assert.ok(calls[0].body.input.model_audio_base64);
@@ -2115,6 +2116,7 @@ test("Cloudflare worker reuses cached model ASR across Chinese attempt retries",
   }
 
   assert.equal(runCalls.length, 2);
+  assert.ok(runCalls.every((input) => input.align_timestamps === true));
   assert.ok(runCalls[0].model_audio_base64, "the first submission must include the model audio");
   assert.equal(runCalls[1].model_audio_base64, undefined, "the second submission must reuse the cached model ASR");
   assert.ok(

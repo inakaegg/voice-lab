@@ -161,6 +161,8 @@ RunPod handlerの契約:
 
 - URL、cookie、ブラウザ認証情報を受け取らず、音声bytesだけを受け取る。
 - SpeakLoop中国語復唱では `operation_mode=practice_asr`・`audio_base64`・`target_text` を受け取る。
+- SpeakLoop比較jobは `align_timestamps=true` を指定する。お手本ASRがキャッシュ済みでも、復唱音声のforced alignmentを行う。
+- 単音声のFunASR確認では `align_timestamps` を省略するか `false` にする。この場合は `fa-zh` を読み込まず、`paraformer-zh` のtimestampをそのまま返す。
 - お手本ASRのキャッシュが無い場合は `model_audio_base64` も受け取る。handler outputは `practice_asr_contract_version=3` と `model_transcription` を必須とする。`model_transcription.words` にはforced alignment後の時刻を保存する。
 - お手本ASRのキャッシュがある場合は `model_audio_base64` を省略できる。このjobではRunPod側のお手本ASRを行わないため、`model_transcription` も返さない。WorkerまたはFastAPIはjobと対応付けたキャッシュ済みASRを使う。
 - forced alignment導入前のキャッシュは再利用しない。FastAPIはキャッシュキーへ `fa-zh-v1` を含める。Cloudflareはモデル識別子 `runpod-funasr-fa-zh-v1` を使い、旧KV値は既存TTLで自然失効させる。

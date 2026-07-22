@@ -186,11 +186,12 @@ def test_runpod_practice_asr_provider_submits_dual_audio_async_job(tmp_path: Pat
     assert client.job_inputs == [
         {
             "operation_mode": "practice_asr",
+            "align_timestamps": True,
             "source_language": "zh-CN",
             "target_text": "你好吗？",
             "audio_mime_type": "audio/webm",
             "audio_base64": base64.b64encode(b"attempt audio").decode("ascii"),
-                "model_audio_mime_type": "audio/x-wav",
+            "model_audio_mime_type": "audio/x-wav",
             "model_audio_base64": base64.b64encode(b"model audio").decode("ascii"),
         }
     ]
@@ -215,6 +216,7 @@ def test_runpod_practice_asr_provider_omits_model_audio_when_cached(tmp_path: Pa
     assert client.job_inputs == [
         {
             "operation_mode": "practice_asr",
+            "align_timestamps": True,
             "source_language": "zh-CN",
             "target_text": "你好吗？",
             "audio_mime_type": "audio/webm",
