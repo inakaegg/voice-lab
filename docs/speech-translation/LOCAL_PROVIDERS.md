@@ -135,7 +135,7 @@ python3 scripts/benchmark_pipeline.py \
 
 cold寄りの比較では `--fresh-pipeline-per-run` を追加する。
 
-CPU実測の結論は次のとおり。短いfixture音声で、ASR約8秒、翻訳約27秒、TTS+Seed-VCで約150秒かかった。最大のボトルネックはcold start時のモデルロードと、Qwen3-TTS/Seed-VCのサブプロセス実行である。低遅延化する場合は、GPU上での常駐worker化か、ストリーミング可能なTTS/VC経路への分離が必要になる。数値は環境により変わるため、性能保証値ではない。
+CPU実測の結論は次のとおり。短いfixture音声では、ASR約8秒、翻訳約27秒だった。TTSは約150秒、Seed-VCは約34秒、全体は約219秒だった。最大のボトルネックはcold start時のモデルロードと、Qwen3-TTS/Seed-VCのサブプロセス実行である。低遅延化する場合は、GPU上での常駐worker化か、ストリーミング可能なTTS/VC経路への分離が必要になる。数値は環境により変わるため、性能保証値ではない。
 
 ## モデル評価の要点
 

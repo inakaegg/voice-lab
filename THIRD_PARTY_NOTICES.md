@@ -12,7 +12,9 @@ Vite production buildには以下が含まれる。
 - OpenCC JS
 - Lucide
 - Tailwind CSS
-- clsx、tailwind-merge等Viteの `build.license` で、bundleへ実際に含まれた依存の情報を次へ自動生成する。生成する情報は名称、version、ライセンス識別子、ライセンス本文である。
+- clsx、tailwind-merge等
+
+Viteの `build.license` で、bundleへ実際に含まれた依存の情報を次へ自動生成する。生成する情報は名称、version、ライセンス識別子、ライセンス本文である。
 
 - `src/mo_speech/web/react/assets/licenses.md`
 
