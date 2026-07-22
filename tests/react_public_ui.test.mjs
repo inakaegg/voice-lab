@@ -79,6 +79,9 @@ test("privacy policy explains external audio processing and retention in plain l
   assert.match(privacy, /日ごとの利用回数[\s\S]*3日以内に削除/);
   assert.match(privacy, /操作ログ[\s\S]*約90日間保存/);
   assert.match(privacy, /累計利用回数[\s\S]*公開デモの運用中/);
+  assert.match(privacy, /最終更新日: 2026年7月21日/);
+  assert.match(privacy, /ログインしたメールアドレスと日時[\s\S]*利用状況の把握と不正利用の確認/);
+  assert.match(privacy, /ログインしたメールアドレスと日時:[\s\S]*公開デモ終了時に削除/);
   assert.doesNotMatch(privacy, /最大3日|最大91日|72時間未満|91日未満/);
   assert.doesNotMatch(privacy, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
   assert.match(viteConfig, /privacy:\s*resolve\(rootDir,\s*"privacy\.html"\)/);

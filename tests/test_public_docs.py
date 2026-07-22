@@ -130,6 +130,9 @@ def test_public_privacy_policy_and_retention_are_fixed() -> None:
     assert "音声や入力内容はこの記録に含まれません" in policy
     assert "日ごとの利用回数は、利用日から3日以内に削除します" in policy
     assert "操作ログは、約90日間保存します" in policy
+    assert "ログインしたメールアドレスと日時は、運営者が管理画面で確認できる形で保存します" in policy
+    assert "ログインしたメールアドレスと日時" in privacy
+    assert "public_users" in privacy
     assert "最大3日" not in policy
     assert "最大91日" not in policy
     assert "48時間" in privacy
@@ -297,6 +300,8 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     wrangler = read_text("wrangler.toml")
     migration = read_text("migrations/0001_public_demo_storage.sql")
     sample_migration = read_text("migrations/0002_public_samples.sql")
+    user_email_migration = read_text("migrations/0003_public_user_email.sql")
+    storage = read_text("docs/deployment/STORAGE.md")
 
     assert 'binding = "MO_SPEECH_DB"' in wrangler
     assert 'database_name = "mo-speech-demo-db"' in wrangler
@@ -308,6 +313,19 @@ def test_wrangler_binds_the_project_d1_database_and_tracks_its_schema() -> None:
     assert "CREATE TABLE IF NOT EXISTS audit_events" in migration
     assert "CREATE TABLE IF NOT EXISTS job_metadata" in migration
     assert "CREATE TABLE IF NOT EXISTS public_sample_audios" in sample_migration
+    assert "ALTER TABLE public_users ADD COLUMN email TEXT" in user_email_migration
+    assert "ALTER TABLE public_users ADD COLUMN last_login_at TEXT" in user_email_migration
+    assert "last_login_at TEXT" in storage
+
+
+def test_cloudflare_deploy_applies_remote_d1_migrations_before_worker() -> None:
+    cloudflare = read_text("docs/deployment/CLOUDFLARE.md")
+    deployment = cloudflare.split("## デプロイ", 1)[1].split("## 制限", 1)[0]
+    migration_command = "npx wrangler d1 migrations apply mo-speech-demo-db --remote"
+    deploy_command = "wrangler deploy"
+
+    assert migration_command in deployment
+    assert deployment.index(migration_command) < deployment.index(deploy_command)
 
 
 def test_cloudflare_worker_uses_the_voice_lab_public_name() -> None:

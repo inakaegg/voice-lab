@@ -101,6 +101,16 @@
             </div>
             <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
           </fieldset>
+
+          <fieldset id="public-users-panel" class="suffix-panel public-access-admin" data-public-users>
+            <legend>ログイン利用者</legend>
+            <div class="public-access-header">
+              <p class="route-hint">Googleログインしたアカウントと日時を確認します。この機能より前のログインは表示できません。</p>
+              <button type="button" class="secondary-button" data-public-users-reload>再読み込み</button>
+            </div>
+            <ul class="public-users-list" data-public-users-body></ul>
+            <p class="public-access-status" data-public-users-status role="status" aria-live="polite">公開・運用設定を開くと読み込みます。</p>
+          </fieldset>
             </div>
           </details>
 
@@ -524,5 +534,6 @@
     <script src="/static/app_admin_settings.js" defer></script>
     <script src="/static/app_public_access_settings.js" defer></script>
     <script src="/static/app_public_sample_audio_admin.js" defer></script>
+    <script src="/static/app_public_users.js" defer></script>
   </body>
 </html>

@@ -20,6 +20,8 @@ const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
 const PUBLIC_AUDIT_D1_MIGRATED_KV_KEY = "public-audit-log:d1-migrated";
 const PUBLIC_AUDIT_LOG_DEFAULT_LIMIT = 500;
+const PUBLIC_USERS_DEFAULT_LIMIT = 200;
+const PUBLIC_USERS_MAX_LIMIT = 2000;
 const PUBLIC_AUDIT_RETENTION_SECONDS = 60 * 60 * 24 * 90;
 const PUBLIC_DAILY_QUOTA_RETENTION_SECONDS = 60 * 60 * 48;
 const PUBLIC_SAMPLE_AUDIOS_KV_KEY = "public-sample-audios";
@@ -734,6 +736,9 @@ function isProtectedAdminApiRequest(method, pathname) {
   if (method === "GET" && pathname === "/api/public-audit-log") {
     return true;
   }
+  if (method === "GET" && pathname === "/api/public-users") {
+    return true;
+  }
   if (method === "POST" && pathname === "/api/warmup") {
     return true;
   }
@@ -893,6 +898,7 @@ async function handleGoogleCallback(request, env, url) {
     picture: String(userInfo.picture || ""),
   });
   const settings = await readPublicAccessSettings(env);
+  await recordPublicUserLogin(env, email);
   await appendPublicAuditEvent(env, {
     action: "google_login_success",
     email,
@@ -1135,6 +1141,9 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     if (request.method === "GET" && url.pathname === "/api/public-audit-log") {
       return jsonResponse(await readPublicAuditLog(env, url));
+    }
+    if (request.method === "GET" && url.pathname === "/api/public-users") {
+      return jsonResponse(await readPublicUsers(env, url));
     }
     if (request.method === "PUT" && url.pathname === "/api/public-sample-audios") {
       const payload = await request.json();
@@ -1979,8 +1988,8 @@ async function consumePublicQuotaD1(env, feature, email, featureSettings, reques
   const now = new Date().toISOString();
   await env.MO_SPEECH_DB.batch([
     env.MO_SPEECH_DB.prepare(
-      "INSERT INTO public_users (email_hash, created_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET last_seen_at = excluded.last_seen_at",
-    ).bind(emailHash, now, now),
+      "INSERT INTO public_users (email_hash, email, created_at, last_seen_at, last_login_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET email = excluded.email, last_seen_at = excluded.last_seen_at",
+    ).bind(emailHash, normalizeEmail(email), now, now, null),
     env.MO_SPEECH_DB.prepare(
       "INSERT INTO quota_usage_daily (email_hash, feature, usage_date, usage_count, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash, feature, usage_date) DO UPDATE SET usage_count = quota_usage_daily.usage_count + 1, updated_at = excluded.updated_at",
     ).bind(emailHash, feature, today, dailyUsed + 1, now),
@@ -1996,8 +2005,67 @@ async function consumePublicQuotaD1(env, feature, email, featureSettings, reques
   });
 }
 
+async function readPublicUsers(env, url = null) {
+  // limit未指定を0として渡すとclampIntが下限1へ丸めるため、未指定はnullのままfallbackさせる。
+  const requestedLimit = url ? new URL(url).searchParams.get("limit") : null;
+  const limit = clampInt(requestedLimit, 1, PUBLIC_USERS_MAX_LIMIT, PUBLIC_USERS_DEFAULT_LIMIT);
+  if (!env.MO_SPEECH_DB) {
+    return { users: [], limit, stored: 0 };
+  }
+  const settings = await readPublicAccessSettings(env);
+  const rows = await env.MO_SPEECH_DB.prepare(`
+    WITH selected_users AS (
+      SELECT email_hash, email, created_at, last_seen_at, last_login_at
+      FROM public_users
+      ORDER BY last_login_at IS NULL, last_login_at DESC
+      LIMIT ?
+    )
+    SELECT
+      selected_users.email_hash,
+      selected_users.email,
+      selected_users.created_at,
+      selected_users.last_seen_at,
+      selected_users.last_login_at,
+      quota_usage_total.feature,
+      quota_usage_total.usage_count
+    FROM selected_users
+    LEFT JOIN quota_usage_total
+      ON quota_usage_total.email_hash = selected_users.email_hash
+    ORDER BY selected_users.last_login_at IS NULL, selected_users.last_login_at DESC, quota_usage_total.feature
+  `).bind(limit).all();
+  const stored = await env.MO_SPEECH_DB.prepare("SELECT COUNT(*) AS count FROM public_users").first();
+  const usersByHash = new Map();
+  for (const row of rows.results || []) {
+    let user = usersByHash.get(row.email_hash);
+    if (!user) {
+      user = { ...row, usage: {} };
+      usersByHash.set(row.email_hash, user);
+    }
+    if (row.feature !== null && row.feature !== undefined) {
+      user.usage[String(row.feature)] = Number(row.usage_count || 0);
+    }
+  }
+  const users = [...usersByHash.values()].map((row) => {
+    const usage = row.usage;
+    const usedTotal = Object.values(usage).reduce((sum, value) => sum + value, 0);
+    const email = normalizeEmail(row.email);
+    return {
+      email,
+      email_hash: String(row.email_hash || ""),
+      created_at: String(row.created_at || ""),
+      last_login_at: String(row.last_login_at || ""),
+      // ログインだけの利用者はlast_seen_atが初回記録時刻と同じになる。実利用がない時刻を最終利用として見せない。
+      last_seen_at: usedTotal > 0 ? String(row.last_seen_at || "") : "",
+      is_admin: Boolean(email) && isPublicAdminEmail(email, settings),
+      usage,
+    };
+  });
+  return { users, limit, stored: Number(stored?.count || 0) };
+}
+
 async function readPublicAuditLog(env, url = null) {
-  const requestedLimit = url ? Number(new URL(url).searchParams.get("limit") || "") : 0;
+  // limit未指定を0として渡すとclampIntが下限1へ丸めるため、未指定はnullのままfallbackさせる。
+  const requestedLimit = url ? new URL(url).searchParams.get("limit") : null;
   const limit = clampInt(requestedLimit, 1, publicAuditLogLimit(env), 100);
   if (env.MO_SPEECH_DB) {
     await migrateLegacyAuditEventsToD1(env);
@@ -2134,6 +2202,21 @@ async function retainedPublicAuditEvents(events, now = new Date()) {
     const occurredAt = Date.parse(String(entry.created_at || ""));
     return Number.isFinite(occurredAt) && occurredAt >= cutoff;
   });
+}
+
+async function recordPublicUserLogin(env, email) {
+  if (!env.MO_SPEECH_DB) {
+    return;
+  }
+  const now = new Date().toISOString();
+  const emailHash = await publicIdentityHash(email);
+  try {
+    await env.MO_SPEECH_DB.prepare(
+      "INSERT INTO public_users (email_hash, email, created_at, last_seen_at, last_login_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email_hash) DO UPDATE SET email = excluded.email, last_login_at = excluded.last_login_at",
+    ).bind(emailHash, normalizeEmail(email), now, now, now).run();
+  } catch (_error) {
+    // 利用者記録の失敗でログインを止めない。
+  }
 }
 
 async function publicIdentityHash(email) {
