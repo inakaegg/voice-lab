@@ -16,11 +16,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-_SOURCE_LABEL = re.compile(r"\[(ユーザー指示|実データ確認済み|未確認の推測)")
+_SOURCE_LABELS = (
+    re.compile(r"\[ユーザー指示\]"),
+    re.compile(r"\[実データ確認済み[:：]\s*[^\]\s][^\]]*\]"),
+    re.compile(r"\[未確認の推測\]"),
+)
 _HEADING = re.compile(r"^#{1,6}\s")
+_CONSTRAINT_HEADING = re.compile(r"(?:制約|constraints)", re.IGNORECASE)
 _CODE_FENCE = re.compile(r"^(```|~~~)")
 _CONSTRAINT_LIST_INTRO = re.compile(r"^制約[:：]\s*$")
 _BULLET = re.compile(r"^[-*]\s|^\d+\.\s")
+
+
+def has_source_label(line: str) -> bool:
+    return any(pattern.search(line) for pattern in _SOURCE_LABELS)
 
 
 def iter_unlabeled_constraints(markdown: str):
@@ -46,17 +55,17 @@ def iter_unlabeled_constraints(markdown: str):
                 continue
             if in_constraint_list:
                 if _BULLET.match(line.strip()) and not line.startswith((" ", "\t")):
-                    if not _SOURCE_LABEL.search(line):
+                    if not has_source_label(line):
                         yield line_number, line.strip()
                 elif line.strip() and not line.startswith((" ", "\t")):
                     in_constraint_list = False
             continue
         if _HEADING.match(line):
-            in_constraint_section = "制約" in line
-            in_labeled_section = bool(_SOURCE_LABEL.search(line))
+            in_constraint_section = bool(_CONSTRAINT_HEADING.search(line))
+            in_labeled_section = has_source_label(line)
             continue
         if in_constraint_section and not in_labeled_section:
-            if _BULLET.match(line) and not _SOURCE_LABEL.search(line):
+            if _BULLET.match(line) and not has_source_label(line):
                 yield line_number, line.strip()
 
 
@@ -84,6 +93,34 @@ def test_iter_unlabeled_constraints_covers_headings_and_prompt_blocks() -> None:
     assert unlabeled == [
         (2, "- ラベルなしの制約。"),
         (11, "- ラベルなし。"),
+    ]
+
+
+def test_iter_unlabeled_constraints_covers_english_constraint_heading() -> None:
+    markdown = "\n".join(
+        [
+            "## Global Constraints",
+            "- ラベルなしの制約。",
+            "- [ユーザー指示] ラベルありの制約。",
+        ]
+    )
+
+    assert list(iter_unlabeled_constraints(markdown)) == [
+        (2, "- ラベルなしの制約。"),
+    ]
+
+
+def test_iter_unlabeled_constraints_rejects_incomplete_observation_label() -> None:
+    markdown = "\n".join(
+        [
+            "## 制約",
+            "- [実データ確認済み] 確認方法と件数がない制約。",
+            "- [実データ確認済み: 37件を走査] 完全なラベル。",
+        ]
+    )
+
+    assert list(iter_unlabeled_constraints(markdown)) == [
+        (2, "- [実データ確認済み] 確認方法と件数がない制約。"),
     ]
 
 
