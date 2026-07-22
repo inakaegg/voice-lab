@@ -4,6 +4,12 @@ type UiFixtureOptions = {
   historyState?: "empty" | "long" | "error" | "disabled" | "practice-preview";
   practiceUiMode?: "local" | "cloudflare";
   practicePreviewModelAudio?: boolean;
+  practicePreviewRecompute?: boolean;
+  practicePreviewModelAudioMissing?: boolean;
+  practicePreviewModelAudioDelayMs?: number;
+  practicePreviewRecomputeUnavailableAtMaxPadding?: boolean;
+  practicePreviewSavedPaddingMissing?: boolean;
+  practicePreviewRecomputeDelayMs?: number;
 };
 
 const accessSettings = {
@@ -16,6 +22,29 @@ const accessSettings = {
     skitvoice: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, script_max_chars: 2_000 },
   },
 };
+
+// 無音WAVを組み立てて返す。音声を配信しないと、読み込み失敗のまま比較再生できると
+// 判定していても気づけない。長さは比較区間より十分長くしてクリップを避ける。
+function silentWav(seconds = 3): Buffer {
+  const sampleRate = 8000;
+  const samples = Math.round(sampleRate * seconds);
+  const buffer = Buffer.alloc(44 + samples);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + samples, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate, 28);
+  buffer.writeUInt16LE(1, 32);
+  buffer.writeUInt16LE(8, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(samples, 40);
+  buffer.fill(128, 44);
+  return buffer;
+}
 
 export async function installUiApiFixtures(page: Page, options: UiFixtureOptions = {}) {
   let publicSamples: Record<string, unknown> = {
@@ -38,6 +67,71 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         publicSamples = request.postDataJSON();
       }
       return json(publicSamples);
+    }
+    if (path === "/api/audio-history/outputs/practice-preview-model.wav") {
+      if (options.practicePreviewModelAudioDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.practicePreviewModelAudioDelayMs));
+      }
+      if (options.practicePreviewModelAudioMissing) {
+        return json({ detail: "not found" }, 404);
+      }
+      return route.fulfill({ status: 200, contentType: "audio/wav", body: silentWav() });
+    }
+    if (path === "/api/audio-history/recordings/practice-preview.wav") {
+      return route.fulfill({ status: 200, contentType: "audio/wav", body: silentWav() });
+    }
+    if (path.endsWith("/recomputed-comparison")) {
+      if (options.practicePreviewRecompute === false) {
+        return json({
+          available: false,
+          unavailable_reason: "位置番号を持つ比較結果が保存されていないため、再計算できません。",
+          comparison_alignment: {},
+          model_comparison_alignment: {},
+        });
+      }
+      const padding = Number(new URL(route.request().url()).searchParams.get("playback_padding_seconds") || 0);
+      if (options.practicePreviewRecomputeUnavailableAtMaxPadding && padding >= 0.5) {
+        return json({
+          available: false,
+          unavailable_reason: "位置番号を持つ比較結果が保存されていないため、再計算できません。",
+          comparison_alignment: {},
+          model_comparison_alignment: {},
+        });
+      }
+      // 余白が小さいほど遅く返す。古い要求の応答が新しい応答より後に届く状況を再現する。
+      const delayMs = options.practicePreviewRecomputeDelayMs ?? Math.round((0.5 - padding) * 400);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const shift = (phrases: Array<{ index: number; audio_start: number; audio_end: number }>) => ({
+        available: true,
+        complete: true,
+        all_phrases_playable: true,
+        target_phrase_count: phrases.length,
+        playable_phrase_count: phrases.length,
+        phrases: phrases.map((phrase) => ({
+          ...phrase,
+          available: true,
+          audio_start: Math.max(0, phrase.audio_start - padding),
+          audio_end: phrase.audio_end + padding,
+        })),
+      });
+      return json({
+        available: true,
+        unavailable_reason: "",
+        playback_padding_seconds: padding,
+        saved_playback_padding_seconds: options.practicePreviewSavedPaddingMissing ? null : 0.1,
+        comparison_alignment: shift([
+          { index: 0, audio_start: 0.5, audio_end: 1.2 },
+          { index: 1, audio_start: 1.2, audio_end: 2.0 },
+          { index: 2, audio_start: 2.0, audio_end: 2.4 },
+        ]),
+        model_comparison_alignment: shift([
+          { index: 0, audio_start: 0.4, audio_end: 1.1 },
+          { index: 1, audio_start: 1.1, audio_end: 1.8 },
+          { index: 2, audio_start: 1.8, audio_end: 2.2 },
+        ]),
+        reference_audio_duration: 3.0,
+        attempt_audio_duration: 3.0,
+      });
     }
     if (path === "/api/practice-history") {
       if (options.historyState === "disabled") return json({ settings: { enabled: false }, recordings: [], outputs: [] });
@@ -76,6 +170,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
                 target_text: "银行周末也营业吗？",
                 recognized_text: "银杏周末也营业吗？",
                 outcome: "evaluated",
+                playback_padding_seconds: options.practicePreviewSavedPaddingMissing ? null : 0.1,
                 overall_score: 82,
                 overall_comment: "最初の単語をもう一度確認しましょう。",
                 comparison_target_pinyin: ["yin2", "hang2", "zhou1", "mo4", "ye3", "ying2", "ye4", "ma5"],

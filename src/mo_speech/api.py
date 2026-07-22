@@ -76,6 +76,7 @@ from .practice_llm import (
     probe_audio_duration_seconds,
     supported_practice_comparison_model,
     validate_playback_padding_seconds,
+    validate_practice_llm_result,
 )
 from .practice_jobs import PracticeJobFailure, PracticeJobStore
 from .public_sample_audio import PublicSampleAudioStore
@@ -480,6 +481,8 @@ def _practice_history_diagnostics_metadata(result: dict[str, object]) -> dict[st
         "llm_comparison": result.get("llm_comparison") or {},
         "comparison_model": result.get("comparison_model") or "",
         "playback_padding_seconds": result.get("playback_padding_seconds"),
+        "reference_audio_duration": result.get("reference_audio_duration"),
+        "attempt_audio_duration": result.get("attempt_audio_duration"),
         "llm_usage": result.get("llm_usage") or {},
         "llm_estimated_cost_usd": result.get("llm_estimated_cost_usd"),
         "phrase_matches": result.get("phrase_matches") or [],
@@ -1134,7 +1137,7 @@ def _practice_prompt_audio_index(
     またいで一致しうるため、学習言語も鍵に含める。値は`(created_at, url,
     media_type)`を作成時刻の昇順で並べたリスト。
     """
-    index: dict[str, list[tuple[str, str, str]]] = {}
+    index: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
     for entry in store.list_entries("outputs"):
         metadata = entry.metadata or {}
         if metadata.get("endpoint") != "practice-prompts":
@@ -1175,6 +1178,129 @@ def _practice_model_audio_for_attempt(
         return "", ""
     _, url, media_type = earlier[-1]
     return url, media_type
+
+
+def _practice_history_entry_by_filename(
+    store: AudioHistoryStore,
+    kind: str,
+    filename: str,
+) -> AudioHistoryEntry | None:
+    for entry in store.list_entries(kind):
+        if entry.audio_path.name == filename:
+            return entry
+    return None
+
+
+def _stored_asr_words(timestamps: object) -> list[dict[str, object]] | None:
+    """保存済みASRの単語配列を返す。単語が切り詰められている場合はNoneを返す。
+
+    `_compact_asr_timestamps_for_metadata`は単語を120件、区間を40件で打ち切り、
+    どちらかが打ち切られると`truncated`を真にする。再計算が使うのは単語だけなので、
+    区間だけが打ち切られた履歴は再計算できる。単語の欠落は`word_count`と実際の
+    配列長の差で判定する。`word_count`を持たない古い履歴は`truncated`で判定する。
+    """
+    if not isinstance(timestamps, dict):
+        return None
+    words = timestamps.get("words")
+    if not isinstance(words, list) or not words:
+        return None
+    word_count = timestamps.get("word_count")
+    if isinstance(word_count, int) and not isinstance(word_count, bool):
+        if word_count > len(words):
+            return None
+    elif timestamps.get("truncated") is True:
+        return None
+    return [word for word in words if isinstance(word, dict)]
+
+
+def _stored_audio_duration(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    duration = float(value)
+    return duration if duration > 0 else None
+
+
+def _recomputed_practice_comparison(
+    store: AudioHistoryStore,
+    entry: AudioHistoryEntry,
+    *,
+    padding_seconds: float,
+) -> dict[str, object]:
+    """保存済みASRと位置番号から、実装本体と同じ経路で比較区間を計算し直す。
+
+    LLMは呼び出さず、保存済みの`llm_comparison`をそのまま検証経路へ通す。表示確認
+    専用の計算式を持たないことで、現在のサーバー実装の挙動をそのまま確認できる。
+    """
+    diagnostics = (entry.metadata or {}).get("practice_diagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    saved_padding = diagnostics.get("playback_padding_seconds")
+    payload: dict[str, object] = {
+        "available": False,
+        "unavailable_reason": "",
+        "playback_padding_seconds": padding_seconds,
+        "saved_playback_padding_seconds": (
+            float(saved_padding) if isinstance(saved_padding, (int, float)) else None
+        ),
+        "comparison_alignment": {},
+        "model_comparison_alignment": {},
+        "reference_audio_duration": 0.0,
+        "attempt_audio_duration": 0.0,
+    }
+
+    def unavailable(reason: str) -> dict[str, object]:
+        payload["unavailable_reason"] = reason
+        return payload
+
+    llm_result = diagnostics.get("llm_comparison")
+    if not isinstance(llm_result, dict) or llm_result.get("schema_version") != 1:
+        return unavailable("位置番号を持つ比較結果が保存されていないため、再計算できません。")
+
+    attempt_words = _stored_asr_words(diagnostics.get("asr_timestamps"))
+    reference_words = _stored_asr_words(diagnostics.get("model_asr_timestamps"))
+    if attempt_words is None or reference_words is None:
+        return unavailable("保存済みのASR単語が足りないため、再計算できません。")
+
+    model_audio_url, _ = _practice_model_audio_for_attempt(
+        _practice_prompt_audio_index(store),
+        diagnostics,
+        str((entry.metadata or {}).get("created_at") or ""),
+    )
+    if not model_audio_url:
+        return unavailable("お手本音声を対応付けできないため、再計算できません。")
+    try:
+        reference_path = store.resolve_audio_path("outputs", Path(model_audio_url).name)
+    except ValueError:
+        return unavailable("お手本音声を読み込めないため、再計算できません。")
+
+    # 履歴の音声は再エンコード済みなので、測り直すと比較時の音声長と一致しない。
+    # 保存済みの値があればそれを使い、無い古い履歴だけ測り直す。
+    reference_duration = _stored_audio_duration(diagnostics.get("reference_audio_duration"))
+    if reference_duration is None:
+        reference_duration = probe_audio_duration_seconds(reference_path, fallback_words=reference_words)
+    attempt_duration = _stored_audio_duration(diagnostics.get("attempt_audio_duration"))
+    if attempt_duration is None:
+        attempt_duration = probe_audio_duration_seconds(entry.audio_path, fallback_words=attempt_words)
+    input_payload = build_practice_llm_input(
+        target_language=str(diagnostics.get("target_language") or ""),
+        target_text=str(diagnostics.get("target_text") or ""),
+        padding_seconds=padding_seconds,
+        reference_asr={"words": reference_words},
+        attempt_asr={"words": attempt_words},
+        reference_audio_duration=reference_duration,
+        attempt_audio_duration=attempt_duration,
+    )
+    try:
+        validated = validate_practice_llm_result(llm_result, input_payload)
+        attempt_alignment, reference_alignment = comparison_alignments_from_llm_result(validated)
+    except PracticeLlmError as exc:
+        return unavailable(f"保存済みの比較結果を現在の実装で再計算できませんでした: {exc}")
+
+    payload["available"] = True
+    payload["comparison_alignment"] = attempt_alignment
+    payload["model_comparison_alignment"] = reference_alignment
+    payload["reference_audio_duration"] = reference_duration
+    payload["attempt_audio_duration"] = attempt_duration
+    return payload
 
 
 def _serialized_audio_history_entries(
@@ -2110,6 +2236,8 @@ def create_app(
             "comparison_recognized_pinyin": comparison_recognized_pinyin,
             "comparison_model": comparison_model,
             "playback_padding_seconds": playback_padding_seconds,
+            "reference_audio_duration": reference_audio_duration,
+            "attempt_audio_duration": attempt_audio_duration,
             "llm_usage": evaluated.usage,
             "llm_estimated_cost_usd": evaluated.estimated_cost_usd,
             "timings_ms": {
@@ -3311,6 +3439,24 @@ def create_app(
             "recordings": _serialized_audio_history_entries(active_audio_history_store, "recordings", practice=True),
             "outputs": _serialized_audio_history_entries(active_audio_history_store, "outputs", practice=True),
         }
+
+    @app.get("/api/practice-history/recordings/{filename}/recomputed-comparison")
+    def get_recomputed_practice_comparison(
+        filename: str,
+        playback_padding_seconds: str = "",
+    ) -> dict[str, object]:
+        try:
+            padding = validate_playback_padding_seconds(playback_padding_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        entry = _practice_history_entry_by_filename(active_audio_history_store, "recordings", filename)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="practice history entry not found")
+        return _recomputed_practice_comparison(
+            active_audio_history_store,
+            entry,
+            padding_seconds=padding,
+        )
 
     @app.post("/api/audio-history/outputs")
     async def save_audio_history_output(

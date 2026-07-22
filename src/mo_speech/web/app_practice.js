@@ -8,6 +8,7 @@ const historyPreview = document.querySelector("#practice-history-preview");
 const historyPreviewSelect = document.querySelector("#practice-history-preview-select");
 const historyPreviewButton = document.querySelector("#practice-history-preview-button");
 const historyPreviewStatus = document.querySelector("#practice-history-preview-status");
+const historyPreviewSourceSelect = document.querySelector("#practice-history-preview-source-select");
 const nativePanel = document.querySelector("#practice-native-panel");
 const nativeRecordButton = document.querySelector("#practice-native-record-button");
 const nativeCancelButton = document.querySelector("#practice-native-cancel-button");
@@ -135,12 +136,15 @@ let practiceHistoryPreviewEntries = [];
 let repeatAudioUsesObjectUrl = false;
 let modelAudioUsesObjectUrl = false;
 let isSavedHistoryPreview = false;
+let currentHistoryPreviewEntry = null;
+let historyPreviewRecomputeToken = 0;
 
 targetLanguageSelect.addEventListener("change", () => selectTargetLanguage(targetLanguageSelect.value || defaultPracticeTargetLanguage));
 comparisonModelSelect.addEventListener("change", savePracticeSettings);
 playbackPaddingSlider.addEventListener("input", handlePlaybackPaddingChange);
 historyPreviewSelect.addEventListener("change", syncHistoryPreviewButton);
 historyPreviewButton.addEventListener("click", displaySelectedPracticeHistory);
+historyPreviewSourceSelect.addEventListener("change", handleHistoryPreviewSourceChange);
 nativeRecordButton.addEventListener("click", () => {
   setActiveRecordSlot("native");
   toggleRecording("native");
@@ -173,6 +177,7 @@ modelAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 modelAudio.addEventListener("pause", syncPlayButton);
 modelAudio.addEventListener("play", handleModelAudioPlay);
 modelAudio.addEventListener("playing", handleModelAudioPlay);
+modelAudio.addEventListener("error", handleModelAudioLoadError);
 repeatAudio.addEventListener("loadedmetadata", syncModelAudioSpeed);
 repeatAudio.addEventListener("ended", syncPlayButton);
 repeatAudio.addEventListener("pause", syncPlayButton);
@@ -229,6 +234,12 @@ async function startRecording(slot) {
   } catch (error) {
     showError(error instanceof Error ? error.message : "マイクを使えません。");
     return;
+  }
+  if (isSavedHistoryPreview && historyPreviewSourceSelect.value === "recomputed") {
+    const diagnostics = currentHistoryPreviewEntry?.metadata?.practice_diagnostics;
+    restoreCurrentSavedComparison(
+      `録音を開始したため、保存時の比較区間へ戻しました。保存時の余白は${formatSavedPadding(diagnostics?.playback_padding_seconds)}です。`,
+    );
   }
   const mimeType = preferredRecordingMimeType();
   recordingStream = stream;
@@ -756,6 +767,7 @@ function resetPractice() {
   phraseFeedback.replaceChildren();
   savedResultNotice.hidden = true;
   isSavedHistoryPreview = false;
+  currentHistoryPreviewEntry = null;
   stopRepeatAudio();
   renderNativeLabels();
   renderTargetDisplay();
@@ -965,6 +977,20 @@ function handleModelAudioPlay() {
   syncPlayButton();
 }
 
+// 履歴一覧はURLを返すが、その後の自動prune・管理画面からの削除で実体が消えていること
+// がある。URLの有無だけで比較再生を有効と判断せず、読み込み失敗時は復唱音声だけに戻す。
+function handleModelAudioLoadError() {
+  if (!isSavedHistoryPreview || modelAudioUsesObjectUrl || !modelAudioUrl) {
+    return;
+  }
+  stopModelAudio();
+  // 応答待ちの再計算を無効にし、selectorと比較区間も保存値へ戻す。
+  // お手本音声を失った後に再計算状態だけ残ると、表示と再生内容が一致しない。
+  restoreCurrentSavedComparison(
+    "保存済みの結果を表示しました。お手本音声を読み込めなかったため、比較再生はできません。",
+  );
+}
+
 function handleRepeatAudioPlay() {
   syncModelAudioSpeed();
   syncPlayButton();
@@ -980,6 +1006,14 @@ function handlePlaybackPaddingChange() {
   playbackPaddingSlider.value = String(padding);
   playbackPaddingValue.textContent = `${padding.toFixed(2)}秒`;
   savePracticeSettings();
+  // 再計算は「画面で選んでいる余白を使う」契約なので、余白を変えたら計算し直す。
+  if (isSavedHistoryPreview
+    && historyPreviewSourceSelect.value === "recomputed"
+    && currentHistoryPreviewEntry
+    && !isBusy
+    && mediaRecorder?.state !== "recording") {
+    applyRecomputedComparison(currentHistoryPreviewEntry);
+  }
 }
 
 function handlePinyinSettingChange() {
@@ -1724,10 +1758,12 @@ function practiceHistoryPreviewLabel(entry, diagnostics) {
 
 function syncHistoryPreviewButton() {
   const index = Number.parseInt(historyPreviewSelect.value, 10);
-  historyPreviewButton.disabled = isBusy
-    || mediaRecorder?.state === "recording"
+  const busy = isBusy || mediaRecorder?.state === "recording";
+  historyPreviewButton.disabled = busy
     || !Number.isInteger(index)
     || !practiceHistoryPreviewEntries[index];
+  // 比較区間の切替も再計算要求を出すため、録音・音声処理中は操作させない。
+  historyPreviewSourceSelect.disabled = busy;
 }
 
 function displaySelectedPracticeHistory() {
@@ -1760,6 +1796,8 @@ function displaySelectedPracticeHistory() {
   renderTargetDisplay();
   promptPanel.hidden = false;
   isSavedHistoryPreview = true;
+  historyPreviewRecomputeToken += 1;
+  currentHistoryPreviewEntry = entry;
   setRepeatAudioSource(entry.url);
   if (entry.model_audio_url) {
     setModelAudioSource(entry.model_audio_url);
@@ -1769,6 +1807,128 @@ function displaySelectedPracticeHistory() {
   historyPreviewStatus.textContent = entry.model_audio_url
     ? "保存済みの結果を表示しました。比較再生も確認できます。外部APIや音声処理は呼び出していません。"
     : "保存済みの結果を表示しました。お手本音声が残っていないため比較再生はできません。";
+  if (historyPreviewSourceSelect.value === "recomputed") {
+    applyRecomputedComparison(entry);
+  }
+}
+
+function handleHistoryPreviewSourceChange() {
+  if (!isSavedHistoryPreview || isBusy || mediaRecorder?.state === "recording") {
+    return;
+  }
+  const entry = currentHistoryPreviewEntry;
+  const diagnostics = entry?.metadata?.practice_diagnostics;
+  if (!entry || !diagnostics) {
+    return;
+  }
+  if (historyPreviewSourceSelect.value === "saved") {
+    historyPreviewRecomputeToken += 1;
+    applyPracticeComparisonAlignments(
+      diagnostics.comparison_alignment || null,
+      diagnostics.model_comparison_alignment || null,
+    );
+    historyPreviewStatus.textContent = `保存時の比較区間を表示しています。保存時の余白は${formatSavedPadding(diagnostics.playback_padding_seconds)}です。`;
+    return;
+  }
+  applyRecomputedComparison(entry);
+}
+
+// 0.00秒は有効な設定値なので、未記録と区別する。Number(null)は0になるため、
+// 数値変換の前にnull・undefined・空文字を落とす。
+function formatSavedPadding(value) {
+  if (value === null || value === undefined || value === "") {
+    return "記録なし";
+  }
+  const padding = Number(value);
+  return Number.isFinite(padding) ? `${padding.toFixed(2)}秒` : "記録なし";
+}
+
+// 保存済みの再生区間を差し替え、diff表示と再生ボタンを現在の区間へ合わせ直す。
+function applyPracticeComparisonAlignments(attemptAlignment, modelAlignment) {
+  stopComparisonPlayback();
+  currentAttemptComparisonAlignment = attemptAlignment;
+  currentModelComparisonAlignment = modelAlignment;
+  if (currentAttemptPayload) {
+    // currentAttemptPayloadは履歴一覧のdiagnosticsそのものなので、ここへ再計算結果を
+    // 書き戻すと保存値が失われ、保存値へ戻せなくなる。表示は各globalの区間を使う。
+    renderRecognizedDiff(currentAttemptPayload);
+  }
+  syncPlayButton();
+}
+
+// 余白スライダーのinputは連続発火するため、応答の到着順は要求順と一致しない。
+// 最新の要求以外、表示対象・表示方法が変わった後、録音や音声処理が始まった後、
+// お手本音声を失った後の応答は捨てる。応答待ちの間に状態が変わりうるため、
+// 要求時ではなく適用時の状態で判定する。
+async function applyRecomputedComparison(entry) {
+  const diagnostics = entry.metadata.practice_diagnostics;
+  if (isRepeatOnlyPreview()) {
+    restoreSavedComparisonAlignments(diagnostics);
+    historyPreviewStatus.textContent = "お手本音声を読み込めなかったため、比較区間を計算し直しても確認できません。";
+    return;
+  }
+  const padding = normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2);
+  const token = ++historyPreviewRecomputeToken;
+  const isCurrentRequest = () => token === historyPreviewRecomputeToken
+    && isSavedHistoryPreview
+    && currentHistoryPreviewEntry === entry
+    && historyPreviewSourceSelect.value === "recomputed"
+    && !isBusy
+    && mediaRecorder?.state !== "recording"
+    && !isRepeatOnlyPreview();
+  historyPreviewStatus.textContent = "現在の実装で比較区間を計算し直しています。";
+  try {
+    const response = await fetch(
+      `/api/practice-history/recordings/${encodeURIComponent(entry.filename)}/recomputed-comparison`
+        + `?playback_padding_seconds=${encodeURIComponent(padding)}`,
+    );
+    const payload = await response.json();
+    if (!isCurrentRequest()) {
+      return;
+    }
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(payload, "比較区間を計算し直せませんでした。"));
+    }
+    if (!payload.available) {
+      // selectorだけ戻すと、直前の再計算結果がglobal stateに残り、表示と再生がずれる。
+      restoreSavedComparisonAlignments(diagnostics);
+      historyPreviewStatus.textContent = payload.unavailable_reason || "この履歴は再計算できません。";
+      return;
+    }
+    applyPracticeComparisonAlignments(
+      payload.comparison_alignment || null,
+      payload.model_comparison_alignment || null,
+    );
+    historyPreviewStatus.textContent = `現在の実装で計算し直した比較区間を表示しています。余白は${Number(payload.playback_padding_seconds).toFixed(2)}秒、保存時は${formatSavedPadding(payload.saved_playback_padding_seconds)}です。`;
+  } catch (error) {
+    if (!isCurrentRequest()) {
+      return;
+    }
+    restoreSavedComparisonAlignments(diagnostics);
+    historyPreviewStatus.textContent = error instanceof Error ? error.message : "比較区間を計算し直せませんでした。";
+  }
+}
+
+function restoreSavedComparisonAlignments(diagnostics) {
+  historyPreviewSourceSelect.value = "saved";
+  historyPreviewRecomputeToken += 1;
+  applyPracticeComparisonAlignments(
+    diagnostics.comparison_alignment || null,
+    diagnostics.model_comparison_alignment || null,
+  );
+}
+
+// 再計算中に録音開始や音声読み込み失敗が起きた場合は、遅延応答を捨てるだけでなく、
+// 現在の履歴に保存されたselector・比較区間・状態文言を同じ遷移で復元する。
+function restoreCurrentSavedComparison(statusMessage) {
+  const diagnostics = currentHistoryPreviewEntry?.metadata?.practice_diagnostics;
+  if (!isSavedHistoryPreview || !diagnostics) {
+    historyPreviewRecomputeToken += 1;
+    historyPreviewStatus.textContent = statusMessage;
+    return;
+  }
+  restoreSavedComparisonAlignments(diagnostics);
+  historyPreviewStatus.textContent = statusMessage;
 }
 
 function syncPinyinSettingVisibility() {
