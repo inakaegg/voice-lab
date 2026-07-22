@@ -10,6 +10,7 @@ const script = await readFile(
 
 async function runPublicUsersScript(payload) {
   const fetchCalls = [];
+  const panelListeners = new Map();
   const status = { textContent: "", dataset: {} };
   const body = {
     children: [],
@@ -21,6 +22,9 @@ async function runPublicUsersScript(payload) {
     },
   };
   const root = {
+    closest(selector) {
+      return selector === "details" ? panel : null;
+    },
     querySelector(selector) {
       if (selector === "[data-public-users-reload]") {
         return { addEventListener() {} };
@@ -32,6 +36,12 @@ async function runPublicUsersScript(payload) {
         return status;
       }
       return null;
+    },
+  };
+  const panel = {
+    open: false,
+    addEventListener(type, listener) {
+      panelListeners.set(type, listener);
     },
   };
   const document = {
@@ -66,11 +76,28 @@ async function runPublicUsersScript(payload) {
 
   vm.runInContext(script, context);
   await new Promise((resolve) => setImmediate(resolve));
-  return { fetchCalls, status, body };
+  return {
+    fetchCalls,
+    status,
+    body,
+    async openPanel() {
+      panel.open = true;
+      panelListeners.get("toggle")?.();
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+  };
 }
 
-test("public user list requests the largest page supported by the API", async () => {
+test("public user list waits for its closed operations panel to open", async () => {
   const result = await runPublicUsersScript({ users: [], limit: 2000, stored: 0 });
+
+  assert.deepEqual(result.fetchCalls, []);
+
+  await result.openPanel();
+
+  assert.deepEqual(result.fetchCalls, ["/api/public-users?limit=2000"]);
+
+  await result.openPanel();
 
   assert.deepEqual(result.fetchCalls, ["/api/public-users?limit=2000"]);
 });
@@ -81,6 +108,7 @@ test("public user list reports omitted users when the stored total exceeds the r
     limit: 2000,
     stored: 2450,
   });
+  await result.openPanel();
 
   assert.equal(result.status.textContent, "全2450件中1件を表示しています。");
 });

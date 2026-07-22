@@ -1,11 +1,36 @@
 const publicUsersRoots = [...document.querySelectorAll("[data-public-users]")];
 const PUBLIC_USERS_REQUEST_LIMIT = 2000;
+let publicUsersInitialLoadStarted = false;
 
 if (publicUsersRoots.length > 0) {
+  const panels = new Set();
   for (const root of publicUsersRoots) {
-    root.querySelector("[data-public-users-reload]")?.addEventListener("click", () => loadPublicUsers());
+    root.querySelector("[data-public-users-reload]")?.addEventListener("click", () => {
+      void loadPublicUsers();
+    });
+    const panel = root.closest("details");
+    if (panel) {
+      panels.add(panel);
+    }
   }
-  loadPublicUsers();
+  for (const panel of panels) {
+    panel.addEventListener("toggle", () => {
+      if (panel.open) {
+        loadPublicUsersOnce();
+      }
+    });
+  }
+  if (publicUsersRoots.some((root) => !root.closest("details") || root.closest("details").open)) {
+    loadPublicUsersOnce();
+  }
+}
+
+function loadPublicUsersOnce() {
+  if (publicUsersInitialLoadStarted) {
+    return;
+  }
+  publicUsersInitialLoadStarted = true;
+  void loadPublicUsers();
 }
 
 async function loadPublicUsers() {
