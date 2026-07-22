@@ -1,8 +1,19 @@
-# SpeakLoop
+# Voice Lab — SpeakLoop
+
+[![CI](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml)
+[![Secret scan](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml)
 
 Voice LabのSpeakLoopは、母語で話した「言いたいこと」を、中国語または英語の発音練習へつなげるWebアプリです。録音、学習文と模範音声の生成、復唱、聞き比べまでを1つの流れで進められます。
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
+
+> **English:** SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Built with React, Cloudflare Workers (auth / quota / API gateway), FastAPI, and a private RunPod Serverless GPU backend. CI runs Python, Worker, and browser tests plus E2E on every pull request.
+
+## 画面
+
+| ポータル | SpeakLoop練習画面 |
+| --- | --- |
+| ![Voice Labポータル](docs/images/portal-1440.png) | ![SpeakLoop練習画面](docs/images/speakloop-1440.png) |
 
 ## できること
 
