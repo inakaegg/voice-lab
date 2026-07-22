@@ -50,16 +50,16 @@ def iter_doc_sentences(markdown: str):
         if not stripped or stripped.startswith("|"):
             yield from flush_paragraph()
             continue
+        text = _INLINE_CODE.sub("", stripped)
+        text = _MARKDOWN_LINK.sub(r"\1", text)
+        text = _BARE_URL.sub("", text)
         if stripped.startswith("#"):
             yield from flush_paragraph()
-            paragraph_lines.append((line_number, stripped))
+            paragraph_lines.append((line_number, text))
             yield from flush_paragraph()
             continue
         if _NEW_BLOCK.match(stripped):
             yield from flush_paragraph()
-        text = _INLINE_CODE.sub("", stripped)
-        text = _MARKDOWN_LINK.sub(r"\1", text)
-        text = _BARE_URL.sub("", text)
         paragraph_lines.append((line_number, text))
     yield from flush_paragraph()
 
@@ -92,6 +92,14 @@ def test_iter_doc_sentences_joins_soft_wrapped_paragraphs() -> None:
 
     assert list(iter_doc_sentences(markdown)) == [
         (1, "一つ、二つ、三つ、 四つ、五つまで続く"),
+    ]
+
+
+def test_iter_doc_sentences_excludes_inline_code_from_headings() -> None:
+    markdown = "# 見出し `一、二、三、四、五`"
+
+    assert list(iter_doc_sentences(markdown)) == [
+        (1, "# 見出し"),
     ]
 
 

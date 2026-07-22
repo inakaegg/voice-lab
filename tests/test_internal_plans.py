@@ -18,11 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 _SOURCE_LABELS = (
     re.compile(r"\[ユーザー指示\]"),
-    re.compile(r"\[実データ確認済み[:：]\s*[^\]\s][^\]]*\]"),
+    re.compile(r"\[実データ確認済み[:：](?=[^\]]*\d)\s*[^\]\s][^\]]*\]"),
     re.compile(r"\[未確認の推測\]"),
 )
 _HEADING = re.compile(r"^#{1,6}\s")
-_CONSTRAINT_HEADING = re.compile(r"(?:制約|constraints)", re.IGNORECASE)
+_CONSTRAINT_HEADING = re.compile(r"(?:制約|\bconstraints?\b)", re.IGNORECASE)
 _CODE_FENCE = re.compile(r"^(```|~~~)")
 _CONSTRAINT_LIST_INTRO = re.compile(r"^制約[:：]\s*$")
 _BULLET = re.compile(r"^[-*]\s|^\d+\.\s")
@@ -110,6 +110,19 @@ def test_iter_unlabeled_constraints_covers_english_constraint_heading() -> None:
     ]
 
 
+def test_iter_unlabeled_constraints_covers_singular_english_constraint_heading() -> None:
+    markdown = "\n".join(
+        [
+            "## Global Constraint",
+            "- ラベルなしの制約。",
+        ]
+    )
+
+    assert list(iter_unlabeled_constraints(markdown)) == [
+        (2, "- ラベルなしの制約。"),
+    ]
+
+
 def test_iter_unlabeled_constraints_rejects_incomplete_observation_label() -> None:
     markdown = "\n".join(
         [
@@ -121,6 +134,20 @@ def test_iter_unlabeled_constraints_rejects_incomplete_observation_label() -> No
 
     assert list(iter_unlabeled_constraints(markdown)) == [
         (2, "- [実データ確認済み] 確認方法と件数がない制約。"),
+    ]
+
+
+def test_iter_unlabeled_constraints_rejects_observation_label_without_count() -> None:
+    markdown = "\n".join(
+        [
+            "## 制約",
+            "- [実データ確認済み: 手動確認] 件数がない制約。",
+            "- [実データ確認済み: 手動で37件を確認] 完全なラベル。",
+        ]
+    )
+
+    assert list(iter_unlabeled_constraints(markdown)) == [
+        (2, "- [実データ確認済み: 手動確認] 件数がない制約。"),
     ]
 
 
