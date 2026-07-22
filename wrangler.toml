@@ -38,3 +38,40 @@ USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_po
 
 [triggers]
 crons = ["17 3 * * *"]
+
+[env.staging]
+name = "voice-lab-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "MO_SPEECH_KV"
+id = "8eb39f43a18c4a9892dfafe1ae391a72"
+
+[[env.staging.d1_databases]]
+binding = "MO_SPEECH_DB"
+database_name = "mo-speech-staging-db"
+database_id = "08a21d7a-c5ac-4f24-8273-4a420aae9ec8"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "MO_SPEECH_AUDIO_R2"
+bucket_name = "mo-speech-audio-preview"
+
+[env.staging.vars]
+RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
+RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
+RUNPOD_RUNTIME_HEALTH_CHECK = "1"
+RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "0"
+RUNPOD_WARMUP_PRELOAD_TRANSLATION = "1"
+RUNPOD_WARMUP_PRELOAD_VOICE_CONVERSION = "1"
+OPENAI_TRANSLATION_MODEL = "gpt-5.6-terra"
+OPENAI_TEXT_TRANSFORM_MODEL = "gpt-5.6-terra"
+OPENAI_TEXT_DISPLAY_MODEL = "gpt-5.6-terra"
+OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+OPENAI_TTS_VOICE = "coral"
+OPENAI_TTS_RESPONSE_FORMAT = "wav"
+SEED_VC_DIFFUSION_STEPS = "8"
+SEED_VC_REFERENCE_MAX_SECONDS = "12"
+USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
+
+[env.staging.triggers]
+crons = []
