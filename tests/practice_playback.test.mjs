@@ -6,6 +6,7 @@ await import("../src/mo_speech/web/practice_playback.js");
 const {
   comparisonPlaybackPlan,
   comparisonRangeForTargetOffset,
+  segmentFadeVolume,
   shouldStopAudioSegment,
   buildPracticeDiffCells,
   compactPracticeDiffCells,
@@ -105,6 +106,14 @@ test("segment playback stops at the exact end instead of 30ms early", () => {
   assert.equal(shouldStopAudioSegment({ active: true, ended: false, currentTime: 0.969, segmentEnd: 1.0 }), false);
   assert.equal(shouldStopAudioSegment({ active: true, ended: false, currentTime: 1.0, segmentEnd: 1.0 }), true);
   assert.equal(shouldStopAudioSegment({ active: false, ended: false, currentTime: 0.5, segmentEnd: 1.0 }), true);
+});
+
+test("segment playback applies a short symmetric fade at both cut edges", () => {
+  assert.equal(segmentFadeVolume({ currentTime: 1.0, segmentStart: 1.0, segmentEnd: 2.0, fadeSeconds: 0.03 }), 0);
+  assert.equal(segmentFadeVolume({ currentTime: 1.015, segmentStart: 1.0, segmentEnd: 2.0, fadeSeconds: 0.03 }), 0.5);
+  assert.equal(segmentFadeVolume({ currentTime: 1.5, segmentStart: 1.0, segmentEnd: 2.0, fadeSeconds: 0.03 }), 1);
+  assert.equal(segmentFadeVolume({ currentTime: 1.985, segmentStart: 1.0, segmentEnd: 2.0, fadeSeconds: 0.03 }), 0.5);
+  assert.equal(segmentFadeVolume({ currentTime: 2.0, segmentStart: 1.0, segmentEnd: 2.0, fadeSeconds: 0.03 }), 0);
 });
 
 test("a heard-word difference selects the paired range for its target phrase", () => {

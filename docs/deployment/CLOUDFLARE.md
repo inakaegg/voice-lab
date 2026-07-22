@@ -198,6 +198,6 @@ preview_bucket_name = "mo-speech-audio-preview"
 - `MO_SPEECH_KV` binding が無い環境では、管理画面の設定を永続化できない。R2を設定してもCloudflare版のユーザー音声履歴は有効にならない。
 - 大きい録音ファイルはWorkerとRunPodのrequest size制限を受ける。ユーザー画面では短い録音を前提にする。
 - OpenAI ASR、翻訳、TTSはWorkerのHTTP request内で完了を待つ。SpeakLoop中国語復唱ASRはRunPodの非同期jobとprogress updateを使うが、queueの詳細原因や残高不足はRunPodが明示した範囲でしか判定できない。
-- SpeakLoop中国語比較の完了outputでは `practice_asr_contract_version=2` を必須とする。`model_audio_base64` を送ったjobでは `model_transcription` も必須とし、欠落時は旧RunPod imageとして再デプロイを案内する。
+- SpeakLoop中国語比較の完了outputでは `practice_asr_contract_version=3` を必須とする。`model_audio_base64` を送ったjobでは `model_transcription` も必須とし、欠落時は旧RunPod imageとして再デプロイを案内する。
 - お手本ASRのキャッシュ命中により `model_audio_base64` を省略したjobは、`model_transcription` も返さない。この場合はWorkerまたはFastAPIがjobと対応付けたキャッシュ済みASRを使い、旧imageとは判定しない。
 - Seed-VCはRunPod endpointのqueue-based Serverlessを使うため、VC処理中の細かいstage progressはRunPod job statusから推定する。

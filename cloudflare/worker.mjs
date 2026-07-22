@@ -244,6 +244,26 @@ function practiceLlmValidateScore(value, label) {
   }
 }
 
+function practiceLlmClampedPlaybackRange(words, { startIndex, endIndex, duration, padding, label }) {
+  const selected = words.slice(startIndex, endIndex);
+  const start = practiceLlmRequiredFiniteNumber(selected[0].start, `${label} word start`);
+  const end = practiceLlmRequiredFiniteNumber(selected[selected.length - 1].end, `${label} word end`);
+  const audioDuration = practiceLlmRequiredFiniteNumber(duration, `${label} audio duration`);
+
+  let playbackStart = Math.max(0, start - padding);
+  if (startIndex > 0) {
+    const previousEnd = practiceLlmRequiredFiniteNumber(words[startIndex - 1].end, `${label} previous word end`);
+    playbackStart = previousEnd < start ? Math.max(playbackStart, previousEnd) : start;
+  }
+
+  let playbackEnd = Math.min(audioDuration, end + padding);
+  if (endIndex < words.length) {
+    const nextStart = practiceLlmRequiredFiniteNumber(words[endIndex].start, `${label} next word start`);
+    playbackEnd = nextStart > end ? Math.min(playbackEnd, nextStart) : Math.min(audioDuration, end);
+  }
+  return { playbackStart, playbackEnd };
+}
+
 function practiceLlmValidateRange(value, asrValue, { duration, padding, label }) {
   if (!value || typeof value !== "object" || !asrValue || typeof asrValue !== "object") {
     throw new PracticeLlmError(`${label} range is invalid`, { stage: "validate_response" });
@@ -291,8 +311,13 @@ function practiceLlmValidateRange(value, asrValue, { duration, padding, label })
   const start = practiceLlmRequiredFiniteNumber(selected[0].start, `${label} word start`);
   const end = practiceLlmRequiredFiniteNumber(selected[selected.length - 1].end, `${label} word end`);
   const audioDuration = practiceLlmRequiredFiniteNumber(duration, `${label} audio duration`);
-  const playbackStart = Math.max(0, start - padding);
-  const playbackEnd = Math.min(audioDuration, end + padding);
+  const { playbackStart, playbackEnd } = practiceLlmClampedPlaybackRange(words, {
+    startIndex,
+    endIndex,
+    duration: audioDuration,
+    padding,
+    label,
+  });
   if (playbackEnd <= playbackStart) {
     throw new PracticeLlmError(`${label} playback range is empty`, { stage: "validate_response" });
   }
@@ -586,7 +611,7 @@ async function lookupRunpodPracticeModelAsrCache(env, { audioBytes, sourceLangua
   // メモリ)キャッシュ空間を使う。modelにはOpenAIのモデル名と衝突しないRunPod
   // provider名を使い、同じ音声でもproviderが違えば別キーになるようにする。
   const digest = bufferToHex(await crypto.subtle.digest("SHA-256", audioBytes));
-  const key = practiceModelAsrCacheKey(digest, "runpod-funasr-paraformer-zh", sourceLanguage);
+  const key = practiceModelAsrCacheKey(digest, "runpod-funasr-fa-zh-v1", sourceLanguage);
   const cached = await lookupPracticeModelAsrCache(env, key);
   return { key, cached };
 }
@@ -3167,6 +3192,7 @@ async function createPracticeAttemptJob(request, env) {
     });
     const body = await submitRunpodJob(env, {
       operation_mode: "practice_asr",
+      align_timestamps: true,
       source_language: targetLanguage,
       target_text: targetText,
       audio_mime_type: audioMimeType || "audio/wav",
@@ -3293,12 +3319,12 @@ async function practiceAttemptJobSnapshot(body, health = null, env = {}) {
       return failedPracticeAttemptJob(jobId, stages, metrics, "RunPod job completed without an output object");
     }
     const contractVersion = Number(output.practice_asr_contract_version || 0);
-    if (!Number.isFinite(contractVersion) || contractVersion < 2) {
+    if (!Number.isFinite(contractVersion) || contractVersion < 3) {
       return failedPracticeAttemptJob(
         jobId,
         stages,
         metrics,
-        "RunPod imageがpractice ASR contract v2に対応していません。現在のRunPod imageを再デプロイしてください。",
+        "RunPod imageがpractice ASR contract v3に対応していません。現在のRunPod imageを再デプロイしてください。",
         "RunPod imageの更新が必要です",
       );
     }

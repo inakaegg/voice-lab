@@ -373,6 +373,7 @@ class RunpodServerlessPracticeAsrProvider:
             raise ValueError("RunPod FunASR practice ASR only supports zh-CN")
         payload: dict[str, object] = {
             "operation_mode": "practice_asr",
+            "align_timestamps": True,
             "source_language": source_language,
             "target_text": str(target_text or ""),
             "audio_mime_type": _audio_mime_type(attempt_audio_path),

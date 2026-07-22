@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handleRequest, runPublicDataRetention } from "../cloudflare/worker.mjs";
+import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
@@ -28,6 +28,37 @@ test("Cloudflare worker routes only the current public app pages", async () => {
     "/react/privacy.html",
     "/react/privacy.html",
   ]);
+});
+
+test("Cloudflare playback padding stops before neighboring speech", () => {
+  const words = [
+    { text: "前", start: 0, end: 0.45 },
+    { text: "対象", start: 0.8, end: 1.2 },
+    { text: "次", start: 1.25, end: 1.6 },
+  ];
+  const result = validatePracticeLlmResult({
+    schema_version: 1,
+    overall_score: 100,
+    overall_comment: "ok",
+    phrases: [{
+      phrase_index: 0,
+      target_text: "対象",
+      score: 100,
+      comment: "ok",
+      reference: { status: "assigned", word_start_index: 1, word_end_index: 2 },
+      attempt: { status: "assigned", word_start_index: 1, word_end_index: 2 },
+    }],
+  }, {
+    target_text: "対象",
+    padding_seconds: 0.3,
+    reference_audio_duration: 2,
+    attempt_audio_duration: 2,
+    reference_asr: { words },
+    attempt_asr: { words },
+  });
+
+  assert.equal(result.phrases[0].reference.playback_start, 0.5);
+  assert.equal(result.phrases[0].reference.playback_end, 1.25);
 });
 
 test("Cloudflare worker deletes expired daily quota and audit data without resetting total quota", async () => {
@@ -1889,7 +1920,7 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
         delayTime: 1200,
         executionTime: 450,
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "你好吗？你今天去哪里？",
           text: "你哈吗？你今天到那里？",
           model: "funasr/paraformer-zh",
@@ -1963,6 +1994,7 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
   assert.equal(queued.current_stage.model, "funasr/paraformer-zh");
   assert.equal(calls[0].url, "https://api.runpod.ai/v2/endpoint/run");
   assert.equal(calls[0].body.input.operation_mode, "practice_asr");
+  assert.equal(calls[0].body.input.align_timestamps, true);
   assert.equal(calls[0].body.input.target_text, "你好吗？你今天去哪里？");
   assert.ok(calls[0].body.input.audio_base64);
   assert.ok(calls[0].body.input.model_audio_base64);
@@ -1985,6 +2017,7 @@ test("Cloudflare worker exposes Chinese practice as an async dual-audio RunPod j
 
 test("Cloudflare worker reuses cached model ASR across Chinese attempt retries", async () => {
   const runCalls = [];
+  const kv = fakeKv();
   const env = fakeEnv(async (url, init = {}) => {
     if (url === "https://api.runpod.ai/v2/endpoint/run") {
       const body = parseJsonBody(init.body);
@@ -2002,7 +2035,7 @@ test("Cloudflare worker reuses cached model ASR across Chinese attempt retries",
         id: "practice-job-1",
         status: "COMPLETED",
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "你好。",
           text: "你好",
           model: "funasr/paraformer-zh",
@@ -2025,7 +2058,7 @@ test("Cloudflare worker reuses cached model ASR across Chinese attempt retries",
         id: "practice-job-2",
         status: "COMPLETED",
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "你好。",
           text: "你好",
           model: "funasr/paraformer-zh",
@@ -2056,7 +2089,7 @@ test("Cloudflare worker reuses cached model ASR across Chinese attempt retries",
       });
     }
     throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
+  }, { kv });
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const form = new FormData();
@@ -2083,8 +2116,13 @@ test("Cloudflare worker reuses cached model ASR across Chinese attempt retries",
   }
 
   assert.equal(runCalls.length, 2);
+  assert.ok(runCalls.every((input) => input.align_timestamps === true));
   assert.ok(runCalls[0].model_audio_base64, "the first submission must include the model audio");
   assert.equal(runCalls[1].model_audio_base64, undefined, "the second submission must reuse the cached model ASR");
+  assert.ok(
+    [...kv.__store.keys()].some((key) => key.includes("runpod-funasr-fa-zh-v1:zh-CN:")),
+    "the aligned timestamps must use a versioned cache identity",
+  );
 });
 
 test("Cloudflare worker retries an empty Chinese model ASR instead of caching it", async () => {
@@ -2101,7 +2139,7 @@ test("Cloudflare worker retries an empty Chinese model ASR instead of caching it
     if (url.startsWith("https://api.runpod.ai/v2/endpoint/status/empty-reference-retry-")) {
       const jobIndex = Number(url.split("-").at(-1)) - 1;
       const output = {
-        practice_asr_contract_version: 2,
+        practice_asr_contract_version: 3,
         target_text: "你好。",
         text: "",
         model: "funasr/paraformer-zh",
@@ -2482,7 +2520,7 @@ test("Cloudflare worker scores a Chinese practice attempt using the LLM comparis
         id: "practice-llm-job-1",
         status: "COMPLETED",
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "你好。",
           text: "你好。",
           model: "funasr/paraformer-zh",
@@ -2627,7 +2665,7 @@ test("Cloudflare worker preserves phrase context for polyphonic diff pinyin", as
         id: "practice-pinyin-job-1",
         status: "COMPLETED",
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "银行。",
           text: "银形",
           model: "funasr/paraformer-zh",
@@ -2713,7 +2751,7 @@ test("Cloudflare worker surfaces an LLM validation failure as a failed job snaps
         id: "practice-llm-job-fail",
         status: "COMPLETED",
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "你好。",
           text: "你好。",
           model: "funasr/paraformer-zh",
@@ -2797,6 +2835,7 @@ test("Cloudflare worker explains when the RunPod practice image predates the dua
         id: "outdated-practice-job",
         status: "COMPLETED",
         output: {
+          practice_asr_contract_version: 2,
           target_text: "你好吗？",
           text: "你好吗？",
           model: "funasr/paraformer-zh",
@@ -2815,7 +2854,7 @@ test("Cloudflare worker explains when the RunPod practice image predates the dua
   assert.equal(response.status, 200);
   assert.equal(payload.status, "failed");
   assert.equal(payload.current_stage.label, "RunPod imageの更新が必要です");
-  assert.match(payload.error, /practice ASR contract v2/);
+  assert.match(payload.error, /practice ASR contract v3/);
   assert.match(payload.error, /再デプロイ/);
 });
 
@@ -2826,7 +2865,7 @@ test("Cloudflare worker reports an empty reference ASR as a typed failed job", a
         id: "empty-reference",
         status: "COMPLETED",
         output: {
-          practice_asr_contract_version: 2,
+          practice_asr_contract_version: 3,
           target_text: "你好吗？",
           text: "你好吗？",
           model: "funasr/paraformer-zh",
@@ -3617,6 +3656,7 @@ async function publicIdentityHashForTest(email) {
 function fakeKv() {
   const store = new Map();
   return {
+    __store: store,
     async get(key) {
       return store.get(key) ?? null;
     },

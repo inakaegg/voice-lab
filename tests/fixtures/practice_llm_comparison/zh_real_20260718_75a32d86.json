@@ -105,7 +105,7 @@
           "start": 0.72,
           "end": 2.339,
           "playback_start": 0.62,
-          "playback_end": 2.439
+          "playback_end": 2.339
         }
       },
       {
@@ -121,7 +121,7 @@
           "start": 1.266208,
           "end": 2.28302,
           "playback_start": 1.166208,
-          "playback_end": 2.38302
+          "playback_end": 2.28302
         },
         "attempt": {
           "status": "assigned",
@@ -130,8 +130,8 @@
           "matched_text": "发了三个多消息",
           "start": 2.339,
           "end": 5.22,
-          "playback_start": 2.239,
-          "playback_end": 5.32
+          "playback_start": 2.339,
+          "playback_end": 5.22
         }
       },
       {
@@ -146,7 +146,7 @@
           "matched_text": "codex已经完成实现了",
           "start": 2.28302,
           "end": 5.54625,
-          "playback_start": 2.18302,
+          "playback_start": 2.28302,
           "playback_end": 5.64625
         },
         "attempt": {
@@ -156,8 +156,8 @@
           "matched_text": "codix已经完全实现了",
           "start": 5.22,
           "end": 8.459,
-          "playback_start": 5.12,
-          "playback_end": 8.559
+          "playback_start": 5.22,
+          "playback_end": 8.459
         }
       },
       {
@@ -182,7 +182,7 @@
           "matched_text": "你就像咱妈样呢",
           "start": 8.459,
           "end": 10.289,
-          "playback_start": 8.359,
+          "playback_start": 8.459,
           "playback_end": 10.26
         }
       }
@@ -204,7 +204,7 @@
         "reference_base_range": {"start": 0.0, "end": 0.541},
         "attempt_base_range": {"start": 0.72, "end": 2.339},
         "reference_playback_range": {"start": 0.0, "end": 0.641},
-        "attempt_playback_range": {"start": 0.62, "end": 2.439}
+        "attempt_playback_range": {"start": 0.62, "end": 2.339}
       },
       {
         "phrase_index": 1,
@@ -213,8 +213,8 @@
         "comment": "「花」と「小时」が、それぞれ「发」と「消息」として認識されています。",
         "reference_base_range": {"start": 1.266208, "end": 2.28302},
         "attempt_base_range": {"start": 2.339, "end": 5.22},
-        "reference_playback_range": {"start": 1.166208, "end": 2.38302},
-        "attempt_playback_range": {"start": 2.239, "end": 5.32}
+        "reference_playback_range": {"start": 1.166208, "end": 2.28302},
+        "attempt_playback_range": {"start": 2.339, "end": 5.22}
       },
       {
         "phrase_index": 2,
@@ -223,8 +223,8 @@
         "comment": "全体は伝わっていますが、「完成」が「完全」として認識されています。",
         "reference_base_range": {"start": 2.28302, "end": 5.54625},
         "attempt_base_range": {"start": 5.22, "end": 8.459},
-        "reference_playback_range": {"start": 2.18302, "end": 5.64625},
-        "attempt_playback_range": {"start": 5.12, "end": 8.559}
+        "reference_playback_range": {"start": 2.28302, "end": 5.64625},
+        "attempt_playback_range": {"start": 5.22, "end": 8.459}
       },
       {
         "phrase_index": 3,
@@ -234,7 +234,7 @@
         "reference_base_range": {"start": 6.23675, "end": 7.313083},
         "attempt_base_range": {"start": 8.459, "end": 10.289},
         "reference_playback_range": {"start": 6.13675, "end": 7.413083},
-        "attempt_playback_range": {"start": 8.359, "end": 10.26}
+        "attempt_playback_range": {"start": 8.459, "end": 10.26}
       }
     ]
   },
@@ -305,6 +305,7 @@
     "asr_words_and_timestamps": "Recovered from the original Codex session log after the source worktree was removed.",
     "scores_comments_and_complete_timestamps": "Expected product output reviewed after the past alignment-only call; this object is not presented as the raw response from that earlier call.",
     "attempt_last_playback_end": "Clamped from ASR end 10.289 plus padding to the measured audio duration 10.26.",
+    "neighboring_speech_padding": "Padding is removed at contiguous phrase boundaries so playback does not enter the adjacent utterance.",
     "legacy_three_phrase_alignment": "Intentionally excluded."
   }
 }

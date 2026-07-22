@@ -117,6 +117,9 @@ def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: py
                 timestamp_granularities=["word"],
             )
 
+        def force_align_detail(self, _audio_path, _transcription):
+            raise AssertionError("single-audio practice_asr must not run forced alignment")
+
     monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
 
     payload = runpod_handler.handler(
@@ -139,7 +142,7 @@ def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: py
 
 
 def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[bytes, str]] = []
+    calls: list[tuple[str, bytes, str]] = []
     progress: list[dict[str, object]] = []
 
     class FakeFunAsrProvider:
@@ -151,11 +154,22 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
             assert include_timestamps is True
             audio = audio_path.read_bytes()
             text = "你好吗？" if audio == b"model audio" else "你哈吗？"
-            calls.append((audio, text))
+            calls.append(("asr", audio, text))
             return AsrTranscription(
                 text=text,
                 model=self.model,
                 words=[{"text": text.rstrip("？"), "start": 0.1, "end": 0.9}],
+                timestamp_granularities=["word"],
+            )
+
+        def force_align_detail(self, audio_path, transcription):
+            audio = audio_path.read_bytes()
+            calls.append(("align", audio, transcription.text))
+            return AsrTranscription(
+                text=transcription.text,
+                model=transcription.model,
+                words=[{"text": transcription.words[0]["text"], "start": 0.0, "end": 0.8}],
+                segments=[{"text": transcription.text, "start": 0.0, "end": 0.8}],
                 timestamp_granularities=["word"],
             )
 
@@ -177,11 +191,16 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
         }
     )
 
-    assert calls == [(b"model audio", "你好吗？"), (b"attempt audio", "你哈吗？")]
+    assert calls == [
+        ("asr", b"model audio", "你好吗？"),
+        ("align", b"model audio", "你好吗？"),
+        ("asr", b"attempt audio", "你哈吗？"),
+        ("align", b"attempt audio", "你哈吗？"),
+    ]
     assert payload["text"] == "你哈吗？"
     assert payload["target_text"] == "你好吗？"
     assert payload["model_transcription"]["text"] == "你好吗？"
-    assert payload["practice_asr_contract_version"] == 2
+    assert payload["practice_asr_contract_version"] == 3
     assert [entry["stage"] for entry in progress] == [
         "initializing",
         "transcribing_model",
@@ -189,6 +208,53 @@ def test_runpod_handler_transcribes_model_and_attempt_with_progress(monkeypatch:
         "finalizing",
     ]
     assert all(entry["model"] == "funasr/paraformer-zh" for entry in progress)
+
+
+def test_runpod_handler_aligns_cached_comparison_attempt_without_model_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeFunAsrProvider:
+        name = "funasr-paraformer-zh"
+        model = "funasr/paraformer-zh"
+
+        def transcribe_detail(self, _audio_path, _source_language, *, include_timestamps):
+            assert include_timestamps is True
+            calls.append("asr")
+            return AsrTranscription(
+                text="你好吗？",
+                model=self.model,
+                words=[{"text": "你好吗", "start": 0.1, "end": 0.9}],
+                timestamp_granularities=["word"],
+            )
+
+        def force_align_detail(self, _audio_path, transcription):
+            calls.append("align")
+            return AsrTranscription(
+                text=transcription.text,
+                model=transcription.model,
+                words=[{"text": "你好吗", "start": 0.0, "end": 0.8}],
+                timestamp_granularities=["word"],
+            )
+
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", FakeFunAsrProvider())
+
+    payload = runpod_handler.handler(
+        {
+            "input": {
+                "operation_mode": "practice_asr",
+                "audio_base64": base64.b64encode(b"attempt audio").decode("ascii"),
+                "source_language": "zh-CN",
+                "target_text": "你好吗？",
+                "align_timestamps": True,
+            }
+        }
+    )
+
+    assert calls == ["asr", "align"]
+    assert payload["words"] == [{"text": "你好吗", "start": 0.0, "end": 0.8}]
+    assert "model_transcription" not in payload
 
 
 def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,6 +271,10 @@ def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pyt
             assert include_timestamps is True
             calls.append("transcribe-funasr")
             return AsrTranscription(text="你好", model="funasr/paraformer-zh")
+
+        def force_align_detail(self, _audio_path, transcription):
+            calls.append("align-funasr")
+            return transcription
 
     monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", FakeVoiceConversionService())
     monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE_LOAD_MS", 1.0)
@@ -1038,6 +1108,25 @@ def test_runpod_voice_conversion_service_preloads_provider_on_first_load(monkeyp
     assert first_load_ms is not None
     assert second_load_ms is None
     assert calls == ["preload"]
+
+
+def test_runpod_funasr_provider_can_skip_alignment_preload(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+
+    class FakeProvider:
+        def preload(self, *, include_alignment):
+            calls.append(include_alignment)
+
+    provider = FakeProvider()
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER", None)
+    monkeypatch.setattr(runpod_handler, "_FUNASR_PRACTICE_PROVIDER_LOAD_MS", None)
+    monkeypatch.setattr(runpod_handler, "FunAsrPracticeProvider", lambda: provider)
+
+    loaded, load_ms = runpod_handler._funasr_practice_provider(preload_alignment=False)
+
+    assert loaded is provider
+    assert load_ms is not None
+    assert calls == [False]
 
 
 def test_runpod_handler_requires_audio_base64(monkeypatch: pytest.MonkeyPatch) -> None:

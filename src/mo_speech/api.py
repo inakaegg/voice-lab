@@ -220,7 +220,7 @@ _practice_model_asr_cache_lock = Lock()
 def _practice_model_asr_cache_key(audio_bytes: bytes, source_language: str, asr_provider: object) -> str:
     provider_name = str(getattr(asr_provider, "name", "") or asr_provider.__class__.__name__)
     digest = hashlib.sha256(audio_bytes).hexdigest()
-    return f"{provider_name}:{source_language}:{digest}"
+    return f"fa-zh-v1:{provider_name}:{source_language}:{digest}"
 
 
 def _transcribe_practice_model_audio(
@@ -2290,9 +2290,9 @@ def create_app(
                 contract_version = int(output.get("practice_asr_contract_version") or 0)
             except (TypeError, ValueError):
                 contract_version = 0
-            if contract_version < 2:
+            if contract_version < 3:
                 error = (
-                    "RunPod imageがpractice ASR contract v2に対応していません。"
+                    "RunPod imageがpractice ASR contract v3に対応していません。"
                     "現在のRunPod imageを再デプロイしてください。"
                 )
                 return {

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-PRACTICE_ASR_CONTRACT_VERSION = 2
+PRACTICE_ASR_CONTRACT_VERSION = 3
 
 
 def _optional_float_env(name: str) -> float | None:
@@ -225,6 +225,7 @@ def main() -> int:
             "audio_mime_type": mime_type,
             "source_language": "zh-CN",
         }
+        input_payload["align_timestamps"] = bool(args.model_audio)
         if args.model_audio:
             model_audio_path = Path(args.model_audio)
             input_payload["model_audio_base64"] = base64.b64encode(model_audio_path.read_bytes()).decode("ascii")

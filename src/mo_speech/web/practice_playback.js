@@ -137,6 +137,19 @@
     return !active || ended || Number(currentTime) >= Number(segmentEnd);
   }
 
+  function segmentFadeVolume({ currentTime, segmentStart, segmentEnd, fadeSeconds = 0.03 }) {
+    const current = Number(currentTime);
+    const start = Number(segmentStart);
+    const end = Number(segmentEnd);
+    const requestedFade = Math.max(0, Number(fadeSeconds));
+    if (![current, start, end, requestedFade].every(Number.isFinite) || end <= start) return 0;
+    if (current <= start || current >= end) return 0;
+    const effectiveFade = Math.min(requestedFade, (end - start) / 2);
+    if (effectiveFade === 0) return 1;
+    const volume = Math.max(0, Math.min(1, (current - start) / effectiveFade, (end - current) / effectiveFade));
+    return Math.round(volume * 1_000_000) / 1_000_000;
+  }
+
   function practiceDisplayCharsEqual(left, right) {
     const normalizedLeft = String(left || "").normalize("NFKC").toLocaleLowerCase();
     const normalizedRight = String(right || "").normalize("NFKC").toLocaleLowerCase();
@@ -276,6 +289,7 @@
     comparisonPlaybackPlan,
     comparisonRangeForTargetOffset,
     shouldStopAudioSegment,
+    segmentFadeVolume,
     comparableTargetText,
     buildPracticeDiffCells,
     compactPracticeDiffCells,
