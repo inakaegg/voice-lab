@@ -90,7 +90,7 @@ Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面と
 ## 既知の制限
 
 - RunPod Serverlessはcold start、queue、GPU利用料金の影響を受けます。
-- ASR結果とフレーズ位置は、言語、発音、録音品質、providerの出力により変動します。
+- ASR結果とフレーズ位置は変動します。要因は言語、発音、録音品質、providerの出力です。
 - D1/KV bindingがないローカル・preview環境ではfallbackを使うため、productionと保存先が異なります。
 - Safari、Firefox、スマートフォン実機の録音形式は継続確認が必要です。
 

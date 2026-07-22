@@ -27,17 +27,17 @@
 | `Plachta/Seed-VC` | 全ファイル取得時は3.94 GB | 個別チェックポイントはより小さい。不要な全取得を避ける。 |
 | `myshell-ai/OpenVoiceV2` | 0.13 GB | 変換器の重みのみ。実際の構成ではbase TTSや依存関係が別途必要になる可能性がある。 |
 
-実行時依存、CUDA/PyTorch wheel、tokenizer cache、一時音声、Docker layerを含めると、上記モデル容量に加えて10-30 GiB程度増える可能性がある。
+上記モデル容量に加えて10-30 GiB程度増える可能性がある。増える要因は実行時依存・CUDA/PyTorch wheel・tokenizer cache・一時音声・Docker layerである。
 
 ## 外部APIと自前運用の比較方針
 
-有料外部APIは完全には除外しない。RunPodやModalで自前運用する場合のGPU課金、保存費用、初期設定、保守の手間と比較して判断する。外部APIを導入する場合は、目的、費用、依存リスク、APIキー管理を実装前に別途docsへ明記する。
+有料外部APIは完全には除外しない。RunPodやModalで自前運用する場合のGPU課金、保存費用、初期設定、保守の手間と比較して判断する。外部APIを導入する場合は、目的・費用・依存リスク・APIキー管理を実装前に別途docsへ明記する。
 
 ## RunPod方針
 
 低アクセスMVPでは、ワーカーを0までスケールダウンでき、ワーカー実行中だけ計算リソース課金されるRunPod Serverlessが有力。ただし、永続モデル保存の費用は残る。
 
-公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker module、RunPodは中国語練習用FunASR、VibeVoice、Seed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
+公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker moduleとする。RunPodは中国語練習用FunASR、VibeVoice、Seed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
 初回のGPUスモーク確認では、Web UIとAPIを含むFastAPIをRunPod Podで一体起動する。これはモデルロード、GPU利用、録音またはファイルアップロードから音声出力までを先に確認するための検証構成であり、公開MVPの本番構成ではない。RunPod CLI手順は [RUNPOD.md](RUNPOD.md) を参照する。
 
@@ -45,7 +45,7 @@
 
 1. コードと依存関係だけを含む小さいコンテナを作る。
 2. モデル重みはRunPod Network Volumeへ置く。単一のHugging Faceモデルで足りる場合だけRunPod cached modelsも検討する。
-3. PodとServerlessで `MODEL_CACHE_DIR=/runpod-volume/models`、`HF_HOME=/runpod-volume/huggingface`、`HF_HUB_CACHE=/runpod-volume/huggingface/hub` に揃える。
+3. PodとServerlessで環境変数を揃える。対象は `MODEL_CACHE_DIR=/runpod-volume/models`、`HF_HOME=/runpod-volume/huggingface`、`HF_HUB_CACHE=/runpod-volume/huggingface/hub` である。
 4. 低アクセスMVPでは `workersMin=0` を使う。
 5. 最初はREST APIまたはCLIスクリプトで自動化し、ローカル縦切りが動いてからGitHub Actionsを追加する。
 
