@@ -1,11 +1,137 @@
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# AGENTS.md「1文の読点（、）は3つまで」をdocs/配下へ機械検査する。
+DOC_SENTENCE_COMMA_LIMIT = 3
+_INLINE_CODE = re.compile(r"`[^`]*`")
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_BARE_URL = re.compile(r"https?://\S+")
+_NEW_BLOCK = re.compile(r"^(?:[-*+]\s|\d+\.\s)")
+
+
+def iter_doc_sentences(markdown: str):
+    """コードブロック・表・URL・リンク先を除いた本文を(行番号, 文)で返す。文の区切りは「。」。"""
+    in_code_block = False
+    paragraph_lines = []
+
+    def flush_paragraph():
+        if not paragraph_lines:
+            return []
+        sentences = []
+        sentence_parts = []
+        sentence_start = None
+        for line_number, text in paragraph_lines:
+            parts = text.split("。")
+            for part_index, part in enumerate(parts):
+                if part.strip():
+                    if sentence_start is None:
+                        sentence_start = line_number
+                    sentence_parts.append(part.strip())
+                if part_index < len(parts) - 1 and sentence_parts:
+                    sentences.append((sentence_start, " ".join(sentence_parts)))
+                    sentence_parts = []
+                    sentence_start = None
+        if sentence_parts:
+            sentences.append((sentence_start, " ".join(sentence_parts)))
+        paragraph_lines.clear()
+        return sentences
+
+    for line_number, raw_line in enumerate(markdown.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            yield from flush_paragraph()
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if not stripped or stripped.startswith("|"):
+            yield from flush_paragraph()
+            continue
+        text = _INLINE_CODE.sub("", stripped)
+        text = _MARKDOWN_LINK.sub(r"\1", text)
+        text = _BARE_URL.sub("", text)
+        if stripped.startswith("#"):
+            yield from flush_paragraph()
+            paragraph_lines.append((line_number, text))
+            yield from flush_paragraph()
+            continue
+        if _NEW_BLOCK.match(stripped):
+            yield from flush_paragraph()
+        paragraph_lines.append((line_number, text))
+    yield from flush_paragraph()
+
+
+def test_iter_doc_sentences_splits_sentences_and_excludes_non_prose() -> None:
+    markdown = "\n".join(
+        [
+            "# 見出し",
+            "一つ、二つ、三つ、四つ、五つと数える。次の文。",
+            "```",
+            "code、code、code、code、code",
+            "```",
+            "| 表、表、表、表、表 |",
+            "リンクは[表示名、A、B、C、D](https://example.com/a,b,c,d)を残す。",
+            "URLは https://example.com/x,y,z を除外し、`a、b、c、d、e` も除外する。",
+        ]
+    )
+    sentences = list(iter_doc_sentences(markdown))
+
+    assert (2, "一つ、二つ、三つ、四つ、五つと数える") in sentences
+    assert (2, "次の文") in sentences
+    assert (7, "リンクは表示名、A、B、C、Dを残す") in sentences
+    assert (8, "URLは  を除外し、 も除外する") in sentences
+    assert all("code" not in sentence for _, sentence in sentences)
+    assert all("表、表" not in sentence for _, sentence in sentences)
+
+
+def test_iter_doc_sentences_joins_soft_wrapped_paragraphs() -> None:
+    markdown = "一つ、二つ、三つ、\n四つ、五つまで続く。"
+
+    assert list(iter_doc_sentences(markdown)) == [
+        (1, "一つ、二つ、三つ、 四つ、五つまで続く"),
+    ]
+
+
+def test_iter_doc_sentences_excludes_inline_code_from_headings() -> None:
+    markdown = "# 見出し `一、二、三、四、五`"
+
+    assert list(iter_doc_sentences(markdown)) == [
+        (1, "# 見出し"),
+    ]
+
+
+def test_public_doc_sentences_keep_commas_within_limit() -> None:
+    violations = []
+    for path in sorted((ROOT / "docs").rglob("*.md")):
+        markdown = path.read_text(encoding="utf-8")
+        for line_number, sentence in iter_doc_sentences(markdown):
+            comma_count = sentence.count("、")
+            if comma_count > DOC_SENTENCE_COMMA_LIMIT:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{line_number} 読点{comma_count}個: {sentence}"
+                )
+    assert not violations, (
+        f"1文の読点は{DOC_SENTENCE_COMMA_LIMIT}つまで（AGENTS.md）。違反{len(violations)}件:\n"
+        + "\n".join(violations)
+    )
+
 
 def read_text(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def test_public_docs_carry_an_update_date_near_the_top() -> None:
+    # AGENTS.md「現状説明を持つ文書には更新日を置く」をdocs/配下へ機械検査する。
+    date_line = re.compile(r"^(最終)?更新日[:：]\s*\S+")
+    missing = []
+    for path in sorted((ROOT / "docs").rglob("*.md")):
+        head_lines = path.read_text(encoding="utf-8").splitlines()[:5]
+        if not any(date_line.match(line) for line in head_lines):
+            missing.append(str(path.relative_to(ROOT)))
+    assert not missing, "冒頭5行に更新日行がないdocs:\n" + "\n".join(missing)
 
 
 def test_readme_presents_speakloop_without_research_branding() -> None:
