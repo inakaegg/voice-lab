@@ -5,6 +5,7 @@ on:
     types: [opened, reopened, synchronize]
 
 permissions:
+  checks: read
   contents: write
   pull-requests: write
 
@@ -12,7 +13,7 @@ jobs:
   enable-auto-merge:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
 
     steps:
       - name: Read Dependabot metadata
@@ -21,10 +22,42 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable squash auto-merge for npm and GitHub Actions patch/minor updates
+      - name: Wait for required checks
         if: >-
-          (steps.metadata.outputs.package-ecosystem == 'npm_and_yarn' ||
-          steps.metadata.outputs.package-ecosystem == 'github_actions') &&
+          steps.metadata.outputs.package-ecosystem == 'npm_and_yarn' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor')
+        run: |
+          for attempt in {1..12}; do
+            set +e
+            checks_output="$(gh pr checks --required --watch --fail-fast "$PR_URL" 2>&1)"
+            checks_status=$?
+            set -e
+            printf '%s\n' "$checks_output"
+
+            if [ "$checks_status" -eq 0 ]; then
+              exit 0
+            fi
+
+            if [[ "$checks_output" != *"no required checks reported"* &&
+                  "$checks_output" != *"no checks reported"* ]]; then
+              exit "$checks_status"
+            fi
+
+            if [ "$attempt" -eq 12 ]; then
+              echo "Required checks were not reported after 12 attempts." >&2
+              exit "$checks_status"
+            fi
+
+            sleep 10
+          done
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable squash auto-merge for npm patch/minor updates
+        if: >-
+          steps.metadata.outputs.package-ecosystem == 'npm_and_yarn' &&
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor')
         run: gh pr merge --auto --squash "$PR_URL"
