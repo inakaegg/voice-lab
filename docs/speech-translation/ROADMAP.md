@@ -1,6 +1,6 @@
 # SpeakLoop ロードマップ
 
-更新日: 2026-07-22
+更新日: 2026-07-23
 
 ## この文書の役割
 
@@ -84,6 +84,13 @@ FastAPIを直ちに全廃するのではなく、Python依存処理を提供す�
 ピンイン生成・RunPod jobのpolling・お手本ASRキャッシュ・OpenCC簡体字正規化・音声base64変換である。
 最初に着手するのはお手本ASRキャッシュとする。
 影響範囲が他より閉じており、契約とテストの移行手順をここで確立できるためである。
+
+Phase 1では、Cloudflare Workerの入口へTypeScriptとHonoを導入した。
+未移行のrequestは既存handlerへ委譲し、scheduled handlerも既存の保持期限処理を使う。
+`GET /api/runtime` はHonoへ移し、status・headers・bodyの互換を契約テストで固定した。
+お手本ASRキャッシュは共通TSモジュールへ抽出した。
+KVキー・TTL・空ASR拒否・KVなしfallbackの契約は変更していない。
+FastAPI側の統一とDurable Objectの導入は、後続Phaseで行う。
 
 ## 今後の変更: 公開文書の整理
 

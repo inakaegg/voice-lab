@@ -1,5 +1,11 @@
 import { pinyin } from "pinyin-pro";
 import { Converter } from "opencc-js/t2cn";
+import {
+  lookupPracticeModelAsrCache,
+  practiceModelAsrCacheKey,
+  serializeAsrTimestamps,
+  storePracticeModelAsrCache,
+} from "./src/practice-model-asr-cache.ts";
 
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
@@ -14,7 +20,6 @@ const PRACTICE_ATTEMPT_RESULT_KV_PREFIX = "practice-attempt-result:";
 // 見失う)。
 const PRACTICE_ATTEMPT_POLL_WINDOW_SECONDS = 30 * 60;
 const PRACTICE_LLM_ATTEMPT_OPTIONS_DEFAULT_TTL_SECONDS = PRACTICE_ATTEMPT_POLL_WINDOW_SECONDS + 10 * 60;
-const PRACTICE_MODEL_ASR_CACHE_KV_PREFIX = "practice-model-asr:";
 const RUNPOD_VC_READY_KV_KEY_PREFIX = "runpod:seed-vc-ready:";
 const PUBLIC_ACCESS_SETTINGS_KV_KEY = "public-access-settings";
 const PUBLIC_AUDIT_LOG_KV_KEY = "public-audit-log";
@@ -550,39 +555,6 @@ async function readPracticeAttemptResult(env, jobId) {
   return ephemeralPracticeAttemptResults.get(jobId) || null;
 }
 
-function practiceModelAsrCacheKey(digest, model, sourceLanguage) {
-  return `${PRACTICE_MODEL_ASR_CACHE_KV_PREFIX}${model}:${sourceLanguage}:${digest}`;
-}
-
-function practiceAsrHasSpeech(transcription) {
-  const timestamps = serializeAsrTimestamps(transcription || {});
-  return Boolean(
-    String(transcription?.text || "").trim()
-    || (timestamps?.words || []).length
-    || (timestamps?.segments || []).length
-  );
-}
-
-async function lookupPracticeModelAsrCache(env, key) {
-  const kv = stateKv(env);
-  const cached = kv ? await kvGetJson(kv, key, null) : ephemeralPracticeModelAsrCache.get(key) || null;
-  return practiceAsrHasSpeech(cached) ? cached : null;
-}
-
-async function storePracticeModelAsrCache(env, key, transcription) {
-  if (!practiceAsrHasSpeech(transcription)) {
-    return;
-  }
-  const kv = stateKv(env);
-  if (kv) {
-    await kv.put(key, JSON.stringify(transcription), {
-      expirationTtl: numberFromEnv(env.CLOUDFLARE_PRACTICE_MODEL_ASR_CACHE_TTL_SECONDS, 3600),
-    });
-  } else {
-    ephemeralPracticeModelAsrCache.set(key, transcription);
-  }
-}
-
 async function cachedPracticeModelTranscription(env, { audioBytes, audioMimeType, sourceLanguage, filename, model }) {
   // お手本音声は同じ目標文への再挑戦のたびに同じ内容で送られてくる。同一音声・
   // 言語・モデルの組で結果は変わらないため、復唱のたびにASRを再実行せず
@@ -678,7 +650,6 @@ let ephemeralPublicAccessSettings = null;
 const ephemeralTranslationJobs = new Map();
 const ephemeralPracticeAttemptLlmOptions = new Map();
 const ephemeralPracticeAttemptResults = new Map();
-const ephemeralPracticeModelAsrCache = new Map();
 const ephemeralPublicUsage = new Map();
 
 export default {
@@ -1131,9 +1102,6 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "OPTIONS") {
       return jsonResponse({}, { status: 204 });
     }
-    if (request.method === "GET" && url.pathname === "/api/runtime") {
-      return jsonResponse(await runtimePayload(env));
-    }
     if (request.method === "GET" && url.pathname === "/api/user-settings") {
       return jsonResponse(await readUserSettings(env));
     }
@@ -1351,7 +1319,15 @@ async function serveAsset(request, env, url) {
   );
 }
 
-async function runtimePayload(env) {
+export async function runtimeResponse(env = {}) {
+  try {
+    return jsonResponse(await runtimePayload(env));
+  } catch (error) {
+    return jsonResponse({ detail: errorMessage(error) }, { status: error.status || 500 });
+  }
+}
+
+export async function runtimePayload(env) {
   const runpodAvailable = Boolean(env.RUNPOD_ENDPOINT_ID && env.RUNPOD_API_KEY);
   const openaiAvailable = Boolean(env.OPENAI_API_KEY);
   const health = runpodAvailable && env.RUNPOD_RUNTIME_HEALTH_CHECK !== "0"
@@ -4173,22 +4149,6 @@ function normalizedAsrTimingRows(rows, textKey) {
       end,
     }];
   });
-}
-
-function serializeAsrTimestamps(transcription) {
-  const words = transcription?.words || [];
-  const segments = transcription?.segments || [];
-  const rawWordCount = Number(transcription?.raw_timestamp_word_count ?? words.length);
-  const rawSegmentCount = Number(transcription?.raw_timestamp_segment_count ?? segments.length);
-  return {
-    available: Boolean(rawWordCount || rawSegmentCount),
-    model: transcription?.model || "",
-    timestamp_granularities: transcription?.timestamp_granularities || [],
-    words,
-    segments,
-    raw_timestamp_word_count: rawWordCount,
-    raw_timestamp_segment_count: rawSegmentCount,
-  };
 }
 
 async function translateTranscript(env, { transcript, sourceLanguage, targetLanguage }) {
