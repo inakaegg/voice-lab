@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "lucide-react": "^1.24.0",
+    "lucide-react": "^1.25.0",
     "opencc-js": "^1.4.1",
     "pinyin-pro": "^3.28.1",
     "react": "^19.2.7",
