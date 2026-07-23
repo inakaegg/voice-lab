@@ -87,3 +87,8 @@ jobs:
 
       - name: Deploy production Worker
         run: npx wrangler deploy --env=""
+
+      - name: Smoke production deployment
+        run: >-
+          python3 scripts/smoke_cloudflare_deployment.py
+          --base-url https://voice-lab.inakaegg.workers.dev

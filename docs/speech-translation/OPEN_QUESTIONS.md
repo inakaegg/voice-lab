@@ -1,12 +1,12 @@
 # 未決定事項
 
-更新日: 2026-07-22
+更新日: 2026-07-23
 
 現在の実装仕様は [SPEC.md](SPEC.md) を正とする。この文書には、実装済みの過去の検討事項を残さず、判断が必要な事項だけを記録する。
 
 ## 公開境界と構成分離
 
-- production内では単一Workerを正とする。staging用resourceと設定は準備済みだが、staging Workerの初回手動deployは未実施である。
+- production内では単一Workerを正とする。staging Workerは別resourceで配備し、必須Worker secretも登録済みである。Googleログインの実操作確認は未実施である。
 - SkitVoice/VibeVoiceは一般公開せず、同一Worker内でも管理者研究境界へ閉じる。
 - secret、障害、デプロイ権限の物理分離が必要になった場合だけ、SpeakLoopと研究用SkitVoiceのWorker分割を再検討する。
 

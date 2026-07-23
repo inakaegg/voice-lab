@@ -50,3 +50,8 @@ jobs:
 
       - name: Deploy staging Worker
         run: npx wrangler deploy --env staging
+
+      - name: Smoke staging deployment
+        run: >-
+          python3 scripts/smoke_cloudflare_deployment.py
+          --base-url https://voice-lab-staging.inakaegg.workers.dev
