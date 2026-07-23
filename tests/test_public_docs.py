@@ -241,6 +241,8 @@ def test_publication_record_tracks_public_repository_and_external_controls() -> 
     assert "Private vulnerability reportingは有効" in checklist
     assert "required checks" in checklist
     assert "force pushとbranch削除は禁止" in checklist
+    assert "2026-07-22（米国太平洋時間）" in checklist
+    assert "2026-07-23T04:38:20Z" in checklist
     assert "legacy quota keyは0件" in checklist
     assert "D1 audit 97件" in checklist
     assert "registry credentialは1件" in checklist

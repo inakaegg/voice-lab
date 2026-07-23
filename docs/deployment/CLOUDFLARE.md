@@ -232,16 +232,15 @@ wrangler secret put ADMIN_GOOGLE_EMAILS --env staging
 
 Google OAuth clientの承認済みリダイレクトURIには、`https://voice-lab-staging.inakaegg.workers.dev/auth/google/callback` を追加する。
 
-staging Workerは2026-07-22に初回deploy済みである。2026-07-23に `OPENAI_API_KEY`、`RUNPOD_API_KEY`、`RUNPOD_ENDPOINT_ID`、`PUBLIC_SESSION_SECRET` を登録した。同日に `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`ADMIN_GOOGLE_EMAILS` も登録し、deploy後smokeの全6項目が成功した。Google OAuth clientのリダイレクトURIとGoogleログインの実操作は別途確認する。
+staging Workerは2026-07-22（米国太平洋時間）に初回deploy済みである。Cloudflare APIの記録は `2026-07-23T04:38:20Z` である。2026-07-23に `OPENAI_API_KEY`、`RUNPOD_API_KEY`、`RUNPOD_ENDPOINT_ID`、`PUBLIC_SESSION_SECRET` を登録した。同日に `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`ADMIN_GOOGLE_EMAILS` も登録し、deploy後smokeの全6項目が成功した。Google OAuth clientのリダイレクトURIとGoogleログインの実操作は別途確認する。
 
 残るstaging確認は次の順で行う。
 
-1. staging Worker secretsを登録する。
-2. Google OAuth clientへstagingのリダイレクトURIを追加する。
-3. `Deploy Cloudflare Staging` で確認対象branchを選ぶ。
-4. D1 migration、Worker deploy、deploy後smokeの成功を確認する。
-5. Googleログインと管理画面の認可を確認する。
-6. 費用上限を確認してから、最小入力でOpenAI経路とRunPod経路を個別に確認する。
+1. Google OAuth clientへstagingのリダイレクトURIを追加する。
+2. `Deploy Cloudflare Staging` で確認対象branchを選ぶ。
+3. D1 migration、Worker deploy、deploy後smokeの成功を確認する。
+4. Googleログインと管理画面の認可を確認する。
+5. 費用上限を確認してから、最小入力でOpenAI経路とRunPod経路を個別に確認する。
 
 GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する。Worker secretが無い初回deployでは静的画面を配信できるが、対応する生成APIは503でfail closedする。Google OAuth用secretまたは管理者メールが無い場合も、ログインと管理機能は503でfail closedする。
 

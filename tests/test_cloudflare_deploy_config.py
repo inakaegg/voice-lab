@@ -138,6 +138,13 @@ def test_docs_record_the_deployed_staging_worker_and_secret_status() -> None:
     assert "staging Workerは配備済み" in cloudflare
     assert "stagingの必須Worker secretは登録済み" in cloudflare
     assert "Googleログインの実操作確認は未実施" in cloudflare
+    assert "2026-07-22（米国太平洋時間）に初回deploy済み" in cloudflare
+    assert "2026-07-23T04:38:20Z" in cloudflare
+    assert (
+        "残るstaging確認は次の順で行う。\n\n"
+        "1. Google OAuth clientへstagingのリダイレクトURIを追加する。"
+    ) in cloudflare
+    assert "staging Worker secretsを登録する" not in cloudflare
     assert "OPENAI_API_KEY" in cloudflare
     assert "PUBLIC_SESSION_SECRET" in cloudflare
     assert "staging Workerは未配備" not in cloudflare
