@@ -5,15 +5,39 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
 
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      pip-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      # RunPodベースイメージ(runpod/pytorch:2.8.0-cuda12.8.1)と同時更新するため固定。
+      # tests/test_runpod_scripts.py と tests/test_project_metadata.py が機械検査する。
+      - dependency-name: torch
+      - dependency-name: torchaudio
+      - dependency-name: funasr
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
