@@ -1,6 +1,6 @@
 # 公開デモのデータ取扱い境界
 
-更新日: 2026-07-17
+更新日: 2026-07-23
 
 この文書は実装上のデータフローと保存境界を固定する技術文書である。利用者向けの案内は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とし、公開画面の `/privacy` から同じ内容を確認できるようにする。
 
@@ -42,6 +42,6 @@ Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの
 
 期限のあるD1の日次quotaとaudit eventは、Cloudflare WorkerのCron Triggerで1日1回削除する。KVの短期job、日次quota、audit fallbackにはTTLを設定する。累計quotaは利用上限を維持するデータなので公開デモ運用中は自動削除せず、デモ終了時に削除する。
 
-GitHubのPrivate vulnerability reportingはpublic repositoryでのみ外部から利用できる。現在は公開文書整理のためrepositoryをprivateにしているので、public化時に再確認する。
+GitHub repositoryはpublicである。Private vulnerability reportingは有効であり、外部からsecurity advisoryを非公開で報告できる。
 
 productionへの新Worker反映とlegacy KV削除は完了しており、平文email keyの残存は0件である。

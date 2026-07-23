@@ -216,14 +216,13 @@ def test_secret_scanning_layers_are_documented() -> None:
     assert "push前" in roadmap
 
 
-def test_publication_record_tracks_private_docs_remediation_and_external_controls() -> None:
+def test_publication_record_tracks_public_repository_and_external_controls() -> None:
     checklist = read_text("docs/deployment/PUBLICATION_CHECKLIST.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
 
     for document in (checklist, roadmap):
         assert "GitHub repository" in document
-        assert "private" in document
-        assert "再公開" in document
+        assert "public" in document
 
     assert "Docker Hub" in checklist
     assert "公開状態" in checklist
@@ -236,10 +235,14 @@ def test_publication_record_tracks_private_docs_remediation_and_external_control
     assert "VibeVoice" in checklist
     assert "外部状態スナップショット" in checklist
     assert "is_private=true" in checklist
-    assert "Secret scanningとGitHub Push Protectionはpublic化時に再確認" in checklist
+    assert "Secret scanningとGitHub Push Protectionは有効" in checklist
     assert "Dependabot alertsは有効" in checklist
     assert "Code scanningは未導入" in checklist
-    assert "private状態ではbranch protectionのAPIが403" in checklist
+    assert "Private vulnerability reportingは有効" in checklist
+    assert "required checks" in checklist
+    assert "force pushとbranch削除は禁止" in checklist
+    assert "2026-07-22（米国太平洋時間）" in checklist
+    assert "2026-07-23T04:38:20Z" in checklist
     assert "legacy quota keyは0件" in checklist
     assert "D1 audit 97件" in checklist
     assert "registry credentialは1件" in checklist
@@ -348,8 +351,7 @@ def test_privacy_boundary_explains_external_processing_without_blocking_runpod()
     assert "保持期間" in privacy
     assert "削除" in privacy
     assert "legacy KVの平文email keyは0件" in privacy
-    assert "Private vulnerability reporting" in privacy
-    assert "public化時に再確認" in privacy
+    assert "Private vulnerability reportingは有効" in privacy
     assert "RUNPOD_OPERATION_POLICIES_JSON" not in privacy
     assert "policy.ttl" not in privacy
     assert "policy.executionTimeout" not in privacy

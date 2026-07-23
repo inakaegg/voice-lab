@@ -108,8 +108,43 @@ def test_deploy_workflows_build_the_frontend_before_wrangler() -> None:
         assert workflow.index(build) < workflow.index(deploy)
 
 
-def test_docs_keep_staging_worker_pending_until_the_first_manual_deploy() -> None:
+def test_deploy_workflows_smoke_the_deployed_environment() -> None:
+    cases = [
+        (
+            ROOT / ".github/workflows/deploy.yml",
+            "https://voice-lab.inakaegg.workers.dev",
+        ),
+        (
+            ROOT / ".github/workflows/deploy-staging.yml",
+            "https://voice-lab-staging.inakaegg.workers.dev",
+        ),
+    ]
+
+    for path, base_url in cases:
+        workflow = path.read_text(encoding="utf-8")
+        deploy = "npx wrangler deploy"
+        smoke = "python3 scripts/smoke_cloudflare_deployment.py"
+        assert workflow.index(deploy) < workflow.index(smoke)
+        assert f"--base-url {base_url}" in workflow
+
+
+def test_cloudflare_deployment_smoke_script_exists() -> None:
+    assert (ROOT / "scripts/smoke_cloudflare_deployment.py").is_file()
+
+
+def test_docs_record_the_deployed_staging_worker_and_secret_status() -> None:
     cloudflare = (ROOT / "docs/deployment/CLOUDFLARE.md").read_text(encoding="utf-8")
 
-    assert "staging Workerは未配備" in cloudflare
-    assert "現在はproductionとstagingの2 Workerを同じrepoから配備する" not in cloudflare
+    assert "staging Workerは配備済み" in cloudflare
+    assert "stagingの必須Worker secretは登録済み" in cloudflare
+    assert "Googleログインの実操作確認は未実施" in cloudflare
+    assert "2026-07-22（米国太平洋時間）に初回deploy済み" in cloudflare
+    assert "2026-07-23T04:38:20Z" in cloudflare
+    assert (
+        "残るstaging確認は次の順で行う。\n\n"
+        "1. Google OAuth clientへstagingのリダイレクトURIを追加する。"
+    ) in cloudflare
+    assert "staging Worker secretsを登録する" not in cloudflare
+    assert "OPENAI_API_KEY" in cloudflare
+    assert "PUBLIC_SESSION_SECRET" in cloudflare
+    assert "staging Workerは未配備" not in cloudflare
