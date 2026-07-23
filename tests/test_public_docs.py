@@ -195,8 +195,8 @@ def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     assert "npm run check:js" in workflow
     assert "Dockerfile.runpod" in workflow
     assert "branches: [main]" in workflow
-    assert "gitleaks/gitleaks-action@v2" not in workflow
-    assert "gitleaks/gitleaks-action@v2" in secret_workflow
+    assert "gitleaks/gitleaks-action" not in workflow
+    assert "gitleaks/gitleaks-action@v3" in secret_workflow
     assert "fetch-depth: 0" in secret_workflow
     assert "branches: [main]" not in secret_workflow
     assert "on:\n  push:\n  pull_request:" in secret_workflow
