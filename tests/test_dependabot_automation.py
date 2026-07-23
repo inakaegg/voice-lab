@@ -89,3 +89,15 @@ def test_dependabot_automerge_workflow_uses_pinned_metadata_and_safe_merge() -> 
     )
     assert "--admin" not in workflow
     assert "gh pr review" not in workflow
+
+
+def test_dependabot_automerge_retries_when_required_checks_are_not_reported() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "for attempt in {1..12}; do" in workflow
+    assert "no required checks reported" in workflow
+    assert "no checks reported" in workflow
+    assert "sleep 10" in workflow
+    assert workflow.index("for attempt in {1..12}; do") < workflow.index(
+        "gh pr checks --required --watch --fail-fast"
+    )
