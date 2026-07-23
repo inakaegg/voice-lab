@@ -23,11 +23,23 @@ updates:
         patterns:
           - "*"
     ignore:
-      # RunPodベースイメージ(runpod/pytorch:2.8.0-cuda12.8.1)と同時更新するため固定。
-      # tests/test_runpod_scripts.py と tests/test_project_metadata.py が機械検査する。
+      # 通常更新はRunPodベースイメージ(runpod/pytorch:2.8.0-cuda12.8.1)と同時に行う。
+      # update-typesはsecurity updatesへ適用されないため、脆弱性修正PRは維持される。
       - dependency-name: torch
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
       - dependency-name: torchaudio
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
       - dependency-name: funasr
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /

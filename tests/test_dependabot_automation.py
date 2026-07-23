@@ -29,12 +29,25 @@ def test_dependabot_groups_only_npm_and_github_actions_patch_minor_updates() -> 
         assert "          - major" not in section
 
 
-def test_dependabot_keeps_runpod_coupled_python_dependencies_ignored() -> None:
+def test_dependabot_ignores_only_version_updates_for_runpod_coupled_dependencies() -> (
+    None
+):
     config = DEPENDABOT.read_text(encoding="utf-8")
     pip = _ecosystem_section(config, "pip", "github-actions")
+    dependencies = ("torch", "torchaudio", "funasr")
 
-    for dependency in ("torch", "torchaudio", "funasr"):
-        assert f"- dependency-name: {dependency}" in pip
+    for index, dependency in enumerate(dependencies):
+        dependency_rule = pip.split(f"- dependency-name: {dependency}", 1)[1]
+        if index + 1 < len(dependencies):
+            dependency_rule = dependency_rule.split(
+                f"- dependency-name: {dependencies[index + 1]}",
+                1,
+            )[0]
+
+        assert "update-types:" in dependency_rule
+        assert "version-update:semver-patch" in dependency_rule
+        assert "version-update:semver-minor" in dependency_rule
+        assert "version-update:semver-major" in dependency_rule
 
 
 def test_dependabot_automerge_workflow_has_narrow_trigger_and_permissions() -> None:
@@ -43,18 +56,19 @@ def test_dependabot_automerge_workflow_has_narrow_trigger_and_permissions() -> N
     assert "pull_request:" in workflow
     assert "types: [opened, reopened, synchronize]" in workflow
     assert "pull_request_target:" not in workflow
+    assert "checks: read" in workflow
     assert "contents: write" in workflow
     assert "pull-requests: write" in workflow
     assert "dependabot[bot]" in workflow
 
 
-def test_dependabot_automerge_workflow_allows_only_selected_ecosystems_and_updates() -> (
+def test_dependabot_automerge_workflow_allows_only_npm_patch_minor_updates() -> (
     None
 ):
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "outputs.package-ecosystem == 'npm_and_yarn'" in workflow
-    assert "outputs.package-ecosystem == 'github_actions'" in workflow
+    assert "outputs.package-ecosystem == 'github_actions'" not in workflow
     assert "outputs.package-ecosystem == 'pip'" not in workflow
     assert "outputs.update-type == 'version-update:semver-patch'" in workflow
     assert "outputs.update-type == 'version-update:semver-minor'" in workflow
@@ -69,5 +83,9 @@ def test_dependabot_automerge_workflow_uses_pinned_metadata_and_safe_merge() -> 
         in workflow
     )
     assert "gh pr merge --auto --squash" in workflow
+    assert 'gh pr checks --required --watch --fail-fast "$PR_URL"' in workflow
+    assert workflow.index("gh pr checks --required") < workflow.index(
+        "gh pr merge --auto"
+    )
     assert "--admin" not in workflow
     assert "gh pr review" not in workflow
