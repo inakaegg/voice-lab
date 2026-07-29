@@ -115,6 +115,12 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 依存ライブラリ、モデル、第三者実装にはそれぞれのライセンスと利用条件が適用されます。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
 
+## 開発記録
+
+比較再生の再生位置がズレる問題を、計測の設計からforced alignment導入まで立て直した経緯を図解付きで公開しています。
+
+- [開発記録: 比較再生の再生位置問題](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 症状の切り分け、原因の実測特定、LLMとforced alignmentへの分業、改善の計測値
+
 ## ドキュメント
 
 - [全体仕様](docs/speech-translation/SPEC.md)
