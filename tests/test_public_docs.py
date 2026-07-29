@@ -401,7 +401,7 @@ def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> N
     assert "ローカルsimulation" in roadmap
     assert "本番リソースへ接続しない" in roadmap
     assert "job単位のDurable Object" in roadmap
-    assert "お手本ASR cache" in roadmap
+    assert "お手本ASRキャッシュ" in roadmap
     assert "公開文書の整理" in roadmap
     assert "既存文書への統合" in roadmap
     assert "`_ai/`" in roadmap
