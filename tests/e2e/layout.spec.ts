@@ -48,6 +48,20 @@ for (const route of publicRoutes) {
   });
 }
 
+test("SpeakLoop keeps the own-voice tooltip inside the viewport for zh-CN", async ({ page }) => {
+  await page.goto("/speakloop");
+  await page.locator("#practice-target-language-select").selectOption("zh-CN");
+  await expect(page.locator("#practice-chinese-script-setting")).toBeVisible();
+  await page.locator("#practice-own-voice-toggle").focus();
+  const tooltip = page.locator("#practice-own-voice-tooltip");
+  await expect(tooltip).toBeVisible();
+  const tooltipBox = await tooltip.boundingBox();
+  const viewportWidth = page.viewportSize()?.width || 0;
+  expect(tooltipBox).not.toBeNull();
+  expect(tooltipBox!.x).toBeGreaterThanOrEqual(0);
+  expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
+});
+
 test("SpeakLoop keeps the shared privacy notice at the workflow bottom left", async ({ page }) => {
   await page.goto("/speakloop");
   const [contentBox, workflowBox, privacyBox] = await Promise.all([

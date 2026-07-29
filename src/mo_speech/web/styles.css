@@ -1650,6 +1650,9 @@ audio {
   gap: 10px;
   justify-content: space-between;
   min-width: 0;
+  /* own-voice tooltipの投錨先。コントロール自身を基準にすると、言語設定の増減で
+     コントロールが行の左側へ回り込んだとき固定幅tooltipが画面外へはみ出す。 */
+  position: relative;
 }
 
 .practice-current-language {
@@ -1955,7 +1958,6 @@ audio {
 .practice-own-voice-setting {
   align-items: center;
   display: inline-flex;
-  position: relative;
 }
 
 .practice-own-voice-tooltip {
@@ -4810,7 +4812,7 @@ html[data-tab-audio-available="false"] .react-public-body[data-layout="compact"]
   .react-public-body[data-layout="compact"] .practice-playback-padding input[type="range"] { inline-size: 72px; }
   .react-public-body[data-layout="compact"] .practice-script-toggle button { min-height: 36px; padding-inline: 10px; }
   .react-public-body[data-layout="compact"] .practice-own-voice-control { min-height: 42px; }
-  .react-public-body[data-layout="compact"] .practice-own-voice-tooltip { width: min(300px, calc(100vw - 32px)); }
+  .react-public-body[data-layout="compact"] .practice-own-voice-tooltip { left: 0; right: 0; width: auto; }
   .react-public-body[data-layout="compact"] .practice-history-preview-controls { align-items: stretch; grid-template-columns: 1fr; }
   .react-public-body[data-layout="compact"] .practice-history-preview-controls button { width: 100%; }
   .react-public-body[data-layout="compact"] .react-flow-card { padding: 12px; }
