@@ -1475,6 +1475,105 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(practiceHistory.outputs.length, 0);
 });
 
+test("Cloudflare worker maps OpenAI quota exhaustion to a provider-free category message", async () => {
+  const env = fakeEnv(async (url) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return json({
+        error: {
+          message: "You exceeded your current quota, please check your plan and billing details.",
+          type: "insufficient_quota",
+          code: "insufficient_quota",
+        },
+      }, { status: 429 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+  form.append("target_language", "zh-CN");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(payload.detail, "現在サーバー側のAI利用枠を超えているため処理できません。時間をおいてもう一度お試しください。");
+  assert.ok(!/openai|billing|quota|残高/i.test(payload.detail));
+});
+
+test("Cloudflare worker logs upstream OpenAI failures as metadata without payload content", async () => {
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    logged.push(args.map((value) => String(value)).join(" "));
+  };
+  try {
+    const env = fakeEnv(async (url) => {
+      if (url === "https://api.openai.com/v1/audio/transcriptions") {
+        return json({
+          error: {
+            message: "You exceeded your current quota, please check your plan and billing details.",
+            type: "insufficient_quota",
+            code: "insufficient_quota",
+          },
+        }, { status: 429 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }, { kv: fakeKv() });
+    const form = new FormData();
+    form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+    form.append("target_language", "zh-CN");
+
+    await handleRequest(
+      new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
+      env,
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.ok(logged.some((line) => line.includes("insufficient_quota") && line.includes("429")));
+  assert.ok(logged.some((line) => line.includes("/api/practice/prompts")));
+  assert.ok(!logged.some((line) => line.includes("native")));
+});
+
+test("Cloudflare worker logs a failed practice attempt job with its job id", async () => {
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    logged.push(args.map((value) => String(value)).join(" "));
+  };
+  let payload;
+  try {
+    const env = fakeEnv(async (url) => {
+      if (url === "https://api.runpod.ai/v2/endpoint/status/practice-job-stale") {
+        return json({
+          id: "practice-job-stale",
+          status: "COMPLETED",
+          output: {
+            practice_asr_contract_version: 2,
+            text: "你好",
+            model: "funasr/paraformer-zh",
+          },
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }, { kv: fakeKv() });
+    const response = await handleRequest(
+      new Request("https://example.com/api/practice/attempt-jobs/practice-job-stale"),
+      env,
+    );
+    payload = await response.json();
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(payload.status, "failed");
+  assert.ok(logged.some((line) => line.includes("practice-job-stale") && line.includes("contract")));
+});
+
 test("Cloudflare worker rejects attempt intent for a practice recording", async () => {
   // /api/practice/recordings only creates prompts now; attempts go through
   // /api/practice/attempt-jobs (which needs the model audio for comparison).

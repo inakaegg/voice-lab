@@ -1287,6 +1287,12 @@ async function handleApiRequest(request, env, ctx, url) {
     if (error instanceof PracticeLlmError) {
       return jsonResponse(practiceLlmErrorEnvelope(error), { status: 502 });
     }
+    console.error("api request failed", JSON.stringify({
+      method: request.method,
+      path: url.pathname,
+      status: error.status || 500,
+      detail: errorMessage(error).slice(0, 300),
+    }));
     return jsonResponse({ detail: errorMessage(error) }, { status: error.status || 500 });
   }
 }
@@ -3557,6 +3563,11 @@ function practiceAttemptJobStages() {
 
 function failedPracticeAttemptJob(jobId, stages, metrics, error, label = "処理に失敗しました") {
   const detail = typeof error === "object" && error !== null ? String(error.message || "") : String(error || "");
+  console.error("practice attempt job failed", JSON.stringify({
+    job_id: jobId,
+    label,
+    detail: detail.slice(0, 300),
+  }));
   return {
     job_id: jobId,
     status: "failed",
@@ -4067,6 +4078,26 @@ function cloudflareHistoryDisabledSettings() {
   };
 }
 
+const OPENAI_QUOTA_PUBLIC_MESSAGE = "現在サーバー側のAI利用枠を超えているため処理できません。時間をおいてもう一度お試しください。";
+
+// クレジット枯渇だけ利用者向けカテゴリ文言へ変換し、他の失敗は呼び出し元の従来メッセージに任せる。
+// provider名を含む従来メッセージはフロント側のマスク(SPEC.mdのエラー文言方針)で汎用文言になる。
+function throwIfOpenAiQuotaError(operation, status, errorBody) {
+  const upstream = errorBody && typeof errorBody === "object" ? errorBody.error : null;
+  const code = upstream && typeof upstream === "object" ? String(upstream.code || upstream.type || "") : "";
+  const upstreamMessage = upstream && typeof upstream === "object"
+    ? String(upstream.message || "")
+    : String(upstream || "");
+  console.error(`openai ${operation} failed`, JSON.stringify({
+    status,
+    code,
+    message: upstreamMessage.slice(0, 300),
+  }));
+  if (status === 402 || code === "insufficient_quota") {
+    throw httpError(503, OPENAI_QUOTA_PUBLIC_MESSAGE);
+  }
+}
+
 async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage, filename }) {
   const transcription = await openAiTranscribeDetail(env, {
     audioBytes,
@@ -4117,6 +4148,13 @@ async function openAiTranscribeDetail(env, {
   });
   const text = await response.text();
   if (!response.ok) {
+    let errorBody = null;
+    try {
+      errorBody = JSON.parse(text);
+    } catch (_error) {
+      errorBody = null;
+    }
+    throwIfOpenAiQuotaError("asr", response.status, errorBody);
     throw httpError(response.status, `OpenAI ASR failed: ${text}`);
   }
   if (responseFormat === "text") {
@@ -4415,6 +4453,7 @@ async function openAiText(env, payload) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    throwIfOpenAiQuotaError("text", response.status, body);
     throw httpError(response.status, body.error?.message || body.error || `OpenAI request failed: ${response.status}`);
   }
   return textFromOpenAiResponse(body);
@@ -4440,6 +4479,7 @@ async function openAiSpeech(env, text) {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    throwIfOpenAiQuotaError("tts", response.status, body);
     throw httpError(response.status, body.error?.message || body.error || `OpenAI TTS failed: ${response.status}`);
   }
   const audio = await response.arrayBuffer();
