@@ -3915,3 +3915,74 @@ function fakeD1Statement(db, sql, args) {
     },
   };
 }
+
+test("Cloudflare worker serves robots.txt and sitemap.xml for the public origin", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+  // 生成API向けのログイン必須設定はページ閲覧を制限しないため、クロール許可を変えない。
+  env.PUBLIC_GOOGLE_AUTH_REQUIRED = "1";
+  env.ASSETS = {
+    fetch: async () => {
+      throw new Error("robots.txt and sitemap.xml must not fall through to assets");
+    },
+  };
+
+  const robots = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/robots.txt"), env);
+  assert.equal(robots.status, 200);
+  assert.match(robots.headers.get("Content-Type"), /text\/plain/);
+  const robotsBody = await robots.text();
+  assert.match(robotsBody, /^User-agent: \*$/m);
+  for (const path of ["/admin", "/fun", "/speakloop/admin", "/skitvoice/admin", "/api/", "/auth/"]) {
+    assert.ok(robotsBody.includes(`Disallow: ${path}`), `robots.txt disallows ${path}`);
+  }
+  assert.ok(robotsBody.includes("Sitemap: https://voice-lab.inakaegg.workers.dev/sitemap.xml"));
+
+  const sitemap = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/sitemap.xml"), env);
+  assert.equal(sitemap.status, 200);
+  assert.match(sitemap.headers.get("Content-Type"), /application\/xml/);
+  const sitemapBody = await sitemap.text();
+  for (const loc of [
+    "https://voice-lab.inakaegg.workers.dev/",
+    "https://voice-lab.inakaegg.workers.dev/speakloop",
+    "https://voice-lab.inakaegg.workers.dev/privacy",
+  ]) {
+    assert.ok(sitemapBody.includes(`<loc>${loc}</loc>`), `sitemap lists ${loc}`);
+  }
+  assert.doesNotMatch(sitemapBody, /skitvoice/);
+});
+
+test("Cloudflare worker blocks crawlers on non-canonical deployments", async () => {
+  const assets = {
+    fetch: async () => {
+      throw new Error("robots.txt and sitemap.xml must not fall through to assets");
+    },
+  };
+
+  const stagingEnv = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  stagingEnv.PUBLIC_GOOGLE_AUTH_REQUIRED = "1";
+  stagingEnv.ASSETS = assets;
+
+  const robots = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/robots.txt"), stagingEnv);
+  assert.equal(robots.status, 200);
+  const robotsBody = await robots.text();
+  assert.match(robotsBody, /^Disallow: \/$/m);
+  assert.doesNotMatch(robotsBody, /Sitemap:/);
+
+  const sitemap = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/sitemap.xml"), stagingEnv);
+  assert.equal(sitemap.status, 404);
+
+  const mismatchedEnv = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  mismatchedEnv.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+  mismatchedEnv.ASSETS = assets;
+
+  const mismatchedRobots = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/robots.txt"), mismatchedEnv);
+  assert.match(await mismatchedRobots.text(), /^Disallow: \/$/m);
+  const mismatchedSitemap = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/sitemap.xml"), mismatchedEnv);
+  assert.equal(mismatchedSitemap.status, 404);
+});

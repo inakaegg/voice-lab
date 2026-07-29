@@ -34,11 +34,18 @@ def test_staging_uses_separate_cloudflare_data_resources() -> None:
     assert staging_r2["bucket_name"] != production_r2["bucket_name"]
 
 
+# PUBLIC_CANONICAL_ORIGINは正規公開originだけへクロールを許可するためproduction専用とする。
+# stagingへ複製するとstagingが検索エンジンへ公開されるため、複製対象から除外する。
+PRODUCTION_ONLY_VARS = {"PUBLIC_CANONICAL_ORIGIN"}
+
+
 def test_staging_repeats_vars_requires_login_and_disables_the_production_cron() -> None:
     config = load_wrangler_config()
     staging = config["env"]["staging"]
 
     for name, value in config["vars"].items():
+        if name in PRODUCTION_ONLY_VARS:
+            continue
         assert staging["vars"][name] == value
     assert staging["vars"]["PUBLIC_GOOGLE_AUTH_REQUIRED"] == "1"
     assert staging["triggers"]["crons"] == []
@@ -49,6 +56,13 @@ def test_workers_logs_observability_is_enabled_for_production_and_staging() -> N
 
     assert config["observability"]["enabled"] is True
     assert config["env"]["staging"]["observability"]["enabled"] is True
+
+
+def test_staging_does_not_define_the_canonical_crawl_origin() -> None:
+    config = load_wrangler_config()
+
+    assert config["vars"]["PUBLIC_CANONICAL_ORIGIN"] == "https://voice-lab.inakaegg.workers.dev"
+    assert "PUBLIC_CANONICAL_ORIGIN" not in config["env"]["staging"]["vars"]
 
 
 def test_production_deploy_waits_for_successful_main_ci() -> None:

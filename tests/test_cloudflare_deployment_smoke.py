@@ -77,6 +77,18 @@ def healthy_responses() -> dict[str, tuple[int, str, str]]:
             },
         ),
         "/api/vibevoice/status": json_response(401, {"error": "authentication required"}),
+        "/robots.txt": response(
+            200,
+            "User-agent: *\nDisallow: /admin\n\nSitemap: http://example.com/sitemap.xml\n",
+        ),
+        "/sitemap.xml": response(
+            200,
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            "  <url><loc>http://example.com/</loc></url>\n"
+            "</urlset>\n",
+            "application/xml; charset=utf-8",
+        ),
     }
 
 
@@ -84,7 +96,29 @@ def test_smoke_accepts_a_healthy_deployment() -> None:
     result = run_smoke(healthy_responses())
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "PASS 6/6" in result.stdout
+    assert "PASS 8/8" in result.stdout
+
+
+def test_smoke_accepts_a_non_canonical_deployment_that_blocks_crawlers() -> None:
+    responses = healthy_responses()
+    responses["/robots.txt"] = response(200, "User-agent: *\nDisallow: /\n")
+    responses["/sitemap.xml"] = response(404, "not found")
+
+    result = run_smoke(responses)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS 8/8" in result.stdout
+
+
+def test_smoke_rejects_a_robots_sitemap_mismatch() -> None:
+    responses = healthy_responses()
+    responses["/sitemap.xml"] = response(404, "not found")
+
+    result = run_smoke(responses)
+    output = result.stdout + result.stderr
+
+    assert result.returncode == 1
+    assert "/sitemap.xml" in output
 
 
 def test_smoke_reports_all_failed_checks_without_response_bodies() -> None:
@@ -108,7 +142,7 @@ def test_smoke_reports_all_failed_checks_without_response_bodies() -> None:
     output = result.stdout + result.stderr
 
     assert result.returncode == 1
-    assert "FAIL 3/6" in output
+    assert "FAIL 3/8" in output
     assert "/speakloop" in output
     assert "/api/public-session" in output
     assert "/api/vibevoice/status" in output

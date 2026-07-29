@@ -109,6 +109,44 @@ def validate_public_session(response: Response) -> str | None:
     return None
 
 
+def run_crawl_checks(base_url: str) -> list[str]:
+    """robots.txtとsitemap.xmlの整合を確認する。
+
+    正規公開originはSitemap行と200のsitemapを返す。それ以外の配備は
+    全体Disallowとsitemap 404を返す。どちらの構成も合格とする。
+    """
+    try:
+        robots = fetch(f"{base_url}/robots.txt")
+    except (OSError, URLError) as error:
+        return [f"/robots.txt: request failed ({type(error).__name__})"]
+    if robots.status != 200:
+        return [f"/robots.txt: expected HTTP 200, got {robots.status}"]
+    robots_body = robots.body.decode("utf-8", "replace")
+
+    failures: list[str] = []
+    if "User-agent: *" not in robots_body:
+        failures.append("/robots.txt: missing 'User-agent: *'")
+    crawlable = "Sitemap:" in robots_body
+
+    try:
+        sitemap = fetch(f"{base_url}/sitemap.xml")
+    except (OSError, URLError) as error:
+        failures.append(f"/sitemap.xml: request failed ({type(error).__name__})")
+        return failures
+    if crawlable:
+        if sitemap.status != 200:
+            failures.append(
+                f"/sitemap.xml: robots.txt advertises a sitemap but got HTTP {sitemap.status}",
+            )
+        elif "<urlset" not in sitemap.body.decode("utf-8", "replace"):
+            failures.append("/sitemap.xml: response has no <urlset> element")
+    elif sitemap.status != 404:
+        failures.append(
+            f"/sitemap.xml: expected HTTP 404 on a crawl-blocked deployment, got {sitemap.status}",
+        )
+    return failures
+
+
 def run_checks(base_url: str) -> tuple[list[str], int]:
     checks = [
         Check("/", 200),
@@ -137,7 +175,8 @@ def run_checks(base_url: str) -> tuple[list[str], int]:
             if validation_error is not None:
                 failures.append(f"{check.path}: {validation_error}")
 
-    return failures, len(checks)
+    failures.extend(run_crawl_checks(base_url))
+    return failures, len(checks) + 2
 
 
 def main() -> int:

@@ -710,7 +710,51 @@ export async function handleRequest(request, env = {}, ctx = {}) {
       return authResponse;
     }
   }
+  if (request.method === "GET" && url.pathname === "/robots.txt") {
+    return robotsResponse(env, url);
+  }
+  if (request.method === "GET" && url.pathname === "/sitemap.xml") {
+    return sitemapResponse(env, url);
+  }
   return serveAsset(request, env, url);
+}
+
+const CRAWL_DISALLOWED_PATHS = ["/admin", "/fun", "/speakloop/admin", "/skitvoice/admin", "/api/", "/auth/"];
+// SkitVoiceは非公開案内のためsitemapへ載せない。掲載対象を変える場合は docs/deployment/CLOUDFLARE.md も更新する。
+const SITEMAP_PUBLIC_PATHS = ["/", "/speakloop", "/privacy"];
+
+// クロール許可は正規公開originだけに与える。PUBLIC_GOOGLE_AUTH_REQUIREDは生成API用の
+// 設定でページ閲覧を制限しないため、クロール可否の判定に使わない。
+function crawlingAllowed(env, url) {
+  const canonical = String(env.PUBLIC_CANONICAL_ORIGIN || "").trim().replace(/\/+$/, "");
+  return Boolean(canonical) && canonical === url.origin;
+}
+
+function robotsResponse(env, url) {
+  const lines = crawlingAllowed(env, url)
+    ? [
+      "User-agent: *",
+      ...CRAWL_DISALLOWED_PATHS.map((path) => `Disallow: ${path}`),
+      "",
+      `Sitemap: ${url.origin}/sitemap.xml`,
+    ]
+    : ["User-agent: *", "Disallow: /"];
+  return new Response(`${lines.join("\n")}\n`, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+function sitemapResponse(env, url) {
+  if (!crawlingAllowed(env, url)) {
+    return new Response("Not Found", { status: 404 });
+  }
+  const urls = SITEMAP_PUBLIC_PATHS
+    .map((path) => `  <url><loc>${url.origin}${path}</loc></url>`)
+    .join("\n");
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+  return new Response(body, {
+    headers: { "Content-Type": "application/xml; charset=utf-8" },
+  });
 }
 
 function isPublicAuthPath(pathname) {
