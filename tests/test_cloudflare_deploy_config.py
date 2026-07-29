@@ -44,6 +44,13 @@ def test_staging_repeats_vars_requires_login_and_disables_the_production_cron() 
     assert staging["triggers"]["crons"] == []
 
 
+def test_workers_logs_observability_is_enabled_for_production_and_staging() -> None:
+    config = load_wrangler_config()
+
+    assert config["observability"]["enabled"] is True
+    assert config["env"]["staging"]["observability"]["enabled"] is True
+
+
 def test_production_deploy_waits_for_successful_main_ci() -> None:
     workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
 

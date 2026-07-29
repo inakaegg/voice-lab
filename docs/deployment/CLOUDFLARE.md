@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-07-23
+更新日: 2026-07-29
 
 ## 目的
 
@@ -243,6 +243,13 @@ staging Workerは2026-07-22（米国太平洋時間）に初回deploy済みで�
 5. 費用上限を確認してから、最小入力でOpenAI経路とRunPod経路を個別に確認する。
 
 GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する。Worker secretが無い初回deployでは静的画面を配信できるが、対応する生成APIは503でfail closedする。Google OAuth用secretまたは管理者メールが無い場合も、ログインと管理機能は503でfail closedする。
+
+## ログと監視
+
+- Workers Logsは `wrangler.toml` の `[observability]` で本番とstagingの両方を有効にする。
+- WorkerはOpenAI upstream失敗・API失敗・練習jobの失敗をconsole.errorへ記録する。ログへ音声データや台本などのpayloadは含めない。
+- 過去ログはCloudflare dashboardの対象Worker → Logsで確認する。リアルタイム確認は `npx wrangler tail voice-lab` を使う。
+- Workers LogsのFreeプラン枠は1日20万イベント・保持3日である。超過する場合は `head_sampling_rate` を下げる。
 
 ## 制限
 
