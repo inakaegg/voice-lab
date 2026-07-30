@@ -1,6 +1,6 @@
 # SpeakLoop公開デモ・ポートフォリオ
 
-更新日: 2026-07-23
+更新日: 2026-07-30
 
 ## 現在地
 
@@ -10,7 +10,7 @@
 - 利用者音声と生成音声はCloudflare版のVoice Lab履歴へ保存しない。
 - quota・監査情報はD1、短期jobとfallbackはKVを使い、平文emailを含む旧quota keyは削除済み。
 - 中国語ASRと任意の声質変換はprivateなRunPod Serverlessへ分離している。
-- Python／Node CI、React production build、Playwright 3 viewport E2Eを実装済み。
+- Python／Node CI、React production build、Playwright 3ブラウザ×3 viewport E2Eを実装済み。
 - Gitleaksはcommit前、push前、全branchへのpush・pull requestで独立して実行する。
 - GitHub repositoryはpublicである。Secret scanning、Push Protection、Private vulnerability reportingを有効にしている。
 - Docker HubのRunPod image repositoryはprivateで、認証済みcold startを確認済み。

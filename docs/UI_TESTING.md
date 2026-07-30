@@ -21,6 +21,8 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 - intermediate: `1024x768`
 - mobile: `390x844`
 
+各viewportをChromium、WebKit、Firefoxで検査する。Firefoxのmobile projectは`isMobile`を使わず、viewportと`hasTouch`を指定する。
+
 共通検査:
 
 - `scrollWidth <= clientWidth`
@@ -49,6 +51,12 @@ CloudflareのGoogle OAuth管理境界はWorker単体テストを正とし、通�
 npm run test:e2e
 ```
 
+開発中にChromiumだけを実行する場合は、次のproject指定を使う。
+
+```bash
+npx playwright test --project "chromium-*"
+```
+
 合格画面を目視確認するための画像は、任意実行の次のコマンドで`tmp/playwright/visual-review/`へ保存する。pixel差分の合否判定には使わず、PC／スマホの情報階層と美観を直接確認する。
 
 ```bash
@@ -58,5 +66,5 @@ npm run test:e2e:visual
 初回またはbrowser revision更新時は次を実行する。
 
 ```bash
-npx playwright install chromium
+npx playwright install chromium webkit firefox
 ```
