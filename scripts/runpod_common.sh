@@ -24,7 +24,6 @@ RUNPOD_APP_ENV_KEYS=(
   OPENAI_TTS_VOICE
   OPENAI_TTS_RESPONSE_FORMAT
   OPENAI_TTS_INSTRUCTIONS
-  GOOGLE_TTS_TIMEOUT_SECONDS
   MODEL_CACHE_DIR
   HF_HOME
   HF_HUB_CACHE
@@ -94,7 +93,6 @@ set_default_runpod_app_env() {
   export OPENAI_TTS_MODEL="${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}"
   export OPENAI_TTS_VOICE="${OPENAI_TTS_VOICE:-coral}"
   export OPENAI_TTS_RESPONSE_FORMAT="${OPENAI_TTS_RESPONSE_FORMAT:-wav}"
-  export GOOGLE_TTS_TIMEOUT_SECONDS="${GOOGLE_TTS_TIMEOUT_SECONDS:-30}"
   export MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-${model_volume_path}/models}"
   export HF_HOME="${HF_HOME:-${model_volume_path}/huggingface}"
   export HF_HUB_CACHE="${HF_HUB_CACHE:-${model_volume_path}/huggingface/hub}"

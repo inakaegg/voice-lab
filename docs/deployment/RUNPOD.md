@@ -1,6 +1,6 @@
 # RunPodデプロイ手順
 
-更新日: 2026-07-30
+更新日: 2026-08-02
 
 ## 現在の状態
 
@@ -449,7 +449,7 @@ RunPod実行先を選んだときに `RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are 
 
 この構成ではFastAPIがUIとローカル履歴を担当する。RunPodへ送る処理は中国語練習ASRとVCである。SpeakLoopのお手本ASR・翻訳・通常TTSはOpenAI providerを使う。
 
-テキスト読み上げだけを測る場合は `operation_mode=text_tts` を使う。Google Translate TTS endpointは公式APIではないため、安定運用の既定にはしない。OpenAI TTSを測る場合は `--tts-backend openai` を指定し、endpoint側に `OPENAI_API_KEY` を渡す。
+テキスト読み上げだけを測る場合は `operation_mode=text_tts` を使う。利用できるTTS backendはOpenAI TTSだけである。`--tts-backend openai` を指定し、endpoint側に `OPENAI_API_KEY` を渡す。
 
 ```sh
 RUNPOD_ENDPOINT_ID=<endpoint-id> \
@@ -458,7 +458,7 @@ python scripts/runpod_smoke_serverless.py \
   --operation-mode text_tts \
   --text "こんにちは" \
   --target-language ja-JP \
-  --tts-backend google_translate
+  --tts-backend openai
 ```
 
 VC単体を測る場合は `operation_mode=voice_conversion` を使う。

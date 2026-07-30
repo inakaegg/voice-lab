@@ -1,0 +1,263 @@
+[
+  {
+    "id": "dog",
+    "label_ja": "犬",
+    "sources": [
+      {"dir": "cc0", "file": "dog.wav"},
+      {"dir": "extra", "file": "dog1a.wav"},
+      {"dir": "extra", "file": "dog1b.wav"},
+      {"dir": "extra", "file": "dog2a.wav"},
+      {"dir": "extra", "file": "dog2b.wav"},
+      {"dir": "extra", "file": "dog3a.wav"},
+      {"dir": "extra", "file": "dog_barking1.wav"},
+      {"dir": "extra", "file": "dog_barking2.wav"},
+      {"dir": "extra", "file": "howling.wav"},
+      {"dir": "extra", "file": "maltese_dog1.wav"},
+      {"dir": "extra", "file": "maltese_dog2.wav"},
+      {"dir": "extra", "file": "maltese_dog3.wav"},
+      {"dir": "extra", "file": "maltese_dog4.wav"},
+      {"dir": "extra", "file": "maltese_dog5.wav"},
+      {"dir": "extra", "file": "maltese_dog6.wav"},
+      {"dir": "extra", "file": "maltese_dog7.wav"},
+      {"dir": "extra", "file": "small_dog1.wav"},
+      {"dir": "extra", "file": "small_dog2.wav"},
+      {"dir": "extra", "file": "talking_dog.wav"}
+    ]
+  },
+  {
+    "id": "cat",
+    "label_ja": "猫",
+    "sources": [
+      {"dir": "cc0", "file": "cat.wav"},
+      {"dir": "extra", "file": "cat1a.wav"},
+      {"dir": "extra", "file": "cat1b.wav"},
+      {"dir": "extra", "file": "cat1c.wav"},
+      {"dir": "extra", "file": "cat2a.wav"},
+      {"dir": "extra", "file": "cat2b.wav"},
+      {"dir": "extra", "file": "cat3a.wav"},
+      {"dir": "extra", "file": "cat3b.wav"},
+      {"dir": "extra", "file": "cat3c.wav"},
+      {"dir": "extra", "file": "cat4a.wav"},
+      {"dir": "extra", "file": "cat4b.wav"},
+      {"dir": "extra", "file": "cat5a.wav"},
+      {"dir": "extra", "file": "cat_purring.wav"},
+      {"dir": "extra", "file": "cat_sweet_voice1.wav"},
+      {"dir": "extra", "file": "cat_sweet_voice2.wav"},
+      {"dir": "extra", "file": "cat_sweet_voice3.wav"},
+      {"dir": "extra", "file": "cat_sweet_voice4.wav"},
+      {"dir": "extra", "file": "cats_fighting.wav"},
+      {"dir": "extra", "file": "female_cat1.wav"},
+      {"dir": "extra", "file": "old_cat1.wav"},
+      {"dir": "extra", "file": "old_cat2.wav"},
+      {"dir": "extra", "file": "old_cat3.wav"}
+    ]
+  },
+  {
+    "id": "cow",
+    "label_ja": "牛",
+    "sources": [
+      {"dir": "cc0", "file": "cow.wav"},
+      {"dir": "extra", "file": "cow1.wav"}
+    ]
+  },
+  {
+    "id": "rooster",
+    "label_ja": "おんどり",
+    "sources": [
+      {"dir": "cc0", "file": "rooster.wav"}
+    ]
+  },
+  {
+    "id": "chick",
+    "label_ja": "ひよこ",
+    "sources": [
+      {"dir": "extra", "file": "chicks.wav"},
+      {"dir": "extra", "file": "like_chick.wav"}
+    ]
+  },
+  {
+    "id": "horse",
+    "label_ja": "馬",
+    "sources": [
+      {"dir": "cc0", "file": "horse.wav"}
+    ]
+  },
+  {
+    "id": "sheep",
+    "label_ja": "羊",
+    "sources": [
+      {"dir": "cc0", "file": "sheep.wav"}
+    ]
+  },
+  {
+    "id": "goat",
+    "label_ja": "ヤギ",
+    "sources": [
+      {"dir": "cc0", "file": "goat.wav"}
+    ]
+  },
+  {
+    "id": "duck",
+    "label_ja": "カモ・アヒル",
+    "sources": [
+      {"dir": "cc0", "file": "duck.wav"},
+      {"dir": "extra", "file": "mallard1.wav"}
+    ]
+  },
+  {
+    "id": "frog",
+    "label_ja": "カエル",
+    "sources": [
+      {"dir": "cc0", "file": "frog.wav"}
+    ]
+  },
+  {
+    "id": "cricket",
+    "label_ja": "コオロギ",
+    "sources": [
+      {"dir": "cc0", "file": "cricket.wav"}
+    ]
+  },
+  {
+    "id": "elephant",
+    "label_ja": "ゾウ",
+    "sources": [
+      {"dir": "cc0", "file": "elephant.wav"}
+    ]
+  },
+  {
+    "id": "lion",
+    "label_ja": "ライオン",
+    "sources": [
+      {"dir": "cc0", "file": "lion.wav"}
+    ]
+  },
+  {
+    "id": "crow",
+    "label_ja": "カラス",
+    "sources": [
+      {"dir": "extra", "file": "crow1.wav"},
+      {"dir": "extra", "file": "crow2.wav"},
+      {"dir": "extra", "file": "crow3.wav"},
+      {"dir": "extra", "file": "crow4.wav"},
+      {"dir": "extra", "file": "crow5.wav"},
+      {"dir": "extra", "file": "crow6.wav"},
+      {"dir": "extra", "file": "crow7.wav"},
+      {"dir": "extra", "file": "crows.wav"}
+    ]
+  },
+  {
+    "id": "sparrow",
+    "label_ja": "スズメ",
+    "sources": [
+      {"dir": "extra", "file": "sparrows.wav"}
+    ]
+  },
+  {
+    "id": "swallow",
+    "label_ja": "ツバメ",
+    "sources": [
+      {"dir": "extra", "file": "swallows.wav"}
+    ]
+  },
+  {
+    "id": "owl",
+    "label_ja": "フクロウ",
+    "sources": [
+      {"dir": "extra", "file": "owl.wav"}
+    ]
+  },
+  {
+    "id": "heron",
+    "label_ja": "サギ",
+    "sources": [
+      {"dir": "extra", "file": "heron1.wav"},
+      {"dir": "extra", "file": "heron2.wav"}
+    ]
+  },
+  {
+    "id": "flamingo",
+    "label_ja": "フラミンゴ",
+    "sources": [
+      {"dir": "extra", "file": "flamingos_at_zoo1.wav"},
+      {"dir": "extra", "file": "flamingos_at_zoo2.wav"},
+      {"dir": "extra", "file": "flamingos_at_zoo3.wav"}
+    ]
+  },
+  {
+    "id": "magpie",
+    "label_ja": "カササギ",
+    "sources": [
+      {"dir": "extra", "file": "magpie1.wav"}
+    ]
+  },
+  {
+    "id": "wagtail",
+    "label_ja": "セキレイ",
+    "sources": [
+      {"dir": "extra", "file": "wagtail.wav"}
+    ]
+  },
+  {
+    "id": "warbler",
+    "label_ja": "ウグイス",
+    "sources": [
+      {"dir": "extra", "file": "warbler1.wav"},
+      {"dir": "extra", "file": "warbler2.wav"},
+      {"dir": "extra", "file": "warbler3.wav"}
+    ]
+  },
+  {
+    "id": "blue-rock-thrush",
+    "label_ja": "イソヒヨドリ",
+    "sources": [
+      {"dir": "extra", "file": "blue_rock_thrush.wav"}
+    ]
+  },
+  {
+    "id": "buzzard",
+    "label_ja": "ノスリ",
+    "sources": [
+      {"dir": "extra", "file": "buzzard.wav"}
+    ]
+  },
+  {
+    "id": "daurian-redstart",
+    "label_ja": "ジョウビタキ",
+    "sources": [
+      {"dir": "extra", "file": "daurian_redstart.wav"}
+    ]
+  },
+  {
+    "id": "grebe",
+    "label_ja": "カイツブリ",
+    "sources": [
+      {"dir": "extra", "file": "grebe_couple.wav"},
+      {"dir": "extra", "file": "little_grebe1.wav"},
+      {"dir": "extra", "file": "little_grebe2.wav"}
+    ]
+  },
+  {
+    "id": "japanese-white-eye",
+    "label_ja": "メジロ",
+    "sources": [
+      {"dir": "extra", "file": "Jpn_white_eye1.wav"}
+    ]
+  },
+  {
+    "id": "tropical-bird",
+    "label_ja": "熱帯の鳥",
+    "sources": [
+      {"dir": "extra", "file": "tropical_bird1.wav"},
+      {"dir": "extra", "file": "tropical_bird2.wav"},
+      {"dir": "extra", "file": "tropical_bird3.wav"}
+    ]
+  },
+  {
+    "id": "panda",
+    "label_ja": "パンダ",
+    "sources": [
+      {"dir": "extra", "file": "panda.wav"}
+    ]
+  }
+]

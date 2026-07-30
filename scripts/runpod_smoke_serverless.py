@@ -46,7 +46,7 @@ def main() -> int:
     parser.add_argument("--reference-audio")
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
     parser.add_argument("--target-text", default=os.getenv("RUNPOD_SMOKE_TARGET_TEXT"))
-    parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "google_translate"))
+    parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "openai"))
     parser.add_argument("--target-language", default=os.getenv("RUNPOD_SMOKE_TARGET_LANGUAGE", "ja-JP"))
     parser.add_argument("--voice-backend", default=os.getenv("RUNPOD_SMOKE_VOICE_BACKEND", "seed-vc"))
     parser.add_argument("--seed-vc-diffusion-steps", type=int)

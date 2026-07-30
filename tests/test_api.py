@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import sys
 from pathlib import Path
 from threading import Event
@@ -2789,7 +2790,14 @@ def test_admin_serves_browser_ui() -> None:
     assert "runpod-warmup-button" in response.text
     assert "runpod-warmup-status" in response.text
     assert "RunPod手動準備" in response.text
-    assert "Google Translate TTS endpoint" in response.text
+    tts_backend_select = re.search(
+        r'<select id="tts_backend"[^>]*>(.*?)</select>',
+        response.text,
+        re.DOTALL,
+    )
+    assert tts_backend_select is not None
+    assert tts_backend_select.group(1).count("<option") == 1
+    assert 'value="openai"' in tts_backend_select.group(1)
     assert "OpenAI TTS API" in response.text
     assert "tts_text_file" in response.text
     assert "テキストファイル" in response.text
@@ -2888,9 +2896,9 @@ def test_runtime_api_returns_active_mode_and_provider_names(tmp_path, monkeypatc
     assert payload["providers"] == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
     assert payload["supported_voice_modes"] == ["default"]
     assert "translation_backends" not in payload
-    assert [backend["id"] for backend in payload["text_tts_backends"]] == ["google_translate", "openai"]
-    assert payload["text_tts_backends"][1]["settings"]["supported_target_languages"][0] == "auto"
-    assert "fr" in payload["text_tts_backends"][1]["settings"]["supported_target_languages"]
+    assert [backend["id"] for backend in payload["text_tts_backends"]] == ["openai"]
+    assert payload["text_tts_backends"][0]["settings"]["supported_target_languages"][0] == "auto"
+    assert "fr" in payload["text_tts_backends"][0]["settings"]["supported_target_languages"]
     assert payload["voice_conversion_backends"] == [
         {
             "id": "fake-vc",
@@ -3005,6 +3013,46 @@ def test_text_to_speech_job_api_generates_audio_and_history(tmp_path) -> None:
     audio_response = client.get(history["outputs"][0]["url"])
     assert audio_response.status_code == 200
     assert audio_response.content == "TTS:ja-JP:こんにちは".encode()
+
+
+def test_text_to_speech_job_api_defaults_to_openai_provider(tmp_path) -> None:
+    class FakeOpenAiTtsProvider:
+        name = "fake-text-tts"
+        audio_mime_type = "audio/wav"
+
+        def synthesize(self, text, target_language):
+            return TtsOutput(
+                audio_bytes=f"TTS:{target_language}:{text}".encode(),
+                audio_mime_type="audio/wav",
+                timings_ms={"tts": 1.0, "total": 1.0},
+                warnings=[],
+            )
+
+    history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
+    client = TestClient(
+        create_app(
+            text_tts_providers={"openai": FakeOpenAiTtsProvider()},
+            voice_conversion_service=_fake_voice_conversion_service(),
+            audio_history_store=history_store,
+        )
+    )
+
+    response = client.post(
+        "/api/text-to-speech-jobs",
+        data={"text": "こんにちは", "target_language": "ja-JP"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    for _ in range(20):
+        status_payload = client.get(f"/api/text-to-speech-jobs/{payload['job_id']}").json()
+        if status_payload["status"] == "succeeded":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("text-to-speech job did not finish")
+
+    assert status_payload["result"]["providers"] == {"tts": "fake-text-tts"}
 
 
 def test_audio_history_output_api_saves_uploaded_audio_as_wav(tmp_path, monkeypatch) -> None:
