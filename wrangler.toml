@@ -1,5 +1,5 @@
 name = "voice-lab"
-main = "cloudflare/worker.mjs"
+main = "cloudflare/src/index.ts"
 compatibility_date = "2025-06-27"
 
 assets = { directory = "./src/mo_speech/web", binding = "ASSETS", run_worker_first = true, html_handling = "none" }

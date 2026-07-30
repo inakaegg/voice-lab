@@ -58,7 +58,7 @@ flowchart LR
 
 ## ローカルセットアップ
 
-Python 3.11以上とNode.jsを使います。UI/APIとfake providerを動かす最小構成は次のとおりです。
+Python 3.11以上とNode.js 22.18以上を使います。UI/APIとfake providerを動かす最小構成は次のとおりです。
 
 ```sh
 python3 -m pip install -e ".[dev]"
@@ -99,6 +99,7 @@ gitleaks git --redact --log-opts='--all' .
 python3 -m pytest
 npm test
 npm run check:js
+npm run check:worker
 npm run check:web
 npm run test:e2e
 ```

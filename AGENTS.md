@@ -120,11 +120,13 @@ gitleaks git --redact --log-opts='--all' .
 python3 -m pytest
 npm test
 npm run check:js
+npm run check:worker
 npm run check:web
 ```
 
 - Pythonの全単体・APIテストは `python3 -m pytest` を正とする。
 - Cloudflare WorkerとWeb静的検査は `npm test` と `npm run check:js` を正とする。
+- Cloudflare Workerの型検査とdry-run bundleは `npm run check:worker` を正とする。
 - React公開画面の型検査とproduction buildは `npm run check:web` を正とする。
 - 新しいworktreeでは先に `npm ci` を実行する。未実行だと `npm run check:web` が同梱ライセンスの生成でファイル不在エラーになり、原因が分かりにくい。
 - RunPod Docker buildとGPU smokeは通常CIへ入れず、ローカル検証通過後に手動workflowで実行する。

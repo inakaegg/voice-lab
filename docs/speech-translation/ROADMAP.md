@@ -90,6 +90,13 @@ Cloudflare WorkerへTypeScriptの入口とHonoを導入する。
 
 FastAPIを直ちに全廃するのではなく、Python依存処理を提供する役割へ縮小する方針は維持する。
 
+Phase 1では、Cloudflare Workerの入口へTypeScriptとHonoを導入した。
+未移行のrequestは既存handlerへ委譲し、scheduled handlerも既存の保持期限処理を使う。
+`GET /api/runtime` はHonoへ移し、status・headers・bodyの互換を契約テストで固定した。
+お手本ASRキャッシュは共通TSモジュールへ抽出した。
+KVキー・TTL・空ASR拒否・KVなしfallbackの契約は変更していない。
+FastAPI側の統一とDurable Objectの導入は、後続Phaseで行う。
+
 ## 今後の変更: 公開文書の整理
 
 公開文書を、製品を理解し利用・評価・再現するために必要な内容へ絞る。

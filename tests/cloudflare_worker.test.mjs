@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import workerEntrypoint from "../cloudflare/src/index.ts";
 import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
@@ -3420,7 +3421,7 @@ test("Cloudflare worker reports audio history as disabled", async () => {
 test("Cloudflare worker reports RunPod runtime availability and warm health", async () => {
   const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
 
-  const response = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const response = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const payload = await response.json();
   const openai = payload.translation_backends.find((backend) => backend.id === "openai");
   const runpod = payload.translation_backends.find((backend) => backend.id === "runpod_serverless");
@@ -3446,7 +3447,7 @@ test("Cloudflare worker only enables user-page warmup when explicitly opted in",
   const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
   env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "1";
 
-  const response = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const response = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const payload = await response.json();
   const seedVc = payload.voice_conversion_backends[0];
 
@@ -3489,7 +3490,7 @@ test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", asy
   const warmupJob = await warmupResponse.json();
   const statusResponse = await handleRequest(new Request("https://example.com/api/warmup/warm-job", { headers: { cookie: adminCookieValue } }), env);
   const statusJob = await statusResponse.json();
-  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtimeResponse = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const runtime = await runtimeResponse.json();
   const seedVc = runtime.voice_conversion_backends[0];
 
@@ -3529,7 +3530,7 @@ test("Cloudflare worker stores Seed-VC ready state when warmup run completes imm
     env,
   );
   const warmupJob = await warmupResponse.json();
-  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtimeResponse = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const runtime = await runtimeResponse.json();
   const seedVc = runtime.voice_conversion_backends[0];
 
@@ -3570,7 +3571,7 @@ test("Cloudflare worker stores Seed-VC ready state when voice conversion run com
     env,
   );
   const vcJob = await vcResponse.json();
-  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtimeResponse = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const runtime = await runtimeResponse.json();
   const seedVc = runtime.voice_conversion_backends[0];
 
@@ -3654,8 +3655,8 @@ test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async ()
   const adminCookieValue = await adminCookie(firstEnv);
 
   await handleRequest(new Request("https://example.com/api/warmup/warm-job", { headers: { cookie: adminCookieValue } }), firstEnv);
-  const firstRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), firstEnv)).json();
-  const secondRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), secondEnv)).json();
+  const firstRuntime = await (await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), firstEnv, {})).json();
+  const secondRuntime = await (await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), secondEnv, {})).json();
 
   assert.equal(firstRuntime.voice_conversion_backends[0].settings.warmup.ready, true);
   assert.equal(secondRuntime.voice_conversion_backends[0].settings.warmup.ready, false);

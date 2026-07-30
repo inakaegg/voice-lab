@@ -10,9 +10,10 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:visual": "PLAYWRIGHT_VISUAL_REVIEW=1 playwright test tests/e2e/visual-review.spec.ts",
-    "test": "node --test tests/*.mjs",
-    "test:worker": "node --test tests/*.mjs",
+    "test": "node --test tests/*.mjs tests/*.mts",
+    "test:worker": "node --test tests/*.mjs tests/*.mts",
     "check:js": "node --check cloudflare/worker.mjs && node --check src/mo_speech/web/*.js",
+    "check:worker": "tsc -p cloudflare/tsconfig.json --noEmit && wrangler deploy --dry-run --outdir tmp/wrangler-dry-run",
     "check:web": "npm run typecheck:web && npm run build:web && npm run verify:web-styles"
   },
   "dependencies": {
@@ -25,13 +26,16 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260723.1",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "hono": "^4.12.31",
     "tailwindcss": "^4.3.2",
     "typescript": "^7.0.2",
-    "vite": "^8.1.5"
+    "vite": "^8.1.5",
+    "wrangler": "^4.113.0"
   }
 }
