@@ -2,6 +2,31 @@ import { defineConfig } from "@playwright/test";
 
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const baseURL = externalBaseUrl || "http://127.0.0.1:4173";
+const browserNames = ["chromium", "webkit", "firefox"] as const;
+const viewportProjects: Array<{
+  name: string;
+  use: {
+    viewport: { width: number; height: number };
+    hasTouch?: boolean;
+    isMobile?: boolean;
+  };
+}> = [
+  { name: "desktop", use: { viewport: { width: 1440, height: 900 } } },
+  { name: "intermediate", use: { viewport: { width: 1024, height: 768 } } },
+  { name: "mobile", use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } },
+];
+
+const projects = browserNames.flatMap((browserName) =>
+  viewportProjects.map(({ name, use }) => {
+    const browserUse = { ...use };
+    // PlaywrightのFirefoxはisMobileに対応しないため、viewportとtouch指定だけを共有する。
+    if (browserName === "firefox") delete browserUse.isMobile;
+    return {
+      name: `${browserName}-${name}`,
+      use: { browserName, ...browserUse },
+    };
+  }),
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -22,11 +47,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
-  projects: [
-    { name: "desktop", use: { viewport: { width: 1440, height: 900 } } },
-    { name: "intermediate", use: { viewport: { width: 1024, height: 768 } } },
-    { name: "mobile", use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } },
-  ],
+  projects,
   webServer: externalBaseUrl ? undefined : {
     command: "python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173/health",

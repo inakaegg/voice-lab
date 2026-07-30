@@ -59,6 +59,9 @@ jobs:
   ui-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      matrix:
+        browser: [chromium, webkit, firefox]
 
     steps:
       - uses: actions/checkout@v7
@@ -78,17 +81,33 @@ jobs:
           python3 -m pip install -e .
           npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Responsive UI layout tests
-        run: npm run test:e2e
+        run: >-
+          npx playwright test
+          --project "${{ matrix.browser }}-desktop"
+          --project "${{ matrix.browser }}-intermediate"
+          --project "${{ matrix.browser }}-mobile"
 
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-ui-failure
+          name: playwright-ui-failure-${{ matrix.browser }}
           path: tmp/playwright/
           if-no-files-found: ignore
           retention-days: 7
+
+  ui-e2e-required:
+    name: ui-e2e
+    needs: ui-e2e
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require every browser E2E job
+        env:
+          UI_E2E_RESULT: ${{ needs.ui-e2e.result }}
+        run: test "$UI_E2E_RESULT" = "success"
