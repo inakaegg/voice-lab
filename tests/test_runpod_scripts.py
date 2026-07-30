@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -33,6 +34,33 @@ def test_runpod_build_push_prefers_explicit_image_env(tmp_path: Path) -> None:
 
     assert "docker.io/example/from-env:new" in result.stdout
     assert "docker.io/example/from-file:old" not in result.stdout
+
+
+def test_runpod_build_push_dry_run_does_not_require_docker(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("bash", "dirname"):
+        target = shutil.which(name)
+        assert target is not None, f"required command for the test is missing: {name}"
+        (bin_dir / name).symlink_to(target)
+
+    env = {
+        "PATH": str(bin_dir),
+        "RUNPOD_DRY_RUN": "1",
+        "RUNPOD_ENV_FILE": str(tmp_path / "missing.env"),
+        "RUNPOD_IMAGE": "docker.io/example/mo-speech:dry",
+        "DOCKERHUB_REPOSITORY_VISIBILITY": "private",
+    }
+
+    result = subprocess.run(
+        ["bash", "scripts/runpod_build_push.sh"],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert "docker buildx build" in result.stdout
 
 
 def test_runpod_build_push_checks_registry_visibility_before_push() -> None:
