@@ -200,3 +200,37 @@ test("public workbench keeps settings at the mobile top right and avoids cramped
   assert.match(styles, /@media \(min-width:\s*1120px\)/);
   assert.match(styles, /\.react-practice-flow:has\(#practice-prompt-panel\[hidden\]\)/);
 });
+
+const PUBLIC_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+
+test("public pages declare share metadata (description, OGP, canonical, icons)", () => {
+  const pages = [
+    { name: "portal", html: portalHtml, url: `${PUBLIC_ORIGIN}/` },
+    { name: "speakloop", html: speakloopHtml, url: `${PUBLIC_ORIGIN}/speakloop` },
+    { name: "skitvoice", html: skitvoiceHtml, url: `${PUBLIC_ORIGIN}/skitvoice` },
+    { name: "privacy", html: privacyHtml, url: `${PUBLIC_ORIGIN}/privacy` },
+  ];
+  for (const page of pages) {
+    assert.match(page.html, /<meta name="description" content="[^"]+"/, `${page.name}: description`);
+    assert.match(page.html, /<meta property="og:title" content="[^"]+"/, `${page.name}: og:title`);
+    assert.match(page.html, /<meta property="og:description" content="[^"]+"/, `${page.name}: og:description`);
+    assert.match(page.html, /<meta property="og:type" content="website"/, `${page.name}: og:type`);
+    assert.match(page.html, /<meta property="og:site_name" content="Voice Lab"/, `${page.name}: og:site_name`);
+    assert.match(page.html, /<meta property="og:locale" content="ja_JP"/, `${page.name}: og:locale`);
+    assert.ok(page.html.includes(`<meta property="og:url" content="${page.url}"`), `${page.name}: og:url`);
+    assert.ok(page.html.includes(`<meta property="og:image" content="${PUBLIC_ORIGIN}/react/og-voice-lab.png"`), `${page.name}: og:image`);
+    assert.match(page.html, /<meta property="og:image:width" content="1200"/, `${page.name}: og:image:width`);
+    assert.match(page.html, /<meta property="og:image:height" content="630"/, `${page.name}: og:image:height`);
+    assert.match(page.html, /<meta name="twitter:card" content="summary_large_image"/, `${page.name}: twitter:card`);
+    assert.ok(page.html.includes(`<link rel="canonical" href="${page.url}"`), `${page.name}: canonical`);
+    assert.match(page.html, /<link rel="apple-touch-icon" href="\/react\/apple-touch-icon\.png"/, `${page.name}: apple-touch-icon`);
+    assert.match(page.html, /<meta name="theme-color"/, `${page.name}: theme-color`);
+  }
+});
+
+test("portal and SpeakLoop expose JSON-LD structured data", () => {
+  assert.match(portalHtml, /<script type="application\/ld\+json">/);
+  assert.match(portalHtml, /"@type":"WebSite"/);
+  assert.match(speakloopHtml, /<script type="application\/ld\+json">/);
+  assert.match(speakloopHtml, /"@type":"WebApplication"/);
+});

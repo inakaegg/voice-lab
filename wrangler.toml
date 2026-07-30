@@ -20,6 +20,7 @@ bucket_name = "mo-speech-audio"
 preview_bucket_name = "mo-speech-audio-preview"
 
 [vars]
+PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev"
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
 RUNPOD_RUNTIME_HEALTH_CHECK = "1"
@@ -35,6 +36,10 @@ OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
 USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
 
 [triggers]
 crons = ["17 3 * * *"]
@@ -73,6 +78,10 @@ OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
 USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1
 
 [env.staging.triggers]
 crons = []

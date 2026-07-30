@@ -1476,6 +1476,105 @@ test("Cloudflare worker creates a pronunciation practice prompt", async () => {
   assert.equal(practiceHistory.outputs.length, 0);
 });
 
+test("Cloudflare worker maps OpenAI quota exhaustion to a provider-free category message", async () => {
+  const env = fakeEnv(async (url) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") {
+      return json({
+        error: {
+          message: "You exceeded your current quota, please check your plan and billing details.",
+          type: "insufficient_quota",
+          code: "insufficient_quota",
+        },
+      }, { status: 429 });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { kv: fakeKv() });
+  const form = new FormData();
+  form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+  form.append("target_language", "zh-CN");
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
+    env,
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(payload.detail, "現在サーバー側のAI利用枠を超えているため処理できません。時間をおいてもう一度お試しください。");
+  assert.ok(!/openai|billing|quota|残高/i.test(payload.detail));
+});
+
+test("Cloudflare worker logs upstream OpenAI failures as metadata without payload content", async () => {
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    logged.push(args.map((value) => String(value)).join(" "));
+  };
+  try {
+    const env = fakeEnv(async (url) => {
+      if (url === "https://api.openai.com/v1/audio/transcriptions") {
+        return json({
+          error: {
+            message: "You exceeded your current quota, please check your plan and billing details.",
+            type: "insufficient_quota",
+            code: "insufficient_quota",
+          },
+        }, { status: 429 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }, { kv: fakeKv() });
+    const form = new FormData();
+    form.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
+    form.append("target_language", "zh-CN");
+
+    await handleRequest(
+      new Request("https://example.com/api/practice/prompts", { method: "POST", body: form }),
+      env,
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.ok(logged.some((line) => line.includes("insufficient_quota") && line.includes("429")));
+  assert.ok(logged.some((line) => line.includes("/api/practice/prompts")));
+  assert.ok(!logged.some((line) => line.includes("native")));
+});
+
+test("Cloudflare worker logs a failed practice attempt job with its job id", async () => {
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    logged.push(args.map((value) => String(value)).join(" "));
+  };
+  let payload;
+  try {
+    const env = fakeEnv(async (url) => {
+      if (url === "https://api.runpod.ai/v2/endpoint/status/practice-job-stale") {
+        return json({
+          id: "practice-job-stale",
+          status: "COMPLETED",
+          output: {
+            practice_asr_contract_version: 2,
+            text: "你好",
+            model: "funasr/paraformer-zh",
+          },
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }, { kv: fakeKv() });
+    const response = await handleRequest(
+      new Request("https://example.com/api/practice/attempt-jobs/practice-job-stale"),
+      env,
+    );
+    payload = await response.json();
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(payload.status, "failed");
+  assert.ok(logged.some((line) => line.includes("practice-job-stale") && line.includes("contract")));
+});
+
 test("Cloudflare worker rejects attempt intent for a practice recording", async () => {
   // /api/practice/recordings only creates prompts now; attempts go through
   // /api/practice/attempt-jobs (which needs the model audio for comparison).
@@ -3817,3 +3916,74 @@ function fakeD1Statement(db, sql, args) {
     },
   };
 }
+
+test("Cloudflare worker serves robots.txt and sitemap.xml for the public origin", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+  // 生成API向けのログイン必須設定はページ閲覧を制限しないため、クロール許可を変えない。
+  env.PUBLIC_GOOGLE_AUTH_REQUIRED = "1";
+  env.ASSETS = {
+    fetch: async () => {
+      throw new Error("robots.txt and sitemap.xml must not fall through to assets");
+    },
+  };
+
+  const robots = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/robots.txt"), env);
+  assert.equal(robots.status, 200);
+  assert.match(robots.headers.get("Content-Type"), /text\/plain/);
+  const robotsBody = await robots.text();
+  assert.match(robotsBody, /^User-agent: \*$/m);
+  for (const path of ["/admin", "/fun", "/speakloop/admin", "/skitvoice/admin", "/api/", "/auth/"]) {
+    assert.ok(robotsBody.includes(`Disallow: ${path}`), `robots.txt disallows ${path}`);
+  }
+  assert.ok(robotsBody.includes("Sitemap: https://voice-lab.inakaegg.workers.dev/sitemap.xml"));
+
+  const sitemap = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/sitemap.xml"), env);
+  assert.equal(sitemap.status, 200);
+  assert.match(sitemap.headers.get("Content-Type"), /application\/xml/);
+  const sitemapBody = await sitemap.text();
+  for (const loc of [
+    "https://voice-lab.inakaegg.workers.dev/",
+    "https://voice-lab.inakaegg.workers.dev/speakloop",
+    "https://voice-lab.inakaegg.workers.dev/privacy",
+  ]) {
+    assert.ok(sitemapBody.includes(`<loc>${loc}</loc>`), `sitemap lists ${loc}`);
+  }
+  assert.doesNotMatch(sitemapBody, /skitvoice/);
+});
+
+test("Cloudflare worker blocks crawlers on non-canonical deployments", async () => {
+  const assets = {
+    fetch: async () => {
+      throw new Error("robots.txt and sitemap.xml must not fall through to assets");
+    },
+  };
+
+  const stagingEnv = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  stagingEnv.PUBLIC_GOOGLE_AUTH_REQUIRED = "1";
+  stagingEnv.ASSETS = assets;
+
+  const robots = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/robots.txt"), stagingEnv);
+  assert.equal(robots.status, 200);
+  const robotsBody = await robots.text();
+  assert.match(robotsBody, /^Disallow: \/$/m);
+  assert.doesNotMatch(robotsBody, /Sitemap:/);
+
+  const sitemap = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/sitemap.xml"), stagingEnv);
+  assert.equal(sitemap.status, 404);
+
+  const mismatchedEnv = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  mismatchedEnv.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+  mismatchedEnv.ASSETS = assets;
+
+  const mismatchedRobots = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/robots.txt"), mismatchedEnv);
+  assert.match(await mismatchedRobots.text(), /^Disallow: \/$/m);
+  const mismatchedSitemap = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/sitemap.xml"), mismatchedEnv);
+  assert.equal(mismatchedSitemap.status, 404);
+});

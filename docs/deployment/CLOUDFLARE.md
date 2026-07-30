@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-07-23
+更新日: 2026-07-29
 
 ## 目的
 
@@ -209,7 +209,7 @@ wrangler secret put ADMIN_GOOGLE_EMAILS
 | `MO_SPEECH_DB` | `mo-speech-demo-db` | `mo-speech-staging-db` |
 | `MO_SPEECH_AUDIO_R2` | `mo-speech-audio` | `mo-speech-audio-preview` |
 
-stagingはproductionのCron Triggerを継承しないよう、`crons = []` を明示する。通常のWorker設定値は `[env.staging.vars]` へ複製する。初回配備から課金APIを匿名公開しないよう、`PUBLIC_GOOGLE_AUTH_REQUIRED=1` を既定にする。Worker secretも環境間で継承されない。
+stagingはproductionのCron Triggerを継承しないよう、`crons = []` を明示する。通常のWorker設定値は `[env.staging.vars]` へ複製する。ただし `PUBLIC_CANONICAL_ORIGIN` はクロール許可を正規公開originへ限定するため複製しない。初回配備から課金APIを匿名公開しないよう、`PUBLIC_GOOGLE_AUTH_REQUIRED=1` を既定にする。Worker secretも環境間で継承されない。
 
 `Deploy Cloudflare Staging` は `workflow_dispatch` 専用である。GitHub Actionsの実行画面でbranchを選び、そのrevisionのReact成果物を再生成する。その後に次の順でstagingへ反映する。
 
@@ -243,6 +243,23 @@ staging Workerは2026-07-22（米国太平洋時間）に初回deploy済みで�
 5. 費用上限を確認してから、最小入力でOpenAI経路とRunPod経路を個別に確認する。
 
 GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する。Worker secretが無い初回deployでは静的画面を配信できるが、対応する生成APIは503でfail closedする。Google OAuth用secretまたは管理者メールが無い場合も、ログインと管理機能は503でfail closedする。
+
+## ログと監視
+
+- Workers Logsは `wrangler.toml` の `[observability]` で本番とstagingの両方を有効にする。
+- WorkerはOpenAI upstream失敗・API失敗・練習jobの失敗をconsole.errorへ記録する。ログへ音声データや台本などのpayloadは含めない。
+- 過去ログはCloudflare dashboardの対象Worker → Logsで確認する。リアルタイム確認は `npx wrangler tail voice-lab` を使う。
+- Workers LogsのFreeプラン枠は1日20万イベント・保持3日である。超過する場合は `head_sampling_rate` を下げる。
+
+## 検索・共有メタ情報
+
+公開4route(`/`・`/speakloop`・`/skitvoice`・`/privacy`)の配信HTMLには共有・検索用のメタ情報を静的に埋め込む。内容はmeta description・OGP・Twitter Card・canonical URL・apple-touch-iconである。共有カード用のOG画像は全routeで `og-voice-lab.png`(1200×630)を共用し、`apps/web/public/` からビルドで `/react/` 配下へ配置する。`/` と `/speakloop` にはJSON-LD構造化データ(`WebSite`・`WebApplication`)を置く。
+
+Workerは `/robots.txt` と `/sitemap.xml` を配信する。クロール許可は `PUBLIC_CANONICAL_ORIGIN` が要求originと一致する配備だけに与える。productionでは `wrangler.toml` の `[vars]` でこの値を公開URLへ設定する。stagingは設定しないため、robots.txtが全体Disallowを返しsitemapは404になる。`PUBLIC_GOOGLE_AUTH_REQUIRED` は生成APIのログイン必須設定でありページ閲覧を制限しないため、クロール可否の判定に使わない。
+
+sitemapへ載せるのは `/`・`/speakloop`・`/privacy` だけとする。`/skitvoice` は非公開案内のため載せない。管理系routeと `/api/`・`/auth/` はrobots.txtでDisallowする。対象の管理系routeは `/admin`・`/fun`・`/speakloop/admin`・`/skitvoice/admin` である。
+
+deploy後smokeはrobots.txtとsitemap.xmlの整合も確認する。HTMLメタとWorker配信の回帰は `tests/react_public_ui.test.mjs` と `tests/cloudflare_worker.test.mjs` が検査する。Google Search Consoleへの登録とsitemap送信は外部操作のため未実施である。
 
 ## 制限
 

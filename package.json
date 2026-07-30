@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "lucide-react": "^1.25.0",
+    "lucide-react": "^1.27.0",
     "opencc-js": "^1.4.1",
     "pinyin-pro": "^3.28.2",
     "react": "^19.2.8",
@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260723.1",
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",

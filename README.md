@@ -1,3 +1,6 @@
+
+
+
 # Voice Lab — SpeakLoop
 
 [![CI](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml)
@@ -14,6 +17,19 @@ Voice LabのSpeakLoopは、母語で話した「言いたいこと」を、中�
 | ポータル | SpeakLoop練習画面 |
 | --- | --- |
 | ![Voice Labポータル](docs/images/portal-1440.png) | ![SpeakLoop練習画面](docs/images/speakloop-1440.png) |
+
+
+## デモ動画
+
+スマートフォン実機での操作を収録した約2分のデモです。話した内容から「自分の声」によるお手本音声を生成し、練習結果を音声と文字で比較します。
+
+**英語**
+
+https://github.com/user-attachments/assets/018a157d-28b2-45fd-bac4-ab462f4cee9d
+
+**中国語**
+
+https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ## できること
 
