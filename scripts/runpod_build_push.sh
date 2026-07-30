@@ -10,7 +10,9 @@ load_runpod_env
 if [[ -n "${RUNPOD_IMAGE_FROM_ENV}" ]]; then
   RUNPOD_IMAGE="${RUNPOD_IMAGE_FROM_ENV}"
 fi
-require_cmd docker
+if [[ "${RUNPOD_DRY_RUN:-0}" != "1" ]]; then
+  require_cmd docker
+fi
 require_env RUNPOD_IMAGE
 
 cd "${REPO_ROOT}"

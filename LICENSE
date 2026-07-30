@@ -7,6 +7,11 @@ sublicense, sell, or create derivative works from the Voice Lab source code,
 except where permission is required by the GitHub Terms of Service or is
 provided separately in writing by the copyright holder.
 
+As a limited exception, permission is granted to clone this repository and to
+build and run it locally for the sole purpose of evaluating or reviewing the
+work. This exception does not permit redistribution, publication, production
+use, or the creation of derivative works.
+
 Third-party software, models, data, and generated dependency bundles remain
 subject to their own license terms. Those terms are not restricted or replaced
 by this notice. See THIRD_PARTY_NOTICES.md for the repository's dependency and
