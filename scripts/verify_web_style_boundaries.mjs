@@ -3,15 +3,13 @@ import { readFile } from "node:fs/promises";
 
 const read = (name) => readFile(new URL(`../src/mo_speech/web/react/${name}.html`, import.meta.url), "utf8");
 const readStatic = (name) => readFile(new URL(`../src/mo_speech/web/${name}`, import.meta.url), "utf8");
-const [portal, speakloop, skitvoice, appCss, ...staticPages] = await Promise.all([
+const [portal, speakloop, appCss, ...staticPages] = await Promise.all([
   read("portal"),
   read("speakloop"),
-  read("skitvoice"),
   readFile(new URL("../src/mo_speech/web/react/assets/app.css", import.meta.url), "utf8"),
   ...[
     "index.html",
     "practice_admin.html",
-    "vibevoice.html",
     "user.html",
   ].map(readStatic),
 ]);
@@ -19,7 +17,7 @@ const [portal, speakloop, skitvoice, appCss, ...staticPages] = await Promise.all
 assert.doesNotMatch(portal, /\/static\/styles\.css/, "portal must not load the legacy stylesheet");
 assert.match(portal, /\/react\/assets\/portal\.css/, "portal must load its Tailwind build");
 
-for (const [route, html] of [["speakloop", speakloop], ["skitvoice", skitvoice]]) {
+for (const [route, html] of [["speakloop", speakloop]]) {
   assert.doesNotMatch(html, /\/static\/styles\.css/, `${route} must not load the legacy stylesheet directly`);
   assert.match(html, /\/react\/assets\/app\.css/, `${route} must load the shared Tailwind compatibility build`);
   assert.doesNotMatch(html, /\/react\/assets\/portal\.css/, `${route} must not load portal Tailwind CSS`);

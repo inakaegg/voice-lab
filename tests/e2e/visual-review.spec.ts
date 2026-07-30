@@ -7,11 +7,9 @@ import { installUiApiFixtures } from "./fixtures";
 const routes = [
   { path: "/", slug: "portal" },
   { path: "/speakloop", slug: "speakloop" },
-  { path: "/skitvoice", slug: "skitvoice" },
   { path: "/privacy", slug: "privacy" },
   { path: "/admin", slug: "admin" },
   { path: "/speakloop/admin", slug: "speakloop-admin" },
-  { path: "/skitvoice/admin", slug: "skitvoice-admin" },
   { path: "/fun", slug: "fun" },
 ] as const;
 
@@ -62,28 +60,5 @@ for (const theme of ["light", "dark"] as const) {
   });
 
   for (const state of ["authenticated", "api-error"] as const) {
-    test(`capture public SkitVoice ${state} invariant in ${theme}`, async ({ page }, testInfo) => {
-      await page.unroute("**/api/**");
-      await page.route("**/api/**", async (route) => {
-        if (state === "api-error") {
-          return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "fixture error" }) });
-        }
-        return route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ authenticated: true, is_admin: false, email: "viewer@example.com" }),
-        });
-      });
-      await page.addInitScript((selectedTheme) => localStorage.setItem("mo-speech-theme", selectedTheme), theme);
-      await page.goto("/skitvoice");
-      await expect(page.getByRole("heading", { name: "研究機能は一般公開していません" })).toBeVisible();
-      await expect(page.locator("#vibevoice-form, [data-public-sample-language]")).toHaveCount(0);
-      const outputDir = "tmp/playwright/visual-review";
-      await mkdir(outputDir, { recursive: true });
-      await page.screenshot({
-        path: `${outputDir}/${testInfo.project.name}-${theme}-skitvoice-${state}.png`,
-        fullPage: true,
-      });
-    });
   }
 }

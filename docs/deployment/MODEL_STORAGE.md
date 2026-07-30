@@ -39,7 +39,7 @@
 
 低アクセスMVPでは、ワーカーを0までスケールダウンでき、ワーカー実行中だけ計算リソース課金されるRunPod Serverlessが有力。ただし、永続モデル保存の費用は残る。
 
-公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker moduleとする。RunPodは中国語練習用FunASR、VibeVoice、Seed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
+公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker moduleとする。RunPodは中国語練習用FunASRとSeed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
 初回のGPUスモーク確認では、Web UIとAPIを含むFastAPIをRunPod Podで一体起動する。これはモデルロード、GPU利用、録音またはファイルアップロードから音声出力までを先に確認するための検証構成であり、公開MVPの本番構成ではない。RunPod CLI手順は [RUNPOD.md](RUNPOD.md) を参照する。
 
@@ -61,7 +61,6 @@ RunPodで最初に使うモデル配置:
 | 翻訳 | `Qwen/Qwen3-4B` | `/runpod-volume/huggingface/hub` |
 | TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | `/runpod-volume/huggingface/hub` |
 | 声質変換 | Seed-VC checkpoint | `/runpod-volume/huggingface/hub` または `SEED_VC_CHECKPOINT` で指定したpath |
-| スキットTTS | VibeVoice 1.5B + Qwen tokenizer + ComfyUI-VibeVoice拡張 | `/runpod-volume/models/vibevoice` または `MO_VIBEVOICE_HOME` / `COMFYUI_VIBEVOICE_PATH` |
 
 初回取得後は、モデル更新による挙動差を避けるため、必要に応じて `FASTER_WHISPER_LOCAL_FILES_ONLY=1` と `QWEN_TRANSLATION_LOCAL_FILES_ONLY=1` に切り替える。
 

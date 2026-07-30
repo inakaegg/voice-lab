@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from mo_speech.api import _practice_model_asr_cache_key, create_app
 from mo_speech.audio_history import AudioHistoryEntry, AudioHistoryStore
-from mo_speech.media_reference import ReferenceAudioClip
 from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
 from mo_speech.practice_llm import PracticeLlmError, PracticeLlmEvaluation
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
@@ -36,7 +35,6 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
     monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "default-audio-history"))
     monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
-    monkeypatch.setenv("MO_VIBEVOICE_DEBUG_RESULT_DIR", str(tmp_path / "vibevoice-debug"))
     monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(tmp_path / "public-sample-audios.json"))
     monkeypatch.setenv(
         "MO_PRACTICE_ATTEMPT_STATE_DIR",
@@ -45,10 +43,9 @@ def isolate_default_audio_history(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RUNPOD_ENV_FILE", str(tmp_path / "missing.runpod.env"))
     monkeypatch.delenv("RUNPOD_ENDPOINT_ID", raising=False)
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
-    monkeypatch.delenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", raising=False)
 
 
-def test_local_public_sample_audio_api_persists_and_serves_skitvoice_samples(tmp_path, monkeypatch) -> None:
+def test_local_public_sample_audio_api_persists_and_serves_speakloop_samples(tmp_path, monkeypatch) -> None:
     storage_path = tmp_path / "public-sample-audios.json"
     monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(storage_path))
     sample = {
@@ -58,31 +55,55 @@ def test_local_public_sample_audio_api_persists_and_serves_skitvoice_samples(tmp
         "audio_mime_type": "audio/wav",
         "audio_base64": base64.b64encode(b"sample audio").decode("ascii"),
     }
-    payload = {"features": {"skitvoice": {"samples": {"zh-CN": sample}}}}
+    payload = {"features": {"speakloop": {"samples": {"zh-CN": sample}}}}
 
     first_client = TestClient(create_app())
     saved = first_client.put("/api/public-sample-audios", json=payload)
 
     assert saved.status_code == 200
-    assert saved.json()["features"]["skitvoice"]["samples"]["zh-CN"]["title"] == "中国語サンプル"
-    assert saved.json()["features"]["skitvoice"]["samples"]["zh-CN"]["size_bytes"] == len(b"sample audio")
+    assert saved.json()["features"]["speakloop"]["samples"]["zh-CN"]["title"] == "中国語サンプル"
+    assert saved.json()["features"]["speakloop"]["samples"]["zh-CN"]["size_bytes"] == len(b"sample audio")
     assert storage_path.is_file()
 
     reloaded_client = TestClient(create_app())
     fetched = reloaded_client.get("/api/public-sample-audios")
     assert fetched.status_code == 200
-    assert fetched.json()["features"]["skitvoice"]["samples"]["zh-CN"]["audio_base64"] == sample["audio_base64"]
+    assert fetched.json()["features"]["speakloop"]["samples"]["zh-CN"]["audio_base64"] == sample["audio_base64"]
 
-    deleted = reloaded_client.delete("/api/public-sample-audios/skitvoice?language=zh-CN")
+    deleted = reloaded_client.delete("/api/public-sample-audios/speakloop?language=zh-CN")
     assert deleted.status_code == 200
-    assert deleted.json()["features"]["skitvoice"]["samples"]["zh-CN"] is None
+    assert deleted.json()["features"]["speakloop"]["samples"]["zh-CN"] is None
+
+
+def test_local_public_sample_audio_api_reads_legacy_file_with_removed_features(tmp_path, monkeypatch) -> None:
+    legacy_path = tmp_path / "public-sample-audios.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "features": {
+                    "speakloop": None,
+                    "skitvoice": {"samples": {"ja-JP": None, "zh-CN": None, "en-US": None}},
+                    "fun": None,
+                    "voice_conversion": None,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MO_PUBLIC_SAMPLE_AUDIO_PATH", str(legacy_path))
+    client = TestClient(create_app())
+
+    response = client.get("/api/public-sample-audios")
+
+    assert response.status_code == 200
+    assert "skitvoice" not in response.json()["features"]
 
 
 def test_local_public_sample_audio_api_rejects_unsupported_language() -> None:
     client = TestClient(create_app())
     payload = {
         "features": {
-            "skitvoice": {
+            "speakloop": {
                 "samples": {
                     "fr-FR": {
                         "title": "unsupported",
@@ -187,6 +208,8 @@ def test_retired_local_ui_routes_return_not_found() -> None:
         "/vibevoice",
         "/vibevoice/simple",
         "/vibevoice/admin",
+        "/skitvoice",
+        "/skitvoice/admin",
         "/seed-vc",
         "/static/vibevoice_simple.html",
         "/static/seed_vc.html",
@@ -1411,698 +1434,6 @@ def test_practice_admin_serves_practice_history_ui() -> None:
     assert "Voice Lab" in response.text
     assert "/api/practice-history" not in response.text
     assert "/static/app_practice_history.js" in response.text
-
-
-def test_skitvoice_serves_simple_user_ui_without_admin_controls() -> None:
-    client = TestClient(create_app())
-
-    response = client.get("/skitvoice")
-
-    assert response.status_code == 200
-    assert "SkitVoice" in response.text
-    assert "SkitVoice 管理" not in response.text
-    assert 'data-vibevoice-mode="simple"' in response.text
-    assert "/react/assets/skitvoice.js" in response.text
-    assert '<div id="root"></div>' in response.text
-
-
-def test_vibevoice_serves_admin_skit_ui() -> None:
-    client = TestClient(create_app())
-
-    response = client.get("/skitvoice/admin")
-
-    assert response.status_code == 200
-    assert "SkitVoice 管理" in response.text
-    assert "vibevoice-script" in response.text
-    assert 'data-vibevoice-mode="simple"' not in response.text
-    assert 'data-reference-url-open-slot="1"' in response.text
-    assert 'id="vibevoice-reference-url-dialog"' in response.text
-    assert 'name="directed_retry_max_multiplier"' in response.text
-    assert "/static/app_vibevoice.js" in response.text
-
-
-def test_vibevoice_status_api_uses_service() -> None:
-    class FakeVibeVoiceService:
-        def status(self):
-            return {"available": True, "provider": "fake-vibevoice"}
-
-    client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
-
-    response = client.get("/api/vibevoice/status")
-
-    assert response.status_code == 200
-    assert response.json()["available"] is True
-    assert response.json()["provider"] == "fake-vibevoice"
-    assert response.json()["url_reference_audio"]["enabled"] is False
-    assert "yt_dlp" in response.json()["url_reference_audio"]["tools"]
-    assert response.json()["url_reference_audio"]["tools"]["javascript_runtime"]["command"] == "node"
-
-
-def test_vibevoice_status_api_reports_loopback_url_reference_availability(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = TestClient(create_app(), base_url="http://127.0.0.1")
-
-    enabled_response = client.get("/api/vibevoice/status")
-    monkeypatch.setenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", "0")
-    disabled_response = client.get("/api/vibevoice/status")
-
-    assert enabled_response.json()["url_reference_audio"]["enabled"] is True
-    assert disabled_response.json()["url_reference_audio"]["enabled"] is False
-
-
-def test_vibevoice_generate_api_returns_audio() -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {"stdout_tail": "ok", "stderr_tail": ""}
-        providers = {"vibevoice": "fake-vibevoice"}
-        artifacts = [
-            {
-                "kind": "speaker_vibevoice",
-                "label": "Speaker 1 VibeVoice",
-                "audio_mime_type": "audio/wav",
-                "audio_base64": base64.b64encode(b"speaker wav").decode("ascii"),
-            }
-        ]
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-            self.voice_bytes = b""
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            self.voice_bytes = voice_paths[0].path.read_bytes()
-            return FakeVibeVoiceResult()
-
-    service = FakeVibeVoiceService()
-    client = TestClient(create_app(vibevoice_service=service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={
-            "script": "你好。",
-            "inference_steps": "3",
-            "line_by_line": "true",
-            "directed_line_mode": "true",
-            "directed_retry_low_score": "true",
-            "directed_retry_score_threshold": "0.7",
-            "directed_retry_max_lines": "4",
-            "model_id": "vibevoice-1.5b-latest",
-        },
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["audio_mime_type"] == "audio/wav"
-    assert payload["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
-    assert payload["normalized_script"] == "Speaker 1: 你好。"
-    assert payload["artifacts"][0]["label"] == "Speaker 1 VibeVoice"
-    assert payload["providers"]["vibevoice"] == "fake-vibevoice"
-    assert len(service.calls) == 1
-    assert service.calls[0][2].model_id == "vibevoice-1.5b-latest"
-    assert service.calls[0][2].inference_steps == 3
-    assert service.calls[0][2].line_by_line is True
-    assert service.calls[0][2].directed_line_mode is True
-    assert service.calls[0][2].directed_retry_low_score is True
-    assert service.calls[0][2].directed_retry_score_threshold == 0.7
-    assert service.calls[0][2].directed_retry_max_lines == 4
-
-
-def test_vibevoice_generate_api_translates_script_before_generation(monkeypatch) -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {}
-        providers = {"vibevoice": "fake-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            return FakeVibeVoiceResult()
-
-    def fake_translate(script_text: str, output_language: str, model: str) -> str:
-        assert script_text == "1 こんにちは\n2 元気ですか"
-        assert output_language == "zh-CN"
-        assert model == "test-vv-translation-model"
-        return '{"source_language":"ja-JP","script":"1 你好。\\n2 你好吗？"}'
-
-    monkeypatch.setenv("OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL", "test-vv-translation-model")
-    monkeypatch.setattr("mo_speech.api._openai_vibevoice_translate_script", fake_translate, raising=False)
-    service = FakeVibeVoiceService()
-    client = TestClient(create_app(vibevoice_service=service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={
-            "script": "1 こんにちは\n2 元気ですか",
-            "output_language": "zh-CN",
-            "translate_script": "true",
-        },
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    assert service.calls[0][0] == "1 你好。\n2 你好吗？"
-    diagnostics = response.json()["diagnostics"]["script_translation"]
-    assert diagnostics["enabled"] is True
-    assert diagnostics["source_language"] == "ja-JP"
-    assert diagnostics["output_language"] == "zh-CN"
-    assert diagnostics["source_script"] == "1 こんにちは\n2 元気ですか"
-    assert diagnostics["translated_script"] == "1 你好。\n2 你好吗？"
-    assert diagnostics["model"] == "test-vv-translation-model"
-
-
-def test_vibevoice_script_api_generates_exact_five_lines_from_current_script(monkeypatch) -> None:
-    captured: dict[str, str] = {}
-
-    def fake_generate(seed_script: str) -> str:
-        captured["seed_script"] = seed_script
-        return "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう"
-
-    monkeypatch.setattr(
-        "mo_speech.api._openai_vibevoice_generate_script",
-        fake_generate,
-    )
-    client = TestClient(create_app())
-
-    response = client.post("/api/vibevoice/scripts", json={"seed_script": "1 AIについて話そう\n2 いいですね"})
-
-    assert response.status_code == 200
-    assert captured["seed_script"] == "1 AIについて話そう\n2 いいですね"
-    assert response.json()["script"].splitlines() == [
-        "1 こんにちは",
-        "2 久しぶりです",
-        "1 元気でしたか",
-        "2 元気です",
-        "1 また話しましょう",
-    ]
-
-
-def test_vibevoice_generate_api_defaults_to_directed_retry_mode() -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {}
-        providers = {"vibevoice": "fake-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            return FakeVibeVoiceResult()
-
-    service = FakeVibeVoiceService()
-    client = TestClient(create_app(vibevoice_service=service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={"script": "\n".join(f"1 你好{i}。" for i in range(1, 12))},
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    assert len(service.calls) == 1
-    options = service.calls[0][2]
-    assert options.directed_line_mode is True
-    assert options.directed_retry_low_score is True
-    assert options.directed_retry_score_threshold == 0.65
-    assert options.directed_retry_max_lines == 6
-
-
-def test_vibevoice_generate_api_scales_retry_max_lines_from_multiplier() -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {}
-        providers = {"vibevoice": "fake-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            return FakeVibeVoiceResult()
-
-    service = FakeVibeVoiceService()
-    client = TestClient(create_app(vibevoice_service=service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={
-            "script": "\n".join(f"1 你好{i}。" for i in range(1, 12)),
-            "directed_retry_max_multiplier": "2",
-        },
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    assert service.calls[0][2].directed_retry_max_lines == 12
-
-
-def test_vibevoice_generate_api_preserves_voice_slots() -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 2: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {}
-        providers = {"vibevoice": "fake-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-            self.voice_bytes = b""
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            self.voice_bytes = voice_paths[0].path.read_bytes()
-            return FakeVibeVoiceResult()
-
-    service = FakeVibeVoiceService()
-    client = TestClient(create_app(vibevoice_service=service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={"script": "Speaker 2: 你好。"},
-        files={"voice_file_2": ("voice2.wav", b"voice2", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    assert len(service.calls) == 1
-    voice_samples = service.calls[0][1]
-    assert len(voice_samples) == 1
-    assert voice_samples[0].slot == 2
-    assert service.voice_bytes == b"voice2"
-
-
-def test_vibevoice_reference_audio_from_url_api_returns_wav() -> None:
-    class FakeReferenceAudioExtractor:
-        def __init__(self):
-            self.calls = []
-
-        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
-            self.calls.append((url, start_seconds, duration_seconds))
-            return ReferenceAudioClip(
-                audio_bytes=b"RIFFurlwav",
-                audio_mime_type="audio/wav",
-                filename="reference_url_s75_d5.wav",
-                source_url=url,
-                start_seconds=75.0 if start_seconds is None else start_seconds,
-                detected_start_seconds=75.0,
-                duration_seconds=duration_seconds,
-            )
-
-    extractor = FakeReferenceAudioExtractor()
-    client = TestClient(create_app(reference_audio_extractor=extractor), base_url="http://127.0.0.1")
-
-    response = client.post(
-        "/api/vibevoice/reference-audio-from-url",
-        data={"url": "https://youtu.be/example?t=75", "duration_seconds": "5"},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["audio_mime_type"] == "audio/wav"
-    assert payload["audio_base64"] == base64.b64encode(b"RIFFurlwav").decode("ascii")
-    assert payload["filename"] == "reference_url_s75_d5.wav"
-    assert payload["start_seconds"] == 75.0
-    assert payload["detected_start_seconds"] == 75.0
-    assert extractor.calls == [("https://youtu.be/example?t=75", None, 5.0)]
-
-
-def test_vibevoice_reference_audio_from_url_api_rejects_non_local_request() -> None:
-    class FailingReferenceAudioExtractor:
-        def extract_from_url(self, *args, **kwargs):
-            raise AssertionError("extractor must not run for a non-local request")
-
-    client = TestClient(create_app(reference_audio_extractor=FailingReferenceAudioExtractor()))
-
-    response = client.post(
-        "/api/vibevoice/reference-audio-from-url",
-        data={"url": "https://youtu.be/example", "duration_seconds": "5"},
-    )
-
-    assert response.status_code == 403
-    assert response.json() == {
-        "detail": "URL参照音声取得はローカルFastAPIへのloopback接続でのみ利用できます。"
-    }
-
-
-def test_vibevoice_reference_audio_from_url_api_allows_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeReferenceAudioExtractor:
-        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
-            return ReferenceAudioClip(
-                audio_bytes=b"RIFFurlwav",
-                audio_mime_type="audio/wav",
-                filename="reference.wav",
-                source_url=url,
-                start_seconds=0.0,
-                detected_start_seconds=None,
-                duration_seconds=duration_seconds,
-            )
-
-    monkeypatch.setenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", "1")
-    client = TestClient(create_app(reference_audio_extractor=FakeReferenceAudioExtractor()))
-
-    response = client.post(
-        "/api/vibevoice/reference-audio-from-url",
-        data={"url": "https://example.com/audio", "duration_seconds": "5"},
-    )
-
-    assert response.status_code == 200
-
-
-def test_vibevoice_generate_api_resolves_url_reference_before_runpod_backend() -> None:
-    class FakeReferenceAudioExtractor:
-        def __init__(self):
-            self.calls = []
-
-        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
-            self.calls.append((url, start_seconds, duration_seconds))
-            return ReferenceAudioClip(
-                audio_bytes=b"RIFFurlwav",
-                audio_mime_type="audio/wav",
-                filename="reference_url_s12_d6.wav",
-                source_url=url,
-                start_seconds=12.0,
-                detected_start_seconds=75.0,
-                duration_seconds=duration_seconds,
-            )
-
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFrunpod"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "runpod_handler_total": 20.0, "total": 20.0}
-        diagnostics = {}
-        providers = {"vibevoice": "runpod-serverless-vibevoice"}
-
-    class FakeRunpodVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-            self.voice_bytes = b""
-            self.voice_names = []
-
-        def status(self):
-            return {"available": True, "provider": "fake-runpod"}
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            self.voice_bytes = voice_paths[0].path.read_bytes()
-            self.voice_names = [voice.path.name for voice in voice_paths]
-            return FakeVibeVoiceResult()
-
-    extractor = FakeReferenceAudioExtractor()
-    runpod_service = FakeRunpodVibeVoiceService()
-    client = TestClient(
-        create_app(reference_audio_extractor=extractor, runpod_vibevoice_service=runpod_service),
-        base_url="http://127.0.0.1",
-    )
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={
-            "script": "你好。",
-            "backend": "runpod_serverless",
-            "model_id": "vibevoice-large-aoi-pinned",
-            "voice_url_1": "https://youtu.be/example?t=75",
-            "voice_url_start_1": "12",
-            "voice_url_duration_1": "6",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["providers"]["vibevoice"] == "runpod-serverless-vibevoice"
-    assert payload["diagnostics"]["url_reference_audio"] == [
-        {
-            "slot": 1,
-            "filename": "reference_url_s12_d6.wav",
-            "source_url": "https://youtu.be/example?t=75",
-            "start_seconds": 12.0,
-            "detected_start_seconds": 75.0,
-            "duration_seconds": 6.0,
-            "size_bytes": len(b"RIFFurlwav"),
-        }
-    ]
-    assert extractor.calls == [("https://youtu.be/example?t=75", 12.0, 6.0)]
-    assert len(runpod_service.calls) == 1
-    assert runpod_service.voice_bytes == b"RIFFurlwav"
-    assert runpod_service.voice_names == ["voice-1.wav"]
-
-
-def test_vibevoice_generate_api_rejects_url_reference_from_non_local_request() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={
-            "script": "你好。",
-            "voice_url_1": "https://youtu.be/example",
-            "voice_url_duration_1": "5",
-        },
-    )
-
-    assert response.status_code == 403
-
-
-def test_vibevoice_job_api_rejects_url_reference_from_non_local_request() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/vibevoice/jobs",
-        data={
-            "script": "你好。",
-            "voice_url_1": "https://youtu.be/example",
-            "voice_url_duration_1": "5",
-        },
-    )
-
-    assert response.status_code == 403
-
-
-def test_vibevoice_generate_api_can_use_runpod_backend() -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFrunpod"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "runpod_handler_total": 20.0, "total": 20.0}
-        diagnostics = {}
-        providers = {"vibevoice": "runpod-serverless-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-
-        def status(self):
-            return {"available": True, "provider": "fake-runpod"}
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            return FakeVibeVoiceResult()
-
-    runpod_service = FakeVibeVoiceService()
-    client = TestClient(create_app(runpod_vibevoice_service=runpod_service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={"script": "你好。", "backend": "runpod_serverless", "model_id": "vibevoice-large-aoi-pinned"},
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["providers"]["vibevoice"] == "runpod-serverless-vibevoice"
-    assert payload["audio_base64"] == base64.b64encode(b"RIFrunpod").decode("ascii")
-    assert len(runpod_service.calls) == 1
-    assert runpod_service.calls[0][2].model_id == "vibevoice-large-aoi-pinned"
-
-
-def test_vibevoice_generate_api_rejects_runpod_only_model_on_local_backend() -> None:
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, *, script_text, voice_paths, options):
-            self.calls.append((script_text, voice_paths, options))
-            raise AssertionError("local service should not be called for a RunPod-only model")
-
-    service = FakeVibeVoiceService()
-    client = TestClient(create_app(vibevoice_service=service))
-
-    response = client.post(
-        "/api/vibevoice/generate",
-        data={"script": "你好。", "backend": "local", "model_id": "vibevoice-large-aoi-pinned"},
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 400
-    assert "runpod_serverless" in response.json()["detail"]
-    assert service.calls == []
-
-
-def test_vibevoice_job_api_rejects_runpod_only_model_on_local_backend() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/vibevoice/jobs",
-        data={"script": "你好。", "backend": "local", "model_id": "vibevoice-large-aoi-pinned"},
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 400
-    assert "runpod_serverless" in response.json()["detail"]
-
-
-def test_vibevoice_job_api_reports_elapsed_and_result(tmp_path: Path) -> None:
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {"used_voice_samples": [{"slot": 1, "filename": "voice.wav", "size": 5}]}
-        providers = {"vibevoice": "fake-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
-            if progress_callback is not None:
-                progress_callback("generation", "VibeVoice生成")
-                progress_callback("generation", "生成中 16/32 (50%, 残り約00:08)")
-            return FakeVibeVoiceResult()
-
-    client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
-
-    response = client.post(
-        "/api/vibevoice/jobs",
-        data={"script": "你好。"},
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-    status_payload = None
-    for _ in range(20):
-        status_response = client.get(f"/api/vibevoice/jobs/{job_id}")
-        assert status_response.status_code == 200
-        status_payload = status_response.json()
-        if status_payload["status"] == "succeeded":
-            break
-    assert status_payload is not None
-    assert status_payload["status"] == "succeeded"
-    assert status_payload["elapsed_ms"] >= 0
-    assert status_payload["result"]["audio_base64"] == base64.b64encode(b"RIFFfakewav").decode("ascii")
-    assert any("16/32" in item["label"] for item in status_payload["progress_log"])
-    debug_payload = json.loads((tmp_path / "vibevoice-debug" / "last-result.json").read_text(encoding="utf-8"))
-    assert debug_payload["job_id"] == job_id
-    assert debug_payload["result"]["audio_base64_chars"] == len(base64.b64encode(b"RIFFfakewav").decode("ascii"))
-    assert "audio_base64" not in debug_payload["result"]
-    assert debug_payload["result"]["diagnostics"]["used_voice_samples"] == FakeVibeVoiceResult.diagnostics["used_voice_samples"]
-    assert debug_payload["result"]["diagnostics"]["script_translation"]["enabled"] is False
-    assert debug_payload["result"]["diagnostics"]["script_translation"]["output_language"] == "zh-CN"
-
-
-def test_vibevoice_job_api_resolves_url_reference_and_reports_diagnostics(tmp_path: Path) -> None:
-    class FakeReferenceAudioExtractor:
-        def __init__(self):
-            self.calls = []
-
-        def extract_from_url(self, url, *, start_seconds=None, duration_seconds=5.0):
-            self.calls.append((url, start_seconds, duration_seconds))
-            return ReferenceAudioClip(
-                audio_bytes=b"RIFFjoburlwav",
-                audio_mime_type="audio/wav",
-                filename="reference_url_s75_d5.wav",
-                source_url=url,
-                start_seconds=75.0,
-                detected_start_seconds=75.0,
-                duration_seconds=duration_seconds,
-            )
-
-    class FakeVibeVoiceResult:
-        audio_bytes = b"RIFFfakewav"
-        audio_mime_type = "audio/wav"
-        normalized_script = "Speaker 1: 你好。"
-        timings_ms = {"vibevoice": 12.0, "total": 12.0}
-        diagnostics = {}
-        providers = {"vibevoice": "fake-vibevoice"}
-
-    class FakeVibeVoiceService:
-        def __init__(self):
-            self.voice_bytes = b""
-
-        def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
-            self.voice_bytes = voice_paths[0].path.read_bytes()
-            return FakeVibeVoiceResult()
-
-    extractor = FakeReferenceAudioExtractor()
-    service = FakeVibeVoiceService()
-    client = TestClient(
-        create_app(reference_audio_extractor=extractor, vibevoice_service=service),
-        base_url="http://127.0.0.1",
-    )
-
-    response = client.post(
-        "/api/vibevoice/jobs",
-        data={
-            "script": "你好。",
-            "voice_url_1": "https://youtu.be/example?t=75",
-            "voice_url_duration_1": "5",
-        },
-    )
-
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-    status_payload = None
-    for _ in range(20):
-        status_response = client.get(f"/api/vibevoice/jobs/{job_id}")
-        assert status_response.status_code == 200
-        status_payload = status_response.json()
-        if status_payload["status"] == "succeeded":
-            break
-    assert status_payload is not None
-    assert status_payload["status"] == "succeeded"
-    assert service.voice_bytes == b"RIFFjoburlwav"
-    assert extractor.calls == [("https://youtu.be/example?t=75", None, 5.0)]
-    assert status_payload["result"]["diagnostics"]["url_reference_audio"][0]["source_url"] == "https://youtu.be/example?t=75"
-    debug_payload = json.loads((tmp_path / "vibevoice-debug" / "last-result.json").read_text(encoding="utf-8"))
-    assert debug_payload["result"]["diagnostics"]["url_reference_audio"][0]["filename"] == "reference_url_s75_d5.wav"
-
-
-def test_vibevoice_job_api_can_request_cancel() -> None:
-    class FakeVibeVoiceService:
-        def generate(self, *, script_text, voice_paths, options, progress_callback=None, cancel_event=None):
-            if cancel_event is not None:
-                cancel_event.wait(timeout=2)
-            raise RuntimeError("cancel observed")
-
-    client = TestClient(create_app(vibevoice_service=FakeVibeVoiceService()))
-    response = client.post(
-        "/api/vibevoice/jobs",
-        data={"script": "你好。"},
-        files={"voice_file_1": ("voice.wav", b"voice", "audio/wav")},
-    )
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-
-    cancel_response = client.post(f"/api/vibevoice/jobs/{job_id}/cancel")
-
-    assert cancel_response.status_code == 200
-    assert cancel_response.json()["status"] in {"cancelling", "cancelled", "failed"}
 
 
 def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:

@@ -22,7 +22,7 @@ if [[ -z "${image_name}" ]]; then
     image_name="${RUNPOD_IMAGE:-}"
   fi
 fi
-image_tag="${RUNPOD_DEPLOY_IMAGE_TAG:-${RUNPOD_IMAGE_TAG:-${RUNPOD_DEPLOY_IMAGE_TAG_PREFIX:-runpod-vibevoice}-${short_sha}}}"
+image_tag="${RUNPOD_DEPLOY_IMAGE_TAG:-${RUNPOD_IMAGE_TAG:-${RUNPOD_DEPLOY_IMAGE_TAG_PREFIX:-runpod-app}-${short_sha}}}"
 image_visibility="${RUNPOD_DEPLOY_IMAGE_VISIBILITY:-private}"
 new_image="${image_name}:${image_tag}"
 template_name="${RUNPOD_DEPLOY_TEMPLATE_NAME:-mo-speech-serverless-${short_sha}}"

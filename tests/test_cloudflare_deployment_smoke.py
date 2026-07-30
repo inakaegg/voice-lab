@@ -76,7 +76,7 @@ def healthy_responses() -> dict[str, tuple[int, str, str]]:
                 "authenticated": False,
             },
         ),
-        "/api/vibevoice/status": json_response(401, {"error": "authentication required"}),
+        "/api/public-users": json_response(401, {"error": "authentication required"}),
         "/robots.txt": response(
             200,
             "User-agent: *\nDisallow: /admin\n\nSitemap: http://example.com/sitemap.xml\n",
@@ -133,7 +133,7 @@ def test_smoke_reports_all_failed_checks_without_response_bodies() -> None:
             "debug": secret_marker,
         },
     )
-    responses["/api/vibevoice/status"] = json_response(
+    responses["/api/public-users"] = json_response(
         503,
         {"error": secret_marker},
     )
@@ -145,5 +145,5 @@ def test_smoke_reports_all_failed_checks_without_response_bodies() -> None:
     assert "FAIL 3/8" in output
     assert "/speakloop" in output
     assert "/api/public-session" in output
-    assert "/api/vibevoice/status" in output
+    assert "/api/public-users" in output
     assert secret_marker not in output

@@ -1,10 +1,10 @@
 # Voice Lab Webアプリ仕様
 
-更新日: 2026-07-29
+更新日: 2026-07-30
 
 ## 目的
 
-Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフォリオの主機能とする。複数話者音声生成のSkitVoice/VibeVoiceは一般公開製品から外し、privateまたは管理者専用の研究機能として隔離する。ローカルFastAPI、Cloudflare Worker、RunPod Serverlessの責任を分離し、秘密情報とGPU処理をブラウザへ置かない。
+Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフォリオの主機能とする。ローカルFastAPI、Cloudflare Worker、RunPod Serverlessの責任を分離し、秘密情報とGPU処理をブラウザへ置かない。この構成はproduction公開環境へ反映済みである。
 
 ## 正式route
 
@@ -12,10 +12,8 @@ Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフ�
 | --- | --- | --- |
 | `/` | Voice Labポータル | 公開 |
 | `/speakloop` | SpeakLoop | 公開 |
-| `/skitvoice` | 研究機能の非公開案内（生成・sampleなし） | 公開 |
 | `/admin` | 総合管理 | 管理者認証必須 |
 | `/speakloop/admin` | SpeakLoop管理 | 管理者認証必須 |
-| `/skitvoice/admin` | SkitVoice管理 | 管理者認証必須 |
 | `/fun` | 実験的な音声変換デモ | 管理者認証必須 |
 
 ### 管理者認証
@@ -28,26 +26,6 @@ Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフ�
 - 別の管理パスワードや管理者cookieは設けない。
 - ローカルFastAPIは開発者が起動する信頼済み環境として、管理ログインなしで管理画面と `/fun` を提供する。
 - 廃止した旧routeへの互換aliasは設けない。Static AssetsのHTMLファイルを直接指定して管理者認証を迂回できないようにする。
-
-### SkitVoice/VibeVoiceの公開境界
-
-Cloudflare版では、匿名利用者と通常のGoogleログイン利用者のどちらにも、SkitVoice/VibeVoiceのinteractive generationを許可しない。公開ポータルには製品導線を置かず、`/skitvoice` は生成フォームやsampleを含まない案内だけを返す。
-
-次の全APIを、route個別の表示条件ではなく、既存Google管理者セッションを使う共通server-side guardで保護する。
-
-- `GET /api/vibevoice/status`
-- `POST /api/vibevoice/reference-audio-from-url`
-- `POST /api/vibevoice/scripts`
-- `POST /api/vibevoice/jobs`
-- `GET /api/vibevoice/jobs/{id}`
-- `POST /api/vibevoice/jobs/{id}/cancel`
-
-- Cloudflare Workerにはsync generation APIを設けない。ローカルFastAPIの `POST /api/vibevoice/generate` と上記API、`/skitvoice`、`/skitvoice/admin` は、開発者が起動する信頼済み研究環境として維持する。
-- Cloudflareの `/skitvoice/admin` と直接配信用HTML `/static/vibevoice.html` は管理者認証必須とする。旧 `/vibevoice*` routeは404を維持する。
-- `GET /api/public-session` は非adminへSkitVoiceのfeature/quota設定を返さず、`GET /api/public-sample-audios` は非adminへSkitVoice sampleを返さない。
-- 外部R2 objectはこの実装変更では削除しない。
-
-この管理者境界はproduction公開環境へ反映済みだが、研究機能を一般公開できることの証明ではない。VibeVoice runtime、第三者Large mirror、ComfyUI fork、RunPod imageはprivate維持を前提とする。
 
 ## SpeakLoop
 
@@ -133,17 +111,6 @@ Cloudflare版では、匿名利用者と通常のGoogleログイン利用者の�
 - 公開UIの主要ステータスとエラーは、providerを変更しても成立する文言にする。provider名・モデル名・raw stage・内部エラーは主要文言に含めない。分離先は弱い技術詳細・管理画面・ブラウザconsole・サーバーログとする。
 - 外部AIプロバイダの利用枠超過は例外として原因カテゴリだけを利用者へ伝える。固定文言「現在サーバー側のAI利用枠を超えているため処理できません。時間をおいてもう一度お試しください。」をHTTP 503で返し、クレジット残高や課金状態の詳細は表示しない。
 
-## SkitVoice
-
-- 台本と最大4つの参照音声から複数話者の会話音声を生成する。
-- 初期台本は2話者・5行とし、台本自動生成は入力済みテキストを種に発展させる。
-- 出力言語は `🇺🇸 English`、`🇨🇳 中文`、`🇯🇵 日本語` の順とし、既定値は英語にする。
-- 台本言語と出力言語が異なる場合は自動翻訳し、生成前に翻訳文を表示する。
-- 参照音声は、ローカル版ではファイル・マイク・タブ音声・URL切り出しの4方式、Cloudflare版ではURLを除く3方式に対応する。タブ音声は `getDisplayMedia` と `MediaRecorder` を利用できるブラウザだけに表示する。初期判定で非対応なら操作自体を隠し、利用開始時に非対応と判明した場合だけtoastで代替手段を案内する。
-- 生成結果をASR timestampで検査し、必要に応じて話者位置補正、低スコア行再生成、Seed-VC後処理を行う。
-- RunPod実行は非同期jobとし、管理者研究画面の主要表示は処理目的で区別する。provider／モデル名とraw stage、生の失敗理由は、弱い技術詳細・進捗ログ・サーバーログに残す。公開 `/skitvoice` は生成状態を持たない。
-- 詳細は [VIBEVOICE.md](VIBEVOICE.md) を参照する。
-
 ## 実行環境の責任
 
 | 処理 | ローカルFastAPI | Cloudflare Worker | RunPod handler |
@@ -152,8 +119,7 @@ Cloudflare版では、匿名利用者と通常のGoogleログイン利用者の�
 | Google OAuth・公開quota | — | ○ | — |
 | OpenAI ASR・翻訳・TTS | 母語入力、英語復唱、翻訳、TTS | 母語入力、英語復唱、翻訳、TTS | — |
 | SpeakLoop中国語比較ASR | provider経由で非同期jobを依頼・polling | お手本／復唱音声bytesを非同期jobとして中継 | `paraformer-zh`でASR後に`fa-zh`整列とVADスナップ |
-| URL参照音声取得 | `yt-dlp` + `ffmpeg` | 拒否 | 拒否 |
-| VibeVoice・Seed-VC GPU推論 | provider経由で依頼 | job APIを中継 | ○ |
+| Seed-VC GPU推論 | provider経由で依頼 | job APIを中継 | ○ |
 | quota・監査・サンプルmetadata | ローカルファイル | D1、bindingなし時のみfallback | — |
 | 音声履歴 | ローカルファイル | 保存しない | 保存しない |
 | 公開サンプル音声blob | ローカルファイル | R2、bindingなし時のみfallback | — |
@@ -189,8 +155,6 @@ RunPod handlerの契約:
 ## UI契約
 
 - 公開UIの視覚階層、レスポンシブ、テーマ、状態は [UI_STYLE.md](../UI_STYLE.md) を正とする。
-- SkitVoiceは1120px以上で台本・参照音声・生成の3列、821〜1119pxで2列、820px以下で1列にする。
-- 出力音声サンプルは英語、中国語、日本語の順とし、PCでは横並びにする。
 - 通信を伴う保存・削除・生成操作は、処理中・成功・失敗をボタン付近のstatusで通知し、処理中は二重送信を防ぐ。
 - ブラウザ既定audio controlsを公開・管理UIへ露出せず、共通の再生・一時停止・シーク・時間表示を使う。
 

@@ -73,33 +73,6 @@ def test_runpod_build_push_checks_registry_visibility_before_push() -> None:
     assert 'RUNPOD_IMAGE_VISIBILITY:-private' in script
 
 
-def test_runpod_common_sets_vibevoice_revision_defaults() -> None:
-    command = (
-        "source scripts/runpod_common.sh; "
-        "set_default_runpod_app_env; "
-        "runpod_env_json "
-        "VIBEVOICE_MODEL_REPO "
-        "VIBEVOICE_MODEL_REVISION "
-        "VIBEVOICE_TOKENIZER_REPO "
-        "VIBEVOICE_TOKENIZER_REVISION"
-    )
-
-    result = subprocess.run(
-        ["bash", "-lc", command],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    payload = json.loads(result.stdout)
-    assert payload == {
-        "VIBEVOICE_MODEL_REPO": "microsoft/VibeVoice-1.5B",
-        "VIBEVOICE_MODEL_REVISION": "1904eae38036e9c780d28e27990c27748984eafe",
-        "VIBEVOICE_TOKENIZER_REPO": "Qwen/Qwen2.5-1.5B",
-        "VIBEVOICE_TOKENIZER_REVISION": "8faed761d45a263340a0528343f099c05c9a4323",
-    }
-
-
 def test_runpod_common_sets_resident_gpu_model_lifecycle_defaults() -> None:
     command = (
         "source scripts/runpod_common.sh; "
@@ -107,10 +80,8 @@ def test_runpod_common_sets_resident_gpu_model_lifecycle_defaults() -> None:
         "runpod_env_json "
         "MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START "
         "MO_RUNPOD_PRELOAD_FUNASR_ON_START "
-        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE "
         "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR "
         "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION "
-        "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE "
         "FUNASR_MODEL FUNASR_FA_MODEL FUNASR_VAD_MODEL FUNASR_PUNC_MODEL FUNASR_HUB FUNASR_DEVICE"
     )
 
@@ -125,45 +96,14 @@ def test_runpod_common_sets_resident_gpu_model_lifecycle_defaults() -> None:
     assert payload == {
         "MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START": "0",
         "MO_RUNPOD_PRELOAD_FUNASR_ON_START": "0",
-        "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE": "1",
         "MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR": "1",
         "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION": "1",
-        "MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE": "1",
         "FUNASR_MODEL": "funasr/paraformer-zh",
         "FUNASR_FA_MODEL": "funasr/fa-zh",
         "FUNASR_VAD_MODEL": "funasr/fsmn-vad",
         "FUNASR_PUNC_MODEL": "funasr/ct-punc",
         "FUNASR_HUB": "hf",
         "FUNASR_DEVICE": "cuda",
-    }
-
-
-def test_runpod_common_sets_directed_vibevoice_pipeline_defaults() -> None:
-    command = (
-        "source scripts/runpod_common.sh; "
-        "set_default_runpod_app_env; "
-        "runpod_env_json "
-        "MO_VIBEVOICE_DIRECTED_ASR_PROVIDER "
-        "MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL "
-        "MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE "
-        "MO_VIBEVOICE_DIRECTED_VC_ENABLED "
-        "MO_VIBEVOICE_DIRECTED_VC_BACKEND"
-    )
-
-    result = subprocess.run(
-        ["bash", "-lc", command],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    payload = json.loads(result.stdout)
-    assert payload == {
-        "MO_VIBEVOICE_DIRECTED_ASR_PROVIDER": "openai",
-        "MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL": "whisper-1",
-        "MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE": "auto",
-        "MO_VIBEVOICE_DIRECTED_VC_ENABLED": "1",
-        "MO_VIBEVOICE_DIRECTED_VC_BACKEND": "seed-vc",
     }
 
 
@@ -277,6 +217,18 @@ def test_runpod_image_pins_cuda_compatible_torch_audio_and_imports_seed_vc() -> 
     assert "import seed_vc.api" in dockerfile
 
 
+def test_runpod_dockerfile_has_no_orphaned_continuation_lines() -> None:
+    dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
+    previous = ""
+    for line in dockerfile.splitlines():
+        if line.lstrip().startswith("&&"):
+            assert previous.rstrip().endswith("\\"), f"orphaned continuation line: {line.strip()}"
+        if line.strip():
+            previous = line
+        elif not line.strip():
+            previous = ""
+
+
 def test_runpod_image_does_not_install_url_reference_download_tools() -> None:
     dockerfile = Path("Dockerfile.runpod").read_text(encoding="utf-8")
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -288,11 +240,8 @@ def test_runpod_image_does_not_install_url_reference_download_tools() -> None:
     assert "yt-dlp" not in dockerfile
     assert not any(
         dependency.startswith("yt-dlp")
-        for dependency in optional_dependencies["vibevoice"]
-    )
-    assert any(
-        dependency.startswith("yt-dlp")
-        for dependency in optional_dependencies["url-reference"]
+        for dependencies in optional_dependencies.values()
+        for dependency in dependencies
     )
     assert "url-reference" not in dockerfile
 
@@ -319,30 +268,6 @@ def test_runpod_smoke_script_supports_chinese_practice_asr() -> None:
     assert 'practice_asr_contract_version' in script
     assert '"preload_practice_asr": args.preload_practice_asr' in script
     assert 'key.endswith("audio_base64")' in script
-
-
-def test_runpod_smoke_script_supports_vibevoice_generation_overrides() -> None:
-    script = Path("scripts/runpod_smoke_serverless.py").read_text(encoding="utf-8")
-
-    assert "--vibevoice-cfg-scale" in script
-    assert "--vibevoice-no-sample" in script
-    assert "--vibevoice-temperature" in script
-    assert "--vibevoice-directed-line-mode" in script
-    assert "--vibevoice-directed-retry-low-score" in script
-    assert "--vibevoice-directed-retry-score-threshold" in script
-    assert "--vibevoice-directed-retry-max-lines" in script
-    assert "--vibevoice-directed-retry-max-multiplier" in script
-    assert 'RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_MULTIPLIER", "1"' in script
-    assert "--vibevoice-line-gap" in script
-    assert 'generation_payload["cfg_scale"] = args.vibevoice_cfg_scale' in script
-    assert 'generation_payload["do_sample"] = False' in script
-    assert 'generation_payload["temperature"] = args.vibevoice_temperature' in script
-    assert '"directed_line_mode": args.vibevoice_directed_line_mode' in script
-    assert '"directed_retry_low_score": args.vibevoice_directed_retry_low_score' in script
-    assert '"directed_retry_score_threshold": args.vibevoice_directed_retry_score_threshold' in script
-    assert '"directed_retry_max_multiplier": args.vibevoice_directed_retry_max_multiplier' in script
-    assert 'generation_payload["directed_retry_max_lines"] = args.vibevoice_directed_retry_max_lines' in script
-    assert '"line_gap": args.vibevoice_line_gap' in script
 
 
 def test_runpod_smoke_script_uses_runpod_default_policy_without_logging_raw_errors() -> None:
@@ -519,13 +444,13 @@ def test_runpod_deploy_serverless_image_dry_run_orchestrates_unique_tag(tmp_path
     )
     output = result.stdout + result.stderr
 
-    assert "runpod-vibevoice-abcdef1" in output
+    assert "runpod-app-abcdef1" in output
     assert "gh workflow run runpod-image.yml --ref feature/test" in output
     assert "-f image_name=docker.io/example/mo-speech" in output
     assert "-f expected_visibility=private" in output
-    assert "-f image_tag=runpod-vibevoice-abcdef1" in output
+    assert "-f image_tag=runpod-app-abcdef1" in output
     assert "POST https://rest.runpod.io/v1/templates" in output
-    assert "image=docker.io/example/mo-speech:runpod-vibevoice-abcdef1" in output
+    assert "image=docker.io/example/mo-speech:runpod-app-abcdef1" in output
     assert "containerRegistryAuthId=registry-id" in output
     assert "/v1/endpoints/endpoint-id/update" in output
     assert "python scripts/runpod_smoke_serverless.py --operation-mode diagnostics" in output

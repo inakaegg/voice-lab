@@ -179,12 +179,6 @@ def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
     assert "利用条件" in spec
     assert "プライバシー" in spec
 
-    vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
-    assert "ブラウザの共有許可" in vibevoice
-    assert "コンテンツの利用許諾" in vibevoice
-    assert "タブ音声録音の開始前に権利確認を必須とする" in vibevoice
-    assert "必須チェックを毎回要求しない" not in vibevoice
-
 
 def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     workflow = read_text(".github/workflows/ci.yml")
@@ -232,7 +226,6 @@ def test_publication_record_tracks_public_repository_and_external_controls() -> 
     assert "保持期間" in checklist
     assert "Seed-VC" in checklist
     assert "GPL-3.0" in checklist
-    assert "VibeVoice" in checklist
     assert "外部状態スナップショット" in checklist
     assert "is_private=true" in checklist
     assert "Secret scanningとGitHub Push Protectionは有効" in checklist
@@ -293,10 +286,8 @@ def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
     assert "THIRD_PARTY_NOTICES.md" in readme
     assert "Seed-VC" in notices
     assert "GPL-3.0" in notices
-    assert "ComfyUI-VibeVoice" in notices
     assert "bundled dependency licenses" in notices
     assert "public container imageを配布しない" in notices
-    assert "self-hosted runtimeへ実装済みとは表示しない" in notices
 
     browser_bundle = notices.split("## ブラウザbundle", 1)[1].split("## Cloudflare Worker", 1)[0]
     worker_bundle = notices.split("## Cloudflare Worker", 1)[1].split("## Python・GPU image", 1)[0]
@@ -362,16 +353,12 @@ def test_public_summaries_focus_on_speakloop_while_technical_boundaries_remain()
     readme = read_text("README.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     spec = read_text("docs/speech-translation/SPEC.md")
-    vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
 
-    for document in (readme, roadmap):
+    for document in (readme, roadmap, spec):
         assert "SpeakLoop" in document
         assert "SkitVoice" not in document
         assert "VibeVoice" not in document
     assert "VIBEVOICE.md" not in readme
-    assert "生成フォームやsampleを含まない" in spec
-    assert "public sample APIはSkitVoice sampleを返さない" in vibevoice
-    assert "aoi-ot/VibeVoice-LargeをMicrosoft公式配布と表現しない" in read_text("THIRD_PARTY_NOTICES.md")
 
 
 def test_current_state_docs_match_the_deployed_production_boundary() -> None:
@@ -380,7 +367,6 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         "docs/deployment/CLOUDFLARE.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
-        "docs/deployment/APP_SPLIT.md",
         "docs/speech-translation/SPEC.md",
     ):
         document = read_text(relative_path)
@@ -497,7 +483,6 @@ def test_frontend_migration_plan_preserves_current_api_and_state_boundaries() ->
     assert "TypeScript" in migration
     assert "API互換" in migration
     assert "SpeakLoop" in migration
-    assert "SkitVoice" in migration
     assert "状態遷移" in migration
     assert "一括移行しない" in migration
 
@@ -511,8 +496,8 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
     assert "/speakloop" in readme
     for document in (spec, architecture, cloudflare):
         assert "/speakloop" in document
-        assert "/skitvoice" in document
-    assert "/skitvoice" not in readme
+    for document in (readme, spec, architecture):
+        assert "/skitvoice" not in document
 
     assert "`/fun` は管理者認証済みの場合だけ" in spec
     assert "同じGoogle OAuthセッション" in spec
@@ -522,9 +507,6 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
     assert "`/user`" not in spec
     assert "`/vibevoice`" not in spec
     assert "Cloudflare Pages" not in architecture
-    assert "ファイル、マイク、タブ音声" in cloudflare
-    assert "2話者・5行" in spec
-    assert "1120px以上" in spec
     assert "D1" in spec
     assert "R2" in spec
 

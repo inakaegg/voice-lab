@@ -10,7 +10,7 @@ from typing import Any
 
 
 DEFAULT_PUBLIC_SAMPLE_AUDIO_PATH = "tmp/public-sample-audios.json"
-PUBLIC_SAMPLE_FEATURES = ("fun", "voice_conversion", "speakloop", "skitvoice")
+PUBLIC_SAMPLE_FEATURES = ("fun", "voice_conversion", "speakloop")
 PUBLIC_SAMPLE_LANGUAGES = ("ja-JP", "zh-CN", "en-US")
 PUBLIC_SAMPLE_AUDIO_MAX_BYTES = 1_800_000
 
@@ -21,7 +21,6 @@ def empty_public_sample_audios() -> dict[str, object]:
             "fun": None,
             "voice_conversion": None,
             "speakloop": None,
-            "skitvoice": {"samples": {language: None for language in PUBLIC_SAMPLE_LANGUAGES}},
         }
     }
 
@@ -41,6 +40,12 @@ class PublicSampleAudioStore:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return empty_public_sample_audios()
+        # 廃止済みfeature（旧skitvoice等）を含む保存済みファイルも読めるよう、未知keyは読み捨てる。
+        if isinstance(payload, dict):
+            raw_features = payload.get("features", payload)
+            if isinstance(raw_features, dict):
+                known = {key: value for key, value in raw_features.items() if key in PUBLIC_SAMPLE_FEATURES}
+                payload = {"features": known}
         return normalize_public_sample_audios(payload)
 
     def write(self, payload: object) -> dict[str, object]:

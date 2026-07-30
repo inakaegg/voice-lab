@@ -55,7 +55,7 @@
   - 出力シリアライズ
   - エラー処理
   - 進捗パース
-- VibeVoice/RunPod向けのDocker build、image deploy、serverless smokeは、ローカルの該当テストが通ってから必要最小限だけ実行する。リモートでしか確認できない場合は、その理由と最小入力を明確にしてから実行する。
+- RunPod向けのDocker build、image deploy、serverless smokeは、ローカルの該当テストが通ってから必要最小限だけ実行する。リモートでしか確認できない場合は、その理由と最小入力を明確にしてから実行する。
 - Web UIの機能(録音・アップロード・ローディング表示・音声再生)は、コード上の存在確認だけで完了扱いしない。
 - FastAPIのルート/API実装を変更した場合、ローカル確認前に必ずUvicornプロセスを再起動する。静的ファイルは再起動なしで更新されるが、Pythonのルート/APIは起動中プロセスに古い実装が残る。「フロントだけ最新、API/routeは古い」状態で確認しない。
 - 既存サーバーを使って確認する場合は、`lsof -nP -iTCP:<port> -sTCP:LISTEN` と `ps -p <pid> -o pid,lstart,command` で起動時刻とコマンドを確認する。再起動できない場合は別ポートで新しく起動し、確認に使ったURLを報告する。
@@ -66,7 +66,7 @@
 - 見えるUI変更では、利用可能なら共通の `$ui-quality` Skillを使う。
 - 公開React UIは [docs/UI_STYLE.md](docs/UI_STYLE.md) のroute別移行表を正とする。移行済みrouteはTailwind CSS v4 + repo所有shadcn/ui、未移行routeはReact共通部品 + `src/mo_speech/web/styles.css` を使う。同じrouteで両方式を読み込まない。
 - Tailwind依存の見える共通部品は、利用側routeが同じ基盤へ移行するまで旧routeへ持ち込まない。shadcn/ui componentはrepo内で所有し、Voice Labのtokenとvariantへ合わせる。
-- `/` を視覚基準とし、`/speakloop` と `/skitvoice` を同じ製品群として確認する。
+- `/` を視覚基準とし、`/speakloop` を同じ製品群として確認する。
 - 基準幅は `1440px`、`1024px`、`390px` とする。確認対象はLight／Darkと長い日本語、初期状態と主要な動的状態、errorである。
 - Web UIでは実際にレンダリングされた画面を確認する。共有ブラウザが利用できない場合も、それだけで検証を打ち切らない。利用可能なPlaywright、DevTools系手段、ローカルChromeのheadless／CDP等を検討する。
 - `scrollWidth <= clientWidth` と設定の右端位置、列数とカード順、sticky要素の非遮蔽を確認する。DOM寸法の計測だけで済まさず、スクリーンショットを直接開いて確認する。
@@ -79,21 +79,6 @@
 - 最初から重い声質クローン構成に寄せず、まず `音声 -> 文字起こし -> 翻訳 -> 音声` の縦切りを通す。
 - 局所的なヒューリスティクスで1ケースだけ通す調整を避ける。
 - 性能改善や容量削減を主張する変更では、変更前後の計測または見積もりを残す。
-
-## URL参照音声の実行境界
-
-- URL参照音声の取得は、ローカルFastAPIプロセス上の `yt-dlp` と `ffmpeg` だけで行う。
-- YouTube取得では対応版NodeをJS runtimeとして使い、yt-dlpへ `--js-runtimes node` を明示する。cookieやPO Tokenを既定で扱わない。
-- Cloudflare公開版ではURL入力を表示せず、URL付きAPIリクエストもWorkerで拒否する。
-- RunPod handlerはURLを受け取らず、ローカルFastAPIで切り出した音声bytesだけを受け取る。RunPod imageへ `yt-dlp` とURL取得機能を含めない。
-- ローカルFastAPIでURL取得に失敗した場合、後続のRunPod処理はまだ始まっていない。確認済みの原因としてRunPod、Cloudflare、datacenter制限をエラーへ表示しない。
-- URL取得の責任を別環境へ移す場合やRunPod imageへ取得ツールを追加する場合は、実装前に仕様変更として `docs/` へ記録する。
-- URL参照の変更では、次をテストで確認する。期待値は実装と同じ変更だけで正当化せず、仕様上の実行主体と照合する。
-
-  - ローカルFastAPIで取得すること
-  - Cloudflareが拒否すること
-  - RunPod payloadにURLが含まれないこと
-  - RunPod imageに取得ツールがないこと
 
 ## モデルとデータの扱い
 

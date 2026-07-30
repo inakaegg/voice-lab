@@ -358,9 +358,9 @@ def test_runpod_client_polls_async_job_until_completed() -> None:
                     "id": "job-1",
                     "status": "IN_PROGRESS",
                     "output": {
-                        "stage": "loading_vibevoice_model",
-                        "label": "VibeVoice Largeモデルを読み込んでいます",
-                        "model": "vibevoice-large-aoi-pinned",
+                        "stage": "loading_model",
+                        "label": "モデルを読み込んでいます",
+                        "model": "test-model",
                     },
                 }
             return {"id": "job-1", "status": "COMPLETED", "output": {"ok": True}}
@@ -380,7 +380,7 @@ def test_runpod_client_polls_async_job_until_completed() -> None:
         ("GET", "/status/job-1", None),
     ]
     assert [item["status"] for item in progress] == ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"]
-    assert progress[1]["output"]["stage"] == "loading_vibevoice_model"
+    assert progress[1]["output"]["stage"] == "loading_model"
 
 
 def test_runpod_client_failed_job_reports_job_id_and_structured_error() -> None:
