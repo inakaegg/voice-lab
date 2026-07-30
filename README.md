@@ -1,6 +1,3 @@
-
-
-
 # Voice Lab — SpeakLoop
 
 [![CI](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml)
@@ -10,7 +7,7 @@ Voice LabのSpeakLoopは、母語で話した「言いたいこと」を、中�
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
-> **English:** SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Built with React, Cloudflare Workers (auth / quota / API gateway), FastAPI, and a private RunPod Serverless GPU backend. CI runs Python, Worker, and browser tests plus E2E on every pull request.
+> **English:** SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, and a private RunPod Serverless GPU backend. CI runs Python, Worker, and browser tests plus E2E on every pull request.
 
 ## 画面
 
@@ -123,11 +120,28 @@ Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面と
 
 詳細は [KNOWN_LIMITS.md](docs/speech-translation/KNOWN_LIMITS.md) を参照してください。
 
+## 開発体制
+
+個人開発です。実装にはAIコーディングエージェント（Claude Code、Codex）を利用しています。
+
+作者が行うこと:
+
+- 要件と仕様の決定、設計判断
+- 変更ごとのレビューと、指摘の取捨選択
+- 実データでの検証と、公開範囲・費用の判断
+
+エージェントが行うこと:
+
+- 設計案の提示、コードとテストの実装
+- 実装とは別contextでのレビュー
+
+品質は自動テスト、CI、secret scan、文書lint、別モデルによる相互レビューで担保します。運用ルールは [AGENTS.md](AGENTS.md) を参照してください。
+
 ## セキュリティとライセンス
 
 脆弱性の連絡方法は [SECURITY.md](SECURITY.md) を参照してください。公開Issueへ秘密情報や個人情報を投稿しないでください。
 
-Voice Lab本体にはオープンソースライセンスを付与していません。ソースコードの閲覧・評価を目的とするポートフォリオ公開を想定していますが、複製、改変、再配布などの許可は [LICENSE](LICENSE) に明記した範囲に限ります。
+Voice Lab本体にはオープンソースライセンスを付与していません。ソースコードの閲覧・評価を目的とするポートフォリオ公開を想定していますが、複製、改変、再配布などの許可は [LICENSE](LICENSE) に明記した範囲に限ります。評価・レビュー目的のcloneとローカル実行は、LICENSEの限定的な例外として許可しています。
 
 依存ライブラリ、モデル、第三者実装にはそれぞれのライセンスと利用条件が適用されます。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
 
