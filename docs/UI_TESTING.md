@@ -1,6 +1,6 @@
 # UIテスト方針
 
-更新日: 2026-07-22
+更新日: 2026-07-30
 
 ## 目的
 
@@ -14,10 +14,6 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 - `/speakloop`
 - `/admin`
 - `/speakloop/admin`
-
-管理者専用の実験routeも、共通ブランド、横overflow、主要操作の到達性を検査する。
-
-- `/fun`
 
 基準viewport:
 
@@ -39,7 +35,7 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 
 通常のE2Eはfake providerのローカルFastAPIを新規portで起動する。既存serverを再利用しない。依存させない対象はGPU・RunPod・OpenAI・OAuth・本番データである。管理画面が読む設定・サンプル・履歴・runtime APIはPlaywright fixtureで固定する。
 
-Cloudflareの管理password認証はWorker単体テストを正とし、通常CIへ本番passwordを持ち込まない。公開環境smokeは秘密情報を保護した手動workflowとして分ける。
+CloudflareのGoogle OAuth管理境界はWorker単体テストを正とし、通常CIへ本番credentialを持ち込まない。公開環境smokeは秘密情報を保護した手動workflowとして分ける。
 
 ## screenshotとbaseline
 

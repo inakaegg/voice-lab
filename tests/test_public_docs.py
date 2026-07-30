@@ -172,9 +172,10 @@ def test_status_docs_do_not_claim_cloudflare_gateway_is_unimplemented() -> None:
     assert "D1" in known_limits
 
 
-def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
+def test_current_spec_limits_own_voice_to_the_same_recording_request() -> None:
     spec = read_text("docs/speech-translation/SPEC.md")
 
+    assert "同じ `POST /api/practice/recordings` request" in spec
     assert "タブ音声" in spec
     assert "利用条件" in spec
     assert "プライバシー" in spec
@@ -405,12 +406,16 @@ def test_speech_translation_docs_are_consolidated() -> None:
     assert not (ROOT / "docs/speech-translation/REFERENCE_SELECTION.md").exists()
 
     local_providers = read_text("docs/speech-translation/LOCAL_PROVIDERS.md")
-    assert "benchmark_pipeline.py" in local_providers
-    assert "要件未達" in local_providers
+    assert "SpeechProviderBundle" in local_providers
+    assert "MO_TRANSLATION_PROVIDER" in local_providers
+    assert "benchmark_pipeline.py" not in local_providers
+    assert "OPENAI_REALTIME_TRANSLATION" not in local_providers
 
     voice_clone = read_text("docs/speech-translation/VOICE_CLONE.md")
     assert "silencedetect" in voice_clone
     assert "REFERENCE_SELECTION.md" not in voice_clone
+    assert "voice_mode" not in voice_clone
+    assert "id-ID" not in voice_clone
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:
@@ -487,7 +492,7 @@ def test_frontend_migration_plan_preserves_current_api_and_state_boundaries() ->
     assert "一括移行しない" in migration
 
 
-def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None:
+def test_public_docs_define_only_current_routes_and_retired_fun_boundary() -> None:
     readme = read_text("README.md")
     spec = read_text("docs/speech-translation/SPEC.md")
     architecture = read_text("docs/deployment/ARCHITECTURE.md")
@@ -498,12 +503,15 @@ def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None
         assert "/speakloop" in document
     for document in (readme, spec, architecture):
         assert "/skitvoice" not in document
+        assert "/fun" not in document
 
-    assert "`/fun` は管理者認証済みの場合だけ" in spec
     assert "同じGoogle OAuthセッション" in spec
     assert "別の管理パスワードや管理者cookieは設けない" in spec
     assert "管理機能の認証をWorker内のGoogle OAuthへ一本化" in cloudflare
     assert "管理者専用の別パスワード、別cookie、認証例外は設けない" in cloudflare
+    assert "退役route" in cloudflare
+    assert "`/fun`" in cloudflare
+    assert "旧音声翻訳APIも404" in cloudflare
     assert "`/user`" not in spec
     assert "`/vibevoice`" not in spec
     assert "Cloudflare Pages" not in architecture

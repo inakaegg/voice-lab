@@ -6,13 +6,13 @@
 
 公開画面の状態管理が大きくなっているため、Vite + React + TypeScriptへの移行は有効。ただし既存画面を一括移行しない。現行のvanilla JavaScriptは実運用されている。録音、IndexedDB、比較再生、job pollingを同時に書き換えると回帰原因を切り分けにくい。
 
-表示基盤の移行対象は公開ポータル、SpeakLoop、管理2画面とする。管理画面の状態制御は既存classic JavaScriptを維持し、まずCSS build、共通shell、レスポンシブを移す。内部検証・旧互換画面は最小限の共通shellだけを適用し、Worker/FastAPIのAPI互換を維持する。
+表示基盤の移行対象は公開ポータル、SpeakLoop、管理2画面とする。管理画面の状態制御は既存classic JavaScriptを維持し、まずCSS build、共通shell、レスポンシブを移す。WorkerとFastAPIのAPI互換を維持する。
 
 ## 実装状況
 
 - 公開ポータルとSpeakLoopをVite + React + TypeScriptのmulti-page buildへ切り替えた。
 - Reactは公開画面の構造、共通ヘッダー、サンプル表示枠、レスポンシブレイアウトを担当する。
-- 対象は録音・比較再生・IndexedDB・URL参照・RunPod job pollingである。回帰を抑えるため既存controllerをReact mount後に読み込む移行アダプタを使う。
+- 対象は録音・比較再生・IndexedDB・RunPod job pollingである。回帰を抑えるため既存controllerをReact mount後に読み込む移行アダプタを使う。
 - WorkerとFastAPIは公開routeにReact buildを返す。管理画面は従来HTML/JavaScriptのDOM契約を維持しつつ、Viteが生成する共通CSS assetを使う。
 - 次段階では、既存controller内の状態遷移をreducer/hooksへ小単位で移し、移行済み部分から旧controllerを縮小する。
 
@@ -26,7 +26,7 @@
 
 2026-07-10以降、新規または移行済みのReact routeはTailwind CSS v4とshadcn/uiを正とする。shadcn/uiは依存先の完成画面を埋め込むライブラリではなく、必要なcomponent sourceをrepoへ追加し、Voice Labのtokenとvariantで管理するために使う。
 
-公開ポータル`/`は専用の軽量Tailwind assetを使う。SpeakLoop・管理画面・実験画面は共通Tailwind assetへ既存selector compatibility layerを取り込み、HTMLから`/static/styles.css`の直接参照を外す。これにより、既存controller契約を維持したままtoken・focus・responsive・管理shellを一つのbuild経路で管理する。
+公開ポータル`/`は専用の軽量Tailwind assetを使う。SpeakLoopと管理画面は共通Tailwind assetへ既存selector compatibility layerを取り込み、HTMLから`/static/styles.css`の直接参照を外す。これにより、既存controller契約を維持したままtoken・focus・responsive・管理shellを一つのbuild経路で管理する。
 
 | route | 現在のスタイル基盤 | 旧`styles.css` | Tailwind CSS |
 | --- | --- | --- | --- |
@@ -34,7 +34,6 @@
 | `/speakloop` | React + 共通Tailwind compatibility asset | 読み込まない | 読む |
 | `/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
 | `/speakloop/admin` | static DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
-| `/fun` | 管理者専用DOM + 共通Tailwind compatibility asset | 読み込まない | 読む |
 
 同じrouteで旧stylesheetとTailwindを二重ロードしない。production build後に、ポータル専用assetと共通compatibility assetの境界、全active HTMLから旧stylesheet参照が消えていることを検査する。
 
@@ -49,14 +48,13 @@ src/mo_speech/web/
   react/privacy.html          プライバシーポリシー（/privacy）
   index.html                  総合管理（/admin）
   practice_admin.html         SpeakLoop管理（/speakloop/admin）
-  user.html                   実験画面（/fun・管理者専用）
   app_practice.js             録音・prompt・比較再生・表示状態
   app_public_session.js       公開ログイン状態
   app_public_sample_audio.js  公開サンプル
 cloudflare/worker.mjs         route・auth・quota・API gateway
 ```
 
-退役したrouteはWorkerが404を返す。対象は `/user`・`/skitvoice`・`/skitvoice/admin`・`/vibevoice*`・`/seed-vc` とその直接配信用HTMLである。
+退役したrouteはWorkerが404を返す。対象は `/fun`・`/user`・`/skitvoice`・`/skitvoice/admin`・`/vibevoice*`・`/seed-vc` とその直接配信用HTMLである。
 
 最初にAPI clientと純粋な状態遷移をUIから分離し、その後に表示部品をReactへ置き換える。
 
@@ -106,7 +104,7 @@ Viteのbuild出力はWorker Static Assetsから配信する。移行中はroute�
 - API path、FormData field、job snapshot、error messageのAPI互換を維持する。
 - 通常時だけでなく、状態遷移をテストする。対象は権限拒否・録音中断・quota超過・job失敗・キャンセル・ページ再読込である。
 - IndexedDB/localStorageのkeyを変える場合は旧draftを移行する。
-- デスクトップ幅とモバイル幅で実ブラウザ確認する。確認対象は録音、タブ音声共有、比較再生、job進捗である。
+- デスクトップ幅とモバイル幅で実ブラウザ確認する。確認対象は録音、比較再生、job進捗である。
 - 新旧コードを長期間二重保守しない。route切替後は対応する旧公開scriptを削除する。
 
 全面移行の完了を今回の保存層・docs・CI改善と同じ変更へ混ぜない。まず状態とAPI契約をテストで固定し、route単位の小さい変更として実施する。

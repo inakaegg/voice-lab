@@ -22,20 +22,15 @@ preview_bucket_name = "mo-speech-audio-preview"
 [vars]
 PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev"
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
-RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
 RUNPOD_RUNTIME_HEALTH_CHECK = "1"
-RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "0"
-RUNPOD_WARMUP_PRELOAD_TRANSLATION = "1"
 RUNPOD_WARMUP_PRELOAD_VOICE_CONVERSION = "1"
 OPENAI_TRANSLATION_MODEL = "gpt-5.6-terra"
-OPENAI_TEXT_TRANSFORM_MODEL = "gpt-5.6-terra"
 OPENAI_TEXT_DISPLAY_MODEL = "gpt-5.6-terra"
 OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 OPENAI_TTS_VOICE = "coral"
 OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
-USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
 
 [observability]
 enabled = true
@@ -64,20 +59,15 @@ bucket_name = "mo-speech-audio-preview"
 [env.staging.vars]
 PUBLIC_GOOGLE_AUTH_REQUIRED = "1"
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
-RUNPOD_SERVERLESS_TRANSLATION_BACKEND = "openai"
 RUNPOD_RUNTIME_HEALTH_CHECK = "1"
-RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "0"
-RUNPOD_WARMUP_PRELOAD_TRANSLATION = "1"
 RUNPOD_WARMUP_PRELOAD_VOICE_CONVERSION = "1"
 OPENAI_TRANSLATION_MODEL = "gpt-5.6-terra"
-OPENAI_TEXT_TRANSFORM_MODEL = "gpt-5.6-terra"
 OPENAI_TEXT_DISPLAY_MODEL = "gpt-5.6-terra"
 OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 OPENAI_TTS_VOICE = "coral"
 OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
-USER_SETTINGS_JSON = "{\"target_language\":\"ja-JP\",\"joke_texts\":[],\"joke_position\":\"after\",\"joke_selection\":\"rotation\",\"joke_variation_count\":0,\"joke_variants\":[],\"theme\":\"blue\"}"
 
 [env.staging.observability]
 enabled = true

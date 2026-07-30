@@ -92,30 +92,6 @@ test("Cloudflare worker expires old KV audit fallback data without deleting tota
   assert.equal(await kv.get("public-usage:speakloop:hash:total"), "8");
 });
 
-test("Cloudflare worker exposes fun only to an allowlisted Google account", async () => {
-  const requestedPaths = [];
-  const env = adminAuthEnv(async () => {
-    throw new Error("unexpected fetch");
-  });
-  env.ASSETS = {
-    async fetch(request) {
-      requestedPaths.push(new URL(request.url).pathname);
-      return new Response("asset", { status: 200 });
-    },
-  };
-
-  const blocked = await handleRequest(new Request("https://example.com/fun"), env);
-  const cookie = await adminCookie(env);
-  const allowed = await handleRequest(new Request("https://example.com/fun", { headers: { cookie } }), env);
-  const directAsset = await handleRequest(new Request("https://example.com/static/user.html", { headers: { cookie } }), env);
-
-  assert.equal(blocked.status, 302);
-  assert.equal(blocked.headers.get("location"), "/auth/google/login?next=%2Ffun");
-  assert.equal(allowed.status, 200);
-  assert.equal(directAsset.status, 404);
-  assert.deepEqual(requestedPaths, ["/user.html"]);
-});
-
 test("Cloudflare worker returns 404 for retired application routes", async () => {
   const env = fakeEnv(async () => {
     throw new Error("unexpected fetch");
@@ -123,6 +99,8 @@ test("Cloudflare worker returns 404 for retired application routes", async () =>
   env.ASSETS = { fetch: async () => new Response("unexpected asset", { status: 200 }) };
 
   for (const path of [
+    "/fun",
+    "/fun/",
     "/user",
     "/skitvoice",
     "/skitvoice/admin",
@@ -135,11 +113,55 @@ test("Cloudflare worker returns 404 for retired application routes", async () =>
     "/vibevoice_simple.html",
     "/seed_vc.html",
     "/static/user.html",
+    "/static/app_user.js",
+    "/static/app_realtime.js",
     "/static/vibevoice_simple.html",
     "/static/seed_vc.html",
   ]) {
     const response = await handleRequest(new Request(`https://example.com${path}`), env);
     assert.equal(response.status, 404, path);
+  }
+});
+
+test("Cloudflare worker serves the current public sample admin asset", async () => {
+  const requestedPaths = [];
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("asset", { status: 200 });
+    },
+  };
+
+  const response = await handleRequest(
+    new Request("https://example.com/static/app_public_sample_audio_admin.js"),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(requestedPaths, ["/app_public_sample_audio_admin.js"]);
+});
+
+test("Cloudflare worker returns 404 for retired legacy translation APIs", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+
+  for (const [method, path] of [
+    ["GET", "/api/user-settings"],
+    ["PUT", "/api/user-settings"],
+    ["POST", "/api/user-display-text"],
+    ["POST", "/api/user-text-output"],
+    ["POST", "/api/user-joke-output"],
+    ["POST", "/api/translate-speech"],
+    ["POST", "/api/translate-speech-jobs"],
+    ["GET", "/api/translate-speech-jobs/retired"],
+    ["POST", "/api/openai-realtime-translation-session"],
+  ]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`, { method }), env);
+    assert.equal(response.status, 404, `${method} ${path}`);
   }
 });
 
@@ -201,18 +223,11 @@ test("Cloudflare worker protects admin APIs with the same allowlisted Google ses
   const cookie = await adminCookie(env);
 
   const blockedSettings = await handleRequest(
-    new Request("https://example.com/api/user-settings", {
-      method: "PUT",
-      body: JSON.stringify({ theme: "blue" }),
-    }),
+    new Request("https://example.com/api/public-access-settings"),
     env,
   );
   const allowedSettings = await handleRequest(
-    new Request("https://example.com/api/user-settings", {
-      method: "PUT",
-      headers: { cookie },
-      body: JSON.stringify({ theme: "blue" }),
-    }),
+    new Request("https://example.com/api/public-access-settings", { headers: { cookie } }),
     env,
   );
   const blockedHistory = await handleRequest(new Request("https://example.com/api/audio-history"), env);
@@ -494,96 +509,13 @@ test("Cloudflare worker returns a full audit log page when no limit is requested
   assert.equal(payload.events.length, 4);
 });
 
-test("Cloudflare worker lets a Google admin use fun generation APIs without consuming quota", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      fun: { daily_limit: 0, total_limit: 0, text_max_chars: 5, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  const env = adminAuthEnv(async (url) => {
-    calls.push(url);
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env);
-
-  const allowed = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const oversized = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは！", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const practiceForm = new FormData();
-  practiceForm.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
-  practiceForm.append("target_language", "en-US");
-  const publicFeatureUsesSameGoogleSession = await handleRequest(
-    new Request("https://example.com/api/practice/prompts", {
-      method: "POST",
-      headers: { cookie },
-      body: practiceForm,
-    }),
-    env,
-  );
-
-  assert.equal(allowed.status, 200);
-  assert.equal(oversized.status, 413);
-  assert.deepEqual(await oversized.json(), { detail: "text is too large" });
-  assert.notEqual(publicFeatureUsesSameGoogleSession.status, 401);
-  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-  const funExemption = audit.find((event) => event.action === "public_quota_exempt" && event.feature === "fun");
-  assert.equal(funExemption.email, undefined);
-  assert.equal(funExemption.email_hash, await publicIdentityHashForTest("admin@example.com"));
-});
-
-test("Cloudflare worker always protects fun generation APIs with Google admin auth", async () => {
-  const env = adminAuthEnv(async (url) => {
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
-  const viewerCookie = await publicCookie(env, "/fun");
-  const requestBody = JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" });
-
-  const unauthenticated = await handleRequest(new Request("https://example.com/api/user-text-output", {
-    method: "POST",
-    body: requestBody,
-  }), env);
-  const forbidden = await handleRequest(new Request("https://example.com/api/user-text-output", {
-    method: "POST",
-    headers: { cookie: viewerCookie },
-    body: requestBody,
-  }), env);
-
-  assert.equal(unauthenticated.status, 401);
-  assert.deepEqual(await unauthenticated.json(), { detail: "Google admin login is required" });
-  assert.equal(forbidden.status, 403);
-  assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" });
-});
-
-test("Cloudflare worker always protects fun voice conversion jobs with Google admin auth", async () => {
+test("Cloudflare worker always protects admin voice conversion jobs with Google auth", async () => {
   const calls = [];
   const env = adminAuthEnv(async (url) => {
     calls.push(url);
     throw new Error(`unexpected url: ${url}`);
   }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
-  const viewerCookie = await publicCookie(env, "/fun");
+  const viewerCookie = await publicCookie(env, "/admin");
   const request = (cookie = "") => {
     const form = new FormData();
     form.append("source_audio", new Blob(["source"], { type: "audio/wav" }), "source.wav");
@@ -605,79 +537,27 @@ test("Cloudflare worker always protects fun voice conversion jobs with Google ad
   assert.equal(calls.some((url) => url.endsWith("/run")), false);
 });
 
-test("Cloudflare worker protects fun job status endpoints with Google admin auth", async () => {
+test("Cloudflare worker protects voice conversion job status with Google admin auth", async () => {
   const calls = [];
   const env = adminAuthEnv(async (url) => {
     calls.push(url);
     throw new Error(`unexpected url: ${url}`);
   }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
-  const viewerCookie = await publicCookie(env, "/fun");
+  const viewerCookie = await publicCookie(env, "/admin");
 
-  for (const path of [
-    "/api/translate-speech-jobs/job-translation",
-    "/api/voice-conversion-jobs/job-vc",
-  ]) {
-    const unauthenticated = await handleRequest(new Request(`https://example.com${path}`), env);
-    const forbidden = await handleRequest(
-      new Request(`https://example.com${path}`, { headers: { cookie: viewerCookie } }),
-      env,
-    );
+  const path = "/api/voice-conversion-jobs/job-vc";
+  const unauthenticated = await handleRequest(new Request(`https://example.com${path}`), env);
+  const forbidden = await handleRequest(
+    new Request(`https://example.com${path}`, { headers: { cookie: viewerCookie } }),
+    env,
+  );
 
-    assert.equal(unauthenticated.status, 401, path);
-    assert.deepEqual(await unauthenticated.json(), { detail: "admin authentication required" }, path);
-    assert.equal(forbidden.status, 403, path);
-    assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" }, path);
-  }
+  assert.equal(unauthenticated.status, 401, path);
+  assert.deepEqual(await unauthenticated.json(), { detail: "admin authentication required" }, path);
+  assert.equal(forbidden.status, 403, path);
+  assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" }, path);
 
   assert.deepEqual(calls, []);
-});
-
-test("Cloudflare worker exempts configured admin Google emails from public quota", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      fun: { daily_limit: 0, total_limit: 0, text_max_chars: 80, audio_max_bytes: 1000 },
-    },
-  }));
-  const env = publicAuthEnv(async (url) => {
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "owner@example.com", email_verified: true });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv, adminGoogleEmails: "owner@example.com" });
-  const cookie = await publicCookie(env);
-
-  const first = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const second = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-
-  assert.equal(first.status, 200);
-  assert.equal(second.status, 200);
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-  assert.deepEqual(
-    audit.map((event) => event.action),
-    ["google_login_success", "public_quota_exempt", "public_quota_exempt"],
-  );
 });
 
 test("Cloudflare worker lets a Google admin edit public access limits", async () => {
@@ -720,58 +600,7 @@ test("Cloudflare worker lets a Google admin edit public access limits", async ()
   assert.equal(fetched.features.speakloop.total_limit, 90);
   assert.equal(fetched.features.speakloop.audio_max_bytes, 1234);
   assert.equal(fetched.features.speakloop.text_max_chars, 321);
-});
-
-test("Cloudflare worker applies saved public admin emails before quota checks", async () => {
-  const kv = fakeKv();
-  const calls = [];
-  const env = publicAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init?.body) });
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "Owner@Example.COM", email_verified: true });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv, adminGoogleEmails: "owner@example.com" });
-  const adminSession = await adminCookie(env);
-
-  const updated = await handleRequest(
-    new Request("https://example.com/api/public-access-settings", {
-      method: "PUT",
-      headers: { cookie: adminSession },
-      body: JSON.stringify({
-        google_login_required: true,
-        admin_google_emails: ["owner@example.com"],
-        features: {
-          fun: { daily_limit: 0, total_limit: 0, text_max_chars: 100, audio_max_bytes: 1000 },
-        },
-      }),
-    }),
-    env,
-  );
-  const publicSession = await publicCookie(env);
-
-  const created = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie: publicSession },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-
-  assert.equal(updated.status, 200);
-  assert.equal(created.status, 200);
-  assert.deepEqual(
-    audit.map((event) => event.action),
-    ["google_login_success", "public_access_settings_updated", "google_login_success", "public_quota_exempt"],
-  );
+  assert.equal("fun" in fetched.features, false);
 });
 
 test("Cloudflare worker lets admins publish sample audios for public pages", async () => {
@@ -877,54 +706,9 @@ test("Cloudflare worker does not recurse while migrating an empty legacy sample 
   const response = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
 
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).features.speakloop, null);
-});
-
-test("Cloudflare worker rejects oversized admin input before calling an external API", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      fun: { daily_limit: 1, total_limit: 1, text_max_chars: 5, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  const env = adminAuthEnv(async (url) => {
-    calls.push(url);
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "viewer@example.com", email_verified: true });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env);
-
-  const tooLong = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "これは長すぎる", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const valid = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "短い", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-
-  assert.equal(tooLong.status, 413);
-  assert.deepEqual(await tooLong.json(), { detail: "text is too large" });
-  assert.equal(valid.status, 200);
-  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
+  const payload = await response.json();
+  assert.equal(payload.features.speakloop, null);
+  assert.equal("fun" in payload.features, false);
 });
 
 test("Cloudflare worker reports admin auth setup errors on protected routes", async () => {
@@ -939,73 +723,6 @@ test("Cloudflare worker reports admin auth setup errors on protected routes", as
   assert.match(await page.text(), /ADMIN_GOOGLE_EMAILS/);
   assert.equal(api.status, 503);
   assert.deepEqual(await api.json(), { detail: "admin authentication is not configured" });
-});
-
-test("Cloudflare worker translates speech with OpenAI and stores a completed job", async () => {
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init.body) });
-    if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return json({ text: "Halo Jepang" });
-    }
-    if (url === "https://api.openai.com/v1/responses") {
-      if (calls.filter((call) => call.url === url).length === 1) {
-        return json({
-          output_text: JSON.stringify({
-            source_language: "id-ID",
-            target_language: "ja-JP",
-            translated_text: "こんにちは日本",
-          }),
-        });
-      }
-      return json({ output_text: "こんにちは日本" });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
-  const form = new FormData();
-  form.append("audio", new Blob(["webm"], { type: "audio/webm;codecs=opus" }), "recording.webm");
-  form.append("source_language", "auto");
-  form.append("target_language", "user-auto");
-  form.append("voice_mode", "default");
-  form.append("text_transform", "user_effects");
-  form.append("text_transform_options", JSON.stringify({ variation: true }));
-  const adminCookieValue = await adminCookie(env);
-
-  const response = await handleRequest(
-    new Request("https://example.com/api/translate-speech-jobs", { method: "POST", headers: { cookie: adminCookieValue }, body: form }),
-    env,
-  );
-  const payload = await response.json();
-  const polled = await (
-    await handleRequest(
-      new Request(`https://example.com/api/translate-speech-jobs/${payload.job_id}`, { headers: { cookie: adminCookieValue } }),
-      env,
-    )
-  ).json();
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-
-  assert.equal(response.status, 200);
-  assert.match(payload.job_id, /^cf-/);
-  assert.equal(payload.status, "succeeded");
-  assert.equal(payload.result.transcript, "Halo Jepang");
-  assert.equal(payload.result.translated_text, "こんにちは日本");
-  assert.equal(payload.result.transformed_text, "こんにちは日本");
-  assert.equal(payload.result.target_language, "ja-JP");
-  assert.equal(payload.result.audio_base64, Buffer.from([7, 8, 9]).toString("base64"));
-  assert.deepEqual(polled, payload);
-  assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
-  assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
-  assert.equal(calls[2].url, "https://api.openai.com/v1/responses");
-  assert.equal(calls[3].url, "https://api.openai.com/v1/audio/speech");
-  assert.equal(history.settings.enabled, false);
-  assert.equal(history.recordings.length, 0);
-  assert.equal(history.outputs.length, 0);
-  assert.equal(calls[0].init.body.get("response_format"), "json");
 });
 
 test("Cloudflare worker creates a pronunciation practice prompt", async () => {
@@ -2675,11 +2392,6 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   form.append("voice_backend", "seed-vc");
   form.append("source_audio", new Blob(["source"], { type: "audio/webm;codecs=opus" }), "source.webm");
   form.append("reference_audio", new Blob(["reference"], { type: "audio/webm;codecs=opus" }), "reference.webm");
-  form.append("audio_effect_audio", new Blob(["moo"], { type: "audio/mpeg" }), "cow.mp3");
-  form.append("audio_effect_enabled", "true");
-  form.append("audio_effect_insert_mode", "silence_or_tail");
-  form.append("audio_effect_max_insertions", "2");
-  form.append("audio_effect_min_silence_ms", "450");
 
   const response = await handleRequest(
     new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie: await adminCookie(env) }, body: form }),
@@ -2692,11 +2404,7 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   assert.equal(calls[0].body.input.operation_mode, "voice_conversion");
   assert.equal(calls[0].body.input.source_audio_mime_type, "audio/webm");
   assert.equal(calls[0].body.input.reference_audio_mime_type, "audio/webm");
-  assert.equal(calls[0].body.input.audio_effect_audio_mime_type, "audio/mpeg");
-  assert.equal(calls[0].body.input.audio_effect_audio_base64, Buffer.from("moo").toString("base64"));
-  assert.equal(calls[0].body.input.audio_effect_insert_mode, "silence_or_tail");
-  assert.equal(calls[0].body.input.audio_effect_max_insertions, 2);
-  assert.equal(calls[0].body.input.audio_effect_min_silence_ms, 450);
+  assert.equal("audio_effect_audio_base64" in calls[0].body.input, false);
 });
 
 test("Cloudflare worker does not save voice conversion source audio", async () => {
@@ -2755,240 +2463,6 @@ test("Cloudflare worker maps completed RunPod voice conversion status to local j
   assert.deepEqual(history.outputs, []);
 });
 
-test("Cloudflare worker creates user text output with OpenAI text transform and TTS", async () => {
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
-    if (url === "https://api.openai.com/v1/responses") {
-      return json({ output_text: "めっちゃこんにちは" });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  });
-
-  const cookie = await adminCookie(env);
-  const response = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify({
-        transcript: "Halo",
-        translated_text: "こんにちは",
-        target_language: "ja-JP",
-        text_transform_options: { osaka_dialect: true },
-      }),
-    }),
-    env,
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(payload.transformed_text, "めっちゃこんにちは");
-  assert.equal(payload.audio_mime_type, "audio/wav");
-  assert.equal(payload.audio_base64, Buffer.from([1, 2, 3]).toString("base64"));
-  assert.equal(calls[0].body.model, "gpt-5.6-terra");
-  assert.equal(calls[1].body.response_format, "wav");
-});
-
-test("Cloudflare worker persists user settings in KV and generates joke variations", async () => {
-  const calls = [];
-  const env = adminAuthEnv(
-    async (url, init) => {
-      calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: JSON.stringify({ variants: [["A1"], ["B1"]] }) });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv() },
-  );
-
-  const adminCookieValue = await adminCookie(env);
-  const saveResponse = await handleRequest(
-    new Request("https://example.com/api/user-settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", cookie: adminCookieValue },
-      body: JSON.stringify({
-        target_language: "ja-JP",
-        joke_texts: ["A", "B"],
-        joke_position: "after",
-        joke_selection: "rotation",
-        joke_variation_count: 1,
-        effect_audios: [
-          {
-            id: "cow",
-            name: "cow.wav",
-            audio_mime_type: "audio/wav",
-            audio_base64: Buffer.from("moo").toString("base64"),
-          },
-        ],
-        effect_selection: "random",
-        effect_insert_mode: "tail",
-        effect_max_insertions: 2,
-        effect_min_silence_ms: 450,
-        theme: "pop",
-      }),
-    }),
-    env,
-  );
-  const saved = await saveResponse.json();
-  const getResponse = await handleRequest(new Request("https://example.com/api/user-settings"), env);
-  const loaded = await getResponse.json();
-
-  assert.equal(saveResponse.status, 200);
-  assert.deepEqual(saved.joke_variants, ["A1", "B1"]);
-  assert.deepEqual(saved.joke_pool, ["A", "B", "A1", "B1"]);
-  assert.equal(saved.effect_audios[0].id, "cow");
-  assert.equal(saved.effect_selection, "random");
-  assert.equal(saved.effect_insert_mode, "tail");
-  assert.equal(saved.effect_max_insertions, 2);
-  assert.equal(saved.effect_min_silence_ms, 450);
-  assert.equal(saved.theme, "pop");
-  assert.deepEqual(loaded.joke_pool, saved.joke_pool);
-  assert.deepEqual(loaded.effect_audios, saved.effect_audios);
-  assert.equal(calls[0].url, "https://api.openai.com/v1/responses");
-});
-
-test("Cloudflare worker does not save joke TTS output", async () => {
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: "Lucu sekali." });
-      }
-      if (url === "https://api.openai.com/v1/audio/speech") {
-        return new Response(new Uint8Array([4, 5, 6]), { status: 200 });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv() },
-  );
-  const cookie = await adminCookie(env);
-
-  const jokeResponse = await handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify({ text: "これは冗談です。", target_language: "id-ID" }),
-    }),
-    env,
-  );
-  const adminCookieValue = await adminCookie(env);
-  const historyResponse = await handleRequest(
-    new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }),
-    env,
-  );
-  const history = await historyResponse.json();
-  assert.equal(jokeResponse.status, 200);
-  assert.equal(history.settings.enabled, false);
-  assert.equal(history.recordings.length, 0);
-  assert.equal(history.outputs.length, 0);
-});
-
-test("Cloudflare worker does not store generated audio in R2 history", async () => {
-  const r2 = fakeR2();
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: "R2 sample." });
-      }
-      if (url === "https://api.openai.com/v1/audio/speech") {
-        return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv(), r2 },
-  );
-
-  await handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "R2 test", target_language: "en-US" }),
-    }),
-    env,
-  );
-  const adminCookieValue = await adminCookie(env);
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-  assert.equal(history.settings.metadata_store, "none");
-  assert.equal(history.settings.blob_store, "none");
-  assert.deepEqual(history.outputs, []);
-  assert.equal(r2.__store.size, 0);
-});
-
-test("Cloudflare worker leaves both KV and R2 audio history unused", async () => {
-  const kv = fakeKv();
-  const r2 = fakeR2();
-  let speechCount = 0;
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: `sample-${speechCount}` });
-      }
-      if (url === "https://api.openai.com/v1/audio/speech") {
-        speechCount += 1;
-        return new Response(new Uint8Array([speechCount]), { status: 200 });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv },
-  );
-  const create = () => handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "migration test", target_language: "en-US" }),
-    }),
-    env,
-  );
-
-  await create();
-  env.MO_SPEECH_AUDIO_R2 = r2;
-  await create();
-
-  const adminCookieValue = await adminCookie(env);
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-  assert.deepEqual(history.outputs, []);
-  assert.equal(r2.__store.size, 0);
-});
-
-test("Cloudflare worker exposes no R2 history when its binding changes", async () => {
-  const r2 = fakeR2();
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") return json({ output_text: "temporary" });
-      if (url === "https://api.openai.com/v1/audio/speech") return new Response(new Uint8Array([10]), { status: 200 });
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv(), r2 },
-  );
-  await handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "binding test", target_language: "en-US" }),
-    }),
-    env,
-  );
-  const adminCookieValue = await adminCookie(env);
-  const before = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-  env.MO_SPEECH_AUDIO_R2 = null;
-  const after = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-
-  assert.deepEqual(before.outputs, []);
-  assert.deepEqual(after.outputs, []);
-  assert.equal(r2.__store.size, 0);
-});
-
 test("Cloudflare worker reports audio history as disabled", async () => {
   const env = adminAuthEnv(async () => json({ ok: true }), { kv: fakeKv() });
   const adminCookieValue = await adminCookie(env);
@@ -3018,35 +2492,20 @@ test("Cloudflare worker reports RunPod runtime availability and warm health", as
 
   const response = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const payload = await response.json();
-  const openai = payload.translation_backends.find((backend) => backend.id === "openai");
-  const runpod = payload.translation_backends.find((backend) => backend.id === "runpod_serverless");
   const seedVc = payload.voice_conversion_backends[0];
 
-  assert.equal(openai.available, true);
-  assert.equal(openai.providers.asr, "openai-asr-gpt-4o-transcribe");
-  assert.equal(openai.settings.request_mode, "completed_job");
-  assert.equal(runpod.available, false);
-  assert.equal(runpod.settings.health.warm, true);
+  assert.equal("translation_backends" in payload, false);
+  assert.equal(payload.providers.asr, "openai-asr-gpt-4o-transcribe");
+  assert.equal(payload.providers.translation, "openai-translation-gpt-5.6-terra");
+  assert.deepEqual(payload.supported_voice_modes, ["default"]);
   assert.equal(seedVc.available, true);
   assert.equal(seedVc.settings.seed_vc.model_resident, false);
   assert.equal(seedVc.settings.warmup.ready, false);
-  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, false);
   assert.equal(seedVc.settings.health.warm, true);
   assert.deepEqual(payload.ui_capabilities, {
     practice_developer_settings: false,
     practice_history_preview: false,
   });
-});
-
-test("Cloudflare worker only enables user-page warmup when explicitly opted in", async () => {
-  const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
-  env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "1";
-
-  const response = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
-  const payload = await response.json();
-  const seedVc = payload.voice_conversion_backends[0];
-
-  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, true);
 });
 
 test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", async () => {
@@ -3265,10 +2724,8 @@ function fakeEnv(fetchImpl, options = {}) {
     RUNPOD_ENDPOINT_ID: "endpoint",
     RUNPOD_API_KEY: "runpod-secret",
     RUNPOD_API_BASE_URL: "https://api.runpod.ai/v2",
-    RUNPOD_SERVERLESS_TRANSLATION_BACKEND: "openai",
     OPENAI_API_KEY: "openai-secret",
     OPENAI_TRANSLATION_MODEL: "gpt-5.6-terra",
-    OPENAI_TEXT_TRANSFORM_MODEL: "gpt-5.6-terra",
     OPENAI_TEXT_DISPLAY_MODEL: "gpt-5.6-terra",
     OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
     OPENAI_TTS_VOICE: "coral",
@@ -3532,9 +2989,10 @@ test("Cloudflare worker serves robots.txt and sitemap.xml for the public origin"
   assert.match(robots.headers.get("Content-Type"), /text\/plain/);
   const robotsBody = await robots.text();
   assert.match(robotsBody, /^User-agent: \*$/m);
-  for (const path of ["/admin", "/fun", "/speakloop/admin", "/api/", "/auth/"]) {
+  for (const path of ["/admin", "/speakloop/admin", "/api/", "/auth/"]) {
     assert.ok(robotsBody.includes(`Disallow: ${path}`), `robots.txt disallows ${path}`);
   }
+  assert.equal(robotsBody.includes("Disallow: /fun"), false);
   assert.ok(robotsBody.includes("Sitemap: https://voice-lab.inakaegg.workers.dev/sitemap.xml"));
 
   const sitemap = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/sitemap.xml"), env);

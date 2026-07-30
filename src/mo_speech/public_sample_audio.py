@@ -10,7 +10,7 @@ from typing import Any
 
 
 DEFAULT_PUBLIC_SAMPLE_AUDIO_PATH = "tmp/public-sample-audios.json"
-PUBLIC_SAMPLE_FEATURES = ("fun", "voice_conversion", "speakloop")
+PUBLIC_SAMPLE_FEATURES = ("voice_conversion", "speakloop")
 PUBLIC_SAMPLE_LANGUAGES = ("ja-JP", "zh-CN", "en-US")
 PUBLIC_SAMPLE_AUDIO_MAX_BYTES = 1_800_000
 
@@ -18,7 +18,6 @@ PUBLIC_SAMPLE_AUDIO_MAX_BYTES = 1_800_000
 def empty_public_sample_audios() -> dict[str, object]:
     return {
         "features": {
-            "fun": None,
             "voice_conversion": None,
             "speakloop": None,
         }

@@ -1,161 +1,25 @@
 from __future__ import annotations
 
-import base64
-import inspect
-import json
 import logging
-import os
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Event, Lock, Thread
-from tempfile import TemporaryDirectory
-from time import perf_counter
+from threading import Lock, Thread
 from uuid import uuid4
 
-from .api_audio_history import (
-    history_text_metadata_from_pipeline_result,
-    history_text_metadata_from_recording_result,
-    mime_suffix,
-)
-from .api_runtime import select_translation_pipeline
+from .api_audio_history import mime_suffix
 from .api_serializers import (
     normalize_tts_provider_output,
-    partial_result_from_pipeline_result,
-    serialize_partial_result,
-    serialize_pipeline_result,
     serialize_progress,
     serialize_tts_output,
     serialize_voice_conversion_result,
     text_preview,
 )
-from .audio_effects import insert_audio_effect
-from .audio_history import AudioHistoryEntry, AudioHistoryStore
-from .pipeline import PipelineProgress, PipelineRequest, SpeechTranslationPipeline
+from .audio_history import AudioHistoryStore
+from .pipeline import OperationProgress
 from .providers.voice import VoiceConversionRequest, VoiceConversionResult, VoiceConversionService
 
 LOGGER = logging.getLogger("mo_speech")
 
-
-@dataclass
-class TranslationJob:
-    job_id: str
-    status: str
-    stages: list[dict[str, str]]
-    current_stage: dict[str, str] | None = None
-    partial_result: dict[str, str] = field(default_factory=dict)
-    result: dict[str, object] | None = None
-    error: str | None = None
-
-
-@dataclass
-class TranslationJobStore:
-    pipelines: dict[str, SpeechTranslationPipeline]
-    audio_history_store: AudioHistoryStore
-    jobs: dict[str, TranslationJob] = field(default_factory=dict)
-    lock: Lock = field(default_factory=Lock)
-
-    def start(
-        self,
-        request: PipelineRequest,
-        audio_path: Path,
-        translation_backend: str,
-        recording_entry: AudioHistoryEntry | None = None,
-    ) -> dict[str, object]:
-        pipeline = select_translation_pipeline(self.pipelines, translation_backend)
-        job = TranslationJob(
-            job_id=uuid4().hex,
-            status="queued",
-            stages=planned_stages(pipeline, request),
-        )
-        with self.lock:
-            self.jobs[job.job_id] = job
-        thread = Thread(
-            target=self._run_job,
-            args=(job.job_id, request, audio_path, translation_backend, recording_entry),
-            daemon=True,
-        )
-        thread.start()
-        return self.snapshot(job.job_id)
-
-    def snapshot(self, job_id: str) -> dict[str, object]:
-        with self.lock:
-            job = self.jobs[job_id]
-            return {
-                "job_id": job.job_id,
-                "status": job.status,
-                "current_stage": job.current_stage,
-                "stages": list(job.stages),
-                "partial_result": dict(job.partial_result),
-                "result": job.result,
-                "error": job.error,
-            }
-
-    def _run_job(
-        self,
-        job_id: str,
-        request: PipelineRequest,
-        audio_path: Path,
-        translation_backend: str,
-        recording_entry: AudioHistoryEntry | None,
-    ) -> None:
-        try:
-            with self.lock:
-                self.jobs[job_id].status = "running"
-
-            def report_progress(progress: PipelineProgress) -> None:
-                self._update_progress(job_id, progress)
-
-            result = select_translation_pipeline(self.pipelines, translation_backend).run(
-                request,
-                progress_callback=report_progress,
-            )
-            self.audio_history_store.update_metadata(
-                recording_entry,
-                history_text_metadata_from_recording_result(result),
-            )
-            self.audio_history_store.save_output(
-                result.output_audio_bytes,
-                suffix=mime_suffix(result.output_audio_mime_type),
-                metadata={
-                    "endpoint": "translate-speech-jobs",
-                    "job_id": job_id,
-                    "translation_backend": translation_backend,
-                    "source_language": request.source_language,
-                    "target_language": result.target_language or request.target_language,
-                    "voice_mode": request.voice_mode,
-                    "audio_mime_type": result.output_audio_mime_type,
-                    **history_text_metadata_from_pipeline_result(result),
-                },
-            )
-            with self.lock:
-                job = self.jobs[job_id]
-                job.status = "succeeded"
-                job.result = serialize_pipeline_result(result)
-                job.partial_result = partial_result_from_pipeline_result(result)
-                job.current_stage = {"stage": "complete", "label": "完了", "provider": ""}
-        except Exception as exc:
-            LOGGER.exception("translation job failed: backend=%s job_id=%s", translation_backend, job_id)
-            with self.lock:
-                job = self.jobs[job_id]
-                job.status = "failed"
-                job.error = str(exc)
-        finally:
-            audio_path.unlink(missing_ok=True)
-
-    def _update_progress(self, job_id: str, progress: PipelineProgress) -> None:
-        item = serialize_progress(progress)
-        partial_result = serialize_partial_result(progress)
-        with self.lock:
-            job = self.jobs[job_id]
-            job.current_stage = item
-            job.partial_result.update(partial_result)
-            for index, stage in enumerate(job.stages):
-                if stage["stage"] == item["stage"]:
-                    job.stages[index] = item
-                    break
-            else:
-                job.stages.append(item)
 
 
 @dataclass
@@ -287,16 +151,10 @@ class VoiceConversionJobStore:
             with self.lock:
                 self.jobs[job_id].status = "running"
 
-            def report_progress(progress: PipelineProgress) -> None:
+            def report_progress(progress: OperationProgress) -> None:
                 self._update_progress(job_id, progress)
 
             result: VoiceConversionResult = self.service.convert(request, progress_callback=report_progress)
-            if request.audio_effect_path is not None:
-                self._update_progress(
-                    job_id,
-                    PipelineProgress("audio_effect_insert", "効果音挿入", "ffmpeg"),
-                )
-                result = _insert_audio_effect_for_voice_result(result, request)
             self.audio_history_store.save_output(
                 result.output_audio_bytes,
                 suffix=mime_suffix(result.output_audio_mime_type),
@@ -327,7 +185,7 @@ class VoiceConversionJobStore:
             for audio_path in audio_paths:
                 audio_path.unlink(missing_ok=True)
 
-    def _update_progress(self, job_id: str, progress: PipelineProgress) -> None:
+    def _update_progress(self, job_id: str, progress: OperationProgress) -> None:
         item = serialize_progress(progress)
         with self.lock:
             job = self.jobs[job_id]
@@ -338,44 +196,6 @@ class VoiceConversionJobStore:
                     break
             else:
                 job.stages.append(item)
-
-
-def planned_stages(pipeline: SpeechTranslationPipeline, request: PipelineRequest) -> list[dict[str, str]]:
-    if pipeline.tts.name.startswith("openai-realtime-audio-"):
-        return [
-            {"stage": "asr", "label": "入力音声送信", "provider": pipeline.asr.name},
-            {"stage": "translation", "label": "翻訳", "provider": pipeline.translator.name},
-            {"stage": "tts", "label": "翻訳音声受信", "provider": pipeline.tts.name},
-        ]
-    stages = [
-        {"stage": "asr", "label": "文字起こし", "provider": pipeline.asr.name},
-        {"stage": "translation", "label": "翻訳", "provider": pipeline.translator.name},
-        {"stage": "text_transform", "label": "テキスト加工", "provider": request.text_transform or "なし"},
-    ]
-    if request.voice_mode == "convert" and pipeline.tts.name in {"qwen3-tts-seed-vc"}:
-        stages.extend(
-            [
-                {"stage": "tts", "label": "音声生成", "provider": "Qwen3-TTS"},
-                {"stage": "voice_conversion", "label": "声質変換", "provider": "Seed-VC"},
-            ]
-        )
-    elif request.voice_mode == "convert" and pipeline.tts.name.startswith("openai-tts-seed-vc-"):
-        stages.extend(
-            [
-                {"stage": "tts", "label": "音声生成", "provider": "OpenAI TTS"},
-                {"stage": "voice_conversion", "label": "声質変換", "provider": "Seed-VC"},
-            ]
-        )
-    elif request.voice_mode == "convert" and pipeline.tts.name == "runpod-serverless-tts":
-        stages.extend(
-            [
-                {"stage": "tts", "label": "音声生成", "provider": "RunPod Serverless"},
-                {"stage": "voice_conversion", "label": "声質変換", "provider": "RunPod Serverless"},
-            ]
-        )
-    else:
-        stages.append({"stage": "tts", "label": "音声生成", "provider": pipeline.tts.name})
-    return stages
 
 
 def planned_voice_conversion_stages(
@@ -391,44 +211,4 @@ def planned_voice_conversion_stages(
         {"stage": "source_audio_prepare", "label": "変換元音声準備", "provider": "ffmpeg"},
         {"stage": "reference_audio_prepare", "label": "参照音声準備", "provider": "ffmpeg"},
         {"stage": "voice_conversion", "label": "声質変換", "provider": provider},
-        *(
-            [{"stage": "audio_effect_insert", "label": "効果音挿入", "provider": "ffmpeg"}]
-            if request.audio_effect_path is not None
-            else []
-        ),
     ]
-
-
-def _insert_audio_effect_for_voice_result(
-    result: VoiceConversionResult,
-    request: VoiceConversionRequest,
-) -> VoiceConversionResult:
-    if request.audio_effect_path is None:
-        return result
-    with TemporaryDirectory() as temp_dir_raw:
-        temp_dir = Path(temp_dir_raw)
-        main_audio_path = temp_dir / f"voice-output{mime_suffix(result.output_audio_mime_type)}"
-        output_path = temp_dir / "voice-output-with-effect.wav"
-        main_audio_path.write_bytes(result.output_audio_bytes)
-        effect_result = insert_audio_effect(
-            main_audio_path,
-            request.audio_effect_path,
-            output_path,
-            settings=request.audio_effect_settings,
-        )
-    return VoiceConversionResult(
-        output_audio_bytes=effect_result.audio_bytes,
-        output_audio_mime_type=effect_result.audio_mime_type,
-        timings_ms={
-            **result.timings_ms,
-            **effect_result.timings_ms,
-        },
-        providers={
-            **result.providers,
-            "audio_effect_insert": "ffmpeg",
-        },
-        warnings=[
-            *result.warnings,
-            *effect_result.warnings,
-        ],
-    )

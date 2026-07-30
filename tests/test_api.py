@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from mo_speech.api import _practice_model_asr_cache_key, create_app
 from mo_speech.audio_history import AudioHistoryEntry, AudioHistoryStore
-from mo_speech.pipeline import PipelineProgress, PipelineResult, SpeechTranslationPipeline, TtsOutput
+from mo_speech.pipeline import OperationProgress, SpeechProviderBundle, TtsOutput
 from mo_speech.practice_llm import PracticeLlmError, PracticeLlmEvaluation
 from mo_speech.providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
 from mo_speech.providers.openai_api import AsrTranscription
@@ -97,6 +97,7 @@ def test_local_public_sample_audio_api_reads_legacy_file_with_removed_features(t
 
     assert response.status_code == 200
     assert "skitvoice" not in response.json()["features"]
+    assert "fun" not in response.json()["features"]
 
 
 def test_local_public_sample_audio_api_rejects_unsupported_language() -> None:
@@ -121,26 +122,6 @@ def test_local_public_sample_audio_api_rejects_unsupported_language() -> None:
     assert response.status_code == 400
 
 
-def test_audio_history_is_isolated_from_repository_default(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
-    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "isolated-history"))
-    monkeypatch.setattr(
-        "mo_speech.api_audio_history.prepare_audio_history_wav",
-        lambda audio_bytes, suffix: (b"normalized wav", ".wav", {"audio_mime_type": "audio/wav"}),
-    )
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/translate-speech",
-        data={"translation_backend": "qwen", "source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    assert (tmp_path / "isolated-history" / "recordings").is_dir()
-    assert Path("tmp/audio-history").resolve() != (tmp_path / "isolated-history").resolve()
-
-
 def test_root_serves_voice_lab_portal() -> None:
     client = TestClient(create_app())
 
@@ -163,47 +144,12 @@ def test_privacy_policy_route_serves_public_policy() -> None:
         assert "/react/assets/privacy.js" in response.text
 
 
-def test_fun_serves_operator_only_experimental_ui_locally() -> None:
-    client = TestClient(create_app())
-
-    response = client.get("/fun")
-
-    assert response.status_code == 200
-    assert "へんな へんかん アプリ" in response.text
-    assert "display-mode-button" in response.text
-    assert "user-warmup-status" in response.text
-    assert "じゅんびかくにんちゅう" not in response.text
-    assert "はなしてください" in response.text
-    assert "5びょう いじょう はなしてください" in response.text
-    assert "にてるこえ" not in response.text
-    assert "similar_voice" in response.text
-    assert "ジョーク" in response.text
-    assert "おおさかべん" in response.text
-    assert "バリエーション" in response.text
-    assert "toggle-icon" in response.text
-    assert "😊" in response.text
-    assert "🏯" in response.text
-    assert "✨" in response.text
-    assert "target_language" in response.text
-    assert 'value="user-auto"' in response.text
-    assert "user-processing-panel" in response.text
-    assert "user-processing-bar" in response.text
-    assert "user-output-text" in response.text
-    assert "user-replay-button" in response.text
-    assert "translation_backend" not in response.text
-    assert "operation_mode" not in response.text
-    assert "/static/app_user.js" in response.text
-    assert response.text.index("user-record-button") < response.text.index("user-status")
-    assert response.text.index("user-status") < response.text.index("user-output-texts")
-    assert response.text.index("user-output-texts") < response.text.index("user-processing-panel")
-    assert response.text.index("user-processing-panel") < response.text.index("user-toggles")
-    assert response.text.index("user-toggles") < response.text.index("user-replay-button")
-
-
 def test_retired_local_ui_routes_return_not_found() -> None:
     client = TestClient(create_app())
 
     for path in (
+        "/fun",
+        "/fun/",
         "/user",
         "/vibevoice",
         "/vibevoice/simple",
@@ -211,10 +157,33 @@ def test_retired_local_ui_routes_return_not_found() -> None:
         "/skitvoice",
         "/skitvoice/admin",
         "/seed-vc",
+        "/static/user.html",
+        "/static/app_user.js",
+        "/static/app_realtime.js",
         "/static/vibevoice_simple.html",
         "/static/seed_vc.html",
     ):
         assert client.get(path).status_code == 404, path
+
+
+def test_retired_legacy_translation_apis_are_not_registered() -> None:
+    client = TestClient(create_app())
+
+    requests = (
+        ("GET", "/api/user-settings"),
+        ("PUT", "/api/user-settings"),
+        ("POST", "/api/user-display-text"),
+        ("POST", "/api/user-text-output"),
+        ("POST", "/api/user-joke-output"),
+        ("POST", "/api/translate-speech"),
+        ("POST", "/api/translate-speech-jobs"),
+        ("GET", "/api/translate-speech-jobs/retired"),
+        ("POST", "/api/openai-realtime-translation-session"),
+    )
+    for method, path in requests:
+        response = client.request(method, path)
+        assert response.status_code == 404, (method, path, response.text)
+        assert response.json() == {"detail": "Not Found"}, (method, path, response.text)
 
 
 def test_speakloop_is_the_only_pronunciation_practice_ui_route() -> None:
@@ -258,12 +227,12 @@ def test_speakloop_alias_serves_practice_ui() -> None:
 
 
 def test_practice_attempt_job_rejects_unsupported_asr_model() -> None:
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"en-US": "I want coffee"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -314,12 +283,12 @@ def test_practice_prompt_job_reports_asr_translation_and_tts_models() -> None:
             assert release_tts.wait(timeout=2)
             return b"test wav"
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=BlockingAsr(),
         translator=BlockingTranslator(),
         tts=BlockingTts(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     submitted = client.post(
         "/api/practice/recordings",
@@ -440,12 +409,12 @@ def test_practice_attempt_job_reuses_cached_model_asr_across_retries(tmp_path) -
             )
 
     asr = CountingAsr()
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=asr,
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, practice_llm_service=FakePracticeLlm()))
 
     for attempt_audio in (b"attempt take one", b"attempt take two"):
         response = client.post(
@@ -488,12 +457,12 @@ def test_practice_attempt_job_retries_empty_model_asr_instead_of_caching_it() ->
             return AsrTranscription(text="", model="whisper-1", words=[], segments=[])
 
     asr = EmptyThenValidReferenceAsr()
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=asr,
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     def submit_attempt():
         return client.post(
@@ -597,12 +566,12 @@ def test_practice_attempt_job_uses_selected_llm_and_common_padding(tmp_path) -> 
 
     asr = TimestampAsr()
     llm = FakePracticeLlm()
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=asr,
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=llm))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, practice_llm_service=llm))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -639,12 +608,12 @@ def test_practice_attempt_job_rejects_non_timestamp_asr_model_for_llm_comparison
         def evaluate(self, *, model, input_payload):
             raise AssertionError("LLM must not be called when asr_model can't provide timestamps")
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "unused"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, practice_llm_service=FakePracticeLlm()))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -745,13 +714,13 @@ def test_local_practice_attempt_job_reports_both_asr_and_llm_stages(tmp_path) ->
                 log_path=tmp_path / "practice-llm.json",
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=BlockingTimestampAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(
-        create_app(openai_pipeline=pipeline, practice_llm_service=BlockingPracticeLlm())
+        create_app(openai_provider_bundle=pipeline, practice_llm_service=BlockingPracticeLlm())
     )
 
     submitted = client.post(
@@ -891,14 +860,14 @@ def test_chinese_practice_attempt_job_reports_llm_stage_after_runpod_asr(tmp_pat
                 log_path=tmp_path / "practice-llm.json",
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=CompletedRunpodAsr(),
             practice_llm_service=BlockingPracticeLlm(),
         )
@@ -1024,14 +993,14 @@ def test_chinese_practice_attempt_job_preserves_context_for_polyphonic_diff_piny
                 log_path=tmp_path / "practice-llm.json",
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=CompletedRunpodAsr(),
             practice_llm_service=BlockingPracticeLlm(),
         )
@@ -1156,7 +1125,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
                 log_path=tmp_path / "practice-llm.json",
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
@@ -1170,7 +1139,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
     )
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=runpod,
             audio_history_store=history_store,
             practice_llm_service=practice_llm,
@@ -1198,7 +1167,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
             # お手本ASRを復元し、model_audioを省略したjobを完了できること。
             client = TestClient(
                 create_app(
-                    openai_pipeline=pipeline,
+                    openai_provider_bundle=pipeline,
                     runpod_practice_asr_provider=runpod,
                     audio_history_store=history_store,
                     practice_llm_service=practice_llm,
@@ -1211,7 +1180,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
         status_calls_after_completion = runpod.status_calls
         client = TestClient(
             create_app(
-                openai_pipeline=pipeline,
+                openai_provider_bundle=pipeline,
                 runpod_practice_asr_provider=runpod,
                 audio_history_store=history_store,
                 practice_llm_service=practice_llm,
@@ -1232,7 +1201,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
     disabled_history_root = tmp_path / "disabled-history"
     disabled_history_client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=runpod,
             audio_history_store=AudioHistoryStore(
                 root=disabled_history_root,
@@ -1258,7 +1227,7 @@ def test_chinese_practice_attempt_job_reuses_cached_model_asr_across_retries(
     assert submitted.status_code == 202
     disabled_history_client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=runpod,
             audio_history_store=AudioHistoryStore(
                 root=disabled_history_root,
@@ -1334,7 +1303,7 @@ def test_chinese_practice_attempt_job_retries_empty_model_asr_instead_of_caching
     )
     client = TestClient(
         create_app(
-            openai_pipeline=SpeechTranslationPipeline(
+            openai_provider_bundle=SpeechProviderBundle(
                 asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
                 translator=FakeTranslationProvider({}),
                 tts=FakeTtsProvider(),
@@ -1389,13 +1358,13 @@ def test_practice_attempt_job_returns_comparison_error_without_legacy_fallback()
         def evaluate(self, **_kwargs):
             raise PracticeLlmError("invalid response", stage="validate_response")
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=TimestampAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(
-        create_app(openai_pipeline=pipeline, practice_llm_service=FailingPracticeLlm())
+        create_app(openai_provider_bundle=pipeline, practice_llm_service=FailingPracticeLlm())
     )
 
     response = client.post(
@@ -1437,12 +1406,12 @@ def test_practice_admin_serves_practice_history_ui() -> None:
 
 
 def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "コーヒーがほしいです"}),
         translator=FakeTranslationProvider({("auto", "zh-CN", "コーヒーがほしいです"): "我想要咖啡。"}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     response = client.post(
         "/api/practice/prompts",
@@ -1462,12 +1431,12 @@ def test_practice_prompt_api_generates_target_phrase_and_audio() -> None:
 
 def test_practice_prompt_api_includes_local_pinyin_when_requested(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "コーヒーがほしいです"}),
         translator=FakeTranslationProvider({("auto", "zh-CN", "コーヒーがほしいです"): "我想要咖啡。"}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     response = client.post(
         "/api/practice/prompts",
@@ -1483,14 +1452,14 @@ def test_practice_prompt_api_includes_local_pinyin_when_requested(monkeypatch) -
 
 def test_practice_prompt_api_omits_non_chinese_tokens_from_local_pinyin(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "外付けSSDを買いました"}),
         translator=FakeTranslationProvider(
             {("auto", "zh-CN", "外付けSSDを買いました"): "我买了一个外接 SSD，容量有 1TB。"}
         ),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     response = client.post(
         "/api/practice/prompts",
@@ -1512,12 +1481,12 @@ def test_practice_attempt_job_rejects_a_boundary_only_target_before_asr() -> Non
         def transcribe_detail(self, *args, **kwargs):
             raise AssertionError("ASR must not run for an invalid target")
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=MustNotRunAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -1548,12 +1517,12 @@ def test_practice_attempt_job_rejects_oversized_targets_before_asr() -> None:
         def transcribe_detail(self, *args, **kwargs):
             raise AssertionError("ASR must not run for an oversized target")
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=MustNotRunAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
     target_text = " ".join(f"Phrase {index}." for index in range(17))
 
     response = client.post(
@@ -1671,7 +1640,7 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
                 log_path=tmp_path / "practice-llm.json",
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
@@ -1683,7 +1652,7 @@ def test_practice_attempt_job_returns_runpod_queue_and_completed_dual_alignment(
     )
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
             audio_history_store=history_store,
             practice_llm_service=FakePracticeLlm(),
@@ -1832,7 +1801,7 @@ def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
                 log_path=tmp_path / "practice-llm.json",
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
@@ -1844,7 +1813,7 @@ def test_practice_attempt_job_reuses_cached_runpod_comparison_on_repeated_polls(
     llm = FakePracticeLlm()
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
             practice_llm_service=llm,
         )
@@ -1938,7 +1907,7 @@ def test_practice_attempt_job_falls_back_to_asr_word_ends_when_duration_probe_fa
                 usage=None,
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"zh-CN": "OpenAI should not be used"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
@@ -1951,7 +1920,7 @@ def test_practice_attempt_job_falls_back_to_asr_word_ends_when_duration_probe_fa
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: SimpleNamespace(responses=Responses())))
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
             runpod_practice_asr_provider=FakeAsyncRunpodAsr(),
         )
     )
@@ -1996,12 +1965,12 @@ def test_practice_attempt_job_explains_outdated_runpod_image() -> None:
         def health(self):
             return {}
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=OutdatedRunpodAsr()))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, runpod_practice_asr_provider=OutdatedRunpodAsr()))
 
     response = client.get("/api/practice/attempt-jobs/outdated-practice-job")
 
@@ -2040,12 +2009,12 @@ def test_practice_attempt_job_fails_with_typed_empty_reference_error() -> None:
         def health(self):
             return {}
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, runpod_practice_asr_provider=EmptyReferenceRunpodAsr()))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, runpod_practice_asr_provider=EmptyReferenceRunpodAsr()))
 
     response = client.get("/api/practice/attempt-jobs/empty-reference")
 
@@ -2130,8 +2099,8 @@ def test_practice_attempt_job_transcribes_both_english_audios_with_whisper(tmp_p
             )
 
     asr = SequencedAsr()
-    pipeline = SpeechTranslationPipeline(asr=asr, translator=FakeTranslationProvider({}), tts=FakeTtsProvider())
-    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=FakePracticeLlm()))
+    pipeline = SpeechProviderBundle(asr=asr, translator=FakeTranslationProvider({}), tts=FakeTtsProvider())
+    client = TestClient(create_app(openai_provider_bundle=pipeline, practice_llm_service=FakePracticeLlm()))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -2182,13 +2151,13 @@ def test_practice_attempt_job_returns_no_speech_for_llm_comparison_without_calli
             self.calls.append({"model": model, "input": input_payload})
             raise AssertionError("LLM must not be called for a silent attempt recording")
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=NoSpeechAttemptAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
     llm = FakePracticeLlm()
-    client = TestClient(create_app(openai_pipeline=pipeline, practice_llm_service=llm))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, practice_llm_service=llm))
 
     response = client.post(
         "/api/practice/attempt-jobs",
@@ -2229,12 +2198,12 @@ def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> Non
                 timestamp_granularities=["word"],
             )
 
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=EmptyReferenceAsr(),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     submitted = client.post(
         "/api/practice/attempt-jobs",
@@ -2266,7 +2235,7 @@ def test_practice_attempt_job_reports_typed_alignment_error_in_job_mode() -> Non
 def test_practice_recording_api_rejects_attempt_intent() -> None:
     """/api/practice/recordings only creates prompts now; attempts go through
     /api/practice/attempt-jobs (which needs the model audio for comparison)."""
-    client = TestClient(create_app(openai_pipeline=SpeechTranslationPipeline(
+    client = TestClient(create_app(openai_provider_bundle=SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "unused"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
@@ -2283,12 +2252,12 @@ def test_practice_recording_api_rejects_attempt_intent() -> None:
 
 
 def test_practice_recording_api_uses_explicit_prompt_intent_even_when_target_exists() -> None:
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "明日は天気がいいですか"}),
         translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "我想學習軟體開發。"}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline))
+    client = TestClient(create_app(openai_provider_bundle=pipeline))
 
     response = client.post(
         "/api/practice/recordings",
@@ -2336,14 +2305,14 @@ def test_practice_recording_api_can_create_seed_vc_model_voice_job(monkeypatch) 
         "mo_speech.api.RunpodServerlessVoiceConversionProvider",
         lambda: provider,
     )
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "今日は何をしますか"}),
         translator=FakeTranslationProvider({("auto", "en-US", "今日は何をしますか"): "What are you doing today?"}),
         tts=FakeTtsProvider(),
     )
     client = TestClient(
         create_app(
-            openai_pipeline=pipeline,
+            openai_provider_bundle=pipeline,
         )
     )
 
@@ -2375,7 +2344,7 @@ def test_practice_recording_api_can_create_seed_vc_model_voice_job(monkeypatch) 
 
 
 def test_practice_recording_api_requires_explicit_recording_intent() -> None:
-    client = TestClient(create_app(openai_pipeline=SpeechTranslationPipeline(
+    client = TestClient(create_app(openai_provider_bundle=SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "unused"}),
         translator=FakeTranslationProvider({}),
         tts=FakeTtsProvider(),
@@ -2394,12 +2363,12 @@ def test_practice_recording_api_saves_generated_prompt_audio_to_practice_history
     from mo_speech.audio_history import AudioHistoryStore
 
     history_store = AudioHistoryStore(root=tmp_path / "history", limit=10, enabled=True)
-    pipeline = SpeechTranslationPipeline(
+    pipeline = SpeechProviderBundle(
         asr=FakeAsrProvider({"auto": "明日は天気がいいですか"}),
         translator=FakeTranslationProvider({("auto", "zh-CN", "明日は天気がいいですか"): "明天天气好吗？"}),
         tts=FakeTtsProvider(),
     )
-    client = TestClient(create_app(openai_pipeline=pipeline, audio_history_store=history_store))
+    client = TestClient(create_app(openai_provider_bundle=pipeline, audio_history_store=history_store))
 
     response = client.post(
         "/api/practice/recordings",
@@ -2796,14 +2765,11 @@ def test_admin_serves_browser_ui() -> None:
     response = client.get("/admin")
 
     assert response.status_code == 200
-    assert "音声翻訳" in response.text
-    assert "source_language" in response.text
-    assert "operation_mode" in response.text
-    assert "translation_backend" in response.text
+    assert "音声処理" in response.text
     assert "text_tts" in response.text
     assert "tts_text" in response.text
     assert "tts_backend" in response.text
-    assert "voice_processing" in response.text
+    assert "voice_conversion" in response.text
     assert "voice_backend" in response.text
     assert "reference_audio" in response.text
     assert "seed-vc-settings" in response.text
@@ -2819,37 +2785,10 @@ def test_admin_serves_browser_ui() -> None:
     assert "reference-preview-normalized" in response.text
     assert "seed_vc_length_adjust" in response.text
     assert "seed_vc_inference_cfg_rate" in response.text
-    assert "translation-only" in response.text
-    assert "user_target_language" not in response.text
-    assert "入力が日本語ならインドネシア語、それ以外なら日本語へ自動切替します。" in response.text
-    assert "audio-label" in response.text
-    assert "audio-selection-status" in response.text
-    assert "source-audio-hint" in response.text
-    assert "reference-audio-selection-status" in response.text
-    assert "text-result-section" in response.text
     assert "output-audio-heading" in response.text
-    assert "route-hint" in response.text
-    assert "runtime-mode" not in response.text
-    assert "runtime-note" not in response.text
-    assert "mode</span>" not in response.text
-    assert "input-audio" in response.text
-    assert "audio_device" in response.text
-    assert "audio-device-refresh" in response.text
-    assert "input-level" in response.text
-    assert "recording-details" in response.text
-    assert "voice-mode-hint" in response.text
-    assert "音声翻訳（Qwen/local）" in response.text
-    assert "音声翻訳（OpenAI API）" in response.text
-    assert "音声翻訳（OpenAI Realtime）" in response.text
-    assert "音声翻訳（OpenAI Realtime streaming）" in response.text
-    assert "音声翻訳（RunPod Serverless）" in response.text
     assert "runpod-warmup-button" in response.text
     assert "runpod-warmup-status" in response.text
     assert "RunPod手動準備" in response.text
-    assert response.text.index("runpod-warmup-panel") < response.text.index("operation_mode")
-    assert response.text.index('value="openai"') < response.text.index('value="qwen"')
-    assert "realtime-streaming-panel" in response.text
-    assert "接続開始後に話す" in response.text
     assert "Google Translate TTS endpoint" in response.text
     assert "OpenAI TTS API" in response.text
     assert "tts_text_file" in response.text
@@ -2857,244 +2796,78 @@ def test_admin_serves_browser_ui() -> None:
     assert "history-recordings" in response.text
     assert "history-outputs" in response.text
     assert "history-storage" in response.text
-    assert "user-settings-panel" in response.text
-    assert "user_joke_text" in response.text
-    assert "user_joke_selection" in response.text
-    assert "user_joke_variation_count" in response.text
-    assert "user_joke_variants_preview" in response.text
-    assert "user_joke_pool_preview" in response.text
-    assert "user_effect_audio_files" in response.text
-    assert "user_effect_audio_preview" in response.text
-    assert "user_effect_selection" in response.text
-    assert "user_effect_insert_mode" in response.text
-    assert "user_effect_max_insertions" in response.text
-    assert "user_effect_min_silence_ms" in response.text
-    assert "生成済みバリエーション" in response.text
-    assert "実際に使うジョーク候補" in response.text
-    assert "効果音ファイル" in response.text
-    assert "user_theme" in response.text
-    assert "ローテーション" in response.text
-    assert "ランダム" in response.text
-    assert "青" in response.text
-    assert "ポップ" in response.text
-    assert "ミント" in response.text
-    assert "user-settings-save" in response.text
     assert "use-output-as-input" in response.text
     assert "use-output-as-reference" in response.text
-    assert "text-result-action" in response.text
-    assert "Seed-VCで入力音声に寄せる" in response.text
-    assert "既定音声" not in response.text
     assert "processing-panel" in response.text
     assert "processing-steps" in response.text
     assert "error-message" in response.text
-    assert "末尾付加" in response.text
     assert "VC比較" in response.text
     assert response.text.index("/static/app_dom.js") < response.text.index("/static/app_config.js")
     assert response.text.index("/static/app_config.js") < response.text.index("/static/app_state.js")
     assert response.text.index("/static/app_state.js") < response.text.index("/static/app_audio.js")
-    assert response.text.index("/static/app_audio.js") < response.text.index("/static/app_realtime.js")
-    assert response.text.index("/static/app_realtime.js") < response.text.index("/static/app_history.js")
+    assert response.text.index("/static/app_audio.js") < response.text.index("/static/app_history.js")
     assert response.text.index("/static/app_history.js") < response.text.index("/static/app_seed_vc.js")
     assert response.text.index("/static/app_seed_vc.js") < response.text.index("/static/app.js")
-    assert response.text.index("/static/app.js") < response.text.index("/static/app_admin_settings.js")
     assert "/static/app.js" in response.text
-    assert "/static/app_admin_settings.js" in response.text
+    for retired_text in (
+            "音声翻訳",
+            "source_language",
+            "translation_backend",
+        "translation-only",
+        "realtime-streaming-panel",
+        "user-settings-panel",
+        "/static/app_realtime.js",
+        "/static/app_admin_settings.js",
+    ):
+        assert retired_text not in response.text
 
 
-def test_static_assets_are_served() -> None:
+def test_current_static_assets_are_served_and_retired_assets_are_absent() -> None:
     client = TestClient(create_app())
 
-    js_asset_names = [
+    current_assets = (
         "app_dom.js",
         "app_config.js",
         "app_state.js",
         "app_audio.js",
-        "app_realtime.js",
         "app_history.js",
         "app_seed_vc.js",
+        "app_public_sample_audio_admin.js",
         "app.js",
+        "styles.css",
+    )
+    current_responses = [client.get(f"/static/{name}") for name in current_assets]
+    current_text = "\n".join(response.text for response in current_responses)
+
+    assert all(response.status_code == 200 for response in current_responses)
+    assert "submitTextToSpeech" in current_text
+    assert "submitVoiceConversion" in current_text
+    assert "pollJob" in current_text
+    assert "loadAudioHistory" in current_text
+    assert "previewSeedVcReferenceAudio" in current_text
+    assert 'fetch("/api/public-sample-audios"' in current_text
+    assert ".processing-panel" in current_text
+    assert ".history-panel" in current_text
+
+    retired_assets = (
+        "app_realtime.js",
         "app_admin_settings.js",
         "app_user.js",
-        "app_practice.js",
-    ]
-    js_responses = [client.get(f"/static/{name}") for name in js_asset_names]
-    js_text = "\n".join(response.text for response in js_responses)
-    css_response = client.get("/static/styles.css")
+        "user.html",
+    )
+    for name in retired_assets:
+        assert client.get(f"/static/{name}").status_code == 404, name
 
-    assert all(response.status_code == 200 for response in js_responses)
-    assert "submitTranslation" in js_text
-    assert "append_suffix" in js_text
-    assert "loadRuntime" in js_text
-    assert "translationBackendSelect" in js_text
-    assert "submitTextToSpeech" in js_text
-    assert "handleTtsTextFileChange" in js_text
-    assert "ttsTextFileInput" in js_text
-    assert "deleteHistoryAudio" in js_text
-    assert "history-delete-button" in js_text
-    assert "loadAudioHistory" in js_text
-    assert "useHistoryAudioAsInput" in js_text
-    assert "useHistoryAudioAsReference" in js_text
-    assert "useHistoryTextForTts" in js_text
-    assert "useTextResultForTts" in js_text
-    assert "ensureTtsLanguage" in js_text
-    assert "renderAudioHistorySettings" in js_text
-    assert "history-title" in js_text
-    assert "history-text" in js_text
-    assert "playable_hint" in js_text
-    assert "requestData()" not in js_text
-    assert "openAiTargetLanguages" in js_text
-    assert "isRealtimeTranslationBackend" in js_text
-    assert "isRealtimeStreamingTranslationBackend" in js_text
-    assert "startRealtimeStreaming" in js_text
-    assert "stopRealtimeStreaming" in js_text
-    assert "saveRealtimeStreamingOutput" in js_text
-    assert "startRealtimeOutputRecording" in js_text
-    assert "openai-realtime-translation-session" in js_text
-    assert "syncTtsBackendAvailability" in js_text
-    assert "voiceProcessingSelect" in js_text
-    assert "submitCurrentOperation" in js_text
-    assert "submitVoiceConversion" in js_text
-    assert "pollVoiceConversionJob" in js_text
-    assert "syncOperationMode" in js_text
-    assert "syncVoiceBackendAvailability" in js_text
-    assert "syncSeedVcSettingsVisibility" in js_text
-    assert "appendSeedVcSettings" in js_text
-    assert "seed_vc_reference_auto_select" in js_text
-    assert "previewSeedVcReferenceAudio" in js_text
-    assert "seed-vc/reference-preview" in js_text
-    assert "参照音声の確認APIに接続できませんでした" in js_text
-    assert "renderSeedVcReferencePreview" in js_text
-    assert "seedVcPresets" in js_text
-    assert "applySeedVcPreset" in js_text
-    assert "syncSeedVcPresetSelection" in js_text
-    assert "selectedVoiceBackend" in js_text
-    assert "translationOnlyElements" in js_text
-    assert "textResultSection" in js_text
-    assert "変換元音声ファイル" in js_text
-    assert "VC出力音声" in js_text
-    assert "renderOutputAudioBlob" in js_text
-    assert "outputAudio.play()" in js_text
-    assert "submitUserTranslation" in js_text
-    assert "loadUserDisplayText" in js_text
-    assert "refreshUserSettings" in js_text
-    assert "selectedUserTranslationBackend" in js_text
-    assert "syncUserWarmupStatus" in js_text
-    assert "displayModeButton" in js_text
-    assert "toggleUserReplay" in js_text
-    assert "reprocessLatestUserOutput" in js_text
-    assert "markUserOutputStale" in js_text
-    assert "syncJapaneseTextEffectAvailability" in js_text
-    assert "applyUserTheme" in js_text
-    assert "cancelUserRecordingForNavigation" in js_text
-    assert "beforeunload" in js_text
-    assert "runUserTextOutput" in js_text
-    assert "runUserVoiceConversion" in js_text
-    assert "applyUserVoiceModeToBase" in js_text
-    assert "syncSimilarVoiceAvailability" in js_text
-    assert "userStatus.hidden" in js_text
-    assert "translationResultCache" in js_text
-    assert "baseResultCache" in js_text
-    assert "voiceResultCache" in js_text
-    assert "displayTextCache" in js_text
-    assert "jokeAudioCache" in js_text
-    assert "userJokePool" in js_text
-    assert "selectUserJokeText" in js_text
-    assert "currentUserJokeSettingsSignature" in js_text
-    assert "joke_variants" in js_text
-    assert "joke_selection" in js_text
-    assert "convertUserJokeAudioBlob" in js_text
-    assert "localStorage" in js_text
-    assert "startProcessingLabelAnimation" in js_text
-    assert "buildProcessingLabelHtml" in js_text
-    assert "processing-dot" in js_text
-    assert "processing-dots" in js_text
-    assert "user-text-output" in js_text
-    assert "user-joke-output" in js_text
-    assert "user-auto" in js_text
-    assert "id-ID" in js_text
-    assert "voice-conversion-jobs" in js_text
-    assert "cycleUserTextMode" in js_text
-    assert '["hiragana", "ruby", "indonesian"]' in js_text
-    assert "indonesian_text" in js_text
-    assert "🇯🇵 ひらがな" in js_text
-    assert "🇯🇵 ルビ" in js_text
-    assert "🇮🇩 Indonesia" in js_text
-    assert "setUserProcessingProgress" in js_text
-    assert "processingProgressCeiling" in js_text
-    assert "baseJobCompleteProgressPercent" in js_text
-    assert "userVoiceConversionEnabled() ? 70 : 100" in js_text
-    assert "setUserProcessingProgress(82, { ceiling: 90 })" in js_text
-    assert "renderUserOutputRubyText" in js_text
-    assert "output-ruby-stack" in js_text
-    assert "しょりちゅう" in js_text
-    assert "seed_vc_reference_auto_select" in js_text
-    assert "user-settings" in js_text
-    assert "user_theme" in js_text
-    assert "user_joke_selection" in js_text
-    assert "user_joke_variation_count" in js_text
-    assert "splitAdminJokeTexts" in js_text
-    assert "renderAdminJokePreview" in js_text
-    assert "settings.joke_variants" in js_text
-    assert "settings.joke_pool" in js_text
-    assert "renderInputAudioPreview" in js_text
-    assert "setInputAudioSelectionStatus" in js_text
-    assert "setReferenceAudioSelectionStatus" in js_text
-    assert "履歴から入力" in js_text
-    assert "履歴からVC参照" in js_text
-    assert "loadAudioDevices" in js_text
-    assert "selectedAudioConstraint" in js_text
-    assert "joke_text: hasJoke" not in js_text
-    assert "chooseRecorderOptions" in js_text
-    assert "startInputLevelMeter" in js_text
-    assert "syncTranslationBackendAvailability" in js_text
-    assert "syncVoiceProcessingAvailability" in js_text
-    assert "pollTranslationJob" in js_text
-    assert "renderProcessingJob" in js_text
-    assert "renderPartialResult" in js_text
-    assert "syncTargetOptions" in js_text
-    assert "renderError" in js_text
-    assert css_response.status_code == 200
-    assert ".status" in css_response.text
-    assert ".runtime-panel" not in css_response.text
-    assert ".processing-panel" in css_response.text
-    assert ".history-panel" in css_response.text
-    assert ".user-stage" in css_response.text
-    assert '[data-theme="blue"]' in css_response.text
-    assert '[data-theme="pop"]' in css_response.text
-    assert '[data-theme="mint"]' in css_response.text
-    assert ".display-mode-button" in css_response.text
-    assert ".record-orb" in css_response.text
-    assert ".record-progress" in css_response.text
-    assert ".user-processing-panel" in css_response.text
-    assert ".user-processing-fill" in css_response.text
-    assert ".processing-dots" in css_response.text
-    assert ".processing-dot" in css_response.text
-    assert "progress-sheen" in css_response.text
-    assert ".replay-button" in css_response.text
-    assert ".user-output-texts" in css_response.text
-    assert ".user-output-text" in css_response.text
-    assert ".ruby-line" in css_response.text
-    assert ".output-ruby-stack" in css_response.text
-    assert ".output-ruby-reading" in css_response.text
-    assert "overflow-x: hidden" in css_response.text
-    assert ".toggle-tile" in css_response.text
-    assert ".toggle-tile.is-disabled" in css_response.text
-    assert ".toggle-icon" in css_response.text
-    assert ".toggle-tile::after" not in css_response.text
-    assert ".toggle-tile:not(.is-disabled):hover" in css_response.text
-    assert ".toggle-tile:not(.is-disabled):active" in css_response.text
-    assert "inset 0 5px 12px" in css_response.text
-    assert "translateY(2px) scale(0.96)" in css_response.text
-    assert ".joke-preview-title" in css_response.text
-    assert ".joke-preview-list" in css_response.text
-    assert ".history-title" in css_response.text
-    assert ".history-text" in css_response.text
-    assert ".history-warning" in css_response.text
-    assert ".history-storage" in css_response.text
-    assert ".history-actions" in css_response.text
-    assert ".history-delete-button" in css_response.text
-    assert ".result-actions" in css_response.text
-    assert ".error-message" in css_response.text
+    for retired_text in (
+        "submitTranslation",
+        "pollTranslationJob",
+        "translationBackendSelect",
+        "openai-realtime-translation-session",
+        "submitUserTranslation",
+        "user-joke-output",
+        "user-settings",
+    ):
+        assert retired_text not in current_text
 
 
 def test_runtime_api_returns_active_mode_and_provider_names(tmp_path, monkeypatch) -> None:
@@ -3114,31 +2887,7 @@ def test_runtime_api_returns_active_mode_and_provider_names(tmp_path, monkeypatc
     assert payload["provider_mode"] == "fake"
     assert payload["providers"] == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
     assert payload["supported_voice_modes"] == ["default"]
-    assert [backend["id"] for backend in payload["translation_backends"]] == [
-        "openai",
-        "openai_realtime",
-        "openai_realtime_stream",
-        "qwen",
-        "runpod_serverless",
-    ]
-    assert payload["translation_backends"][0]["available"] is False
-    assert payload["translation_backends"][0]["settings"]["supported_target_languages"][:4] == [
-        "id-ID",
-        "ja-JP",
-        "zh-CN",
-        "en-US",
-    ]
-    assert "fr" in payload["translation_backends"][0]["settings"]["supported_target_languages"]
-    assert "uk" in payload["translation_backends"][1]["settings"]["supported_target_languages"]
-    assert "vi" in payload["translation_backends"][2]["settings"]["supported_target_languages"]
-    assert payload["translation_backends"][1]["available"] is False
-    assert payload["translation_backends"][2]["available"] is False
-    assert payload["translation_backends"][3]["settings"]["supported_routes"] == [
-        {"source_language": "id-ID", "target_language": "ja-JP"},
-        {"source_language": "ja-JP", "target_language": "zh-CN"},
-    ]
-    assert payload["translation_backends"][4]["available"] is False
-    assert "RUNPOD_ENDPOINT_ID" in payload["translation_backends"][4]["reason"]
+    assert "translation_backends" not in payload
     assert [backend["id"] for backend in payload["text_tts_backends"]] == ["google_translate", "openai"]
     assert payload["text_tts_backends"][1]["settings"]["supported_target_languages"][0] == "auto"
     assert "fr" in payload["text_tts_backends"][1]["settings"]["supported_target_languages"]
@@ -3158,272 +2907,14 @@ def test_runtime_api_returns_active_mode_and_provider_names(tmp_path, monkeypatc
     }
 
 
-def test_user_settings_api_defaults_to_japanese(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
-    client = TestClient(create_app())
-
-    response = client.get("/api/user-settings")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "target_language": "ja-JP",
-        "joke_text": "",
-        "joke_texts": [],
-        "joke_position": "after",
-        "joke_selection": "rotation",
-        "joke_variation_count": 0,
-        "joke_variants": [],
-        "joke_pool": [],
-        "effect_audios": [],
-        "effect_selection": "rotation",
-        "effect_insert_mode": "silence_or_tail",
-        "effect_max_insertions": 1,
-        "effect_min_silence_ms": 300,
-        "theme": "blue",
-    }
-
-
-def test_user_settings_api_persists_admin_settings(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
-    client = TestClient(create_app())
-
-    response = client.put(
-        "/api/user-settings",
-        json={
-            "target_language": "ja-JP",
-            "joke_texts": ["きょうも がんばってください。", "いいこえです。"],
-            "joke_position": "before",
-            "joke_selection": "random",
-            "joke_variation_count": 0,
-            "effect_audios": [
-                {
-                    "id": "cow",
-                    "name": "cow.wav",
-                    "audio_mime_type": "audio/wav",
-                    "audio_base64": "UklGRg==",
-                }
-            ],
-            "effect_selection": "random",
-            "effect_insert_mode": "tail",
-            "effect_max_insertions": 2,
-            "effect_min_silence_ms": 450,
-            "theme": "pop",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["joke_position"] == "before"
-    assert response.json()["joke_selection"] == "random"
-    assert response.json()["effect_audios"][0]["id"] == "cow"
-    assert response.json()["effect_selection"] == "random"
-    assert response.json()["effect_insert_mode"] == "tail"
-    assert response.json()["effect_max_insertions"] == 2
-    assert response.json()["effect_min_silence_ms"] == 450
-    assert response.json()["theme"] == "pop"
-    assert client.get("/api/user-settings").json()["joke_text"] == "きょうも がんばってください。\nいいこえです。"
-    assert client.get("/api/user-settings").json()["joke_pool"] == [
-        "きょうも がんばってください。",
-        "いいこえです。",
-    ]
-    assert client.get("/api/user-settings").json()["theme"] == "pop"
-
-
-def test_user_settings_api_generates_joke_variations_on_admin_save(tmp_path, monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class Responses:
-        @staticmethod
-        def create(**kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(output_text='{"variants":[["A1","A2"],["B1","B2"]]}')
-
-    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: SimpleNamespace(responses=Responses())))
-    client = TestClient(create_app())
-
-    response = client.put(
-        "/api/user-settings",
-        json={
-            "target_language": "ja-JP",
-            "joke_texts": ["A", "B"],
-            "joke_position": "after",
-            "joke_selection": "rotation",
-            "joke_variation_count": 2,
-            "theme": "blue",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["joke_variants"] == ["A1", "B1", "A2", "B2"]
-    assert payload["joke_pool"] == ["A", "B", "A1", "B1", "A2", "B2"]
-    assert "variants_per_joke" in captured["input"]
-    assert '"variants_per_joke": 2' in captured["input"]
-    assert client.get("/api/user-settings").json()["joke_pool"] == ["A", "B", "A1", "B1", "A2", "B2"]
-
-
-def test_user_settings_api_rejects_unknown_joke_selection(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
-    client = TestClient(create_app())
-
-    response = client.put(
-        "/api/user-settings",
-        json={"target_language": "ja-JP", "joke_position": "after", "joke_selection": "shuffle", "theme": "blue"},
-    )
-
-    assert response.status_code == 400
-    assert "unsupported joke_selection" in response.json()["detail"]
-
-
-def test_user_settings_api_rejects_unknown_theme(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_USER_SETTINGS_PATH", str(tmp_path / "user-settings.json"))
-    client = TestClient(create_app())
-
-    response = client.put(
-        "/api/user-settings",
-        json={"target_language": "ja-JP", "joke_position": "after", "theme": "sepia"},
-    )
-
-    assert response.status_code == 400
-    assert "unsupported theme" in response.json()["detail"]
-
-
-def test_user_display_text_api_returns_hiragana_with_openai(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class Responses:
-        @staticmethod
-        def create(**kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(output_text="きゅうりょうを あげてください。")
-
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda: SimpleNamespace(responses=Responses())))
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/user-display-text",
-        json={"text": "給料を上げてください。", "target_language": "ja-JP"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "kanji_text": "給料を上げてください。",
-        "hiragana_text": "きゅうりょうを あげてください。",
-        "indonesian_text": "",
-    }
-    assert "hiragana only" in captured["instructions"]
-    assert captured["input"] == "給料を上げてください。"
-
-
-def test_user_display_text_api_uses_indonesian_output_as_indonesian_text() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/user-display-text",
-        json={"text": "Terima kasih.", "target_language": "id-ID"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "kanji_text": "Terima kasih.",
-        "hiragana_text": "",
-        "indonesian_text": "Terima kasih.",
-    }
-
-
-def test_user_text_output_api_reuses_translated_text_for_tts(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class Speech:
-        @staticmethod
-        def create(**kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(content=b"wav")
-
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setitem(
-        sys.modules,
-        "openai",
-        SimpleNamespace(OpenAI=lambda: SimpleNamespace(audio=SimpleNamespace(speech=Speech()))),
-    )
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/user-text-output",
-        json={
-            "transcript": "I want a raise.",
-            "translated_text": "給料を上げてください。",
-            "target_language": "ja-JP",
-            "text_transform_options": {"joke_text": "お願いします。", "joke_position": "after"},
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["transcript"] == "I want a raise."
-    assert payload["translated_text"] == "給料を上げてください。"
-    assert payload["transformed_text"] == "給料を上げてください。 お願いします。"
-    assert payload["target_language"] == "ja-JP"
-    assert payload["audio_base64"] != ""
-    assert payload["providers"]["asr"] == "cached"
-    assert payload["providers"]["translation"] == "cached"
-    assert captured["input"] == "給料を上げてください。 お願いします。"
-
-
-def test_user_joke_output_api_translates_to_indonesian_then_tts() -> None:
-    captured: dict[str, object] = {}
-
-    class FakeTranslator:
-        name = "fake-openai-translation"
-
-        def translate(self, text, source_language, target_language):
-            captured["translation"] = {
-                "text": text,
-                "source_language": source_language,
-                "target_language": target_language,
-            }
-            return "Ini lelucon singkat."
-
-    class FakeTts:
-        name = "fake-openai-tts"
-        audio_mime_type = "audio/wav"
-
-        def synthesize(self, text, target_language):
-            captured["tts"] = {"text": text, "target_language": target_language}
-            return TtsOutput(audio_bytes=f"TTS:{target_language}:{text}".encode(), audio_mime_type="audio/wav")
-
-    openai_pipeline = SimpleNamespace(translator=FakeTranslator(), tts=FakeTts())
-    client = TestClient(create_app(openai_pipeline=openai_pipeline))  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/user-joke-output",
-        json={"text": "まずはジョークです。", "target_language": "id-ID", "tts_backend": "openai"},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["transcript"] == "まずはジョークです。"
-    assert payload["translated_text"] == "Ini lelucon singkat."
-    assert payload["target_language"] == "id-ID"
-    assert base64.b64decode(payload["audio_base64"]) == b"TTS:id-ID:Ini lelucon singkat."
-    assert captured["translation"] == {
-        "text": "まずはジョークです。",
-        "source_language": "auto",
-        "target_language": "id-ID",
-    }
-    assert captured["tts"] == {"text": "Ini lelucon singkat.", "target_language": "id-ID"}
-
-
 def test_runtime_api_returns_supported_voice_modes_from_tts_provider() -> None:
-    class CustomPipeline:
+    class CustomBundle:
         asr = SimpleNamespace(name="custom-asr")
         translator = SimpleNamespace(name="custom-translation")
         tts = SimpleNamespace(name="custom-tts", supported_voice_modes=("convert", "clone", "convert"))
 
     client = TestClient(
-        create_app(pipeline=CustomPipeline(), voice_conversion_service=_fake_voice_conversion_service())
+        create_app(provider_bundle=CustomBundle(), voice_conversion_service=_fake_voice_conversion_service())
     )  # type: ignore[arg-type]
 
     response = client.get("/api/runtime")
@@ -3450,421 +2941,19 @@ def test_runtime_api_marks_unavailable_voice_conversion_backend() -> None:
     ]
 
 
-def test_create_app_preloads_pipeline_when_enabled(monkeypatch) -> None:
-    class PreloadPipeline:
+def test_create_app_preloads_provider_bundle_when_enabled(monkeypatch) -> None:
+    class PreloadBundle:
         preloaded = False
 
         def preload(self) -> None:
             self.preloaded = True
 
-    pipeline = PreloadPipeline()
+    bundle = PreloadBundle()
     monkeypatch.setenv("MO_PRELOAD_MODELS", "1")
 
-    create_app(pipeline=pipeline)  # type: ignore[arg-type]
+    create_app(provider_bundle=bundle)  # type: ignore[arg-type]
 
-    assert pipeline.preloaded is True
-
-
-def test_translate_speech_api_accepts_audio_upload() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/translate-speech",
-        data={
-            "translation_backend": "qwen",
-            "source_language": "id-ID",
-            "target_language": "ja-JP",
-            "text_transform": "append_suffix",
-            "text_transform_suffix": "モー",
-            "text_transform_unit": "sentence",
-        },
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["transcript"] == "Selamat pagi. Terima kasih."
-    assert payload["translated_text"] == "おはようございます。ありがとうございます。"
-    assert payload["transformed_text"] == "おはようございますモー。ありがとうございますモー。"
-    assert payload["providers"] == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
-    assert payload["audio_mime_type"] == "audio/wav"
-    assert payload["audio_base64"] != ""
-
-
-def test_translate_speech_api_saves_local_audio_history_as_wav(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
-    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
-    monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
-    monkeypatch.setattr(
-        "mo_speech.api_audio_history.prepare_audio_history_wav",
-        lambda audio_bytes, suffix: (
-            b"normalized recording wav",
-            ".wav",
-            {
-                "audio_mime_type": "audio/wav",
-                "history_audio_format": "wav_24000_mono_pcm16",
-                "original_audio_suffix": suffix,
-            },
-        ),
-    )
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/translate-speech",
-        data={"translation_backend": "qwen", "source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm;codecs=opus")},
-    )
-
-    assert response.status_code == 200
-    recordings = list((tmp_path / "history" / "recordings").glob("*.wav"))
-    assert len(recordings) == 1
-    assert recordings[0].read_bytes() == b"normalized recording wav"
-    assert len(list((tmp_path / "history" / "recordings").glob("*.webm"))) == 0
-    assert len(list((tmp_path / "history" / "outputs").glob("*.wav"))) == 1
-    history = client.get("/api/audio-history").json()
-    assert history["outputs"][0]["text_preview"] == "谢谢。"
-    assert history["outputs"][0]["tts_text"] == "谢谢。"
-    assert history["outputs"][0]["metadata"]["tts_text"] == "谢谢。"
-    assert history["outputs"][0]["metadata"]["transcript_preview"] == "ありがとう。"
-    assert history["outputs"][0]["label"] == "谢谢。"
-    assert history["recordings"][0]["text_preview"] == "ありがとう。"
-    assert history["recordings"][0]["label"] == "ありがとう。"
-    assert history["recordings"][0]["filename"].endswith(".wav")
-    assert history["recordings"][0]["media_type"] == "audio/wav"
-    assert history["recordings"][0]["metadata"]["filename"] == "recording.webm"
-    assert history["recordings"][0]["metadata"]["original_content_type"] == "audio/webm;codecs=opus"
-    assert history["recordings"][0]["metadata"]["original_audio_suffix"] == ".webm"
-
-
-def test_translate_speech_job_reusing_history_input_does_not_duplicate_recording(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MO_AUDIO_HISTORY_ENABLED", "1")
-    monkeypatch.setenv("MO_AUDIO_HISTORY_DIR", str(tmp_path / "history"))
-    monkeypatch.setenv("MO_AUDIO_HISTORY_LIMIT", "10")
-    monkeypatch.setattr(
-        "mo_speech.api_audio_history.prepare_audio_history_wav",
-        lambda audio_bytes, suffix: (b"normalized wav", ".wav", {"audio_mime_type": "audio/wav"}),
-    )
-    client = TestClient(create_app())
-
-    first_response = client.post(
-        "/api/translate-speech-jobs",
-        data={"translation_backend": "qwen", "source_language": "ja-JP", "target_language": "zh-CN", "voice_mode": "default"},
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
-    )
-    assert first_response.status_code == 200
-    first_job_id = first_response.json()["job_id"]
-    for _ in range(20):
-        first_status = client.get(f"/api/translate-speech-jobs/{first_job_id}").json()
-        if first_status["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("initial translation job did not finish")
-
-    initial_history = client.get("/api/audio-history").json()
-    reused_filename = initial_history["recordings"][0]["filename"]
-
-    second_response = client.post(
-        "/api/translate-speech-jobs",
-        data={
-            "translation_backend": "qwen",
-            "source_language": "ja-JP",
-            "target_language": "zh-CN",
-            "voice_mode": "default",
-            "input_history_kind": "recordings",
-            "input_history_filename": reused_filename,
-        },
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm")},
-    )
-    assert second_response.status_code == 200
-    second_job_id = second_response.json()["job_id"]
-    for _ in range(20):
-        second_status = client.get(f"/api/translate-speech-jobs/{second_job_id}").json()
-        if second_status["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("reused history translation job did not finish")
-
-    history = client.get("/api/audio-history").json()
-    assert [entry["filename"] for entry in history["recordings"]] == [reused_filename]
-
-
-def test_translate_speech_api_accepts_seed_vc_settings_for_convert_mode() -> None:
-    captured_request = None
-
-    class CapturingPipeline:
-        def run(self, request, progress_callback=None) -> PipelineResult:
-            nonlocal captured_request
-            captured_request = request
-            return PipelineResult(
-                transcript="こんにちは。",
-                translated_text="你好。",
-                transformed_text="你好。",
-                output_audio_bytes=b"wav",
-                output_audio_mime_type="audio/wav",
-                timings_ms={"total": 1.0},
-                providers={"asr": "capture-asr", "translation": "capture-translation", "tts": "capture-tts"},
-            )
-
-    client = TestClient(create_app(pipeline=CapturingPipeline()))  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/translate-speech",
-        data={
-            "translation_backend": "qwen",
-            "source_language": "ja-JP",
-            "target_language": "zh-CN",
-            "voice_mode": "convert",
-            "seed_vc_diffusion_steps": "6",
-            "seed_vc_length_adjust": "0.95",
-            "seed_vc_inference_cfg_rate": "0.6",
-            "seed_vc_reference_max_seconds": "5",
-            "seed_vc_reference_auto_select": "true",
-        },
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    assert captured_request is not None
-    settings = captured_request.voice_settings["seed_vc"]
-    assert settings.diffusion_steps == 6
-    assert settings.length_adjust == 0.95
-    assert settings.inference_cfg_rate == 0.6
-    assert settings.reference_max_seconds == 5.0
-    assert settings.reference_auto_select is True
-
-
-def test_translate_speech_job_api_reports_progress_and_result() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/translate-speech-jobs",
-        data={
-            "translation_backend": "qwen",
-            "source_language": "id-ID",
-            "target_language": "ja-JP",
-            "text_transform": "append_suffix",
-            "text_transform_suffix": "モー",
-            "text_transform_unit": "sentence",
-        },
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] in {"queued", "running", "succeeded"}
-    assert payload["stages"] == [
-        {"stage": "asr", "label": "文字起こし", "provider": "fake-asr"},
-        {"stage": "translation", "label": "翻訳", "provider": "fake-translation"},
-        {"stage": "text_transform", "label": "テキスト加工", "provider": "append_suffix"},
-        {"stage": "tts", "label": "音声生成", "provider": "fake-tts"},
-    ]
-
-    job_id = payload["job_id"]
-    for _ in range(20):
-        status_response = client.get(f"/api/translate-speech-jobs/{job_id}")
-        assert status_response.status_code == 200
-        status_payload = status_response.json()
-        if status_payload["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("translation job did not finish")
-
-    assert status_payload["result"]["transcript"] == "Selamat pagi. Terima kasih."
-    assert status_payload["result"]["transformed_text"] == "おはようございますモー。ありがとうございますモー。"
-    assert status_payload["result"]["audio_base64"] != ""
-    assert status_payload["partial_result"] == {
-        "transcript": "Selamat pagi. Terima kasih.",
-        "translated_text": "おはようございます。ありがとうございます。",
-        "transformed_text": "おはようございますモー。ありがとうございますモー。",
-    }
-
-
-def test_translate_speech_job_api_runs_openai_backend() -> None:
-    class FakeOpenAiPipeline:
-        asr = SimpleNamespace(name="fake-openai-asr")
-        translator = SimpleNamespace(name="fake-openai-translation")
-        tts = SimpleNamespace(name="fake-openai-tts", supported_voice_modes=("default", "convert"))
-
-        def run(self, request, progress_callback=None) -> PipelineResult:
-            if progress_callback is not None:
-                progress_callback(PipelineProgress("asr", "文字起こし", self.asr.name))
-            return PipelineResult(
-                transcript="こんにちは。",
-                translated_text="Halo.",
-                transformed_text="Halo.",
-                output_audio_bytes=b"openai-wav",
-                output_audio_mime_type="audio/wav",
-                timings_ms={"total": 1.0},
-                providers={
-                    "asr": "fake-openai-asr",
-                    "translation": "fake-openai-translation",
-                    "tts": "fake-openai-tts",
-                },
-            )
-
-    client = TestClient(
-        create_app(openai_pipeline=FakeOpenAiPipeline(), voice_conversion_service=_fake_voice_conversion_service())
-    )  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/translate-speech-jobs",
-        data={"translation_backend": "openai", "source_language": "ja-JP", "target_language": "zh-CN"},
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["stages"] == [
-        {"stage": "asr", "label": "文字起こし", "provider": "fake-openai-asr"},
-        {"stage": "translation", "label": "翻訳", "provider": "fake-openai-translation"},
-        {"stage": "text_transform", "label": "テキスト加工", "provider": "なし"},
-        {"stage": "tts", "label": "音声生成", "provider": "fake-openai-tts"},
-    ]
-
-    for _ in range(20):
-        status_payload = client.get(f"/api/translate-speech-jobs/{payload['job_id']}").json()
-        if status_payload["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("openai translation job did not finish")
-
-    assert status_payload["result"]["translated_text"] == "Halo."
-
-
-def test_translate_speech_job_api_accepts_user_auto_target_language() -> None:
-    openai_pipeline = SpeechTranslationPipeline(
-        asr=FakeAsrProvider({"auto": "Halo."}),
-        translator=FakeTranslationProvider({("auto", "ja-JP", "Halo."): "こんにちは。"}),
-        tts=FakeTtsProvider(),
-    )
-    openai_pipeline.supported_routes = {("auto", "id-ID"), ("auto", "ja-JP")}
-    client = TestClient(
-        create_app(openai_pipeline=openai_pipeline, voice_conversion_service=_fake_voice_conversion_service())
-    )
-
-    response = client.post(
-        "/api/translate-speech-jobs",
-        data={
-            "translation_backend": "openai",
-            "source_language": "auto",
-            "target_language": "user-auto",
-            "voice_mode": "default",
-        },
-        files={"audio": ("sample.webm", b"fake audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    for _ in range(20):
-        status_payload = client.get(f"/api/translate-speech-jobs/{payload['job_id']}").json()
-        if status_payload["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("user-auto translation job did not finish")
-
-    assert status_payload["error"] is None
-    assert status_payload["result"]["translated_text"] == "こんにちは。"
-    assert status_payload["result"]["target_language"] == "ja-JP"
-
-
-def test_translate_speech_job_api_marks_unexpected_provider_error_failed() -> None:
-    class FailingPipeline:
-        asr = SimpleNamespace(name="failing-asr")
-        translator = SimpleNamespace(name="failing-translation")
-        tts = SimpleNamespace(name="failing-tts")
-
-        def run(self, request, progress_callback=None) -> PipelineResult:
-            raise Exception("Audio file might be corrupted or unsupported")
-
-    client = TestClient(create_app(pipeline=FailingPipeline()))  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/translate-speech-jobs",
-        data={"translation_backend": "qwen", "source_language": "id-ID", "target_language": "ja-JP"},
-        files={"audio": ("recording.webm", b"broken audio", "audio/webm")},
-    )
-
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-    for _ in range(20):
-        status_payload = client.get(f"/api/translate-speech-jobs/{job_id}").json()
-        if status_payload["status"] == "failed":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("translation job did not fail")
-
-    assert status_payload["error"] == "Audio file might be corrupted or unsupported"
-
-
-def test_translate_speech_job_api_defaults_to_openai_backend() -> None:
-    class FakeOpenAiPipeline:
-        asr = SimpleNamespace(name="fake-openai-asr")
-        translator = SimpleNamespace(name="fake-openai-translation")
-        tts = SimpleNamespace(name="fake-openai-tts", supported_voice_modes=("default",))
-
-        def run(self, request, progress_callback=None) -> PipelineResult:
-            return PipelineResult(
-                transcript="こんにちは。",
-                translated_text="Halo.",
-                transformed_text="Halo.",
-                output_audio_bytes=b"openai-wav",
-                output_audio_mime_type="audio/wav",
-                timings_ms={"total": 1.0},
-                providers={
-                    "asr": "fake-openai-asr",
-                    "translation": "fake-openai-translation",
-                    "tts": "fake-openai-tts",
-                },
-            )
-
-    client = TestClient(
-        create_app(openai_pipeline=FakeOpenAiPipeline(), voice_conversion_service=_fake_voice_conversion_service())
-    )  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/translate-speech-jobs",
-        data={"source_language": "ja-JP", "target_language": "zh-CN"},
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    for _ in range(20):
-        status_payload = client.get(f"/api/translate-speech-jobs/{payload['job_id']}").json()
-        if status_payload["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("default openai translation job did not finish")
-
-    assert status_payload["result"]["providers"] == {
-        "asr": "fake-openai-asr",
-        "translation": "fake-openai-translation",
-        "tts": "fake-openai-tts",
-    }
-
-
-def test_translate_speech_api_rejects_unknown_translation_backend() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/translate-speech",
-        data={
-            "translation_backend": "unknown",
-            "source_language": "id-ID",
-            "target_language": "ja-JP",
-        },
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 400
-    assert "unsupported translation backend" in response.json()["detail"]
+    assert bundle.preloaded is True
 
 
 def test_text_to_speech_job_api_generates_audio_and_history(tmp_path) -> None:
@@ -3916,23 +3005,6 @@ def test_text_to_speech_job_api_generates_audio_and_history(tmp_path) -> None:
     audio_response = client.get(history["outputs"][0]["url"])
     assert audio_response.status_code == 200
     assert audio_response.content == "TTS:ja-JP:こんにちは".encode()
-
-
-def test_openai_realtime_translation_session_api_uses_target_language(monkeypatch) -> None:
-    captured = {}
-
-    def fake_client_secret(target_language):
-        captured["target_language"] = target_language
-        return {"value": "ephemeral-test-key"}
-
-    monkeypatch.setattr("mo_speech.api.create_openai_realtime_translation_client_secret", fake_client_secret)
-    client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
-
-    response = client.post("/api/openai-realtime-translation-session", json={"target_language": "ja-JP"})
-
-    assert response.status_code == 200
-    assert response.json() == {"value": "ephemeral-test-key"}
-    assert captured == {"target_language": "ja-JP"}
 
 
 def test_audio_history_output_api_saves_uploaded_audio_as_wav(tmp_path, monkeypatch) -> None:
@@ -4032,69 +3104,6 @@ def test_audio_history_api_deletes_entry_and_metadata(tmp_path) -> None:
     assert client.get("/api/audio-history").json()["outputs"] == []
 
 
-def test_translate_speech_job_api_reports_partial_result_while_running() -> None:
-    progress_reported = Event()
-    finish_job = Event()
-
-    class SlowPipeline:
-        asr = SimpleNamespace(name="slow-asr")
-        translator = SimpleNamespace(name="slow-translation")
-        tts = SimpleNamespace(name="slow-tts")
-
-        def run(self, request, progress_callback=None) -> PipelineResult:
-            if progress_callback is not None:
-                progress_callback(
-                    PipelineProgress(
-                        stage="translation",
-                        label="翻訳",
-                        provider="slow-translation",
-                        transcript="Selamat pagi.",
-                    )
-                )
-            progress_reported.set()
-            assert finish_job.wait(timeout=2)
-            return PipelineResult(
-                transcript="Selamat pagi.",
-                translated_text="おはようございます。",
-                transformed_text="おはようございます。",
-                output_audio_bytes=b"wav",
-                output_audio_mime_type="audio/wav",
-                timings_ms={"total": 0.0},
-                providers={"asr": "slow-asr", "translation": "slow-translation", "tts": "slow-tts"},
-            )
-
-    client = TestClient(create_app(pipeline=SlowPipeline()))  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/translate-speech-jobs",
-        data={"translation_backend": "qwen", "source_language": "id-ID", "target_language": "ja-JP"},
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-
-    assert progress_reported.wait(timeout=2)
-    status_response = client.get(f"/api/translate-speech-jobs/{job_id}")
-    assert status_response.status_code == 200
-    status_payload = status_response.json()
-    assert status_payload["status"] == "running"
-    assert status_payload["current_stage"] == {
-        "stage": "translation",
-        "label": "翻訳",
-        "provider": "slow-translation",
-    }
-    assert status_payload["partial_result"] == {"transcript": "Selamat pagi."}
-
-    finish_job.set()
-    for _ in range(20):
-        status_payload = client.get(f"/api/translate-speech-jobs/{job_id}").json()
-        if status_payload["status"] == "succeeded":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("translation job did not finish")
-
-
 def test_voice_conversion_job_api_runs_selected_backend() -> None:
     client = TestClient(create_app(voice_conversion_service=_fake_voice_conversion_service()))
 
@@ -4142,7 +3151,7 @@ def test_voice_conversion_job_api_marks_failed_stage() -> None:
             progress_callback=None,
         ):
             if progress_callback is not None:
-                progress_callback(PipelineProgress("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless"))
+                progress_callback(OperationProgress("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless"))
             raise RuntimeError(
                 "RunPod job failed with status FAILED: job_id=remote-job-1: "
                 "libcudart.so.13: cannot open shared object file"
@@ -4291,51 +3300,6 @@ def test_seed_vc_reference_preview_api_returns_normalized_audio(monkeypatch: pyt
     assert settings.reference_auto_select is True
 
 
-def test_translate_speech_api_rejects_unsupported_route() -> None:
-    client = TestClient(create_app())
-
-    response = client.post(
-        "/api/translate-speech",
-        data={"translation_backend": "qwen", "source_language": "en-US", "target_language": "ja-JP"},
-        files={"audio": ("sample.wav", b"fake audio", "audio/wav")},
-    )
-
-    assert response.status_code == 400
-    assert "unsupported route" in response.json()["detail"]
-
-
-def test_translate_speech_api_preserves_uploaded_audio_suffix() -> None:
-    captured: dict[str, Path] = {}
-
-    class CapturePipeline:
-        asr = SimpleNamespace(name="capture-asr")
-        translator = SimpleNamespace(name="capture-translation")
-        tts = SimpleNamespace(name="capture-tts")
-
-        def run(self, request) -> PipelineResult:
-            captured["audio_path"] = request.audio_path
-            return PipelineResult(
-                transcript="Selamat pagi.",
-                translated_text="おはようございます。",
-                transformed_text="おはようございます。",
-                output_audio_bytes=b"wav",
-                output_audio_mime_type="audio/wav",
-                timings_ms={"total": 0.0},
-                providers={"asr": "capture-asr", "translation": "capture-translation", "tts": "capture-tts"},
-            )
-
-    client = TestClient(create_app(pipeline=CapturePipeline()))  # type: ignore[arg-type]
-
-    response = client.post(
-        "/api/translate-speech",
-        data={"translation_backend": "qwen", "source_language": "id-ID", "target_language": "ja-JP"},
-        files={"audio": ("recording.webm", b"fake audio", "audio/webm;codecs=opus")},
-    )
-
-    assert response.status_code == 200
-    assert captured["audio_path"].suffix == ".webm"
-
-
 class FakeVoiceConversionProvider:
     backend_id = "fake-vc"
     label = "Fake VC"
@@ -4365,7 +3329,7 @@ class FakeVoiceConversionProvider:
     ):
         self.last_seed_vc_settings = seed_vc_settings
         if progress_callback is not None:
-            progress_callback(PipelineProgress("voice_conversion", "声質変換", self.name))
+            progress_callback(OperationProgress("voice_conversion", "声質変換", self.name))
         return type(
             "FakeTtsOutput",
             (),

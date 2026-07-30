@@ -4,7 +4,7 @@
 
 ## 対象と基準
 
-この文書は、Voice Labの公開ポータルとSpeakLoop、管理2画面に適用する。管理者専用の`/fun`も最低基準は本方針へ揃える。揃える対象はブランドheaderと基本token、overflowとfocusである。
+この文書は、Voice Labの公開ポータルとSpeakLoop、管理2画面に適用する。
 
 - `/` のVoice Labポータルを視覚基準にする。
 - 暖かいニュートラル背景、控えめな影、明快な見出しを維持する。少数のアクセント色と十分な余白も維持する。
@@ -17,7 +17,7 @@
 
 - 新規または移行済みのReact routeでは、Tailwind CSS v4をCSS生成基盤、shadcn/uiのrepo所有コンポーネントをUI部品の起点とする。
 - shadcn/uiは完成テーマをそのまま適用するためではなく、アクセシブルな構造とvariantをrepo内で管理するために使う。本書のVoice Lab方針へ合わせる対象は配色、余白、角丸、影である。
-- 公開ポータル`/`は専用の軽量Tailwind entryを使う。SpeakLoop、管理画面、実験画面は共通のTailwind buildを使う。あわせて既存controller selectorを保つcompatibility layerも使う。
+- 公開ポータル`/`は専用の軽量Tailwind entryを使う。SpeakLoopと管理画面は共通のTailwind buildを使う。あわせて既存controller selectorを保つcompatibility layerも使う。
 - faviconは、Voice Lab共通の青い吹き出しと音声波形の二色マークを全routeで使う。16pxでも識別できる太い形を維持し、製品ごとの別faviconを増やさない。
 - 移行済みrouteのHTMLは`/static/styles.css`を直接読まない。旧selectorが必要な間はVite build内のcompatibility layerとして取り込み、適用順と削除境界を一箇所で管理する。
 - 共通部品へ昇格するのは、利用routeが同じスタイル基盤へ移行してからとする。移行前にTailwind依存の見える部品を旧routeへ持ち込まない。

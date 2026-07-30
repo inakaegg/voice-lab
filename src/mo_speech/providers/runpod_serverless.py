@@ -15,18 +15,11 @@ from typing import Any, Callable
 
 from ..env import load_runpod_gateway_env
 from ..pipeline import (
-    PipelineProgress,
-    PipelineRequest,
-    PipelineResult,
+    OperationProgress,
     ProgressCallback,
-    SpeechTranslationPipeline,
     TtsOutput,
 )
-from .openai_api import (
-    OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES,
-    OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES,
-    AsrTranscription,
-)
+from .openai_api import AsrTranscription
 from .voice import SeedVcRuntimeSettings, VoiceConversionBackendInfo
 
 
@@ -215,58 +208,6 @@ class RunpodServerlessClient:
         return parsed
 
 
-class RunpodServerlessSpeechTranslationPipeline(SpeechTranslationPipeline):
-    def __init__(
-        self,
-        *,
-        client: RunpodServerlessClient | None = None,
-        internal_translation_backend: str | None = None,
-    ) -> None:
-        self.client = client or RunpodServerlessClient.from_env()
-        load_runpod_gateway_env()
-        self.internal_translation_backend = internal_translation_backend or os.getenv(
-            "RUNPOD_SERVERLESS_TRANSLATION_BACKEND",
-            "openai",
-        )
-        super().__init__(
-            asr=_RunpodProvider("runpod-serverless-asr"),
-            translator=_RunpodProvider("runpod-serverless-translation"),
-            tts=_RunpodTtsProvider(),
-        )
-
-    def preload(self) -> None:
-        self.client.warmup({"translation_backend": self.internal_translation_backend})
-
-    def run(self, request: PipelineRequest, progress_callback: ProgressCallback | None = None) -> PipelineResult:
-        if not request.audio_path.exists():
-            raise FileNotFoundError(f"audio file does not exist: {request.audio_path}")
-        _notify(progress_callback, "asr", "RunPod送信", self.asr.name)
-        started = perf_counter()
-        output = self.client.submit(_translation_input_payload(request, self.internal_translation_backend))
-        result = _pipeline_result_from_output(output)
-        timings_ms = dict(result.timings_ms)
-        timings_ms.setdefault("runpod_roundtrip", _elapsed_ms(started))
-        _notify(
-            progress_callback,
-            "tts",
-            "RunPod推論",
-            self.tts.name,
-            transcript=result.transcript,
-            translated_text=result.translated_text,
-            transformed_text=result.transformed_text,
-        )
-        return PipelineResult(
-            transcript=result.transcript,
-            translated_text=result.translated_text,
-            transformed_text=result.transformed_text,
-            output_audio_bytes=result.output_audio_bytes,
-            output_audio_mime_type=result.output_audio_mime_type,
-            timings_ms=timings_ms,
-            providers=result.providers,
-            warnings=result.warnings,
-            target_language=result.target_language,
-        )
-
 
 @dataclass
 class RunpodServerlessVoiceConversionProvider:
@@ -391,93 +332,6 @@ class RunpodServerlessPracticeAsrProvider:
         return self.client.health()
 
 
-def create_runpod_serverless_pipeline() -> RunpodServerlessSpeechTranslationPipeline:
-    return RunpodServerlessSpeechTranslationPipeline()
-
-
-def runpod_serverless_pipeline_status(
-    pipeline: RunpodServerlessSpeechTranslationPipeline | None = None,
-    *,
-    client: RunpodServerlessClient | None = None,
-) -> dict[str, object]:
-    if client is not None:
-        active_client = client
-    elif pipeline is not None:
-        active_client = pipeline.client
-    else:
-        active_client = RunpodServerlessClient.from_env()
-    available = active_client.configured
-    reason = "" if available else "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。"
-    settings = {
-        "source_language_mode": "specified_or_auto",
-        "supported_source_languages": list(OPENAI_SPEECH_TRANSLATION_SOURCE_LANGUAGES),
-        "supported_target_languages": list(OPENAI_SPEECH_TRANSLATION_TARGET_LANGUAGES),
-        "supported_voice_modes": ["default", "convert"],
-        "text_transform": True,
-        "serverless": True,
-        "request_mode": active_client.request_mode,
-        "internal_translation_backend": (
-            pipeline.internal_translation_backend if pipeline is not None else os.getenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", "openai")
-        ),
-        "health": {"checked": False, "warm": False, "worker_counts": {}},
-    }
-    if available and os.getenv("RUNPOD_SERVERLESS_HEALTH_CHECK", "1") != "0":
-        try:
-            settings["health"] = _health_summary(active_client.health())
-        except RuntimeError as exc:
-            settings["health"] = {
-                "checked": True,
-                "warm": False,
-                "worker_counts": {},
-                "error": str(exc),
-            }
-    return {
-        "id": "runpod_serverless",
-        "label": "音声翻訳（RunPod Serverless）",
-        "available": available,
-        "reason": reason,
-        "providers": {
-            "asr": "runpod-serverless-asr",
-            "translation": "runpod-serverless-translation",
-            "tts": "runpod-serverless-tts",
-        },
-        "settings": settings,
-    }
-
-
-def _translation_input_payload(request: PipelineRequest, internal_translation_backend: str) -> dict[str, object]:
-    return {
-        "operation_mode": "translation",
-        "audio_base64": base64.b64encode(request.audio_path.read_bytes()).decode("ascii"),
-        "audio_mime_type": _audio_mime_type(request.audio_path),
-        "translation_backend": internal_translation_backend,
-        "source_language": request.source_language,
-        "target_language": request.target_language,
-        "voice_mode": request.voice_mode,
-        "text_transform": request.text_transform,
-        "text_transform_options": dict(request.text_transform_options),
-        **_seed_vc_payload(request.voice_settings.get("seed_vc")),
-    }
-
-
-def _pipeline_result_from_output(output: dict[str, object]) -> PipelineResult:
-    audio_base64 = output.get("audio_base64")
-    if not isinstance(audio_base64, str) or not audio_base64:
-        raise RuntimeError("RunPod output did not include audio_base64")
-    timings_ms = _timings_from_output(output)
-    return PipelineResult(
-        transcript=str(output.get("transcript", "")),
-        translated_text=str(output.get("translated_text", "")),
-        transformed_text=str(output.get("transformed_text", output.get("translated_text", ""))),
-        output_audio_bytes=base64.b64decode(audio_base64),
-        output_audio_mime_type=str(output.get("audio_mime_type", "audio/wav")),
-        timings_ms=timings_ms,
-        providers=_string_dict(output.get("providers")),
-        warnings=_string_list(output.get("warnings")),
-        target_language=str(output.get("target_language", "")),
-    )
-
-
 def _tts_output_from_output(output: dict[str, object]) -> TtsOutput:
     audio_base64 = output.get("audio_base64")
     if not isinstance(audio_base64, str) or not audio_base64:
@@ -513,32 +367,6 @@ def _seed_vc_payload(settings: object) -> dict[str, object]:
     }
 
 
-def _health_summary(body: dict[str, object]) -> dict[str, object]:
-    worker_counts = _worker_counts(body.get("workers"))
-    warm = any(worker_counts.get(state, 0) > 0 for state in ("IDLE", "RUNNING", "READY", "INITIALIZED"))
-    return {
-        "checked": True,
-        "warm": warm,
-        "worker_counts": worker_counts,
-    }
-
-
-def _worker_counts(workers: object) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    if isinstance(workers, dict):
-        for key, value in workers.items():
-            if isinstance(value, int | float):
-                counts[str(key).upper()] = int(value)
-        return counts
-    if isinstance(workers, list):
-        for worker in workers:
-            if not isinstance(worker, dict):
-                continue
-            state = str(worker.get("state") or worker.get("status") or "UNKNOWN").upper()
-            counts[state] = counts.get(state, 0) + 1
-    return counts
-
-
 def _audio_mime_type(path: Path) -> str:
     if path.suffix.lower() == ".webm":
         return "audio/webm"
@@ -546,13 +374,7 @@ def _audio_mime_type(path: Path) -> str:
 
 
 def _looks_like_handler_output(body: dict[str, object]) -> bool:
-    return any(key in body for key in ("audio_base64", "transcript", "translated_text", "warm"))
-
-
-def _string_dict(value: object) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    return {str(key): str(item) for key, item in value.items()}
+    return any(key in body for key in ("audio_base64", "transcript", "warm", "diagnostics"))
 
 
 def _string_list(value: object) -> list[str]:
@@ -638,18 +460,18 @@ def _runpod_error_candidate(value: object) -> str:
     return _runpod_error_candidate(decoded)
 
 
-def _runpod_voice_conversion_progress(body: dict[str, object]) -> PipelineProgress | None:
+def _runpod_voice_conversion_progress(body: dict[str, object]) -> OperationProgress | None:
     status = str(body.get("status") or "").upper()
     if status in {"", "IN_QUEUE", "QUEUED"}:
-        return PipelineProgress("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless")
+        return OperationProgress("gpu_wait", "利用可能なGPUを待っています", "RunPod Serverless")
     output = body.get("output")
     if status in {"IN_PROGRESS", "RUNNING"} and isinstance(output, dict):
         stage = str(output.get("stage") or "voice_conversion")
         label = str(output.get("label") or "自分の声に変換しています")
         provider = str(output.get("model") or output.get("provider") or "Seed-VC")
-        return PipelineProgress(stage, label, provider)
+        return OperationProgress(stage, label, provider)
     if status in {"IN_PROGRESS", "RUNNING"}:
-        return PipelineProgress("initializing", "RunPod workerを初期化しています", "RunPod Serverless")
+        return OperationProgress("initializing", "RunPod workerを初期化しています", "RunPod Serverless")
     return None
 
 
@@ -659,42 +481,3 @@ def _notify_runpod_status(
 ) -> None:
     if progress_callback is not None:
         progress_callback(dict(body))
-
-
-def _notify(
-    progress_callback: ProgressCallback | None,
-    stage: str,
-    label: str,
-    provider: str,
-    *,
-    transcript: str | None = None,
-    translated_text: str | None = None,
-    transformed_text: str | None = None,
-) -> None:
-    if progress_callback is not None:
-        progress_callback(
-            PipelineProgress(
-                stage=stage,
-                label=label,
-                provider=provider,
-                transcript=transcript,
-                translated_text=translated_text,
-                transformed_text=transformed_text,
-            )
-        )
-
-
-def _elapsed_ms(started: float) -> float:
-    return (perf_counter() - started) * 1000
-
-
-@dataclass(frozen=True)
-class _RunpodProvider:
-    name: str
-
-
-@dataclass(frozen=True)
-class _RunpodTtsProvider:
-    name: str = "runpod-serverless-tts"
-    audio_mime_type: str = "audio/wav"
-    supported_voice_modes: tuple[str, ...] = ("default", "convert")

@@ -16,14 +16,11 @@ function syncSeedVcSettingsVisibility() {
     return;
   }
   const selected = [...voiceBackendSelect.options].find((option) => option.value === voiceBackendSelect.value);
-  const translationUsesSeedVc =
-    operationModeSelect.value === "translation" && selectedVoiceMode() === "convert";
   const voiceConversionUsesSeedVc =
     operationModeSelect.value === "voice_conversion" &&
     voiceBackendSelect.value === "seed-vc" &&
     !Boolean(selected?.disabled);
-  seedVcSettingsPanel.hidden =
-    !translationUsesSeedVc && !voiceConversionUsesSeedVc;
+  seedVcSettingsPanel.hidden = !voiceConversionUsesSeedVc;
 }
 
 function seedVcSettingsForSelectedBackend() {

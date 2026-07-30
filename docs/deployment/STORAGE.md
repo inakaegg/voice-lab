@@ -1,6 +1,6 @@
 # Cloudflare保存層の境界
 
-更新日: 2026-07-22
+更新日: 2026-07-30
 
 ## 目的
 
@@ -10,12 +10,12 @@
 
 | データ | 現在の保存先 | 状態 |
 | --- | --- | --- |
-| ユーザー設定、公開アクセス設定 | Workers KV | 実装済み |
+| 公開アクセス設定 | Workers KV | 実装済み |
 | 短期job snapshot、warmup ready | Workers KV | 実装済み。TTL付き |
 | ユーザー音声履歴 | Cloudflare公開版では保存しない | ローカルFastAPI版だけで利用 |
 | quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存。D1は48時間／90日を超えたデータを日次削除 |
 
-`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは入力・生成音声を履歴indexやblobとして書き込まない。対象は翻訳・VC・SpeakLoop・TTSである。
+`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare WorkerはSpeakLoopとVCの入力・生成音声を履歴indexやblobとして書き込まない。
 
 過去の研究機能で登録したsampleは、一般向け `GET /api/public-sample-audios` から返らない。保持は保証せず、管理者のsample保存・削除操作でD1 rowとR2 objectごと削除され得る。
 

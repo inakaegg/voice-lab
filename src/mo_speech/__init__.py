@@ -1,1 +1,1 @@
-"""Speech translation pipeline package."""
+"""Voice Lab speech-learning package."""

@@ -3,34 +3,24 @@ from __future__ import annotations
 import os
 
 from .env import load_project_env
-from .pipeline import SpeechTranslationPipeline
+from .pipeline import SpeechProviderBundle
 from .providers.fake import FakeAsrProvider, FakeTranslationProvider, FakeTtsProvider
-from .providers.openai_api import create_openai_pipeline, create_openai_realtime_translation_pipeline
+from .providers.openai_api import create_openai_provider_bundle
 
 
 load_project_env()
 
 
-def create_pipeline_from_env() -> SpeechTranslationPipeline:
+def create_provider_bundle_from_env() -> SpeechProviderBundle:
     if os.getenv("MO_PROVIDER_MODE") == "local":
-        return create_local_pipeline()
+        return create_local_provider_bundle()
     if os.getenv("MO_PROVIDER_MODE") == "openai":
-        return create_openai_pipeline()
-    return create_demo_pipeline()
+        return create_openai_provider_bundle()
+    return create_demo_provider_bundle()
 
 
-def create_realtime_translation_pipeline():
-    return create_openai_realtime_translation_pipeline()
-
-
-def create_runpod_serverless_pipeline() -> SpeechTranslationPipeline:
-    from .providers.runpod_serverless import create_runpod_serverless_pipeline as _create_runpod_serverless_pipeline
-
-    return _create_runpod_serverless_pipeline()
-
-
-def create_demo_pipeline() -> SpeechTranslationPipeline:
-    return SpeechTranslationPipeline(
+def create_demo_provider_bundle() -> SpeechProviderBundle:
+    return SpeechProviderBundle(
         asr=FakeAsrProvider(
             {
                 "id-ID": "Selamat pagi. Terima kasih.",
@@ -47,10 +37,10 @@ def create_demo_pipeline() -> SpeechTranslationPipeline:
     )
 
 
-def create_local_pipeline() -> SpeechTranslationPipeline:
+def create_local_provider_bundle() -> SpeechProviderBundle:
     from .providers.local import create_local_asr_provider, create_local_translation_provider, create_local_tts_provider
 
-    return SpeechTranslationPipeline(
+    return SpeechProviderBundle(
         asr=create_local_asr_provider(),
         translator=create_local_translation_provider(),
         tts=create_local_tts_provider(),

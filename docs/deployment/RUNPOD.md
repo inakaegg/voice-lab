@@ -1,20 +1,22 @@
 # RunPodデプロイ手順
 
-更新日: 2026-07-17
+更新日: 2026-07-30
 
 ## 現在の状態
 
-RunPod向けDockerfile、CLI補助スクリプト、Serverless handler、Cloudflare／ローカルFastAPIからの接続経路を実装している。実リソース状態はアカウント側で変わる。実リソース状態とはRunPod APIキー、Docker registry、Network Volume ID、GPU在庫などである。この文書では固定の作成済み／未作成状態を正とせず、デプロイ時に `.runpod.env` とRunPod管理画面で確認する。
+RunPod向けDockerfile・CLI補助スクリプト・Serverless handlerを実装している。CloudflareとローカルFastAPIから接続できる。実リソース状態はアカウント側で変わるため、デプロイ時に `.runpod.env` とRunPod管理画面で確認する。
 
-結論として、次のRunPod対応ブランチではServerlessを先にアプリの推論backendとして接続する。
+RunPodはGPU依存処理だけを担当する。公開UIとAPI gatewayはCloudflare Workerが担当する。ローカル確認ではFastAPIを使える。
 
-1. RunPod Serverless endpointを推論APIとして用意し、ローカルFastAPIを一時的なUI/gatewayとして使う。
-2. FastAPIの `runpod_serverless` 翻訳backendと `seed-vc` VC backendからRunPodへ非同期jobを投げる。
-3. RunPod `/health` と `warmup` operationでcold startとwarm状態を分けて表示、計測する。
-4. Seed-VCのwarm実行が十分速いと実測できた場合だけ、ユーザー画面ではVCを既定動作にし、`にてるこえ` トグルを隠す検討に進む。
-5. 公開MVPではUI/gatewayをCloudflare側へ分け、RunPodは推論APIだけにする。
+Serverless handlerが受け付けるoperationは次の5種類である。
 
-Serverless handlerは、SpeakLoopの中国語発音練習用 `practice_asr` を受ける。加えて音声翻訳、テキスト読み上げ、Seed-VCも受ける。`practice_asr` はお手本と復唱の2音声をFunASR Paraformer Chineseでtimestamp付きASRし、VAD・句読点モデルを併用する。SpeakLoopの英語発音練習は両音声にOpenAI `whisper-1` を使う。母語で話す録音はOpenAIの自動言語判定を引き続き使う。
+- `practice_asr`
+- `text_tts`
+- `voice_conversion`
+- `warmup`
+- `diagnostics`
+
+`practice_asr` はSpeakLoopの中国語発音練習に使う。お手本と復唱をFunASR Paraformer Chineseでtimestamp付きASRし、VADと句読点モデルを併用する。英語発音練習と母語録音の処理はOpenAI経路を使う。
 
 SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り `/status/<job-id>` をpollingする。handlerが送るprogress updateの種類は次のとおり。
 
@@ -45,7 +47,7 @@ Cloudflare Worker、ローカルFastAPI、smoke scriptは、RunPodへ `input` �
 }
 ```
 
-application logと利用者向けerrorには次を含めない: raw音声base64、台本、翻訳結果、request/response全体。cancel、failure、timeout、JSON parse failureでも非payload metadataだけを使う。非payload metadataとはjob ID、HTTP status、正規化したstageなどである。RunPod platform側の一時処理・保持は同社のサービス条件に従うため、公開時はRunPodを外部送信先として案内する。
+application logと利用者向けerrorにはraw音声base64・台本・request全体・response全体を含めない。cancel・failure・timeout・JSON parse failureでも非payload metadataだけを使う。非payload metadataはjob ID・HTTP status・正規化したstageなどである。RunPod側の一時処理と保持は同社のサービス条件に従う。公開時はRunPodを外部送信先として案内する。
 
 ## Podで確認する場合
 
@@ -107,7 +109,6 @@ cp scripts/runpod.env.example .runpod.env
 | `RUNPOD_SERVERLESS_TEMPLATE_ID` | Serverless endpoint作成時のtemplate ID |
 | `RUNPOD_ENDPOINT_ID` | Serverlessスモーク確認先 |
 | `RUNPOD_API_KEY` | ローカルFastAPI gatewayやスモーク確認からRunPod APIを呼ぶためのAPIキー |
-| `RUNPOD_SERVERLESS_TRANSLATION_BACKEND` | Serverless handler内部で使う翻訳backend。既定は `openai`。GPU上のローカルモデル検証では `qwen`。 |
 | `RUNPOD_SERVERLESS_REQUEST_MODE` | FastAPI gatewayからRunPodへ投げる方式。既定は `async`。 |
 | `RUNPOD_SERVERLESS_TIMEOUT_SECONDS` | RunPod job完了待ちの上限秒数。 |
 | `RUNPOD_SERVERLESS_HEALTH_TIMEOUT_SECONDS` | `/api/runtime` からRunPod `/health` を見るときの上限秒数。 |
@@ -315,28 +316,16 @@ RunPod PodではCLIの `--volume-mount-path /runpod-volume` で揃える。Serve
 
 ## 初回GPU検証モデル
 
-最初にRunPodで通す構成は、ローカルMVPと同じモデルをGPU常駐させる。
+RunPod imageには中国語練習ASRとSeed-VCに必要な依存を入れる。モデル本体はNetwork Volumeへ置く。
 
 | 処理 | 既定モデル | RunPod環境変数 |
 | --- | --- | --- |
-| ASR | `mobiuslabsgmbh/faster-whisper-large-v3-turbo` | `FASTER_WHISPER_MODEL`、`FASTER_WHISPER_DEVICE=cuda`、`FASTER_WHISPER_COMPUTE_TYPE=float16` |
-| 翻訳 | `Qwen/Qwen3-4B` | `QWEN_TRANSLATION_MODEL`、`QWEN_TRANSLATION_DEVICE_MAP=auto` |
-| TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | `QWEN_TTS_MODEL`、`QWEN_TTS_DEVICE_MAP=auto`、`QWEN_TTS_DTYPE=float16` |
+| 中国語ASR | `funasr/paraformer-zh` | `FUNASR_MODEL`、`FUNASR_DEVICE=cuda` |
+| forced alignment | `funasr/fa-zh` | `FUNASR_FA_MODEL` |
+| VAD・句読点 | `funasr/fsmn-vad`・`funasr/ct-punc` | `FUNASR_VAD_MODEL`・`FUNASR_PUNC_MODEL` |
 | 声質変換 | Seed-VC | `SEED_VC_EXECUTION_MODE=resident`、`SEED_VC_FP16=true`、`SEED_VC_DIFFUSION_STEPS=8`、`SEED_VC_REFERENCE_MAX_SECONDS=12` |
 
-次に試す上位または比較候補:
-
-| 処理 | 比較候補 | 目的 |
-| --- | --- | --- |
-| ASR | `Systran/faster-whisper-large-v3` | turboより重い精度比較 |
-| ASR | `Systran/faster-distil-whisper-large-v3` | GPU上での速度比較 |
-| 翻訳 | `Qwen/Qwen3-8B` | 4Bより翻訳品質が上がるか確認 |
-| 翻訳 | `Qwen/Qwen3-14B`、`Qwen/Qwen3-32B` | 48GB以上のVRAMまたは量子化前提での品質比較 |
-| TTS | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | 速度比較 |
-| TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | 声色制御とクローン品質比較 |
-| 声質変換 | Seed-VC高品質steps設定 | 類似度と遅延のバランス確認 |
-
-最初のGPUは24GB VRAM級でも試せる。ただし4B翻訳、Qwen3-TTS 1.7B、Seed-VCを同時に扱うため、まずは48GB VRAM級のA40/L40S/RTX 6000 Adaを優先する。Japan regionにH100/H200しかない場合は、初回検証には過剰になりやすい。8B以上や14B以上は、Pod上でVRAM実測後に判断する。
+FunASRとSeed-VCは同じworker processへ同時常駐させない。operation切替時に使わない側を解放し、VRAM使用量を抑える。必要GPUは実測で決める。
 
 ## Network Volume作成
 
@@ -379,18 +368,10 @@ Pod IDが分かったら、Web UIを開く。
 https://<pod-id>-8000.proxy.runpod.net
 ```
 
-CLIで確認する場合:
+CLIでは公開URLの `/health` を確認する。音声処理はServerless化後にoperation別smokeを使う。
 
 ```sh
-RUNPOD_POD_ID=<pod-id> scripts/runpod_smoke_fastapi.sh
-```
-
-音声fixtureも投げる場合:
-
-```sh
-RUNPOD_POD_ID=<pod-id> \
-RUNPOD_SMOKE_AUDIO=/path/to/audio.mp3 \
-scripts/runpod_smoke_fastapi.sh
+curl --fail --show-error "https://<pod-id>-8000.proxy.runpod.net/health"
 ```
 
 ## Serverless化
@@ -411,17 +392,13 @@ scripts/runpod_create_serverless_template.sh
 scripts/runpod_create_serverless_endpoint.sh
 ```
 
-スモーク確認:
+最初にdiagnosticsでimage revisionと依存関係を確認する。
 
 ```sh
 RUNPOD_ENDPOINT_ID=<endpoint-id> \
 RUNPOD_API_KEY=<api-key> \
 python scripts/runpod_smoke_serverless.py \
-  --audio /path/to/audio.mp3 \
-  --translation-backend openai \
-  --source-language id-ID \
-  --target-language ja-JP \
-  --voice-mode convert
+  --operation-mode diagnostics
 ```
 
 `scripts/runpod_smoke_serverless.py` は既定でレスポンス中の `audio_base64` を長さ表示に置き換える。音声base64全体を確認したい場合だけ `--print-audio-base64` を付ける。async pollingでは `--http-timeout` で1回ごとのHTTP timeoutを指定できる。
@@ -433,7 +410,6 @@ RUNPOD_ENDPOINT_ID=<endpoint-id> \
 RUNPOD_API_KEY=<api-key> \
 python scripts/runpod_smoke_serverless.py \
   --operation-mode warmup \
-  --translation-backend openai \
   --preload-voice-conversion
 ```
 
@@ -471,33 +447,7 @@ uvicorn mo_speech.api:app --host 0.0.0.0 --port 8000
 
 RunPod実行先を選んだときに `RUNPOD_ENDPOINT_ID and RUNPOD_API_KEY are required for RunPod Serverless backend.` が出る場合は、起動中のFastAPIプロセスが `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を読めていない。`.runpod.env` を直した後は、Uvicornプロセスを再起動してから確認する。
 
-この構成ではFastAPIがUIと履歴保存を担当し、ASR/翻訳/TTS/VCはRunPod Serverless handlerへ送る。Cloudflare gatewayとオブジェクトストレージ履歴は別段階で追加する。
-
-GPU上のローカル翻訳を比較する場合は、RunPod endpointの環境変数に `MO_TRANSLATION_PROVIDER=qwen3` を渡した上で `--translation-backend qwen` を指定する。ユーザー画面相当の品質確認では、OpenAI API経路を使う。
-
-```sh
-RUNPOD_ENDPOINT_ID=<endpoint-id> \
-RUNPOD_API_KEY=<api-key> \
-python scripts/runpod_smoke_serverless.py \
-  --audio /path/to/audio.mp3 \
-  --translation-backend openai \
-  --source-language id-ID \
-  --target-language ja-JP \
-  --voice-mode default
-```
-
-OpenAI Realtime翻訳を測る場合は、同じく `OPENAI_API_KEY` を渡した上で `--translation-backend openai_realtime` を指定する。Realtime経路は入力言語をAPI側で自動判定するため、`--source-language` は互換用の値として扱う。
-
-```sh
-RUNPOD_ENDPOINT_ID=<endpoint-id> \
-RUNPOD_API_KEY=<api-key> \
-python scripts/runpod_smoke_serverless.py \
-  --audio /path/to/audio.mp3 \
-  --translation-backend openai_realtime \
-  --source-language auto \
-  --target-language ja-JP \
-  --voice-mode default
-```
+この構成ではFastAPIがUIとローカル履歴を担当する。RunPodへ送る処理は中国語練習ASRとVCである。SpeakLoopのお手本ASR・翻訳・通常TTSはOpenAI providerを使う。
 
 テキスト読み上げだけを測る場合は `operation_mode=text_tts` を使う。Google Translate TTS endpointは公式APIではないため、安定運用の既定にはしない。OpenAI TTSを測る場合は `--tts-backend openai` を指定し、endpoint側に `OPENAI_API_KEY` を渡す。
 
@@ -511,7 +461,7 @@ python scripts/runpod_smoke_serverless.py \
   --tts-backend google_translate
 ```
 
-VC単体を測る場合は、翻訳パイプラインを通さず `operation_mode=voice_conversion` を使う。
+VC単体を測る場合は `operation_mode=voice_conversion` を使う。
 
 ```sh
 RUNPOD_ENDPOINT_ID=<endpoint-id> \
@@ -541,11 +491,12 @@ VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEE
 
 ## 完了条件
 
-RunPod移行の初回完了条件は以下。
+RunPod構成の確認条件は以下。
 
 1. `runpodctl` からPodまたはServerless endpointを作成できる。
 2. Network Volumeのmount先とcache環境変数が一致し、モデルcacheがNetwork Volume上に作られる。
 3. `/health` と `/api/runtime` が成功する。
-4. 短い `id-ID -> ja-JP` と `ja-JP -> zh-CN` の音声入力で、文字起こし、翻訳、音声出力が返る。
-5. `timings_ms` とRunPod側メトリクスで、cold startとwarm実行の時間を分けて記録できる。
-6. Podでの一体動作確認後、Serverless handlerでも同じ入力が通る。
+4. diagnosticsが現在のimage revisionと依存情報を返す。
+5. `practice_asr` がcontract version 3の中国語結果を返す。
+6. `text_tts` と `voice_conversion` がoperation別の結果を返す。
+7. `timings_ms` とRunPod側metricsでcold startとwarm実行を分けて記録できる。
