@@ -10,8 +10,6 @@ import {
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
-const USER_SETTINGS_KV_KEY = "user-settings";
-const TRANSLATION_JOB_KV_PREFIX = "translation-job:";
 const PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX = "practice-attempt-llm-options:";
 const PRACTICE_ATTEMPT_RESULT_KV_PREFIX = "practice-attempt-result:";
 // フロントエンド(app_practice.js)のattempt-jobsポーリング締め切りは30分。RunPodジョブが
@@ -37,7 +35,7 @@ const PUBLIC_SESSION_COOKIE = "mo_public_session";
 const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
 const PUBLIC_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PUBLIC_OAUTH_STATE_TTL_SECONDS = 60 * 10;
-const PUBLIC_ACCESS_FEATURES = ["speakloop", "fun", "voice_conversion"];
+const PUBLIC_ACCESS_FEATURES = ["speakloop", "voice_conversion"];
 const OPENAI_LANGUAGE_CODES = {
   auto: "",
   "id-ID": "id",
@@ -583,23 +581,6 @@ async function lookupRunpodPracticeModelAsrCache(env, { audioBytes, sourceLangua
   return { key, cached };
 }
 
-const DEFAULT_USER_SETTINGS = {
-  target_language: "ja-JP",
-  joke_text: "",
-  joke_texts: [],
-  joke_position: "after",
-  joke_selection: "rotation",
-  joke_variation_count: 0,
-  joke_variants: [],
-  joke_pool: [],
-  effect_audios: [],
-  effect_selection: "rotation",
-  effect_insert_mode: "silence_or_tail",
-  effect_max_insertions: 1,
-  effect_min_silence_ms: 300,
-  theme: "blue",
-};
-
 const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
   google_login_required: false,
   admin_google_emails: [],
@@ -609,12 +590,6 @@ const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
       total_limit: 200,
       audio_max_bytes: 8_000_000,
       text_max_chars: 800,
-    },
-    fun: {
-      daily_limit: 10,
-      total_limit: 100,
-      audio_max_bytes: 8_000_000,
-      text_max_chars: 1000,
     },
     voice_conversion: {
       daily_limit: 3,
@@ -628,14 +603,11 @@ const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
 const DEFAULT_PUBLIC_SAMPLE_AUDIOS = {
   features: {
     speakloop: null,
-    fun: null,
     voice_conversion: null,
   },
 };
 
-let ephemeralUserSettings = null;
 let ephemeralPublicAccessSettings = null;
-const ephemeralTranslationJobs = new Map();
 const ephemeralPracticeAttemptLlmOptions = new Map();
 const ephemeralPracticeAttemptResults = new Map();
 const ephemeralPublicUsage = new Map();
@@ -678,7 +650,7 @@ export async function handleRequest(request, env = {}, ctx = {}) {
   return serveAsset(request, env, url);
 }
 
-const CRAWL_DISALLOWED_PATHS = ["/admin", "/fun", "/speakloop/admin", "/api/", "/auth/"];
+const CRAWL_DISALLOWED_PATHS = ["/admin", "/speakloop/admin", "/api/", "/auth/"];
 const SITEMAP_PUBLIC_PATHS = ["/", "/speakloop", "/privacy"];
 
 // クロール許可は正規公開originだけに与える。PUBLIC_GOOGLE_AUTH_REQUIREDは生成API用の
@@ -723,7 +695,6 @@ function isPublicAuthPath(pathname) {
 function isProtectedAdminPagePath(pathname) {
   const path = normalizePathname(pathname);
   return new Set([
-    "/fun",
     "/admin",
     "/index.html",
     "/static/index.html",
@@ -736,9 +707,6 @@ function isProtectedAdminPagePath(pathname) {
 function isProtectedAdminApiRequest(method, pathname) {
   if (method === "OPTIONS") {
     return false;
-  }
-  if (method === "PUT" && pathname === "/api/user-settings") {
-    return true;
   }
   if ((method === "GET" || method === "PUT") && pathname === "/api/public-access-settings") {
     return true;
@@ -765,9 +733,6 @@ function isProtectedAdminApiRequest(method, pathname) {
     return true;
   }
   if (method === "GET" && pathname.startsWith("/api/warmup/")) {
-    return true;
-  }
-  if (method === "GET" && /^\/api\/translate-speech-jobs\/[^/]+$/.test(pathname)) {
     return true;
   }
   if (method === "GET" && /^\/api\/voice-conversion-jobs\/[^/]+$/.test(pathname)) {
@@ -1128,13 +1093,6 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "OPTIONS") {
       return jsonResponse({}, { status: 204 });
     }
-    if (request.method === "GET" && url.pathname === "/api/user-settings") {
-      return jsonResponse(await readUserSettings(env));
-    }
-    if (request.method === "PUT" && url.pathname === "/api/user-settings") {
-      const payload = await request.json();
-      return jsonResponse(await writeUserSettings(payload, env));
-    }
     if (request.method === "GET" && url.pathname === "/api/public-session") {
       return jsonResponse(await publicSessionPayload(request, env));
     }
@@ -1184,29 +1142,6 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "GET" && url.pathname === "/api/practice-history") {
       return jsonResponse(await listPracticeHistory(env));
     }
-    if (request.method === "POST" && url.pathname === "/api/user-display-text") {
-      const payload = await request.json();
-      const text = String(payload.text || "").trim();
-      const targetLanguage = String(payload.target_language || "ja-JP");
-      if (text && targetLanguage === "ja-JP") {
-        await enforcePublicFeatureAccess(request, env, "fun", { textChars: text.length });
-      }
-      return jsonResponse(await createUserDisplayText(payload, env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/user-text-output") {
-      const payload = await request.json();
-      await enforcePublicFeatureAccess(request, env, "fun", {
-        textChars: String(payload.translated_text || "").trim().length,
-      });
-      return jsonResponse(await createUserTextOutput(payload, env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/user-joke-output") {
-      const payload = await request.json();
-      await enforcePublicFeatureAccess(request, env, "fun", {
-        textChars: String(payload.text || "").trim().length,
-      });
-      return jsonResponse(await createUserJokeOutput(payload, env));
-    }
     if (request.method === "POST" && url.pathname === "/api/practice/prompts") {
       return jsonResponse(await createPracticePrompt(request, env));
     }
@@ -1227,13 +1162,6 @@ async function handleApiRequest(request, env, ctx, url) {
       await requirePublicFeaturePollingAccess(request, env, "speakloop");
       const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
       return jsonResponse(await getRunpodJobSnapshot(jobId, env, "voice_conversion"));
-    }
-    if (request.method === "POST" && url.pathname === "/api/translate-speech-jobs") {
-      return jsonResponse(await createTranslationJob(request, env));
-    }
-    if (request.method === "GET" && url.pathname.startsWith("/api/translate-speech-jobs/")) {
-      const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
-      return jsonResponse(await getTranslationJobSnapshot(jobId, env));
     }
     if (request.method === "POST" && url.pathname === "/api/voice-conversion-jobs") {
       return jsonResponse(await createVoiceConversionJob(request, env));
@@ -1276,6 +1204,7 @@ async function serveAsset(request, env, url) {
   }
   const assetUrl = new URL(request.url);
   const retiredPaths = new Set([
+    "/fun",
     "/user",
     "/skitvoice",
     "/skitvoice/admin",
@@ -1288,6 +1217,9 @@ async function serveAsset(request, env, url) {
     "/vibevoice_simple.html",
     "/seed_vc.html",
     "/static/user.html",
+    "/static/app_user.js",
+    "/static/app_realtime.js",
+    "/static/app_admin_settings.js",
     "/static/vibevoice_simple.html",
     "/static/seed_vc.html",
   ]);
@@ -1298,8 +1230,6 @@ async function serveAsset(request, env, url) {
     assetUrl.pathname = "/react/portal.html";
   } else if (url.pathname === "/privacy" || url.pathname === "/privacy/") {
     assetUrl.pathname = "/react/privacy.html";
-  } else if (url.pathname === "/fun" || url.pathname === "/fun/") {
-    assetUrl.pathname = "/user.html";
   } else if (url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
     assetUrl.pathname = "/react/speakloop.html";
   } else if (
@@ -1336,10 +1266,7 @@ export async function runtimePayload(env) {
   const health = runpodAvailable && env.RUNPOD_RUNTIME_HEALTH_CHECK !== "0"
     ? await runpodHealthSummary(env)
     : { checked: false, warm: false, worker_counts: {} };
-  const warmup = {
-    ...(runpodAvailable ? await readRunpodVcReadyState(env) : runpodVcReadyState(false)),
-    auto_on_user_page_load: Boolean(runpodAvailable && env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD === "1"),
-  };
+  const warmup = runpodAvailable ? await readRunpodVcReadyState(env) : runpodVcReadyState(false);
   const seedVcModelResident = Boolean(warmup.ready);
   return {
     provider_mode: "cloudflare",
@@ -1348,51 +1275,11 @@ export async function runtimePayload(env) {
       translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
       tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
     },
-    supported_voice_modes: ["default", "convert"],
+    supported_voice_modes: ["default"],
     ui_capabilities: {
       practice_developer_settings: false,
       practice_history_preview: false,
     },
-    translation_backends: [
-      {
-        id: "openai",
-        label: "音声翻訳（Cloudflare + OpenAI API）",
-        available: openaiAvailable,
-        reason: openaiAvailable ? "" : "OPENAI_API_KEY が設定されていません。",
-        providers: {
-          asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
-          translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
-          tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
-        },
-        settings: {
-          source_language_mode: "specified_or_auto",
-          supported_source_languages: ["auto", "id-ID", "ja-JP", "zh-CN", "en-US"],
-          supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"],
-          supported_voice_modes: ["default"],
-          text_transform: true,
-          request_mode: "completed_job",
-          gateway: "cloudflare",
-        },
-      },
-      {
-        id: "runpod_serverless",
-        label: "音声翻訳（RunPod Serverless）",
-        available: false,
-        reason: "Cloudflareデモでは音声翻訳をOpenAI API、RunPodをSeed-VC専用にします。",
-        providers: {
-          asr: "runpod-serverless-asr",
-          translation: "runpod-serverless-translation",
-          tts: "runpod-serverless-tts",
-        },
-        settings: {
-          source_language_mode: "specified_or_auto",
-          supported_voice_modes: ["default", "convert"],
-          text_transform: true,
-          serverless: true,
-          health,
-        },
-      },
-    ],
     text_tts_backends: [
       {
         id: "openai",
@@ -1467,38 +1354,6 @@ function workerCountsFromHealth(workers) {
     }
   }
   return counts;
-}
-
-async function readUserSettings(env) {
-  const kv = stateKv(env);
-  if (kv) {
-    const stored = await kvGetJson(kv, USER_SETTINGS_KV_KEY, null);
-    if (stored && typeof stored === "object") {
-      return coerceUserSettings(stored);
-    }
-  }
-  if (ephemeralUserSettings) {
-    return ephemeralUserSettings;
-  }
-  if (env.USER_SETTINGS_JSON) {
-    try {
-      return coerceUserSettings(JSON.parse(env.USER_SETTINGS_JSON));
-    } catch (_error) {
-      return DEFAULT_USER_SETTINGS;
-    }
-  }
-  return DEFAULT_USER_SETTINGS;
-}
-
-async function writeUserSettings(payload, env) {
-  const settings = await prepareUserSettingsForWrite(payload, env);
-  const kv = stateKv(env);
-  if (kv) {
-    await kv.put(USER_SETTINGS_KV_KEY, JSON.stringify(settings));
-  } else {
-    ephemeralUserSettings = settings;
-  }
-  return settings;
 }
 
 async function readPublicAccessSettings(env) {
@@ -1806,7 +1661,7 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
   const settings = await readPublicAccessSettings(env);
   const featureSettings = settings.features[feature] || {};
   validatePublicInputLimits(featureSettings, limits);
-  if (feature === "fun" || feature === "voice_conversion") {
+  if (feature === "voice_conversion") {
     if (!adminAuthConfigured(env, settings)) {
       throw httpError(503, "admin authentication is not configured");
     }
@@ -2313,193 +2168,6 @@ async function publicUsageDelete(env, key) {
   }
 }
 
-async function prepareUserSettingsForWrite(payload, env) {
-  const settings = coerceUserSettings(payload);
-  if (settings.joke_variation_count <= 0 || settings.joke_texts.length === 0) {
-    return coerceUserSettings({ ...settings, joke_variants: [] });
-  }
-  const jokeVariants = await generateJokeVariants(settings.joke_texts, settings.joke_variation_count, env);
-  return coerceUserSettings({ ...settings, joke_variants: jokeVariants });
-}
-
-function coerceUserSettings(payload = {}) {
-  const jokeTexts = coerceTextList(payload.joke_texts ?? payload.joke_text);
-  const jokeVariants = coerceTextList(payload.joke_variants);
-  const effectAudios = coerceEffectAudios(payload.effect_audios);
-  return {
-    target_language: supportedValue(payload.target_language, ["ja-JP", "id-ID", "zh-CN", "en-US"], "ja-JP"),
-    joke_text: jokeTexts.join("\n"),
-    joke_texts: jokeTexts,
-    joke_position: supportedValue(payload.joke_position, ["before", "after"], "after"),
-    joke_selection: supportedValue(payload.joke_selection, ["rotation", "random"], "rotation"),
-    joke_variation_count: clampInt(payload.joke_variation_count, 0, 5, 0),
-    joke_variants: jokeVariants,
-    joke_pool: [...jokeTexts, ...jokeVariants],
-    effect_audios: effectAudios,
-    effect_selection: supportedValue(payload.effect_selection, ["rotation", "random"], "rotation"),
-    effect_insert_mode: supportedValue(payload.effect_insert_mode, ["silence_or_tail", "tail"], "silence_or_tail"),
-    effect_max_insertions: clampInt(payload.effect_max_insertions, 1, 5, 1),
-    effect_min_silence_ms: clampInt(payload.effect_min_silence_ms, 100, 2000, 300),
-    theme: supportedValue(payload.theme, ["blue", "pop", "mint"], "blue"),
-  };
-}
-
-function coerceTextList(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean).slice(0, 20);
-  }
-  return String(value || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 20);
-}
-
-function coerceEffectAudios(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item, index) => {
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-      const audioBase64 = String(item.audio_base64 || "").trim();
-      if (!audioBase64 || audioBase64.length > 2_000_000) {
-        return null;
-      }
-      return {
-        id: String(item.id || `effect-${index + 1}`).trim() || `effect-${index + 1}`,
-        name: String(item.name || `effect-${index + 1}.wav`).trim().slice(0, 120) || `effect-${index + 1}.wav`,
-        audio_mime_type: normalizeMimeType(item.audio_mime_type || "audio/wav") || "audio/wav",
-        audio_base64: audioBase64,
-      };
-    })
-    .filter(Boolean)
-    .slice(0, 20);
-}
-
-async function generateJokeVariants(jokeTexts, variationCount, env) {
-  const rawText = await openAiText(env, {
-    model: env.OPENAI_JOKE_VARIATION_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
-    instructions:
-      "You create short joke text variations for a speech conversion app. Keep each variation in the same language as its source joke. Return only strict JSON in this shape: {\"variants\":[[\"variant 1 for source 1\",\"variant 2 for source 1\"],[\"variant 1 for source 2\",\"variant 2 for source 2\"]]}. Each inner array must correspond to the source joke at the same index.",
-    input: JSON.stringify({ jokes: jokeTexts, variants_per_joke: variationCount }),
-  });
-  return parseJokeVariantsResponse(rawText, jokeTexts.length, variationCount);
-}
-
-function parseJokeVariantsResponse(rawText, sourceCount, variationCount) {
-  let text = String(rawText || "").trim();
-  if (text.startsWith("```")) {
-    text = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  }
-  let payload;
-  try {
-    payload = JSON.parse(text);
-  } catch (error) {
-    throw httpError(502, "joke variation response was not valid JSON");
-  }
-  const variants = Array.isArray(payload) ? payload : payload?.variants;
-  if (!Array.isArray(variants)) {
-    throw httpError(502, "joke variation response did not include variants");
-  }
-  let matrix = [];
-  if (variants.every((row) => Array.isArray(row))) {
-    matrix = variants.slice(0, sourceCount).map((row) =>
-      row.map((item) => String(item).trim()).filter(Boolean).slice(0, variationCount)
-    );
-  } else {
-    const flat = variants.map((item) => String(item).trim()).filter(Boolean);
-    matrix = Array.from({ length: sourceCount }, (_, index) =>
-      flat.slice(index * variationCount, (index + 1) * variationCount)
-    );
-  }
-  if (matrix.length < sourceCount || matrix.some((row) => row.length < variationCount)) {
-    throw httpError(502, "joke variation response did not include enough variants");
-  }
-  const ordered = [];
-  for (let variantIndex = 0; variantIndex < variationCount; variantIndex += 1) {
-    for (let sourceIndex = 0; sourceIndex < sourceCount; sourceIndex += 1) {
-      ordered.push(matrix[sourceIndex][variantIndex]);
-    }
-  }
-  return ordered;
-}
-
-async function createTranslationJob(request, env) {
-  const form = await request.formData();
-  const audio = requiredBlob(form, "audio");
-  const audioBytes = await audio.arrayBuffer();
-  const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
-  const sourceLanguage = stringFormValue(form, "source_language", "auto");
-  const targetLanguage = stringFormValue(form, "target_language", "user-auto");
-  const voiceMode = stringFormValue(form, "voice_mode", "default");
-  const textTransform = optionalStringFormValue(form, "text_transform");
-  const textTransformOptions = parseJsonFormValue(form, "text_transform_options", {});
-  const textTransformSuffix = optionalStringFormValue(form, "text_transform_suffix");
-  const textTransformUnit = stringFormValue(form, "text_transform_unit", "text");
-  const jobId = `cf-${crypto.randomUUID()}`;
-
-  await enforcePublicFeatureAccess(request, env, "fun", { audioBytes: audioBytes.byteLength });
-
-  const asrStarted = Date.now();
-  const transcript = await openAiTranscribe(env, {
-    audioBytes,
-    audioMimeType,
-    sourceLanguage,
-    filename: audio.name || `recording.${extensionForMimeType(audioMimeType)}`,
-  });
-  const asrMs = Date.now() - asrStarted;
-
-  const translationStarted = Date.now();
-  const translation = await translateTranscript(env, {
-    transcript,
-    sourceLanguage,
-    targetLanguage,
-  });
-  const translationMs = Date.now() - translationStarted;
-
-  const textTransformStarted = Date.now();
-  const transformedText = await transformTranslationText(env, {
-    translatedText: translation.translated_text,
-    targetLanguage: translation.target_language,
-    textTransform,
-    textTransformOptions,
-    textTransformSuffix,
-    textTransformUnit,
-  });
-  const textTransformMs = Date.now() - textTransformStarted;
-
-  const tts = await openAiSpeech(env, transformedText);
-  const result = {
-    transcript,
-    translated_text: translation.translated_text,
-    transformed_text: transformedText,
-    audio_mime_type: tts.audio_mime_type,
-    audio_base64: tts.audio_base64,
-    timings_ms: {
-      asr: asrMs,
-      translation: translationMs,
-      text_transform: textTransformMs,
-      ...(tts.timings_ms || {}),
-      total: asrMs + translationMs + textTransformMs + Number(tts.timings_ms?.tts || 0),
-    },
-    providers: {
-      asr: `openai-asr-${env.OPENAI_ASR_MODEL || "gpt-4o-transcribe"}`,
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
-      tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
-      ...(textTransform ? { text_transform: textTransform } : {}),
-    },
-    warnings: [],
-    target_language: translation.target_language,
-    detected_source_language: translation.source_language,
-  };
-  const snapshot = completedJobSnapshot(jobId, "translation", result);
-  await saveTranslationJobSnapshot(env, snapshot);
-  return snapshot;
-}
-
 async function createVoiceConversionJob(request, env) {
   const form = await request.formData();
   const sourceAudio = requiredBlob(form, "source_audio");
@@ -2512,8 +2180,6 @@ async function createVoiceConversionJob(request, env) {
   const referenceAudioBase64 = await blobToBase64(referenceAudio);
   const referenceAudioMimeType = normalizeMimeType(referenceAudio.type || guessAudioMimeType(referenceAudio.name));
   const voiceBackend = stringFormValue(form, "voice_backend", "seed-vc");
-  const audioEffectAudio = optionalBlob(form, "audio_effect_audio");
-  const audioEffectEnabled = optionEnabled(stringFormValue(form, "audio_effect_enabled", "false"));
   const payload = {
     operation_mode: "voice_conversion",
     source_audio_base64: sourceAudioBase64,
@@ -2523,30 +2189,6 @@ async function createVoiceConversionJob(request, env) {
     voice_backend: voiceBackend,
     ...seedVcPayloadFromForm(form),
   };
-  if (audioEffectEnabled && audioEffectAudio) {
-    payload.audio_effect_enabled = true;
-    payload.audio_effect_audio_base64 = await blobToBase64(audioEffectAudio);
-    payload.audio_effect_audio_mime_type = normalizeMimeType(
-      audioEffectAudio.type || guessAudioMimeType(audioEffectAudio.name),
-    );
-    payload.audio_effect_insert_mode = supportedValue(
-      stringFormValue(form, "audio_effect_insert_mode", "silence_or_tail"),
-      ["silence_or_tail", "tail"],
-      "silence_or_tail",
-    );
-    payload.audio_effect_max_insertions = clampInt(
-      stringFormValue(form, "audio_effect_max_insertions", "1"),
-      1,
-      5,
-      1,
-    );
-    payload.audio_effect_min_silence_ms = clampInt(
-      stringFormValue(form, "audio_effect_min_silence_ms", "300"),
-      100,
-      2000,
-      300,
-    );
-  }
   const body = await submitRunpodJob(env, payload);
   const snapshot = jobSnapshotFromRunpod(body, "voice_conversion");
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, "voice_conversion")) {
@@ -2558,8 +2200,6 @@ async function createVoiceConversionJob(request, env) {
 async function createWarmupJob(env) {
   const payload = {
     operation_mode: "warmup",
-    translation_backend: env.RUNPOD_SERVERLESS_TRANSLATION_BACKEND || "openai",
-    preload_translation: env.RUNPOD_WARMUP_PRELOAD_TRANSLATION !== "0",
     preload_voice_conversion: env.RUNPOD_WARMUP_PRELOAD_VOICE_CONVERSION !== "0",
   };
   const body = await submitRunpodJob(env, payload);
@@ -2656,47 +2296,6 @@ function runpodVcReadyState(ready, state = {}) {
   };
 }
 
-async function getTranslationJobSnapshot(jobId, env) {
-  if (!jobId) {
-    throw httpError(400, "job_id is required");
-  }
-  const snapshot = await readTranslationJobSnapshot(env, jobId);
-  if (!snapshot) {
-    throw httpError(404, "job not found");
-  }
-  return snapshot;
-}
-
-async function saveTranslationJobSnapshot(env, snapshot) {
-  const kv = stateKv(env);
-  if (kv) {
-    await kv.put(`${TRANSLATION_JOB_KV_PREFIX}${snapshot.job_id}`, JSON.stringify(snapshot), {
-      expirationTtl: numberFromEnv(env.CLOUDFLARE_TRANSLATION_JOB_TTL_SECONDS, 3600),
-    });
-  } else {
-    ephemeralTranslationJobs.set(snapshot.job_id, snapshot);
-  }
-}
-
-async function readTranslationJobSnapshot(env, jobId) {
-  const kv = stateKv(env);
-  if (kv) {
-    return kvGetJson(kv, `${TRANSLATION_JOB_KV_PREFIX}${jobId}`, null);
-  }
-  return ephemeralTranslationJobs.get(jobId) || null;
-}
-
-function completedJobSnapshot(jobId, kind, result) {
-  return {
-    job_id: jobId,
-    status: "succeeded",
-    current_stage: { stage: "complete", label: "完了", provider: "" },
-    stages: completedStages(kind),
-    result,
-    error: null,
-  };
-}
-
 function jobSnapshotFromRunpod(body, kind, health = null, modelId = "") {
   const jobId = String(body.id || body.job_id || "");
   const status = String(body.status || "").toUpperCase();
@@ -2782,11 +2381,7 @@ function plannedStages(kind) {
   if (kind === "warmup") {
     return [{ stage: "warmup", label: "準備", provider: "RunPod Serverless" }];
   }
-  return [
-    { stage: "asr", label: "文字起こし", provider: "RunPod Serverless" },
-    { stage: "translation", label: "翻訳", provider: "RunPod Serverless" },
-    { stage: "tts", label: "音声生成", provider: "RunPod Serverless" },
-  ];
+  throw new Error(`unsupported RunPod job kind: ${kind}`);
 }
 
 function completedStages(kind) {
@@ -2803,10 +2398,10 @@ function currentStageForKind(kind, queued) {
   if (kind === "warmup") {
     return { stage: "warmup", label: "準備", provider: "RunPod Serverless" };
   }
-  return { stage: "asr", label: "RunPod推論", provider: "RunPod Serverless" };
+  throw new Error(`unsupported RunPod job kind: ${kind}`);
 }
 
-async function createUserDisplayText(payload, env) {
+async function createLearnerDisplayText(payload, env) {
   const text = String(payload.text || "").trim();
   const targetLanguage = String(payload.target_language || "ja-JP");
   if (!text) {
@@ -2819,71 +2414,12 @@ async function createUserDisplayText(payload, env) {
     return { kanji_text: text, hiragana_text: "", indonesian_text: "" };
   }
   const hiragana = await openAiText(env, {
-    model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
+    model: env.OPENAI_TEXT_DISPLAY_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
     instructions:
       "Convert the Japanese sentence to hiragana only for display to language learners. Return only the hiragana text, with no notes. Keep punctuation and Arabic numerals readable.",
     input: text,
   });
   return { kanji_text: text, hiragana_text: hiragana || text, indonesian_text: "" };
-}
-
-async function createUserTextOutput(payload, env) {
-  const translatedText = String(payload.translated_text || "").trim();
-  if (!translatedText) {
-    throw httpError(400, "translated_text is required");
-  }
-  const targetLanguage = String(payload.target_language || "ja-JP");
-  const transformOptions = typeof payload.text_transform_options === "object" && payload.text_transform_options !== null
-    ? payload.text_transform_options
-    : {};
-  const transformedText = await transformUserText(translatedText, targetLanguage, transformOptions, env);
-  const tts = await openAiSpeech(env, transformedText);
-  const result = {
-    transcript: String(payload.transcript || ""),
-    translated_text: translatedText,
-    transformed_text: transformedText,
-    audio_mime_type: tts.audio_mime_type,
-    audio_base64: tts.audio_base64,
-    timings_ms: tts.timings_ms,
-    providers: {
-      asr: "cached",
-      translation: "cached",
-      tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
-    },
-    warnings: [],
-    target_language: targetLanguage,
-  };
-  return result;
-}
-
-async function createUserJokeOutput(payload, env) {
-  const text = String(payload.text || "").trim();
-  if (!text) {
-    throw httpError(400, "text is required");
-  }
-  const targetLanguage = String(payload.target_language || "id-ID");
-  const translatedText = await openAiText(env, {
-    model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
-    instructions: "Translate the text into natural Indonesian for a short spoken joke. Return only the translated text.",
-    input: text,
-  });
-  const tts = await openAiSpeech(env, translatedText || text);
-  const result = {
-    transcript: text,
-    translated_text: translatedText || text,
-    transformed_text: translatedText || text,
-    audio_mime_type: tts.audio_mime_type,
-    audio_base64: tts.audio_base64,
-    timings_ms: tts.timings_ms,
-    providers: {
-      asr: "none",
-      translation: `openai-translation-${env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra"}`,
-      tts: `openai-tts-${env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"}`,
-    },
-    warnings: [],
-    target_language: targetLanguage,
-  };
-  return result;
 }
 
 async function createPracticePrompt(request, env) {
@@ -3597,7 +3133,7 @@ async function createPracticeDisplayText(text, targetLanguage, env, { includePin
       pinyin_status: "disabled",
     };
   }
-  const display = await createUserDisplayText({ text, target_language: targetLanguage }, env);
+  const display = await createLearnerDisplayText({ text, target_language: targetLanguage }, env);
   const hiraganaText = String(display.hiragana_text || "").trim();
   const kanjiText = String(display.kanji_text || text).trim();
   return {
@@ -3727,18 +3263,6 @@ function throwIfOpenAiQuotaError(operation, status, errorBody) {
   }
 }
 
-async function openAiTranscribe(env, { audioBytes, audioMimeType, sourceLanguage, filename }) {
-  const transcription = await openAiTranscribeDetail(env, {
-    audioBytes,
-    audioMimeType,
-    sourceLanguage,
-    filename,
-    model: env.OPENAI_ASR_MODEL || "gpt-4o-transcribe",
-    includeTimestamps: false,
-  });
-  return transcription.text;
-}
-
 async function openAiTranscribeDetail(env, {
   audioBytes,
   audioMimeType,
@@ -3846,25 +3370,17 @@ async function translateTranscript(env, { transcript, sourceLanguage, targetLang
   if (!transcript.trim()) {
     return {
       source_language: sourceLanguage === "auto" ? "" : sourceLanguage,
-      target_language: targetLanguage === "user-auto" ? "ja-JP" : targetLanguage,
+      target_language: targetLanguage,
       translated_text: "",
     };
   }
-  const requestedTarget = targetLanguage === "user-auto" ? "user-auto" : supportedValue(targetLanguage, Object.keys(OPENAI_LANGUAGE_NAMES), "ja-JP");
-  const instructions = requestedTarget === "user-auto"
-    ? [
-        "You translate a short speech transcript for a playful demo app.",
-        "Detect the source language from the transcript.",
-        "If the transcript is Japanese, translate it into natural Indonesian and set target_language to id-ID.",
-        "If the transcript is not Japanese, translate it into natural Japanese and set target_language to ja-JP.",
-        "Return only strict JSON: {\"source_language\":\"ja-JP|id-ID|zh-CN|en-US|auto\",\"target_language\":\"ja-JP|id-ID\",\"translated_text\":\"...\"}.",
-      ].join(" ")
-    : [
-        "You translate a short speech transcript for a speech conversion app.",
-        `Translate into ${OPENAI_LANGUAGE_NAMES[requestedTarget] || requestedTarget}.`,
-        "Detect the source language when possible.",
-        "Return only strict JSON: {\"source_language\":\"ja-JP|id-ID|zh-CN|en-US|auto\",\"target_language\":\"...\",\"translated_text\":\"...\"}.",
-      ].join(" ");
+  const requestedTarget = supportedValue(targetLanguage, Object.keys(OPENAI_LANGUAGE_NAMES), "ja-JP");
+  const instructions = [
+    "You translate a short speech transcript into model text for pronunciation practice.",
+    `Translate into ${OPENAI_LANGUAGE_NAMES[requestedTarget] || requestedTarget}.`,
+    "Detect the source language when possible.",
+    "Return only strict JSON: {\"source_language\":\"ja-JP|id-ID|zh-CN|en-US|auto\",\"target_language\":\"...\",\"translated_text\":\"...\"}.",
+  ].join(" ");
   const rawText = await openAiText(env, {
     model: env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
     instructions,
@@ -3884,55 +3400,23 @@ function parseTranslationResponse(rawText, sourceLanguage, requestedTarget) {
   }
   try {
     const payload = JSON.parse(text);
-    const targetLanguage = requestedTarget === "user-auto"
-      ? supportedValue(payload.target_language, ["ja-JP", "id-ID"], "ja-JP")
-      : supportedValue(payload.target_language, Object.keys(OPENAI_LANGUAGE_NAMES), requestedTarget);
+    const targetLanguage = supportedValue(
+      payload.target_language,
+      Object.keys(OPENAI_LANGUAGE_NAMES),
+      requestedTarget,
+    );
     return {
       source_language: supportedValue(payload.source_language, ["auto", ...Object.keys(OPENAI_LANGUAGE_NAMES)], sourceLanguage),
       target_language: targetLanguage || "ja-JP",
       translated_text: String(payload.translated_text || "").trim(),
     };
   } catch (_error) {
-    const fallbackTarget = requestedTarget === "user-auto" ? "ja-JP" : requestedTarget;
     return {
       source_language: sourceLanguage,
-      target_language: fallbackTarget,
+      target_language: requestedTarget,
       translated_text: text,
     };
   }
-}
-
-async function transformTranslationText(env, {
-  translatedText,
-  targetLanguage,
-  textTransform,
-  textTransformOptions,
-  textTransformSuffix,
-  textTransformUnit,
-}) {
-  if (textTransform === "append_suffix") {
-    return appendSuffix(translatedText, textTransformSuffix || String(textTransformOptions?.suffix || ""), textTransformUnit || textTransformOptions?.unit || "text");
-  }
-  if (textTransform === "user_effects") {
-    return transformUserText(translatedText, targetLanguage, textTransformOptions || {}, env);
-  }
-  return translatedText;
-}
-
-function appendSuffix(text, suffix, unit) {
-  if (!suffix) {
-    return text;
-  }
-  if (unit === "text") {
-    return `${text}${suffix}`;
-  }
-  if (unit !== "sentence") {
-    throw httpError(400, `unsupported append_suffix unit: ${unit}`);
-  }
-  return text.replace(/([^。！？!?]+[。！？!?]?)/g, (segment) => {
-    const trimmed = segment.trim();
-    return trimmed ? `${segment}${suffix}` : segment;
-  });
 }
 
 function stateKv(env) {
@@ -3985,35 +3469,6 @@ function bytesToBase64(bytes) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
-}
-
-async function transformUserText(text, targetLanguage, options, env) {
-  if (
-    targetLanguage !== "ja-JP" ||
-    (!optionEnabled(options.osaka_dialect) && !optionEnabled(options.variation))
-  ) {
-    return text;
-  }
-  const instructions = [
-    "You rewrite short Japanese spoken output for a playful speech conversion app.",
-    "Return only the rewritten Japanese text, with no notes.",
-    "Keep it concise and suitable for text-to-speech.",
-  ];
-  if (optionEnabled(options.osaka_dialect)) {
-    instructions.push("Use natural Osaka dialect while preserving the speaker's intent.");
-  }
-  if (optionEnabled(options.variation)) {
-    instructions.push(
-      "Create a small playful variation of the request by changing a concrete number, condition, or target when that is natural; do not make it offensive or confusing.",
-    );
-  }
-  return (
-    await openAiText(env, {
-      model: env.OPENAI_TEXT_TRANSFORM_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra",
-      instructions: instructions.join(" "),
-      input: text,
-    })
-  ) || text;
 }
 
 async function submitRunpodJob(env, inputPayload) {
@@ -4162,14 +3617,6 @@ function requiredBlob(form, key) {
   return value;
 }
 
-function optionalBlob(form, key) {
-  const value = form.get(key);
-  if (!value || typeof value.arrayBuffer !== "function") {
-    return null;
-  }
-  return value;
-}
-
 function stringFormValue(form, key, fallback = "") {
   return String(form.get(key) || fallback);
 }
@@ -4185,18 +3632,6 @@ function optionalStringFormValue(form, key) {
     return null;
   }
   return String(value);
-}
-
-function parseJsonFormValue(form, key, fallback) {
-  const raw = optionalStringFormValue(form, key);
-  if (raw === null) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (_error) {
-    return fallback;
-  }
 }
 
 async function blobToBase64(blob) {

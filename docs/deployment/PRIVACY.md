@@ -1,6 +1,6 @@
 # 公開デモのデータ取扱い境界
 
-更新日: 2026-07-23
+更新日: 2026-07-30
 
 この文書は実装上のデータフローと保存境界を固定する技術文書である。利用者向けの案内は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とし、公開画面の `/privacy` から同じ内容を確認できるようにする。
 
@@ -27,14 +27,14 @@
 - D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
 - R2は管理者が公開用として登録したサンプル音声だけを保存する。
 - 過去の研究機能で登録したsampleは、一般向けsample APIから返らない。保持は保証せず、管理者のsample保存・削除操作で削除され得る。
-- KVは短期job snapshot、ready状態、設定、bindingがない環境のfallbackに使う。短期job snapshotは1時間、fallbackの日次quotaは48時間、audit eventは90日で失効する。fallbackの累計quotaは公開デモの運用中に限り保持する。管理設定の `admin_google_emails` には運営者の平文emailを保存し、`/fun` のuser settingsには管理者が入力した設定・本文を保存できる。一般利用者のquota・audit識別子とは用途を分ける。
+- KVは短期job snapshot、ready状態、公開アクセス設定、bindingがない環境のfallbackに使う。短期job snapshotは1時間、fallbackの日次quotaは48時間、audit eventは90日で失効する。fallbackの累計quotaは公開デモの運用中に限り保持する。管理設定の `admin_google_emails` には運営者の平文emailを保存する。一般利用者のquota・audit識別子とは用途を分ける。
 - ローカルFastAPI版は開発者の端末へ音声履歴と診断情報を保存でき、Cloudflare公開版とは保存境界が異なる。
 
 「履歴として保存しない」は、外部処理事業者が行う処理やログ保持まで否定する表現として使わない。対象事業者はOpenAI、RunPod、Google、Cloudflareである。正式なプライバシーポリシーでは、各処理事業者の現行条件を確認して案内する。
 
 ## RunPodのjob・result・log境界
 
-RunPod requestは入力音声base64、台本、翻訳結果をapplication logやerrorへ含めない。cancel、failure、timeout、malformed responseでもraw payloadを文字列化しない。これはVoice Lab application logの契約であり、RunPod platform側のjob input/result/log保持を削除する保証ではない。
+RunPod requestは入力音声base64と台本をapplication logやerrorへ含めない。cancel、failure、timeout、malformed responseでもraw payloadを文字列化しない。これはVoice Lab application logの契約であり、RunPod platform側のjob input/result/log保持を削除する保証ではない。
 
 Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの既定でjobを実行する。Cloudflare公開版は音声をVoice Labの履歴へ保存しない。RunPod側の一時処理・保持は同社のサービス条件に従うため、Voice Labが保持ゼロを保証する表現はしない。これは外部送信の説明事項であり、operation別policyの設定を公開停止条件にはしない。
 

@@ -21,9 +21,6 @@ from fastapi.staticfiles import StaticFiles
 
 from .api_audio_history import (
     audio_media_type as _audio_media_type,
-    history_text_metadata_from_pipeline_result as _history_text_metadata_from_pipeline_result,
-    history_text_metadata_from_recording_result as _history_text_metadata_from_recording_result,
-    is_reused_history_input as _is_reused_history_input,
     mime_suffix as _mime_suffix,
     save_audio_history_recording as _save_audio_history_recording,
     save_audio_history_uploaded_output as _save_audio_history_uploaded_output,
@@ -31,30 +28,20 @@ from .api_audio_history import (
     serialize_audio_history_settings as _serialize_audio_history_settings,
     upload_suffix as _upload_suffix,
 )
-from .api_jobs import TextToSpeechJobStore, TranslationJobStore, VoiceConversionJobStore
-from .api_requests import (
-    create_pipeline_request as _create_pipeline_request,
-    create_seed_vc_settings as _create_seed_vc_settings,
-)
+from .api_jobs import TextToSpeechJobStore, VoiceConversionJobStore
+from .api_requests import create_seed_vc_settings as _create_seed_vc_settings
 from .api_runtime import (
     provider_names as _provider_names,
-    select_translation_pipeline as _select_translation_pipeline,
     supported_voice_modes as _supported_voice_modes,
-    translation_backends as _translation_backends,
     voice_conversion_backends as _voice_conversion_backends,
 )
 from .api_serializers import normalize_tts_provider_output as _normalize_tts_provider_output
-from .api_serializers import serialize_pipeline_result as _serialize_pipeline_result
-from .audio_effects import AudioEffectInsertSettings
 from .audio_history import AudioHistoryEntry, AudioHistoryStore
 from .factory import (
-    create_openai_pipeline,
-    create_pipeline_from_env,
-    create_realtime_translation_pipeline,
-    create_runpod_serverless_pipeline,
+    create_openai_provider_bundle,
+    create_provider_bundle_from_env,
 )
-from .pipeline import SpeechTranslationPipeline
-from .pipeline import PipelineResult
+from .pipeline import SpeechProviderBundle
 from .practice import (
     PRACTICE_TARGET_LANGUAGES,
     PracticeAlignmentError,
@@ -83,7 +70,6 @@ from .providers.openai_api import (
     OPENAI_TIMESTAMP_ASR_MODELS,
     AsrTranscription,
     OpenAiAsrProvider,
-    create_openai_realtime_translation_client_secret,
     supported_openai_practice_asr_model,
 )
 from .providers.runpod_serverless import (
@@ -98,12 +84,6 @@ from .providers.voice import (
     prepare_seed_vc_reference_preview as _prepare_seed_vc_reference_preview,
 )
 from .text_display import create_user_display_text
-from .transforms import apply_text_transform
-from .user_settings import (
-    UserSettingsStore,
-    prepare_user_settings_for_write,
-    serialize_user_settings,
-)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
@@ -168,10 +148,10 @@ def _practice_llm_error_envelope(error: PracticeLlmError) -> dict[str, object]:
     }
 
 
-def _practice_asr_provider(pipeline: SpeechTranslationPipeline, asr_model: str):
-    if isinstance(pipeline.asr, OpenAiAsrProvider):
+def _practice_asr_provider(bundle: SpeechProviderBundle, asr_model: str):
+    if isinstance(bundle.asr, OpenAiAsrProvider):
         return OpenAiAsrProvider(model=asr_model)
-    return pipeline.asr
+    return bundle.asr
 
 
 def _practice_stage_identity(provider: object, *, fallback_model: str = "") -> tuple[str, str]:
@@ -667,7 +647,7 @@ def _practice_pinyin_text_openai(text: str) -> str:
 
     try:
         response = OpenAI().responses.create(
-            model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TEXT_TRANSFORM_MODEL", "gpt-5.6-terra")),
+            model=os.getenv("OPENAI_TEXT_DISPLAY_MODEL", os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.6-terra")),
             instructions=(
                 "Convert this Simplified Chinese sentence to Hanyu Pinyin with tone marks. "
                 "Return one pinyin syllable per Chinese character, separated by spaces. "
@@ -904,15 +884,12 @@ def _serialized_audio_history_entries(
 
 
 def create_app(
-    pipeline: SpeechTranslationPipeline | None = None,
-    openai_pipeline: SpeechTranslationPipeline | None = None,
-    openai_realtime_pipeline=None,
-    runpod_serverless_pipeline: SpeechTranslationPipeline | None = None,
+    provider_bundle: SpeechProviderBundle | None = None,
+    openai_provider_bundle: SpeechProviderBundle | None = None,
     runpod_practice_asr_provider: RunpodServerlessPracticeAsrProvider | None = None,
     text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
     audio_history_store: AudioHistoryStore | None = None,
-    user_settings_store: UserSettingsStore | None = None,
     public_sample_audio_store: PublicSampleAudioStore | None = None,
     practice_llm_service: PracticeLlmService | None = None,
     practice_attempt_state_store: PracticeAttemptStateStore | None = None,
@@ -940,24 +917,15 @@ def create_app(
     ) -> JSONResponse:
         return JSONResponse(status_code=502, content=_practice_llm_error_envelope(error))
 
-    active_pipeline = pipeline or create_pipeline_from_env()
-    active_openai_pipeline = openai_pipeline or create_openai_pipeline()
-    active_openai_realtime_pipeline = openai_realtime_pipeline or create_realtime_translation_pipeline()
-    active_runpod_serverless_pipeline = runpod_serverless_pipeline or create_runpod_serverless_pipeline()
+    active_provider_bundle = provider_bundle or create_provider_bundle_from_env()
+    active_openai_provider_bundle = openai_provider_bundle or create_openai_provider_bundle()
     active_runpod_practice_asr_provider = runpod_practice_asr_provider or RunpodServerlessPracticeAsrProvider()
-    translation_pipelines = {
-        "openai": active_openai_pipeline,
-        "openai_realtime": active_openai_realtime_pipeline,
-        "qwen": active_pipeline,
-        "runpod_serverless": active_runpod_serverless_pipeline,
-    }
     active_text_tts_providers = text_tts_providers or create_text_tts_providers()
     active_voice_conversion_service = voice_conversion_service or create_voice_conversion_service_from_env()
     active_practice_voice_conversion_service = voice_conversion_service or VoiceConversionService(
         providers=[RunpodServerlessVoiceConversionProvider()]
     )
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
-    active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
     active_practice_llm_service = practice_llm_service or PracticeLlmService()
     active_practice_attempt_state_store = (
@@ -978,7 +946,6 @@ def create_app(
         if job_id:
             active_practice_attempt_state_store.save_terminal_snapshot(job_id, snapshot)
     practice_attempt_finalization_lock = Lock()
-    job_store = TranslationJobStore(translation_pipelines, active_audio_history_store)
     text_tts_job_store = TextToSpeechJobStore(active_text_tts_providers, active_audio_history_store)
     voice_conversion_job_store = VoiceConversionJobStore(active_voice_conversion_service, active_audio_history_store)
     practice_voice_conversion_job_store = VoiceConversionJobStore(
@@ -986,7 +953,7 @@ def create_app(
         active_audio_history_store,
     )
     if os.getenv("MO_PRELOAD_MODELS") == "1":
-        active_pipeline.preload()
+        active_provider_bundle.preload()
     if os.getenv("MO_PRELOAD_VOICE_CONVERSION") == "1" or os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
         active_voice_conversion_service.preload()
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -995,11 +962,6 @@ def create_app(
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(WEB_DIR / "react" / "portal.html")
-
-    @app.get("/fun")
-    @app.get("/fun/")
-    def fun() -> FileResponse:
-        return FileResponse(WEB_DIR / "user.html")
 
     @app.get("/speakloop")
     @app.get("/speakloop/")
@@ -1028,14 +990,8 @@ def create_app(
     def runtime() -> dict[str, object]:
         return {
             "provider_mode": os.getenv("MO_PROVIDER_MODE", "fake") or "fake",
-            "providers": _provider_names(active_pipeline),
-            "supported_voice_modes": _supported_voice_modes(active_pipeline),
-            "translation_backends": _translation_backends(
-                active_pipeline,
-                active_openai_pipeline,
-                active_openai_realtime_pipeline,
-                active_runpod_serverless_pipeline,
-            ),
+            "providers": _provider_names(active_provider_bundle),
+            "supported_voice_modes": _supported_voice_modes(active_provider_bundle),
             "text_tts_backends": text_tts_backend_statuses(active_text_tts_providers),
             "voice_conversion_backends": _voice_conversion_backends(active_voice_conversion_service),
             "ui_capabilities": {
@@ -1043,23 +999,6 @@ def create_app(
                 "practice_history_preview": bool(active_audio_history_store.enabled),
             },
         }
-
-    @app.get("/api/user-settings")
-    def user_settings() -> dict[str, object]:
-        try:
-            return serialize_user_settings(active_user_settings_store.read())
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.put("/api/user-settings")
-    def update_user_settings(payload: dict[str, object] = Body(...)) -> dict[str, object]:
-        try:
-            prepared_payload = prepare_user_settings_for_write(payload)
-            return serialize_user_settings(active_user_settings_store.write(prepared_payload))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/public-sample-audios")
     def public_sample_audios() -> dict[str, object]:
@@ -1083,118 +1022,6 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=503, detail="サンプル音声を削除できませんでした") from exc
 
-    @app.post("/api/user-display-text")
-    def user_display_text(payload: dict[str, str] = Body(...)) -> dict[str, str]:
-        try:
-            return create_user_display_text(
-                str(payload.get("text", "")),
-                str(payload.get("target_language", "ja-JP")),
-            )
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.post("/api/user-text-output")
-    def user_text_output(payload: dict[str, object] = Body(...)) -> dict[str, object]:
-        translated_text = str(payload.get("translated_text", "")).strip()
-        target_language = str(payload.get("target_language", "ja-JP"))
-        if translated_text == "":
-            raise HTTPException(status_code=400, detail="translated_text is required")
-
-        text_transform_options = payload.get("text_transform_options") or {}
-        if not isinstance(text_transform_options, dict):
-            raise HTTPException(status_code=400, detail="text_transform_options must be an object")
-
-        try:
-            transformed_text = apply_text_transform(
-                translated_text,
-                "user_effects" if text_transform_options else None,
-                {**text_transform_options, "target_language": target_language},
-            )
-            tts_output = _normalize_tts_provider_output(
-                active_openai_pipeline.tts.synthesize(transformed_text, target_language),
-                active_openai_pipeline.tts.audio_mime_type,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        result = PipelineResult(
-            transcript=str(payload.get("transcript", "")),
-            translated_text=translated_text,
-            transformed_text=transformed_text,
-            output_audio_bytes=tts_output.audio_bytes,
-            output_audio_mime_type=tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
-            timings_ms=tts_output.timings_ms,
-            providers={
-                "asr": "cached",
-                "translation": "cached",
-                "tts": active_openai_pipeline.tts.name,
-            },
-            warnings=tts_output.warnings,
-            target_language=target_language,
-        )
-        active_audio_history_store.save_output(
-            result.output_audio_bytes,
-            suffix=_mime_suffix(result.output_audio_mime_type),
-            metadata={
-                "endpoint": "user-text-output",
-                "translation_backend": "openai",
-                "target_language": target_language,
-                "voice_mode": "default",
-                "audio_mime_type": result.output_audio_mime_type,
-                **_history_text_metadata_from_pipeline_result(result),
-            },
-        )
-        return _serialize_pipeline_result(result)
-
-    @app.post("/api/user-joke-output")
-    def user_joke_output(payload: dict[str, object] = Body(...)) -> dict[str, object]:
-        text = str(payload.get("text", "")).strip()
-        target_language = str(payload.get("target_language", "id-ID"))
-        if text == "":
-            raise HTTPException(status_code=400, detail="text is required")
-
-        try:
-            translated_text = active_openai_pipeline.translator.translate(text, "auto", target_language)
-            tts_output = _normalize_tts_provider_output(
-                active_openai_pipeline.tts.synthesize(translated_text, target_language),
-                active_openai_pipeline.tts.audio_mime_type,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        result = PipelineResult(
-            transcript=text,
-            translated_text=translated_text,
-            transformed_text=translated_text,
-            output_audio_bytes=tts_output.audio_bytes,
-            output_audio_mime_type=tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
-            timings_ms=tts_output.timings_ms,
-            providers={
-                "asr": "none",
-                "translation": active_openai_pipeline.translator.name,
-                "tts": active_openai_pipeline.tts.name,
-            },
-            warnings=tts_output.warnings,
-            target_language=target_language,
-        )
-        active_audio_history_store.save_output(
-            result.output_audio_bytes,
-            suffix=_mime_suffix(result.output_audio_mime_type),
-            metadata={
-                "endpoint": "user-joke-output",
-                "translation_backend": "openai",
-                "target_language": target_language,
-                "voice_mode": "default",
-                "audio_mime_type": result.output_audio_mime_type,
-                **_history_text_metadata_from_pipeline_result(result),
-            },
-        )
-        return _serialize_pipeline_result(result)
-
     def _create_practice_prompt_result(
         *,
         audio_bytes: bytes,
@@ -1209,15 +1036,15 @@ def create_app(
         timings_ms: dict[str, float] = {}
         total_started = perf_counter()
         used_precomputed_asr = precomputed_asr_result is not None
-        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        asr_provider = _practice_asr_provider(active_openai_provider_bundle, practice_asr_model)
         asr_provider_name, asr_model_name = _practice_stage_identity(
             asr_provider,
             fallback_model=practice_asr_model,
         )
         translation_provider_name, translation_model_name = _practice_stage_identity(
-            active_openai_pipeline.translator
+            active_openai_provider_bundle.translator
         )
-        tts_provider_name, tts_model_name = _practice_stage_identity(active_openai_pipeline.tts)
+        tts_provider_name, tts_model_name = _practice_stage_identity(active_openai_provider_bundle.tts)
         with NamedTemporaryFile(suffix=_upload_suffix(filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
@@ -1246,7 +1073,7 @@ def create_app(
                         model=translation_model_name,
                     )
                 started = perf_counter()
-                target_text = active_openai_pipeline.translator.translate(
+                target_text = active_openai_provider_bundle.translator.translate(
                     transcript,
                     "auto",
                     practice_target_language,
@@ -1264,8 +1091,8 @@ def create_app(
                     )
                 started = perf_counter()
                 tts_output = _normalize_tts_provider_output(
-                    active_openai_pipeline.tts.synthesize(target_text, practice_target_language),
-                    active_openai_pipeline.tts.audio_mime_type,
+                    active_openai_provider_bundle.tts.synthesize(target_text, practice_target_language),
+                    active_openai_provider_bundle.tts.audio_mime_type,
                 )
                 timings_ms.update(tts_output.timings_ms)
                 timings_ms.setdefault("tts", _elapsed_ms(started))
@@ -1290,15 +1117,15 @@ def create_app(
                 practice_target_language,
                 include_pinyin=include_pinyin,
             ),
-            "audio_mime_type": tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
+            "audio_mime_type": tts_output.audio_mime_type or active_openai_provider_bundle.tts.audio_mime_type,
             "audio_base64": base64.b64encode(tts_output.audio_bytes).decode(),
             "timings_ms": timings_ms,
             "asr_model": practice_asr_model,
             "asr_timestamps": asr_timestamps,
             "providers": {
                 "asr": asr_provider.name,
-                "translation": active_openai_pipeline.translator.name,
-                "tts": active_openai_pipeline.tts.name,
+                "translation": active_openai_provider_bundle.translator.name,
+                "tts": active_openai_provider_bundle.tts.name,
             },
         }
         active_audio_history_store.save_output(
@@ -1823,7 +1650,7 @@ def create_app(
                 response.status_code = 202
             return snapshot
 
-        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        asr_provider = _practice_asr_provider(active_openai_provider_bundle, practice_asr_model)
         asr_provider_name, asr_model_name = _practice_stage_identity(
             asr_provider,
             fallback_model=practice_asr_model,
@@ -2163,16 +1990,16 @@ def create_app(
 
         if progress_mode == "job":
             filename = audio.filename or "practice.webm"
-            asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+            asr_provider = _practice_asr_provider(active_openai_provider_bundle, practice_asr_model)
             asr_provider_name, asr_model_name = _practice_stage_identity(
                 asr_provider,
                 fallback_model=practice_asr_model,
             )
             translation_provider_name, translation_model_name = _practice_stage_identity(
-                active_openai_pipeline.translator
+                active_openai_provider_bundle.translator
             )
             tts_provider_name, tts_model_name = _practice_stage_identity(
-                active_openai_pipeline.tts
+                active_openai_provider_bundle.tts
             )
 
             def run_prompt_job(report):
@@ -2290,7 +2117,7 @@ def create_app(
 
         timings_ms: dict[str, float] = {}
         total_started = perf_counter()
-        asr_provider = _practice_asr_provider(active_openai_pipeline, practice_asr_model)
+        asr_provider = _practice_asr_provider(active_openai_provider_bundle, practice_asr_model)
         with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio.flush()
@@ -2301,7 +2128,7 @@ def create_app(
                 timings_ms["asr"] = _elapsed_ms(started)
 
                 started = perf_counter()
-                target_text = active_openai_pipeline.translator.translate(
+                target_text = active_openai_provider_bundle.translator.translate(
                     transcript,
                     "auto",
                     practice_target_language,
@@ -2312,8 +2139,8 @@ def create_app(
 
                 started = perf_counter()
                 tts_output = _normalize_tts_provider_output(
-                    active_openai_pipeline.tts.synthesize(target_text, practice_target_language),
-                    active_openai_pipeline.tts.audio_mime_type,
+                    active_openai_provider_bundle.tts.synthesize(target_text, practice_target_language),
+                    active_openai_provider_bundle.tts.audio_mime_type,
                 )
                 timings_ms.update(tts_output.timings_ms)
                 timings_ms.setdefault("tts", _elapsed_ms(started))
@@ -2335,15 +2162,15 @@ def create_app(
                 practice_target_language,
                 include_pinyin=practice_target_language == "zh-CN" and include_pinyin,
             ),
-            "audio_mime_type": tts_output.audio_mime_type or active_openai_pipeline.tts.audio_mime_type,
+            "audio_mime_type": tts_output.audio_mime_type or active_openai_provider_bundle.tts.audio_mime_type,
             "audio_base64": base64.b64encode(tts_output.audio_bytes).decode("ascii"),
             "timings_ms": timings_ms,
             "asr_model": practice_asr_model,
             "asr_timestamps": _serialize_asr_timestamps(asr_result),
             "providers": {
                 "asr": asr_provider.name,
-                "translation": active_openai_pipeline.translator.name,
-                "tts": active_openai_pipeline.tts.name,
+                "translation": active_openai_provider_bundle.translator.name,
+                "tts": active_openai_provider_bundle.tts.name,
             },
         }
         active_audio_history_store.save_output(
@@ -2367,158 +2194,6 @@ def create_app(
         )
         return result
 
-    @app.post("/api/translate-speech")
-    async def translate_speech(
-        audio: Annotated[UploadFile, File()],
-        source_language: Annotated[str, Form()],
-        target_language: Annotated[str, Form()],
-        translation_backend: Annotated[str, Form()] = "openai",
-        voice_mode: Annotated[str, Form()] = "default",
-        text_transform: Annotated[str | None, Form()] = None,
-        text_transform_options: Annotated[str | None, Form()] = None,
-        text_transform_suffix: Annotated[str | None, Form()] = None,
-        text_transform_unit: Annotated[str, Form()] = "text",
-        seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
-        seed_vc_length_adjust: Annotated[float | None, Form()] = None,
-        seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
-        seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
-        seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
-        input_history_kind: Annotated[str | None, Form()] = None,
-        input_history_filename: Annotated[str | None, Form()] = None,
-    ) -> dict[str, object]:
-        audio_bytes = await audio.read()
-        input_suffix = _upload_suffix(audio.filename)
-        recording_entry = None
-        if not _is_reused_history_input(active_audio_history_store, input_history_kind, input_history_filename):
-            recording_entry = _save_audio_history_recording(
-                active_audio_history_store,
-                audio_bytes,
-                suffix=input_suffix,
-                metadata={
-                    "endpoint": "translate-speech",
-                    "translation_backend": translation_backend,
-                    "source_language": source_language,
-                    "target_language": target_language,
-                    "voice_mode": voice_mode,
-                    "filename": audio.filename or "",
-                    "content_type": audio.content_type or "",
-                },
-            )
-        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename)) as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_audio.flush()
-
-            request = _create_pipeline_request(
-                Path(temp_audio.name),
-                source_language,
-                target_language,
-                voice_mode,
-                text_transform,
-                text_transform_options,
-                text_transform_suffix,
-                text_transform_unit,
-                seed_vc_diffusion_steps,
-                seed_vc_length_adjust,
-                seed_vc_inference_cfg_rate,
-                seed_vc_reference_max_seconds,
-                seed_vc_reference_auto_select,
-            )
-            try:
-                result = _select_translation_pipeline(translation_pipelines, translation_backend).run(request)
-            except (FileNotFoundError, ValueError) as exc:
-                LOGGER.exception("translate_speech failed: backend=%s", translation_backend)
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
-                LOGGER.exception("translate_speech failed: backend=%s", translation_backend)
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        active_audio_history_store.update_metadata(recording_entry, _history_text_metadata_from_recording_result(result))
-        active_audio_history_store.save_output(
-            result.output_audio_bytes,
-            suffix=_mime_suffix(result.output_audio_mime_type),
-            metadata={
-                "endpoint": "translate-speech",
-                "translation_backend": translation_backend,
-                "source_language": source_language,
-                "target_language": result.target_language or target_language,
-                "voice_mode": voice_mode,
-                "audio_mime_type": result.output_audio_mime_type,
-                **_history_text_metadata_from_pipeline_result(result),
-            },
-        )
-        return _serialize_pipeline_result(result)
-
-    @app.post("/api/translate-speech-jobs")
-    async def create_translate_speech_job(
-        audio: Annotated[UploadFile, File()],
-        source_language: Annotated[str, Form()],
-        target_language: Annotated[str, Form()],
-        translation_backend: Annotated[str, Form()] = "openai",
-        voice_mode: Annotated[str, Form()] = "default",
-        text_transform: Annotated[str | None, Form()] = None,
-        text_transform_options: Annotated[str | None, Form()] = None,
-        text_transform_suffix: Annotated[str | None, Form()] = None,
-        text_transform_unit: Annotated[str, Form()] = "text",
-        seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
-        seed_vc_length_adjust: Annotated[float | None, Form()] = None,
-        seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
-        seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
-        seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
-        input_history_kind: Annotated[str | None, Form()] = None,
-        input_history_filename: Annotated[str | None, Form()] = None,
-    ) -> dict[str, object]:
-        audio_bytes = await audio.read()
-        input_suffix = _upload_suffix(audio.filename)
-        recording_entry = None
-        if not _is_reused_history_input(active_audio_history_store, input_history_kind, input_history_filename):
-            recording_entry = _save_audio_history_recording(
-                active_audio_history_store,
-                audio_bytes,
-                suffix=input_suffix,
-                metadata={
-                    "endpoint": "translate-speech-jobs",
-                    "translation_backend": translation_backend,
-                    "source_language": source_language,
-                    "target_language": target_language,
-                    "voice_mode": voice_mode,
-                    "filename": audio.filename or "",
-                    "content_type": audio.content_type or "",
-                },
-            )
-        with NamedTemporaryFile(suffix=_upload_suffix(audio.filename), delete=False) as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_audio.flush()
-            audio_path = Path(temp_audio.name)
-
-        request = _create_pipeline_request(
-            audio_path,
-            source_language,
-            target_language,
-            voice_mode,
-            text_transform,
-            text_transform_options,
-            text_transform_suffix,
-            text_transform_unit,
-            seed_vc_diffusion_steps,
-            seed_vc_length_adjust,
-            seed_vc_inference_cfg_rate,
-            seed_vc_reference_max_seconds,
-            seed_vc_reference_auto_select,
-        )
-        try:
-            return job_store.start(request, audio_path, translation_backend, recording_entry=recording_entry)
-        except ValueError as exc:
-            LOGGER.exception("create_translate_speech_job failed: backend=%s", translation_backend)
-            audio_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/api/translate-speech-jobs/{job_id}")
-    def get_translate_speech_job(job_id: str) -> dict[str, object]:
-        try:
-            return job_store.snapshot(job_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="job not found") from exc
-
     @app.post("/api/text-to-speech-jobs")
     async def create_text_to_speech_job(
         text: Annotated[str, Form()],
@@ -2537,32 +2212,16 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
 
-    @app.post("/api/openai-realtime-translation-session")
-    def create_openai_realtime_translation_session(
-        payload: dict[str, str] = Body(...),
-    ) -> dict[str, object]:
-        try:
-            return create_openai_realtime_translation_client_secret(payload.get("target_language", "ja-JP"))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
     @app.post("/api/voice-conversion-jobs")
     async def create_voice_conversion_job(
         source_audio: Annotated[UploadFile, File()],
         reference_audio: Annotated[UploadFile, File()],
-        audio_effect_audio: Annotated[UploadFile | None, File()] = None,
         voice_backend: Annotated[str, Form()] = "seed-vc",
         seed_vc_diffusion_steps: Annotated[int | None, Form()] = None,
         seed_vc_length_adjust: Annotated[float | None, Form()] = None,
         seed_vc_inference_cfg_rate: Annotated[float | None, Form()] = None,
         seed_vc_reference_max_seconds: Annotated[float | None, Form()] = None,
         seed_vc_reference_auto_select: Annotated[bool | None, Form()] = None,
-        audio_effect_enabled: Annotated[bool, Form()] = False,
-        audio_effect_insert_mode: Annotated[str, Form()] = "silence_or_tail",
-        audio_effect_max_insertions: Annotated[int, Form()] = 1,
-        audio_effect_min_silence_ms: Annotated[int, Form()] = 300,
     ) -> dict[str, object]:
         source_audio_bytes = await source_audio.read()
         source_suffix = _upload_suffix(source_audio.filename)
@@ -2589,22 +2248,6 @@ def create_app(
             reference_audio_path = Path(temp_reference.name)
         audio_paths = [source_audio_path, reference_audio_path]
 
-        audio_effect_path: Path | None = None
-        audio_effect_settings: AudioEffectInsertSettings | None = None
-        if audio_effect_enabled and audio_effect_audio is not None:
-            audio_effect_bytes = await audio_effect_audio.read()
-            if audio_effect_bytes:
-                with NamedTemporaryFile(suffix=_upload_suffix(audio_effect_audio.filename), delete=False) as temp_effect:
-                    temp_effect.write(audio_effect_bytes)
-                    temp_effect.flush()
-                    audio_effect_path = Path(temp_effect.name)
-                audio_paths.append(audio_effect_path)
-                audio_effect_settings = AudioEffectInsertSettings(
-                    insert_mode=audio_effect_insert_mode,
-                    max_insertions=max(1, min(audio_effect_max_insertions, 5)),
-                    min_silence_ms=max(100, min(audio_effect_min_silence_ms, 2000)),
-                )
-
         request = VoiceConversionRequest(
             source_audio_path=source_audio_path,
             reference_audio_path=reference_audio_path,
@@ -2616,8 +2259,6 @@ def create_app(
                 reference_max_seconds=seed_vc_reference_max_seconds,
                 reference_auto_select=seed_vc_reference_auto_select,
             ),
-            audio_effect_path=audio_effect_path,
-            audio_effect_settings=audio_effect_settings,
         )
         return voice_conversion_job_store.start(request, audio_paths)
 

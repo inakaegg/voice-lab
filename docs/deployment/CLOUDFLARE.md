@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-07-29
+更新日: 2026-07-30
 
 ## 目的
 
@@ -18,13 +18,13 @@
 Browser
   -> Cloudflare Worker Static Assets
   -> Cloudflare Worker API gateway
-  -> OpenAI API: 母語ASR、英語復唱ASR、翻訳、TTS、表示用テキスト加工、ジョークTTS
+  -> OpenAI API: 母語ASR、英語復唱ASR、翻訳、TTS、表示用テキスト加工
   -> private RunPod Serverless Job API: 中国語復唱FunASR、Seed-VC、warmup
 ```
 
 ## 退役route
 
-旧研究機能のrouteはWorkerが404を返す。対象は `/skitvoice`・`/skitvoice/admin`・`/vibevoice`・`/vibevoice/simple`・`/vibevoice/admin` と、その直接配信用HTMLである。
+旧研究機能のrouteはWorkerが404を返す。対象は `/fun`・`/user`・`/skitvoice`・`/skitvoice/admin`・`/vibevoice*`・`/seed-vc` である。旧HTMLの直接指定と旧音声翻訳APIも404を返す。
 
 ## 秘密情報
 
@@ -38,7 +38,7 @@ Browser
 - `PUBLIC_SESSION_SECRET`
 - `ADMIN_GOOGLE_EMAILS`
 
-`RUNPOD_API_KEY` は可能なら対象endpointだけに権限を絞ったRestricted API keyにする。OpenAI API keyは、Worker側で完結する処理に使う。対象処理はASR・翻訳・TTS・表示用ひらがな・短いテキスト加工・ジョークTTSなどである。
+`RUNPOD_API_KEY` は可能なら対象endpointだけに権限を絞ったRestricted API keyにする。OpenAI API keyはWorker側で完結する処理に使う。対象処理はASR・翻訳・TTS・表示用ひらがなである。
 
 `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` は、公開デモの生成APIと管理画面で共用するGoogle OAuth clientである。`PUBLIC_SESSION_SECRET` はGoogleログインcookieへの署名に使い、他のsecretへfallbackさせない。`ADMIN_GOOGLE_EMAILS` は、管理画面へアクセスできるGoogleアカウントをカンマ区切りで指定する。管理画面側の設定にも管理者メールを追加でき、secret側と保存設定側の和集合を管理者扱いにする。管理者は公開生成quotaを消費しない。ただし入力サイズ上限は適用する。
 
@@ -59,47 +59,31 @@ Google OAuth clientの「承認済みのリダイレクトURI」には `https://
 
 ## API gateway範囲
 
-Workerは次のAPI互換エンドポイントを提供する。
+Workerは次の主要なAPI互換エンドポイントを提供する。
 
 - `GET /api/runtime`
-- `GET /api/user-settings`
-- `POST /api/user-display-text`
-- `POST /api/user-text-output`
-- `POST /api/user-joke-output`
+- `GET /api/public-session`
+- `GET /api/public-access-settings`
+- `GET /api/public-sample-audios`
+- `POST /api/practice/prompts`
 - `POST /api/practice/recordings`
 - `POST /api/practice/attempt-jobs`
 - `GET /api/practice/attempt-jobs/{job_id}`
-- `POST /api/translate-speech-jobs`
-- `GET /api/translate-speech-jobs/{job_id}`
+- `GET /api/practice/voice-jobs/{job_id}`
 - `POST /api/voice-conversion-jobs`
 - `GET /api/voice-conversion-jobs/{job_id}`
-- `GET /api/practice/voice-jobs/{job_id}`
 - `POST /api/warmup`
-
-音声翻訳のASR、翻訳、TTSはCloudflare WorkerからOpenAI APIを直接呼び、POST時点で `succeeded` の完了jobとして返す。既存UIとの互換のため、完了job snapshotは短時間KVに保存し、`GET /api/translate-speech-jobs/{job_id}` でも同じ結果を返す。
+- `GET /api/warmup/{job_id}`
 
 Seed-VC・warmup・SpeakLoopの中国語復唱比較はRunPod Serverlessの非同期jobへ中継する。RunPodのjob IDをUI向けjob IDとして返し、status pollingで `queued`・`running`・`succeeded`・`failed` 形式へ変換する。中国語比較では、お手本と復唱の両音声を1つのRunPod jobへ送る。progress updateと `/health` を使ってUIへ返す状態は、worker割り当て待ち・worker初期化・FunASRモデル読込・両音声の解析・完了／失敗である。status pollingはquotaを追加消費しない。
 
 SpeakLoopの英語復唱比較はWorkerがお手本と復唱の両音声をOpenAI `whisper-1` で並列解析し、同じjob snapshot形式の完了結果をPOSTのレスポンスで直接返す。
 
-## ユーザー設定と音声履歴の境界
+## 設定と音声履歴の境界
 
-Cloudflareデモでは、管理画面から保存するユーザー画面設定をWorkers KVへ保存する。KV binding は `MO_SPEECH_KV` とし、bindingが無い環境では `USER_SETTINGS_JSON` とWorkerプロセス内の一時設定へfallbackする。
+Cloudflareデモでは、公開アクセス設定をWorkers KVへ保存する。KV bindingは `MO_SPEECH_KV` とする。bindingが無いテスト環境ではWorker process内の一時設定へfallbackする。
 
-例:
-
-```json
-{
-  "joke_texts": ["Aku cuma bercanda."],
-  "joke_position": "after",
-  "joke_selection": "rotation",
-  "theme": "blue"
-}
-```
-
-ジョーク候補は管理画面保存時に正規化し、`joke_variation_count` が1以上ならOpenAI Responses APIでバリエーションを生成して `joke_variants` と `joke_pool` に保存する。ユーザーの変換処理中にはバリエーション生成を行わない。
-
-音声履歴はローカルFastAPI版だけの機能とする。Cloudflare版は入力音声と生成音声を履歴として保存しない。対象は翻訳・VC・SpeakLoop・TTSである。共有管理画面との状態判定用に `GET /api/audio-history` と `GET /api/practice-history` は `enabled: false` と空配列を返すが、履歴音声の登録・取得・削除APIは提供しない。
+音声履歴はローカルFastAPI版だけの機能とする。Cloudflare版はSpeakLoopやVCの音声を履歴として保存しない。共有管理画面との状態判定用に `GET /api/audio-history` と `GET /api/practice-history` は `enabled: false` と空配列を返す。履歴音声の登録・取得・削除APIは提供しない。
 
 公開サンプル音声はblobをR2、metadataをD1へ置く。bindingがないローカル・テスト環境ではKVへfallbackする。R2 bindingは公開サンプル用であり、ユーザー音声履歴の保存を有効にしない。
 
@@ -114,7 +98,7 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 - `PUBLIC_GOOGLE_AUTH_REQUIRED=1` または管理画面設定でGoogleログイン必須にする。
 - ログイン済みGoogleアカウントのemailをSHA-256 hash化し、feature別の日次回数と累計回数をD1へ保存する。D1 bindingがない環境だけKVへfallbackする。
 - `ADMIN_GOOGLE_EMAILS` または管理画面設定の管理者メールに含まれるアカウントは、管理画面へアクセスでき、日次・累計quotaを消費しない。
-- quota対象は、SpeakLoop録音、従来の音声変換/TTS、Seed-VC変換である。管理者は公開quotaを消費しない。
+- quota対象はSpeakLoop録音とSeed-VC変換である。管理者は公開quotaを消費しない。
 - job status polling、静的ページ表示、runtime確認、管理画面閲覧は公開quotaを消費しない。
 - Google OAuth設定が不足している状態でGoogleログイン必須にした場合、生成APIは `503` を返す。課金APIを開放したまま失敗するより、fail closedを優先する。
 
@@ -123,7 +107,6 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 - Googleログイン必須のON/OFF
 - 管理画面へのアクセスを許可するGoogle email
 - SpeakLoopの日次/累計回数、録音最大byte数、対象文最大文字数
-- へんな変換/翻訳/TTSの日次/累計回数、録音最大byte数、テキスト最大文字数
 - Seed-VCの日次/累計回数、source/reference音声最大byte数
 
 入力上限は生成前に検証する。上限超過はquotaを消費しない。quota消費は入力検証後、外部APIやRunPodへ送る直前にD1で更新する。この構成は公開デモの過剰利用防止を目的とし、厳密な課金制御ではない。課金水準の強い同時更新保証が必要になった場合はDurable Objectsを検討する。
@@ -142,7 +125,7 @@ sample metadataはD1、音声blobは非公開R2へ保存する。過去の研究
 
 RunPod endpointはFlashBootを有効にしてcontainer cold start短縮を狙う。ただしFlashBootはSeed-VCの実推論や初回モデルロードそのものを必ず消す機能ではないため、体感が遅い場合はwarmup job、`serverless_timings_ms`、`timings_ms.voice_conversion` を分けて確認する。
 
-ユーザー画面は既定ではページロード後に `POST /api/warmup` を投げない。ユーザー画面の準備状態は小さい状態ドットだけにし、未準備でも録音送信時の実変換jobでRunPodが起動する。デモ前にcold startとSeed-VC preloadを前倒ししたい場合は、管理者用画面 `/admin` の手動準備ボタンから `POST /api/warmup` を実行する。検証用途などでユーザー画面ロード時の自動warmupを戻したい場合だけ、`RUNPOD_AUTO_WARMUP_ON_USER_LOAD=1` を明示設定する。
+公開画面はページロード時に `POST /api/warmup` を投げない。デモ前にcold startとSeed-VC preloadを前倒しする場合は `/admin` の手動準備ボタンを使う。ページ表示だけではRunPod jobを作らない。
 
 warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上で `providers.voice_conversion=seed-vc` またはVC出力が確認できた場合だけ、Cloudflare KVへ短時間のVC ready状態を保存する。ready状態は `RUNPOD_ENDPOINT_ID` ごとに分けて保存し、GPUやendpointを切り替えた後に旧endpointのready状態を流用しない。既定TTLは `RUNPOD_WARMUP_READY_TTL_SECONDS` または300秒とし、期限切れ後は `/api/runtime` がworkerを見つけても `model_resident=false` として返す。
 
@@ -150,11 +133,11 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 ## デプロイ
 
-`wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleでroute、認証、`/api/*` を処理する。`/`、`/speakloop` は公開する。`/admin`、`/speakloop/admin`、`/fun` は管理者認証で保護する。旧routeと旧HTML直指定は404にする。Static Assetsの `run_worker_first` と `html_handling="none"` を使い、認証前にHTML clean URL処理へ渡さない。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
+`wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleでrouteと認証を処理する。`/api/*` も同じmoduleが処理する。`/` と `/speakloop` は公開する。`/admin` と `/speakloop/admin` は管理者認証で保護する。旧routeと旧HTML直指定は404にする。Static Assetsの `run_worker_first` と `html_handling="none"` を使う。秘密情報はリポジトリへ書かず `wrangler secret put` で登録する。
 
-`workers.dev` のまま公開ページを認証なしにして管理機能を守るため、公開生成APIと管理機能の認証をWorker内のGoogle OAuthへ一本化する。対象routeは `/admin`、`/speakloop/admin`、`/fun` である。対象APIは管理画面が使う設定保存、履歴機能の状態確認、warmup APIである。未ログインの管理ページはGoogleログインへ遷移し、ログイン済みでもemailが管理者リストにない場合は403を返す。管理APIは同じ条件で401または403を返す。Google OAuth設定または管理者メールが不足する場合はfail closedで503を返す。
+`workers.dev` のまま公開ページを認証なしにして管理機能を守るため、公開生成APIと管理機能の認証をWorker内のGoogle OAuthへ一本化する。対象routeは `/admin` と `/speakloop/admin` である。対象APIは設定保存・履歴状態確認・warmup・管理者用VCである。未ログインの管理ページはGoogleログインへ遷移する。emailが管理者リストにない場合は403を返す。管理APIは同じ条件で401または403を返す。Google OAuth設定が不足する場合はfail closedで503を返す。
 
-`/fun`を含む公開生成APIも同じGoogleセッションを使う。`/fun`のテキスト・音声生成APIとSeed-VC APIは、公開生成のGoogleログイン必須設定にかかわらず管理者だけに許可する。許可範囲はjob作成、status polling、結果取得を含む。管理者メールに含まれるアカウントはquotaを消費しないが、入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
+管理画面の単体Seed-VCとwarmupは同じGoogleセッションを使う。単体Seed-VCはjob作成から結果取得まで管理者だけに許可する。管理者メールに含まれるアカウントはquotaを消費しない。入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
 production Workerとstaging Workerは配備済みである。現在は2 Workerを同じrepoから配備する。stagingの必須Worker secretは登録済みで、deploy後smokeも成功している。Googleログインの実操作確認は未実施である。
 
@@ -246,14 +229,14 @@ GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する�
 
 Workerは `/robots.txt` と `/sitemap.xml` を配信する。クロール許可は `PUBLIC_CANONICAL_ORIGIN` が要求originと一致する配備だけに与える。productionでは `wrangler.toml` の `[vars]` でこの値を公開URLへ設定する。stagingは設定しないため、robots.txtが全体Disallowを返しsitemapは404になる。`PUBLIC_GOOGLE_AUTH_REQUIRED` は生成APIのログイン必須設定でありページ閲覧を制限しないため、クロール可否の判定に使わない。
 
-sitemapへ載せるのは `/`・`/speakloop`・`/privacy` だけとする。管理系routeと `/api/`・`/auth/` はrobots.txtでDisallowする。対象の管理系routeは `/admin`・`/fun`・`/speakloop/admin` である。
+sitemapへ載せるのは `/`・`/speakloop`・`/privacy` だけとする。管理系routeと `/api/`・`/auth/` はrobots.txtでDisallowする。対象の管理系routeは `/admin` と `/speakloop/admin` である。
 
 deploy後smokeはrobots.txtとsitemap.xmlの整合も確認する。HTMLメタとWorker配信の回帰は `tests/react_public_ui.test.mjs` と `tests/cloudflare_worker.test.mjs` が検査する。Google Search Consoleへの登録とsitemap送信は外部操作のため未実施である。
 
 ## 制限
 
 - `MO_SPEECH_KV` binding が無い環境では、管理画面の設定を永続化できない。R2を設定してもCloudflare版のユーザー音声履歴は有効にならない。
-- 大きい録音ファイルはWorkerとRunPodのrequest size制限を受ける。ユーザー画面では短い録音を前提にする。
+- 大きい録音ファイルはWorkerとRunPodのrequest size制限を受ける。SpeakLoopでは短い録音を前提にする。
 - OpenAI ASR、翻訳、TTSはWorkerのHTTP request内で完了を待つ。SpeakLoop中国語復唱ASRはRunPodの非同期jobとprogress updateを使うが、queueの詳細原因や残高不足はRunPodが明示した範囲でしか判定できない。
 - SpeakLoop中国語比較の完了outputでは `practice_asr_contract_version=3` を必須とする。`model_audio_base64` を送ったjobでは `model_transcription` も必須とし、欠落時は旧RunPod imageとして再デプロイを案内する。
 - お手本ASRのキャッシュ命中により `model_audio_base64` を省略したjobは、`model_transcription` も返さない。この場合はWorkerまたはFastAPIがjobと対応付けたキャッシュ済みASRを使い、旧imageとは判定しない。

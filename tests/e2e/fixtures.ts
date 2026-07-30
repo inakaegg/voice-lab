@@ -16,7 +16,6 @@ const accessSettings = {
   google_login_required: false,
   admin_google_emails: ["portfolio-owner@example.com"],
   features: {
-    fun: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, text_max_chars: 500 },
     voice_conversion: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000 },
     speakloop: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, text_max_chars: 500 },
   },
@@ -47,7 +46,7 @@ function silentWav(seconds = 3): Buffer {
 
 export async function installUiApiFixtures(page: Page, options: UiFixtureOptions = {}) {
   let publicSamples: Record<string, unknown> = {
-    features: { fun: null, voice_conversion: null, speakloop: null },
+    features: { voice_conversion: null, speakloop: null },
   };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -233,7 +232,6 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
       }
       return json({ recordings: [], outputs: [], settings: { enabled: false } });
     }
-    if (path === "/api/user-settings") return json({ theme: "blue", joke_text: "", joke_pool: [], effect_audio_files: [] });
     if (path === "/api/runtime") {
       const local = options.practiceUiMode !== "cloudflare";
       return json({

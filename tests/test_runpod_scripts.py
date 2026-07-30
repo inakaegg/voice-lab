@@ -251,6 +251,10 @@ def test_runpod_smoke_script_supports_diagnostics_operation() -> None:
 
     assert '"diagnostics"' in script
     assert 'input_payload = {"operation_mode": "diagnostics"}' in script
+    assert '"translation"' not in script
+    assert "--translation-backend" not in script
+    assert "--source-language" not in script
+    assert "--voice-mode" not in script
 
 
 def test_runpod_smoke_script_supports_chinese_practice_asr() -> None:

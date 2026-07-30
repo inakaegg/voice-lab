@@ -29,8 +29,6 @@ def test_active_openai_text_defaults_do_not_use_gpt_5_5() -> None:
         "src/mo_speech/api.py",
         "src/mo_speech/providers/openai_api.py",
         "src/mo_speech/text_display.py",
-        "src/mo_speech/transforms.py",
-        "src/mo_speech/user_settings.py",
         "wrangler.toml",
     )
 

@@ -222,6 +222,10 @@ function useAudioBlobAsInput(blob, filename, message, historySource = null, sele
   renderInputAudioPreview(blob, recordedFileName);
   setInputAudioSelectionStatus(selectionLabel, blob, recordedFileName);
   recordingLabel.textContent = "入力に設定済み";
+  if (operationModeSelect.value !== "voice_conversion") {
+    operationModeSelect.value = "voice_conversion";
+    syncOperationMode();
+  }
   setStatus(message || "入力音声を設定しました");
 }
 
@@ -251,39 +255,6 @@ function useHistoryTextForTts(entry) {
     ensureTtsLanguage(targetLanguage);
   }
   setStatus("履歴テキストを読み上げ入力に設定しました");
-}
-
-function useTextResultForTts(source) {
-  const mapping = {
-    transcript: {
-      selector: "#transcript",
-      language: selectedSourceLanguage(),
-    },
-    translated: {
-      selector: "#translated-text",
-      language: form.target_language.value,
-    },
-    transformed: {
-      selector: "#transformed-text",
-      language: form.target_language.value,
-    },
-  };
-  const item = mapping[source];
-  if (!item) {
-    return;
-  }
-  const text = document.querySelector(item.selector)?.textContent?.trim() || "";
-  if (!text || text === "未実行") {
-    renderError("再利用できるテキストがありません");
-    return;
-  }
-  operationModeSelect.value = "text_tts";
-  ttsTextInput.value = text;
-  syncOperationMode();
-  if (item.language && item.language !== "auto") {
-    ensureTtsLanguage(item.language);
-  }
-  setStatus("テキストを読み上げ入力に設定しました");
 }
 
 function ensureTtsLanguage(language) {

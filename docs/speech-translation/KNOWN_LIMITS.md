@@ -1,6 +1,6 @@
 # 既知の制限
 
-更新日: 2026-07-20
+更新日: 2026-07-30
 
 ## 公開デモと外部依存
 
@@ -14,26 +14,17 @@
 - Seed-VCの類似度と自然さは、参照音声の長さ、雑音、話し方に依存する。生成物を私的利用の範囲を超えて公開・共有する場合は、参照音声の利用条件を確認する。
 - Qwen3-TTSとSeed-VCの依存は重く、CPU実行では実用速度に届かない可能性が高い。
 
-## URL参照音声
-
-- URLからの参照音声切り出しはローカルFastAPI版だけの補助機能で、Cloudflare公開版とRunPod handlerはURLを受け取らない。
-- ローカル版でも、YouTube等の公開状態・地域制限・ログイン要求・bot対策により取得できない場合がある。yt-dlp側の追随状況にも依存する。
-- `yt-dlp` は対応版Nodeを `--js-runtimes node` で使う。cookieやPO Tokenは既定機能に含めない。
-- URL取得に失敗した時点ではRunPod処理は開始されていない。
-
 ## ブラウザ
 
-- マイク録音とタブ音声録音にはブラウザ権限と安全なcontextが必要。タブ音声はブラウザが共有対象と音声共有を提示できる場合だけ利用できる。
-- Chromeでの主要動作を基準とする。Safari/Firefox、スマートフォン実機の録音形式、権限、タブ共有は継続確認が必要。
-- タブ音声録音は、ユーザーが選んだ共有対象の音声だけをブラウザ内で録音し、URLやcookieを取得しない。
-- ブラウザのタブ共有許可は公開・再利用の許諾ではない。生成物を公開・共有・再利用する場合は、参照したコンテンツの利用条件を別途確認する。
+- マイク録音にはブラウザ権限と安全なcontextが必要である。
+- Chromeでの主要動作を基準とする。Safari、Firefox、スマートフォン実機の録音形式と権限は継続確認が必要である。
 
 ## 保存とプライバシー
 
 - ローカルFastAPI版はローカル音声履歴と公開サンプルを保存できる。公開サンプルの既定保存先は `tmp/public-sample-audios.json` で、Cloudflare版と同じ管理・表示API契約を使う。
 - Cloudflare公開版はユーザーの入力・生成音声を履歴保存しない。D1へquota・監査・公開サンプルmetadata、R2へ公開サンプルblobだけを置く。
 - D1/R2 bindingがないローカル・preview環境では、公開サンプル、quota、監査にWorkers KV fallbackを使う。
-- 音声翻訳など一部の短期job stateと軽量設定はWorkers KVに残る。SpeakLoopの中国語復唱jobはWorkerがRunPod statusを都度中継し、音声・結果・job snapshotをCloudflare側の履歴に保存しない。
+- SpeakLoopの短期job stateとwarmup ready状態はWorkers KVに残る。中国語復唱jobはWorkerがRunPod statusを都度中継し、音声と結果をCloudflare側の履歴に保存しない。
 - 現在のquotaは公開デモの過剰利用防止であり、厳密な課金台帳や永続workflow engineではない。
 - 公開デモへ機密情報、個人情報、第三者の権利が不明な音声を入力しない。公開サンプルには公開許諾を確認できる素材だけを登録する。
 

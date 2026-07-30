@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speakloopHtml, adminHtml, practiceAdminHtml, funHtml] = await Promise.all([
+const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speakloopHtml, adminHtml, practiceAdminHtml] = await Promise.all([
   read("package.json"),
   read("pyproject.toml"),
   read("src/mo_speech/api.py"),
@@ -14,7 +14,6 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speaklo
   read("apps/web/speakloop.html"),
   read("src/mo_speech/web/index.html"),
   read("src/mo_speech/web/practice_admin.html"),
-  read("src/mo_speech/web/user.html"),
 ]);
 const portalStyles = await read("apps/web/src/portal/styles.css");
 
@@ -32,12 +31,12 @@ test("Voice Lab is the application and package brand without renaming the Python
 
 test("all active pages use the built Voice Lab style assets instead of direct legacy CSS", () => {
   assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
-  for (const html of [speakloopHtml, adminHtml, practiceAdminHtml, funHtml]) {
+  for (const html of [speakloopHtml, adminHtml, practiceAdminHtml]) {
     assert.doesNotMatch(html, /\/static\/styles\.css/);
   }
   assert.match(viteConfig, /appStyles/);
   assert.match(speakloopHtml, /src\/styles\/app\.css/);
-  for (const html of [adminHtml, practiceAdminHtml, funHtml]) {
+  for (const html of [adminHtml, practiceAdminHtml]) {
     assert.match(html, /\/react\/assets\/app\.css/);
   }
 });
@@ -49,7 +48,6 @@ test("all active pages use the shared multi-size Voice Lab favicon", async () =>
     speakloopHtml,
     adminHtml,
     practiceAdminHtml,
-    funHtml,
   ]) {
     assert.match(html, /<link rel="icon" href="\/react\/favicon\.ico" sizes="any" \/>/);
   }
@@ -81,7 +79,7 @@ test("all admin pages expose a consistent Voice Lab admin shell and navigation",
     assert.match(html, /admin-nav/);
     assert.match(html, /href="\/admin"/);
     assert.match(html, /href="\/speakloop\/admin"/);
-    assert.match(html, /href="\/fun">実験画面<\/a>/);
+    assert.doesNotMatch(html, /href="\/fun"/);
   }
 });
 

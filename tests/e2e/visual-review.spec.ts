@@ -10,7 +10,6 @@ const routes = [
   { path: "/privacy", slug: "privacy" },
   { path: "/admin", slug: "admin" },
   { path: "/speakloop/admin", slug: "speakloop-admin" },
-  { path: "/fun", slug: "fun" },
 ] as const;
 
 test.beforeEach(async ({ page }) => {

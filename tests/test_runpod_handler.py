@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from mo_speech import runpod_handler
-from mo_speech.pipeline import PipelineProgress, PipelineResult, TtsOutput
+from mo_speech.pipeline import OperationProgress, TtsOutput
 from mo_speech.providers.openai_api import AsrTranscription
 from mo_speech.providers.voice import VoiceConversionBackendInfo, VoiceConversionService
 
@@ -25,76 +25,6 @@ def test_runpod_progress_failure_does_not_abort_processing(monkeypatch: pytest.M
         {"id": "job-1"},
         {"stage": "loading_model", "label": "FunASRモデルを読み込んでいます"},
     )
-
-
-def test_runpod_handler_translates_base64_audio(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
-    monkeypatch.setattr(runpod_handler, "_PIPELINE_LOAD_MS", None)
-    event = {
-        "input": {
-            "audio_base64": base64.b64encode(b"fake audio").decode("ascii"),
-            "translation_backend": "qwen",
-            "source_language": "ja-JP",
-            "target_language": "zh-CN",
-            "voice_mode": "default",
-        }
-    }
-
-    payload = runpod_handler.handler(event)
-
-    assert payload["transcript"] == "ありがとう。"
-    assert payload["translated_text"] == "谢谢。"
-    assert payload["audio_mime_type"] == "audio/wav"
-    assert payload["providers"] == {"asr": "fake-asr", "translation": "fake-translation", "tts": "fake-tts"}
-    assert payload["audio_base64"] != ""
-    assert payload["serverless"]["operation_mode"] == "translation"
-    assert payload["serverless"]["worker_cold"] is True
-    assert payload["serverless_timings_ms"]["handler_total"] >= 0
-    assert payload["serverless_timings_ms"]["pipeline_load"] >= 0
-
-
-def test_runpod_handler_defaults_to_openai_translation_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = {}
-
-    class FakePipeline:
-        def run(self, request):
-            captured["translation_backend"] = "openai"
-            return PipelineResult(
-                transcript="こんにちは。",
-                translated_text="Halo.",
-                transformed_text="Halo.",
-                output_audio_bytes=b"openai audio",
-                output_audio_mime_type="audio/wav",
-                timings_ms={"total": 1.0},
-                providers={
-                    "asr": "fake-openai-asr",
-                    "translation": "fake-openai-translation",
-                    "tts": "fake-openai-tts",
-                },
-            )
-
-    def fake_translation_pipeline(translation_backend):
-        captured["translation_backend"] = translation_backend
-        return FakePipeline(), 1.0
-
-    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
-    event = {
-        "input": {
-            "audio_base64": base64.b64encode(b"fake audio").decode("ascii"),
-            "source_language": "ja-JP",
-            "target_language": "zh-CN",
-            "voice_mode": "default",
-        }
-    }
-
-    payload = runpod_handler.handler(event)
-
-    assert captured["translation_backend"] == "openai"
-    assert payload["providers"] == {
-        "asr": "fake-openai-asr",
-        "translation": "fake-openai-translation",
-        "tts": "fake-openai-tts",
-    }
 
 
 def test_runpod_handler_transcribes_chinese_practice_with_funasr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,25 +225,6 @@ def test_runpod_handler_releases_voice_conversion_before_funasr(monkeypatch: pyt
     assert runpod_handler._VOICE_CONVERSION_SERVICE_LOAD_MS is None
 
 
-def test_runpod_handler_accepts_user_effect_options_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
-    event = {
-        "input": {
-            "audio_base64": base64.b64encode(b"fake audio").decode("ascii"),
-            "translation_backend": "qwen",
-            "source_language": "ja-JP",
-            "target_language": "zh-CN",
-            "voice_mode": "default",
-            "text_transform": "user_effects",
-            "text_transform_options": '{"joke_text":"先にひとこと。","joke_position":"before"}',
-        }
-    }
-
-    payload = runpod_handler.handler(event)
-
-    assert payload["transformed_text"] == "先にひとこと。 谢谢。"
-
-
 def test_runpod_handler_converts_voice_base64_audio(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = FakeVcProvider()
     monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([provider]))
@@ -368,49 +279,6 @@ def test_runpod_handler_reports_seed_vc_model_progress(monkeypatch: pytest.Monke
     assert all(item["model"] for item in progress)
 
 
-def test_runpod_handler_inserts_audio_effect_after_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider = FakeVcProvider()
-    captured = {}
-
-    def fake_insert(payload, output_audio_bytes, output_audio_mime_type):
-        captured["payload"] = payload
-        captured["output_audio_bytes"] = output_audio_bytes
-        captured["output_audio_mime_type"] = output_audio_mime_type
-        return runpod_handler.AudioEffectInsertResult(
-            audio_bytes=b"converted with effect",
-            audio_mime_type="audio/wav",
-            timings_ms={"audio_effect_insert": 2.0},
-            warnings=[],
-            inserted_count=1,
-            insertion_points=[0.5],
-        )
-
-    monkeypatch.setattr(runpod_handler, "_VOICE_CONVERSION_SERVICE", VoiceConversionService([provider]))
-    monkeypatch.setattr(runpod_handler, "_insert_audio_effect_from_payload", fake_insert)
-    event = {
-        "input": {
-            "operation_mode": "voice_conversion",
-            "source_audio_base64": base64.b64encode(b"source audio").decode("ascii"),
-            "reference_audio_base64": base64.b64encode(b"reference audio").decode("ascii"),
-            "audio_effect_audio_base64": base64.b64encode(b"moo").decode("ascii"),
-            "audio_effect_audio_mime_type": "audio/mpeg",
-            "audio_effect_enabled": True,
-            "audio_effect_insert_mode": "silence_or_tail",
-            "audio_effect_max_insertions": 2,
-            "audio_effect_min_silence_ms": 450,
-        }
-    }
-
-    payload = runpod_handler.handler(event)
-
-    assert captured["output_audio_bytes"] == b"fake converted wav"
-    assert payload["audio_base64"] == base64.b64encode(b"converted with effect").decode("ascii")
-    assert payload["providers"]["audio_effect_insert"] == "ffmpeg"
-    assert payload["timings_ms"]["audio_effect_insert"] == 2.0
-    assert payload["audio_effect_inserted_count"] == 1
-    assert payload["audio_effect_insertion_points"] == [0.5]
-
-
 def test_runpod_handler_audio_suffix_ignores_mime_parameters() -> None:
     assert runpod_handler._audio_suffix("audio/webm;codecs=opus") == ".webm"
     assert runpod_handler._audio_suffix("video/webm; codecs=opus") == ".webm"
@@ -462,105 +330,85 @@ def test_runpod_handler_reports_worker_diagnostics(monkeypatch: pytest.MonkeyPat
     assert payload["serverless"]["operation_mode"] == "diagnostics"
 
 
-def test_runpod_handler_warms_translation_and_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runpod_handler_warms_voice_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
-
-    def fake_translation_pipeline(translation_backend):
-        calls.append(("translation", translation_backend))
-        return object(), 12.0
 
     def fake_voice_conversion_service():
         calls.append(("voice_conversion", "seed-vc"))
         return object(), 34.0
 
-    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
     monkeypatch.setattr(runpod_handler, "_voice_conversion_service", fake_voice_conversion_service)
 
     payload = runpod_handler.handler(
         {
             "input": {
                 "operation_mode": "warmup",
-                "translation_backend": "qwen",
-                "preload_translation": True,
                 "preload_voice_conversion": True,
             }
         }
     )
 
-    assert calls == [("translation", "qwen"), ("voice_conversion", "seed-vc")]
+    assert calls == [("voice_conversion", "seed-vc")]
     assert payload["warm"] is True
-    assert payload["providers"] == {"translation_backend": "qwen", "voice_conversion": "seed-vc"}
+    assert payload["providers"] == {"voice_conversion": "seed-vc"}
     assert payload["serverless"]["operation_mode"] == "warmup"
     assert payload["serverless"]["worker_cold"] is True
-    assert payload["serverless_timings_ms"]["pipeline_load"] == 12.0
     assert payload["serverless_timings_ms"]["voice_conversion_service_load"] == 34.0
 
 
-def test_runpod_handler_warmup_defaults_to_openai_translation_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runpod_handler_warms_practice_asr(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
-    def fake_translation_pipeline(translation_backend):
-        calls.append(("translation", translation_backend))
-        return object(), 12.0
+    def fake_funasr_practice_provider():
+        calls.append(("practice_asr", "funasr"))
+        return SimpleNamespace(name="funasr-paraformer-zh"), 12.0
 
-    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
+    monkeypatch.setattr(runpod_handler, "_funasr_practice_provider", fake_funasr_practice_provider)
 
     payload = runpod_handler.handler(
         {
             "input": {
                 "operation_mode": "warmup",
-                "preload_translation": True,
-                "preload_voice_conversion": False,
+                "preload_practice_asr": True,
             }
         }
     )
 
-    assert calls == [("translation", "openai")]
-    assert payload["providers"] == {"translation_backend": "openai"}
+    assert calls == [("practice_asr", "funasr")]
+    assert payload["providers"] == {"practice_asr": "funasr-paraformer-zh"}
+    assert payload["serverless_timings_ms"]["funasr_provider_load"] == 12.0
 
 
-def test_runpod_preload_defaults_to_openai_translation_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runpod_preload_loads_explicit_voice_conversion_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
-
-    def fake_translation_pipeline(translation_backend):
-        calls.append(("translation", translation_backend))
-        return object(), 12.0
 
     def fake_voice_conversion_service():
         calls.append(("voice_conversion", "seed-vc"))
         return object(), 34.0
 
-    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
     monkeypatch.setattr(runpod_handler, "_voice_conversion_service", fake_voice_conversion_service)
-    monkeypatch.setenv("MO_RUNPOD_PRELOAD_ON_START", "1")
     monkeypatch.setenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START", "1")
-    monkeypatch.delenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", raising=False)
+    monkeypatch.delenv("MO_RUNPOD_PRELOAD_FUNASR_ON_START", raising=False)
 
     runpod_handler._preload_for_serverless()
 
-    assert calls == [("translation", "openai"), ("voice_conversion", "seed-vc")]
+    assert calls == [("voice_conversion", "seed-vc")]
 
 
-def test_runpod_preload_skips_voice_conversion_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runpod_preload_skips_all_providers_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
-
-    def fake_translation_pipeline(translation_backend):
-        calls.append(("translation", translation_backend))
-        return object(), 12.0
 
     def fake_voice_conversion_service():
         calls.append(("voice_conversion", "seed-vc"))
         return object(), 34.0
 
-    monkeypatch.setattr(runpod_handler, "_translation_pipeline", fake_translation_pipeline)
     monkeypatch.setattr(runpod_handler, "_voice_conversion_service", fake_voice_conversion_service)
-    monkeypatch.setenv("MO_RUNPOD_PRELOAD_ON_START", "1")
     monkeypatch.delenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START", raising=False)
-    monkeypatch.delenv("RUNPOD_SERVERLESS_TRANSLATION_BACKEND", raising=False)
+    monkeypatch.delenv("MO_RUNPOD_PRELOAD_FUNASR_ON_START", raising=False)
 
     runpod_handler._preload_for_serverless()
 
-    assert calls == [("translation", "openai")]
+    assert calls == []
 
 
 def test_runpod_voice_conversion_service_preloads_provider_on_first_load(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -604,11 +452,10 @@ def test_runpod_funasr_provider_can_skip_alignment_preload(monkeypatch: pytest.M
     assert calls == [False]
 
 
-def test_runpod_handler_requires_audio_base64(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runpod_handler, "_PIPELINE", None)
-
-    with pytest.raises(ValueError, match="audio_base64 is required"):
-        runpod_handler.handler({"input": {"source_language": "ja-JP", "target_language": "zh-CN"}})
+@pytest.mark.parametrize("operation_mode", ["", "translation", "translate"])
+def test_runpod_handler_rejects_retired_translation_operations(operation_mode: str) -> None:
+    with pytest.raises(ValueError, match=f"unsupported operation_mode: {operation_mode}"):
+        runpod_handler.handler({"input": {"operation_mode": operation_mode}})
 
 
 @pytest.mark.parametrize(
@@ -642,7 +489,7 @@ class FakeVcProvider:
     def convert(self, *, source_audio_path, reference_audio_path, seed_vc_settings=None, progress_callback=None):
         self.last_seed_vc_settings = seed_vc_settings
         if progress_callback is not None:
-            progress_callback(PipelineProgress("voice_conversion", "声質変換", self.name))
+            progress_callback(OperationProgress("voice_conversion", "声質変換", self.name))
         return type(
             "FakeTtsOutput",
             (),

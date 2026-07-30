@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = await readFile(new URL("../src/mo_speech/web/app_user.js", import.meta.url), "utf8");
-const userHtml = await readFile(new URL("../src/mo_speech/web/user.html", import.meta.url), "utf8");
 const practiceSource = await readFile(new URL("../src/mo_speech/web/app_practice.js", import.meta.url), "utf8");
 const practicePlaybackSource = await readFile(new URL("../src/mo_speech/web/practice_playback.js", import.meta.url), "utf8");
 const practiceAdminHtml = await readFile(new URL("../src/mo_speech/web/practice_admin.html", import.meta.url), "utf8");
@@ -11,48 +9,39 @@ const practiceHistorySource = await readFile(new URL("../src/mo_speech/web/app_p
 const publicSessionSource = await readFile(new URL("../src/mo_speech/web/app_public_session.js", import.meta.url), "utf8");
 const publicAccessSettingsSource = await readFile(new URL("../src/mo_speech/web/app_public_access_settings.js", import.meta.url), "utf8");
 const publicSampleAudioSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio.js", import.meta.url), "utf8");
-const publicSampleAudioAdminSource = await readFile(new URL("../src/mo_speech/web/app_public_sample_audio_admin.js", import.meta.url), "utf8");
+const publicSampleAudioAdminSource = await readFile(
+  new URL("../src/mo_speech/web/app_public_sample_audio_admin.js", import.meta.url),
+  "utf8",
+);
 const sampleAudioControlsSource = await readFile(new URL("../src/mo_speech/web/app_sample_audio_controls.js", import.meta.url), "utf8");
 const adminHtml = await readFile(new URL("../src/mo_speech/web/index.html", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../src/mo_speech/web/app.js", import.meta.url), "utf8");
 const adminHistorySource = await readFile(new URL("../src/mo_speech/web/app_history.js", import.meta.url), "utf8");
-const adminSettingsSource = await readFile(new URL("../src/mo_speech/web/app_admin_settings.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/mo_speech/web/styles.css", import.meta.url), "utf8");
-
-test("user page only shows warmup as a passive status dot", () => {
-  assert.match(userHtml, /id="user-warmup-status"/);
-  assert.doesNotMatch(userHtml, />じゅんび/);
-  assert.match(source, /syncUserWarmupStatus\(seedVc\);/);
-  assert.doesNotMatch(source, /maybeStartUserWarmup\(seedVc\)/);
-  assert.doesNotMatch(source, /fetch\("\/api\/warmup"/);
-  assert.match(source, /userWarmupStatus\.dataset\.state/);
-  assert.doesNotMatch(source, /renderUserText\(userWarmupStatus/);
-  assert.match(styles, /\.user-warmup-status\s*\{[^}]*left:\s*clamp/s);
-  assert.match(styles, /\.user-warmup-status\[data-state="ready"\]::before/s);
-  assert.match(styles, /\.user-warmup-status\[data-state="cold"\]\s*\{[^}]*background:\s*#ffffff/s);
-  assert.match(styles, /\.user-warmup-status\[data-state="warming"\]\s*\{[^}]*animation:\s*warmup-dot-spin/s);
-  assert.match(styles, /\.user-warmup-status\[data-state="unknown"\]\s*\{[^}]*border-style:\s*dotted/s);
-});
 
 test("admin page can start RunPod warmup manually", () => {
   assert.match(adminHtml, /id="runpod-warmup-button"/);
   assert.match(adminHtml, /id="runpod-warmup-status"/);
   assert.match(adminHtml, /id="public-access-panel"/);
-  assert.match(adminHtml, /data-public-access-features="fun,voice_conversion"/);
-  assert.match(adminHtml, /data-public-feature="fun"/);
+  assert.match(adminHtml, /data-public-access-features="voice_conversion"/);
   assert.match(adminHtml, /data-public-feature="voice_conversion"/);
   assert.match(adminHtml, /data-public-feature-setting="audio_max_bytes"/);
   assert.match(adminHtml, /data-public-setting="google_login_required"/);
   assert.match(adminHtml, /data-public-samples-admin/);
-  assert.match(adminHtml, /data-public-samples-features="fun,voice_conversion"/);
-  assert.match(adminHtml, /data-public-sample-admin-feature="fun"/);
+  assert.match(adminHtml, /data-public-samples-features="voice_conversion"/);
   assert.match(adminHtml, /data-public-sample-admin-feature="voice_conversion"/);
+  assert.doesNotMatch(adminHtml, /data-public-sample-admin-feature="fun"/);
   assert.match(adminHtml, /\/static\/app_public_access_settings\.js/);
   assert.match(adminHtml, /\/static\/app_public_sample_audio_admin\.js/);
   assert.ok(adminHtml.indexOf("runpod-warmup-panel") < adminHtml.indexOf("operation_mode"));
   assert.match(adminSource, /runpodWarmupButton\.addEventListener\("click", startRunpodWarmup\)/);
   assert.match(adminSource, /fetch\("\/api\/warmup", \{ method: "POST" \}\)/);
   assert.match(adminSource, /fetch\(`\/api\/warmup\/\$\{encodeURIComponent\(jobId\)\}`\)/);
+  assert.match(publicSampleAudioAdminSource, /\/api\/public-sample-audios/);
+  assert.match(publicSampleAudioAdminSource, /method:\s*"DELETE"/);
+  assert.match(publicSampleAudioAdminSource, /data-public-sample-admin-feature/);
+  assert.match(publicSampleAudioAdminSource, /data-public-sample-delete/);
+  assert.match(publicSampleAudioAdminSource, /setPublicSampleActionButton/);
 });
 
 test("SpeakLoop controller keeps pronunciation training separate from conversion demo", () => {
@@ -223,19 +212,9 @@ test("practice history admin uses separated practice history API", () => {
   assert.match(publicAccessSettingsSource, /保存済み/);
   assert.match(publicAccessSettingsSource, /管理画面を許可するGoogleメール/);
   assert.match(publicAccessSettingsSource, /setPublicAccessSaveButton/);
-  assert.match(publicSampleAudioAdminSource, /\/api\/public-sample-audios/);
-  assert.match(publicSampleAudioAdminSource, /method:\s*"DELETE"/);
-  assert.match(publicSampleAudioAdminSource, /data-public-sample-admin-feature/);
-  assert.match(publicSampleAudioAdminSource, /data-public-sample-delete/);
-  assert.match(publicSampleAudioAdminSource, /setPublicSampleActionButton/);
-  assert.match(publicSampleAudioAdminSource, /保存中…/);
-  assert.match(publicSampleAudioAdminSource, /保存済み/);
-  assert.match(publicSampleAudioAdminSource, /削除中…/);
-  assert.match(publicSampleAudioAdminSource, /dataset\.state.*success/s);
   assert.doesNotMatch(practiceAdminHtml, /public-samples-header-status/);
-  assert.match(adminHtml, /id="user-settings-status"[^>]*role="status"/);
-  assert.match(adminSettingsSource, /保存中…/);
-  assert.match(adminSettingsSource, /保存済み/);
+  assert.doesNotMatch(adminHtml, /id="user-settings-status"/);
+  assert.doesNotMatch(adminHtml, /\/static\/app_admin_settings\.js/);
 });
 
 test("shared admin hides local-only history when the server disables it", () => {

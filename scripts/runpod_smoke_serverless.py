@@ -30,13 +30,15 @@ def _optional_int_env(name: str) -> int | None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, practice-ASR, text-TTS, or voice-conversion smoke request.")
+    parser = argparse.ArgumentParser(
+        description="Run a RunPod Serverless practice-ASR, text-TTS, voice-conversion, warmup, or diagnostics smoke request."
+    )
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
     parser.add_argument(
         "--operation-mode",
-        choices=("translation", "practice_asr", "text_tts", "voice_conversion", "warmup", "diagnostics"),
-        default="translation",
+        choices=("practice_asr", "text_tts", "voice_conversion", "warmup", "diagnostics"),
+        default="diagnostics",
     )
     parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
     parser.add_argument("--audio")
@@ -45,19 +47,12 @@ def main() -> int:
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
     parser.add_argument("--target-text", default=os.getenv("RUNPOD_SMOKE_TARGET_TEXT"))
     parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "google_translate"))
-    parser.add_argument("--translation-backend", default=os.getenv("RUNPOD_SMOKE_TRANSLATION_BACKEND", "openai"))
-    parser.add_argument("--source-language", default=os.getenv("RUNPOD_SMOKE_SOURCE_LANGUAGE", "id-ID"))
     parser.add_argument("--target-language", default=os.getenv("RUNPOD_SMOKE_TARGET_LANGUAGE", "ja-JP"))
-    parser.add_argument("--voice-mode", default=os.getenv("RUNPOD_SMOKE_VOICE_MODE", "convert"))
     parser.add_argument("--voice-backend", default=os.getenv("RUNPOD_SMOKE_VOICE_BACKEND", "seed-vc"))
     parser.add_argument("--seed-vc-diffusion-steps", type=int)
     parser.add_argument("--seed-vc-reference-max-seconds", type=float)
     parser.add_argument("--seed-vc-length-adjust", type=float)
     parser.add_argument("--seed-vc-inference-cfg-rate", type=float)
-    parser.add_argument("--text-transform", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM"))
-    parser.add_argument("--text-transform-suffix", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM_SUFFIX"))
-    parser.add_argument("--text-transform-unit", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM_UNIT", "text"))
-    parser.add_argument("--preload-translation", action="store_true", default=os.getenv("RUNPOD_SMOKE_PRELOAD_TRANSLATION") == "1")
     parser.add_argument(
         "--preload-voice-conversion",
         action="store_true",
@@ -84,10 +79,6 @@ def main() -> int:
     elif args.operation_mode == "warmup":
         input_payload = {
             "operation_mode": "warmup",
-            "translation_backend": args.translation_backend,
-            "preload_translation": args.preload_translation or not (
-                args.preload_voice_conversion or args.preload_practice_asr
-            ),
             "preload_voice_conversion": args.preload_voice_conversion,
             "preload_practice_asr": args.preload_practice_asr,
         }
@@ -102,7 +93,7 @@ def main() -> int:
         }
     else:
         if not args.audio:
-            raise SystemExit("--audio is required for translation, practice_asr, and voice_conversion")
+            raise SystemExit("--audio is required for practice_asr and voice_conversion")
         audio_path = Path(args.audio)
         mime_type = "audio/webm" if audio_path.suffix.lower() == ".webm" else (mimetypes.guess_type(audio_path.name)[0] or "audio/wav")
 
@@ -118,16 +109,6 @@ def main() -> int:
             "reference_audio_base64": base64.b64encode(reference_audio_path.read_bytes()).decode("ascii"),
             "reference_audio_mime_type": reference_mime_type,
             "voice_backend": args.voice_backend,
-        }
-    elif args.operation_mode == "translation":
-        input_payload = {
-            "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
-            "audio_mime_type": mime_type,
-            "translation_backend": args.translation_backend,
-            "source_language": args.source_language,
-            "target_language": args.target_language,
-            "voice_mode": args.voice_mode,
-            "text_transform_unit": args.text_transform_unit,
         }
     elif args.operation_mode == "practice_asr":
         input_payload = {
@@ -153,11 +134,6 @@ def main() -> int:
         input_payload["seed_vc_length_adjust"] = args.seed_vc_length_adjust
     if args.seed_vc_inference_cfg_rate is not None:
         input_payload["seed_vc_inference_cfg_rate"] = args.seed_vc_inference_cfg_rate
-    if args.text_transform:
-        input_payload["text_transform"] = args.text_transform
-    if args.text_transform_suffix:
-        input_payload["text_transform_suffix"] = args.text_transform_suffix
-
     payload: dict[str, Any] = {"input": input_payload}
 
     try:

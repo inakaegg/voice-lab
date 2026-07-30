@@ -172,9 +172,9 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
 
 test("Voice Lab gives each product a distinct accent and keeps recording red", () => {
   assert.match(styles, /\.react-public-body\.practice-body\s*\{[^}]*--react-accent:\s*#536da8/s);
-  assert.match(styles, /\.record-orb\s*\{[^}]*background:\s*var\(--user-record-ready\)/s);
-  assert.match(styles, /--user-record-ready:\s*#e65a43/);
-  assert.match(styles, /--user-recording:\s*#c7372f/);
+  assert.match(styles, /\.record-orb\s*\{[^}]*background:\s*var\(--practice-record-ready\)/s);
+  assert.match(styles, /--practice-record-ready:\s*#e65a43/);
+  assert.match(styles, /--practice-recording:\s*#c7372f/);
 });
 
 test("public workbench keeps settings at the mobile top right and avoids cramped columns", () => {

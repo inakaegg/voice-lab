@@ -10,7 +10,6 @@ const [portal, speakloop, appCss, ...staticPages] = await Promise.all([
   ...[
     "index.html",
     "practice_admin.html",
-    "user.html",
   ].map(readStatic),
 ]);
 

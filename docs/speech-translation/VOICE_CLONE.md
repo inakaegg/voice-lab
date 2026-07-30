@@ -1,82 +1,82 @@
-# 声質クローン方針
+# Seed-VC声質変換方針
 
-更新日: 2026-07-20
+更新日: 2026-07-30
 
 ## 目的
 
-ローカル音声翻訳（研究機能）では、入力話者の声を出力音声に反映する。声質クローンは後付けの例外処理ではなく、APIとpipelineの明示的な `voice_mode` として扱う。
+Seed-VCはSpeakLoopの「自分の声」と管理画面のVC比較に使う。旧音声翻訳の一部としては扱わず、入力音声を参照話者へ寄せる独立した処理とする。
 
-## voice mode
+## 現在の実行経路
 
-- `default`: fake providerでAPI/UI確認に使う。local providerでは使わない。
-- `clone`: 入力音声を参照音声として、TTS時点で声質を寄せる。Qwen3-TTS Baseを使う。
-- `convert`: モデルTTSで音声生成した後、Seed-VCで入力話者の声へ変換する。
+SpeakLoopでは通常TTSの音声を変換元にする。同じ練習requestの最初の録音を参照音声にする。別のファイル・URL・ブラウザタブ音声は参照元として受け付けない。
 
-違いは処理順である。`clone` はQwen3-TTSが「テキスト、参照音声、参照テキスト」を受け取り、最初から声を寄せた出力音声を生成する。`convert` は、まずQwen3-TTSで出力言語の音声を作り、その生成音声をSeed-VCで入力音声の話者らしさへ変換する。
+管理画面のVC比較ではsource音声とreference音声を個別に指定する。jobごとに次の設定を変更できる。
 
-`MO_TTS_PROVIDER=qwen-seed-vc` では `clone` と `convert` の両方を選択できる。対応providerが設定されていない `voice_mode` は設定エラーとして返す。
+- diffusion steps
+- 参照音声の上限秒数
+- 発話区間の自動選択
+- length adjust
+- inference cfg rate
 
-ルート別の扱い:
-
-- `id-ID -> ja-JP`: Seed-VCの `convert` を推奨経路にする。
-- `ja-JP -> zh-CN`: Qwen3-TTSの `clone` とSeed-VCの `convert` を比較する。
-
-現時点の聴感確認ではSeed-VCの `convert` の方が入力話者に近いため、UIの初期選択は `convert` にする。
+Cloudflare公開版ではRunPod Serverlessの非同期jobを使う。ローカルFastAPI版では設定したdirect VC providerを使う。
 
 ## 保存方針
 
-- 既定では入力音声、生成音声、voice profileを永続保存しない。
-- voice profileを保存する機能を追加する場合は、実装前に次を仕様化する。
-  - 保存の同意をどの画面で得るか。
-  - 保存先と暗号化の有無。
-  - 削除方法。
-  - voice profileをエクスポートできるか。
+- Cloudflare公開版はsource音声・reference音声・変換結果を履歴保存しない。
+- ローカルFastAPI版の音声履歴はgit管理外へ置く。
+- voice profileを永続保存する機能は提供しない。
+- 将来保存する場合は同意・保存先・暗号化・削除方法を先に仕様化する。
 
 ## 参照音声の前処理
 
-Qwen3-TTSは参照音声とその文字起こしを使う。参照音声の言語がモデルの明示対応外の場合は、speaker embeddingのみを使う設定に切り替える。
+Seed-VCへ渡すreference音声はサーバー側で短いmono WAVへ正規化する。ブラウザ録音はWebM/Opusになりやすい。無音や余分な長さは処理時間を増やすため前処理する。
 
-Seed-VCでは、翻訳後TTS音声を `source`、入力音声を `target` として扱う。これはSeed-VCのCLIが `source` を変換元音声、`target` を参照音声として扱うためである。
-
-Seed-VCへ渡す `target` は、アップロード音声そのものではなく、サーバー側で短いmono WAVへ正規化した参照音声にする。ブラウザ録音はWebM/Opusになりやすく、無音や余分な長さを含むとSeed-VCの処理時間が大きく伸びるためである。既定では先頭10秒までを使い、`SEED_VC_REFERENCE_MAX_SECONDS` と `SEED_VC_REFERENCE_SAMPLE_RATE` で調整できる。
+既定では先頭10秒までを使う。上限は `SEED_VC_REFERENCE_MAX_SECONDS` で変更できる。sample rateは `SEED_VC_REFERENCE_SAMPLE_RATE` で指定する。
 
 ### 発話区間の自動選択
 
-UIの `参照音声の発話区間を自動選択`（`seed_vc_reference_auto_select`）をONにした場合は、先頭からの単純な切り出しではなく、軽量な発話区間選択を行う。
+`seed_vc_reference_auto_select` をONにした場合は次の順で処理する。
 
-- `ffprobe` で参照音声の長さを取得する。
-- `ffmpeg silencedetect` で無音区間を検出し、無音ではない区間を発話候補として扱う。
-- 候補のうち、上限秒数内で最も長い発話区間を選ぶ。
-- 候補が上限秒数より長い場合は、区間の中央寄りから上限秒数ぶんを切り出す。
-- 候補が取れない場合や検出が失敗する場合は、従来どおり先頭から切り出す。
+1. `ffprobe` で参照音声の長さを取得する。
+2. `ffmpeg silencedetect` で無音区間を検出する。
+3. 上限秒数内で最も長い発話区間を選ぶ。
+4. 長すぎる区間は中央寄りから切り出す。
+5. 検出できない場合は先頭から切り出す。
 
-この処理は先頭の無音や余計な間を避けるための前処理であり、音声品質を厳密に判定するものではない。ノイズを理由に参照音声を空にはしない。所要時間はAPIレスポンスの `timings_ms.reference_segment_select` に入る。
+この処理は先頭の無音や余分な間を避ける前処理である。音声品質を判定する処理ではない。所要時間は `timings_ms.reference_segment_select` に含める。
 
-UIでは、Seed-VC本体を実行する前に参照音声の正規化だけを実行し、正規化前後をaudio要素で聴き比べられる。翻訳モードでは入力音声、VC比較モードでは参照音声ファイルを対象にする。
+管理画面ではSeed-VC本体の実行前にreference音声だけを正規化できる。正規化前後のaudioを聴き比べられる。
 
 ## ローカル設定
 
-Qwen3-TTSとSeed-VCを比較できる状態で使う場合:
+Seed-VCだけをVC backendとして使う場合:
 
 ```sh
-MO_PROVIDER_MODE=local \
-MO_TTS_PROVIDER=qwen-seed-vc \
-QWEN_TTS_PYTHON=path/to/python \
+MO_VC_BACKENDS=seed-vc \
 SEED_VC_PYTHON=path/to/python \
-QWEN_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
+PYTHONPATH=src \
+python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 ```
 
-Qwen3-TTSだけなら `MO_TTS_PROVIDER=qwen`、Seed-VCの変換経路だけなら `MO_TTS_PROVIDER=seed-vc` を指定する。
+checkpointとconfigを明示する場合は `SEED_VC_CHECKPOINT` と `SEED_VC_CONFIG` を使う。指定しない場合はprovider側の既定配置を使う。モデル取得前に保存先と必要容量を確認する。
 
-Seed-VCは、checkpointとconfigを明示しない場合、初回実行時に公式の既定モデルを取得する。配置済みのファイルを使う場合は `SEED_VC_CHECKPOINT` と `SEED_VC_CONFIG` を指定する。
+主な調整値:
 
-## 確認済みの動作と制限
+| 変数 | 既定 | 用途 |
+| --- | --- | --- |
+| `SEED_VC_DIFFUSION_STEPS` | `30` | 速度と品質の調整値。 |
+| `SEED_VC_REFERENCE_MAX_SECONDS` | `10` | reference音声の上限秒数。 |
+| `SEED_VC_REFERENCE_AUTO_SELECT` | `0` | 発話区間を自動選択する。 |
+| `SEED_VC_LENGTH_ADJUST` | `1.0` | 出力長を調整する。 |
+| `SEED_VC_INFERENCE_CFG_RATE` | `0.7` | CFG係数。 |
+| `SEED_VC_FP16` | `false` | 対応GPUで半精度を使う。 |
 
-短い参照音声で、`clone`（Qwen3-TTS Base）と `convert`（Seed-VC）のWAV生成を確認済み。CPU実行では短文でも十数秒以上かかり、実用速度には届かない。現状のローカル実装はモデル評価とAPI契約の確認を目的とし、低遅延本番経路ではない。
+## 検証
 
-## 未評価候補
+自動テストではrequest設定・reference前処理・provider呼び出しをfakeで確認する。
 
-- Qwen3-TTS CustomVoice: 指示による声色制御として別途評価する。
-- OpenVoice: Seed-VCで声質類似度または速度が不足する場合に比較する。
-- 外部API: 完全除外はしないが、導入前に費用、キー管理、依存リスクをdocsに明記する。
+```sh
+python3 -m pytest tests/test_voice_providers.py tests/test_api.py
+```
+
+実モデルの品質と速度は環境依存である。実行時はsourceとreferenceを固定し、cold startとwarm実行を分けて記録する。

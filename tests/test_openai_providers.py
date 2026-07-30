@@ -8,11 +8,7 @@ from mo_speech.providers.openai_api import (
     OpenAiAsrProvider,
     OpenAiTranslationProvider,
     OpenAiTtsProvider,
-    create_openai_pipeline,
-    create_openai_realtime_translation_pipeline,
-    openai_pipeline_status,
-    openai_realtime_pipeline_status,
-    openai_realtime_streaming_status,
+    create_openai_provider_bundle,
     supported_openai_practice_asr_model,
 )
 
@@ -217,42 +213,11 @@ def test_openai_tts_uses_speech_api(monkeypatch) -> None:
     assert captured["input"] == "こんにちは。"
 
 
-def test_create_openai_pipeline_supports_default_and_seed_vc(monkeypatch) -> None:
+def test_create_openai_provider_bundle_uses_shared_providers(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_TRANSLATION_MODEL", raising=False)
-    pipeline = create_openai_pipeline()
+    bundle = create_openai_provider_bundle()
 
-    assert pipeline.asr.name == "openai-asr-gpt-4o-transcribe"
-    assert pipeline.translator.name == "openai-translation-gpt-5.6-terra"
-    assert pipeline.tts.supported_voice_modes == ("default", "convert")
-
-
-def test_openai_pipeline_status_requires_api_key(monkeypatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    status = openai_pipeline_status(create_openai_pipeline())
-
-    assert status["available"] is False
-    assert status["reason"] == "OPENAI_API_KEY が設定されていません。"
-
-
-def test_openai_realtime_pipeline_status_reports_backend(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "websocket", SimpleNamespace(WebSocket=object))
-
-    status = openai_realtime_pipeline_status(create_openai_realtime_translation_pipeline())
-
-    assert status["id"] == "openai_realtime"
-    assert status["available"] is True
-    assert status["settings"]["source_language_mode"] == "auto"
-    assert "ja-JP" in status["settings"]["supported_target_languages"]
-
-
-def test_openai_realtime_streaming_status_reports_backend(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    status = openai_realtime_streaming_status()
-
-    assert status["id"] == "openai_realtime_stream"
-    assert status["available"] is True
-    assert status["settings"]["streaming"] is True
-    assert status["settings"]["source_language_mode"] == "auto"
+    assert bundle.asr.name == "openai-asr-gpt-4o-transcribe"
+    assert bundle.translator.name == "openai-translation-gpt-5.6-terra"
+    assert bundle.tts.name == "openai-tts-gpt-4o-mini-tts"
+    assert bundle.tts.supported_voice_modes == ("default",)

@@ -29,9 +29,8 @@ Browser
 | `/speakloop` | SpeakLoop | 公開 |
 | `/admin` | 総合管理 | 管理者認証必須 |
 | `/speakloop/admin` | SpeakLoop管理 | 管理者認証必須 |
-| `/fun` | 実験画面 | 管理者認証必須 |
 
-SpeakLoopの公開生成APIと管理画面は同じGoogle OAuthセッションを使う。`ADMIN_GOOGLE_EMAILS`または保存済み設定に含まれるemailだけを管理者とする。管理者には管理route、管理API、`/fun`へのアクセスを許可する。管理APIは匿名利用者を401、通常Googleユーザーを403で拒否する。管理者は公開quotaを消費しないが、入力サイズ上限は引き続き適用する。別の管理パスワードや管理者cookieは持たない。
+SpeakLoopの公開生成APIと管理画面は同じGoogle OAuthセッションを使う。`ADMIN_GOOGLE_EMAILS`または保存済み設定に含まれるemailだけを管理者とする。管理APIは匿名利用者を401、通常Googleユーザーを403で拒否する。管理者は公開quotaを消費しないが、入力サイズ上限は引き続き適用する。別の管理パスワードや管理者cookieは持たない。
 
 ## データ境界
 

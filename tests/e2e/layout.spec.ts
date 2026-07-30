@@ -9,9 +9,6 @@ const publicRoutes = [
 ] as const;
 
 const adminRoutes = ["/admin", "/speakloop/admin"];
-const utilityRoutes = [
-  { path: "/fun", heading: "はなしてください", action: "ろくおん" },
-] as const;
 const pageErrors = new WeakMap<Page, Error[]>();
 
 test.beforeEach(async ({ page }) => {
@@ -1887,33 +1884,6 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
   }
 });
 
-test("sample save failure leaves a visible retry action", async ({ page }) => {
-  await page.route("**/api/public-sample-audios", async (route) => {
-    if (route.request().method() === "PUT") {
-      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "保存先へ書き込めませんでした" }) });
-      return;
-    }
-    await route.fallback();
-  });
-  await page.goto("/admin");
-  await page.locator(".admin-config-group > summary").click();
-  const funSection = page.locator('[data-public-sample-admin-feature="fun"]');
-  await funSection.locator("[data-public-sample-file]").setInputFiles({
-    name: "english-sample.wav",
-    mimeType: "audio/wav",
-    buffer: Buffer.from("RIFF sample audio"),
-  });
-  const saveButton = page.locator("[data-public-samples-save]");
-  await saveButton.click();
-  await expect(saveButton).toHaveText("再試行");
-  await expect(page.locator("[data-public-samples-status]")).toHaveText("保存先へ書き込めませんでした");
-  await expect(page.locator("[data-public-samples-status]")).toHaveAttribute("data-state", "error");
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-sample-save-error.png`, fullPage: true });
-  }
-});
-
 for (const route of adminRoutes) {
   test(`${route} exposes the Voice Lab admin hierarchy without clipped controls`, async ({ page }) => {
     await page.goto(route);
@@ -2063,14 +2033,3 @@ test("Cloudflare mode hides local-only history panels from shared admin pages", 
   }
   await assertNoHorizontalOverflow(page);
 });
-
-for (const route of utilityRoutes) {
-  test(`${route.path} keeps compatibility controls inside the Voice Lab layout`, async ({ page }) => {
-    await page.goto(route.path);
-    await expect(page.getByRole("link", { name: /Voice Lab/ }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: route.heading, level: 1 })).toBeVisible();
-    await expect(page.getByRole("button", { name: route.action, exact: true }).first()).toBeVisible();
-    await assertNoHorizontalOverflow(page);
-    await assertVisibleControlsInsideViewport(page);
-  });
-}

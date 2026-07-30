@@ -14,17 +14,14 @@ Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフ�
 | `/speakloop` | SpeakLoop | 公開 |
 | `/admin` | 総合管理 | 管理者認証必須 |
 | `/speakloop/admin` | SpeakLoop管理 | 管理者認証必須 |
-| `/fun` | 実験的な音声変換デモ | 管理者認証必須 |
 
 ### 管理者認証
 
-- `/fun` は管理者認証済みの場合だけ表示・利用でき、公開ポータルには導線を置かない。
-- Cloudflare版の管理者認証は、公開生成APIと同じGoogle OAuthセッションを使う。許可メールに含まれるアカウントだけが、管理route・管理API・`/fun` とその生成機能・Seed-VC APIへアクセスできる。
-- 音声翻訳とSeed-VCは、job作成だけでなくstatus pollingと結果取得も管理者専用にする。
-- `/fun` のAPI境界は、公開生成のログイン必須設定をOFFにしても維持する。
+- Cloudflare版の管理者認証は、公開生成APIと同じGoogle OAuthセッションを使う。許可メールに含まれるアカウントだけが管理routeと管理APIへアクセスできる。
+- Cloudflare版の単体Seed-VCは、job作成だけでなくstatus pollingと結果取得も管理者専用にする。
 - 管理者は公開quotaを消費しないが、入力サイズ上限は適用する。
 - 別の管理パスワードや管理者cookieは設けない。
-- ローカルFastAPIは開発者が起動する信頼済み環境として、管理ログインなしで管理画面と `/fun` を提供する。
+- ローカルFastAPIは開発者が起動する信頼済み環境として、管理ログインなしで管理画面を提供する。
 - 廃止した旧routeへの互換aliasは設けない。Static AssetsのHTMLファイルを直接指定して管理者認証を迂回できないようにする。
 
 ## SpeakLoop
@@ -137,7 +134,6 @@ RunPod handlerの契約:
 - WorkerとFastAPIは、必要な `model_transcription` の欠落を一般的なASR失敗と混同せず再デプロイ案内にする。
 - `自分の声` では既存の `operation_mode=voice_conversion` を使い、WorkerまたはFastAPIがSpeakLoop専用job APIとして状態を中継する。
 - RunPodのprogress updateは途中stage表示に使う。最終job outputを採点と比較再生の正、Seed-VC job outputを再生音声の正とする。
-- URL取得失敗時はRunPod処理が始まっていないため、RunPodを原因として表示しない。
 
 ## 保存とプライバシー
 
@@ -149,8 +145,7 @@ RunPod handlerの契約:
 - 音声履歴はローカルFastAPI版だけで保存する。Cloudflare公開版は入力音声と生成音声を履歴として保存しない。
 - ローカルFastAPI版は、RunPod比較の選択条件とterminal snapshotを短期job stateへ既定で1時間保存する。このstateは音声bytesを含まず、音声履歴の有効・無効とは分離する。
 - 公開画面では、外部サービスで処理される音声へ個人情報や機密情報を含めないよう案内する。
-- タブ音声共有はユーザー操作で開始し、選択された共有元の音声trackだけを録音する。映像、URL、cookieは送信しない。
-- 生成物を私的利用の範囲を超えて公開・共有する場合は、参照音声と入力素材の利用条件を確認する。
+- 生成物を私的利用の範囲を超えて公開・共有する場合は、参照音声の利用条件を確認する。
 
 ## UI契約
 
