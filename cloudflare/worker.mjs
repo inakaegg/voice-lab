@@ -37,7 +37,7 @@ const PUBLIC_SESSION_COOKIE = "mo_public_session";
 const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
 const PUBLIC_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PUBLIC_OAUTH_STATE_TTL_SECONDS = 60 * 10;
-const PUBLIC_ACCESS_FEATURES = ["speakloop", "skitvoice", "fun", "voice_conversion"];
+const PUBLIC_ACCESS_FEATURES = ["speakloop", "fun", "voice_conversion"];
 const OPENAI_LANGUAGE_CODES = {
   auto: "",
   "id-ID": "id",
@@ -60,11 +60,6 @@ const PRACTICE_TARGET_LANGUAGES = {
   "ja-JP": { label: "日本語", speech_name: "Japanese" },
   "zh-CN": { label: "中文", speech_name: "Mandarin Chinese" },
   "en-US": { label: "English", speech_name: "English" },
-};
-const VIBEVOICE_OUTPUT_LANGUAGES = {
-  "en-US": { label: "英語", speech_name: "English" },
-  "zh-CN": { label: "中国語", speech_name: "Chinese" },
-  "ja-JP": { label: "日本語（低品質）", speech_name: "Japanese" },
 };
 const MAX_CANONICAL_TARGET_PHRASES = 16;
 const PRACTICE_HARD_BOUNDARIES = new Set(["。", "！", "？", "!", "?", "；", ";", "\n"]);
@@ -615,12 +610,6 @@ const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
       audio_max_bytes: 8_000_000,
       text_max_chars: 800,
     },
-    skitvoice: {
-      daily_limit: 2,
-      total_limit: 20,
-      audio_max_bytes: 10_000_000,
-      script_max_chars: 1600,
-    },
     fun: {
       daily_limit: 10,
       total_limit: 100,
@@ -639,7 +628,6 @@ const DEFAULT_PUBLIC_ACCESS_SETTINGS = {
 const DEFAULT_PUBLIC_SAMPLE_AUDIOS = {
   features: {
     speakloop: null,
-    skitvoice: null,
     fun: null,
     voice_conversion: null,
   },
@@ -690,8 +678,7 @@ export async function handleRequest(request, env = {}, ctx = {}) {
   return serveAsset(request, env, url);
 }
 
-const CRAWL_DISALLOWED_PATHS = ["/admin", "/fun", "/speakloop/admin", "/skitvoice/admin", "/api/", "/auth/"];
-// SkitVoiceは非公開案内のためsitemapへ載せない。掲載対象を変える場合は docs/deployment/CLOUDFLARE.md も更新する。
+const CRAWL_DISALLOWED_PATHS = ["/admin", "/fun", "/speakloop/admin", "/api/", "/auth/"];
 const SITEMAP_PUBLIC_PATHS = ["/", "/speakloop", "/privacy"];
 
 // クロール許可は正規公開originだけに与える。PUBLIC_GOOGLE_AUTH_REQUIREDは生成API用の
@@ -740,8 +727,6 @@ function isProtectedAdminPagePath(pathname) {
     "/admin",
     "/index.html",
     "/static/index.html",
-    "/skitvoice/admin",
-    "/static/vibevoice.html",
     "/speakloop/admin",
     "/practice_admin.html",
     "/static/practice_admin.html",
@@ -751,9 +736,6 @@ function isProtectedAdminPagePath(pathname) {
 function isProtectedAdminApiRequest(method, pathname) {
   if (method === "OPTIONS") {
     return false;
-  }
-  if (pathname === "/api/vibevoice" || pathname.startsWith("/api/vibevoice/")) {
-    return true;
   }
   if (method === "PUT" && pathname === "/api/user-settings") {
     return true;
@@ -1246,27 +1228,6 @@ async function handleApiRequest(request, env, ctx, url) {
       const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
       return jsonResponse(await getRunpodJobSnapshot(jobId, env, "voice_conversion"));
     }
-    if (request.method === "GET" && url.pathname === "/api/vibevoice/status") {
-      return jsonResponse(await vibeVoiceStatus(env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/vibevoice/reference-audio-from-url") {
-      return jsonResponse(await createVibeVoiceReferenceAudioFromUrl(request, env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/vibevoice/scripts") {
-      return jsonResponse(await createVibeVoiceScript(request, env));
-    }
-    if (request.method === "POST" && url.pathname === "/api/vibevoice/jobs") {
-      return jsonResponse(await createVibeVoiceJob(request, env));
-    }
-    if (request.method === "GET" && /^\/api\/vibevoice\/jobs\/[^/]+$/.test(url.pathname)) {
-      const jobId = decodeURIComponent(url.pathname.split("/").pop() || "");
-      return jsonResponse(await getRunpodJobSnapshot(jobId, env, "vibevoice"));
-    }
-    if (request.method === "POST" && /^\/api\/vibevoice\/jobs\/[^/]+\/cancel$/.test(url.pathname)) {
-      const parts = url.pathname.split("/");
-      const jobId = decodeURIComponent(parts[parts.length - 2] || "");
-      return jsonResponse(await cancelRunpodJob(jobId, env, "vibevoice"));
-    }
     if (request.method === "POST" && url.pathname === "/api/translate-speech-jobs") {
       return jsonResponse(await createTranslationJob(request, env));
     }
@@ -1316,6 +1277,8 @@ async function serveAsset(request, env, url) {
   const assetUrl = new URL(request.url);
   const retiredPaths = new Set([
     "/user",
+    "/skitvoice",
+    "/skitvoice/admin",
     "/vibevoice",
     "/vibevoice/simple",
     "/vibevoice/admin",
@@ -1344,16 +1307,6 @@ async function serveAsset(request, env, url) {
     url.pathname === "/speakloop/admin/"
   ) {
     assetUrl.pathname = "/practice_admin.html";
-  } else if (
-    url.pathname === "/skitvoice" ||
-    url.pathname === "/skitvoice/"
-  ) {
-    assetUrl.pathname = "/react/skitvoice.html";
-  } else if (
-    url.pathname === "/skitvoice/admin" ||
-    url.pathname === "/skitvoice/admin/"
-  ) {
-    assetUrl.pathname = "/vibevoice.html";
   } else if (url.pathname === "/admin" || url.pathname === "/admin/") {
     assetUrl.pathname = "/index.html";
   } else if (url.pathname.startsWith("/static/")) {
@@ -1597,9 +1550,6 @@ async function readPublicSampleAudios(env) {
       }
     }
     const samples = coercePublicSampleAudios(DEFAULT_PUBLIC_SAMPLE_AUDIOS);
-    samples.features.skitvoice = {
-      samples: Object.fromEntries(PUBLIC_SAMPLE_LANGUAGES.map((language) => [language, null])),
-    };
     for (const row of result.results || []) {
       const object = await env.MO_SPEECH_AUDIO_R2.get(row.audio_r2_key);
       if (!object || !PUBLIC_ACCESS_FEATURES.includes(row.feature)) continue;
@@ -1611,9 +1561,7 @@ async function readPublicSampleAudios(env) {
         audio_base64: bytesToBase64(new Uint8Array(await object.arrayBuffer())),
         size_bytes: Number(row.size_bytes || 0),
       };
-      if (row.feature === "skitvoice" && row.language === "und") {
-        samples.features.skitvoice.samples["ja-JP"] = sample;
-      } else if (row.language && row.language !== "und") {
+      if (row.language && row.language !== "und") {
         samples.features[row.feature] ||= { samples: {} };
         samples.features[row.feature].samples ||= {};
         samples.features[row.feature].samples[row.language] = sample;
@@ -1644,9 +1592,7 @@ async function publicSampleAudiosPayload(request, env) {
   if (session && isPublicAdminEmail(session.email, settings)) {
     return samples;
   }
-  const publicSamples = structuredClone(samples);
-  publicSamples.features.skitvoice = null;
-  return publicSamples;
+  return structuredClone(samples);
 }
 
 async function writePublicSampleAudios(payload, env) {
@@ -1729,7 +1675,7 @@ function publicSampleRows(samples) {
         if (value.samples[language]) rows.push({ feature, language, sample: value.samples[language] });
       }
     } else if (value) {
-      rows.push({ feature, language: feature === "skitvoice" ? "ja-JP" : "und", sample: value });
+      rows.push({ feature, language: "und", sample: value });
     }
   }
   return rows;
@@ -2629,7 +2575,7 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
     throw httpError(400, "job_id is required");
   }
   const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
-  const health = kind === "vibevoice" ? await runpodHealthForQueuedJob(body, env) : null;
+  const health = null;
   const snapshot = jobSnapshotFromRunpod(body, kind, health);
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, kind)) {
     await saveRunpodVcReadyState(env, snapshot, kind);
@@ -2780,11 +2726,9 @@ function jobSnapshotFromRunpod(body, kind, health = null, modelId = "") {
     };
   }
   const queued = status === "IN_QUEUE" || status === "QUEUED" || !status;
-  const currentStage = kind === "vibevoice"
-    ? vibeVoiceRunpodStage(body, health, modelId)
-    : kind === "voice_conversion"
-      ? voiceConversionRunpodStage(body, queued)
-      : currentStageForKind(kind, queued);
+  const currentStage = kind === "voice_conversion"
+    ? voiceConversionRunpodStage(body, queued)
+    : currentStageForKind(kind, queued);
   return {
     job_id: jobId,
     status: queued ? "queued" : "running",
@@ -2835,19 +2779,6 @@ function plannedStages(kind) {
       { stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" },
     ];
   }
-  if (kind === "vibevoice") {
-    return [
-      { stage: "gpu_wait", label: "GPU待ち", provider: "RunPod Serverless" },
-      { stage: "initializing", label: "Worker初期化", provider: "RunPod Serverless" },
-      { stage: "loading_vibevoice_model", label: "VibeVoiceモデル読込", provider: "RunPod Serverless" },
-      { stage: "vibevoice_generation", label: "VibeVoice生成", provider: "RunPod Serverless" },
-      { stage: "directed_asr", label: "指定台詞ASR", provider: "RunPod Serverless" },
-      { stage: "loading_seed_vc_model", label: "Seed-VCモデル読込", provider: "RunPod Serverless" },
-      { stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" },
-      { stage: "reconstruct", label: "音声再配置", provider: "RunPod Serverless" },
-      { stage: "finalizing", label: "出力仕上げ", provider: "RunPod Serverless" },
-    ];
-  }
   if (kind === "warmup") {
     return [{ stage: "warmup", label: "準備", provider: "RunPod Serverless" }];
   }
@@ -2856,58 +2787,6 @@ function plannedStages(kind) {
     { stage: "translation", label: "翻訳", provider: "RunPod Serverless" },
     { stage: "tts", label: "音声生成", provider: "RunPod Serverless" },
   ];
-}
-
-function vibeVoiceRunpodStage(body, health = null, modelId = "") {
-  const status = String(body?.status || "").toUpperCase();
-  const progress = body?.output;
-  if ((status === "IN_PROGRESS" || status === "RUNNING") && progress && typeof progress === "object") {
-    return {
-      stage: String(progress.stage || "processing"),
-      label: String(progress.label || "RunPodでSkitVoiceを処理しています"),
-      provider: String(progress.provider || "RunPod Serverless"),
-      model: String(progress.model || modelId || "vibevoice-large-aoi-pinned"),
-      detail: String(progress.detail || ""),
-    };
-  }
-  if (status === "" || status === "IN_QUEUE" || status === "QUEUED") {
-    const counts = runpodWorkerCounts(health);
-    if ((counts.initializing || 0) > 0) {
-      return {
-        stage: "initializing",
-        label: "GPUワーカーを初期化しています",
-        provider: "RunPod Serverless",
-        model: modelId || "vibevoice-large-aoi-pinned",
-        detail: "worker起動後にVibeVoiceモデルを読み込みます。",
-      };
-    }
-    return {
-      stage: "gpu_wait",
-      label: "利用可能なGPUを待っています",
-      provider: "RunPod Serverless",
-      model: modelId || "vibevoice-large-aoi-pinned",
-      detail: "RunPodのqueueでworkerの割り当てを待っています。",
-    };
-  }
-  return {
-    stage: "processing",
-    label: "RunPodでSkitVoiceを処理しています",
-    provider: "RunPod Serverless",
-    model: modelId || "vibevoice-large-aoi-pinned",
-    detail: "",
-  };
-}
-
-async function runpodHealthForQueuedJob(body, env) {
-  const status = String(body?.status || "").toUpperCase();
-  if (status && status !== "IN_QUEUE" && status !== "QUEUED") {
-    return null;
-  }
-  try {
-    return await runpodRequest(env, "/health", { method: "GET", timeoutMs: 3000 });
-  } catch (_error) {
-    return null;
-  }
 }
 
 function completedStages(kind) {
@@ -2920,9 +2799,6 @@ function currentStageForKind(kind, queued) {
   }
   if (kind === "voice_conversion") {
     return { stage: "voice_conversion", label: "声質変換", provider: "RunPod Serverless" };
-  }
-  if (kind === "vibevoice") {
-    return { stage: "vibevoice", label: "VibeVoice生成", provider: "RunPod Serverless" };
   }
   if (kind === "warmup") {
     return { stage: "warmup", label: "準備", provider: "RunPod Serverless" };
@@ -3733,273 +3609,6 @@ async function createPracticeDisplayText(text, targetLanguage, env, { includePin
     pinyin_text: "",
     pinyin_status: "disabled",
   };
-}
-
-async function vibeVoiceStatus(env) {
-  const runpodAvailable = Boolean(env.RUNPOD_ENDPOINT_ID && env.RUNPOD_API_KEY);
-  return {
-    backends: {
-      local: {
-        available: false,
-        provider: "cloudflare-worker",
-        default_model_id: "vibevoice-large-aoi-pinned",
-        model_presets: vibeVoiceModelPresets(),
-        cli_exists: false,
-        cli_path: "Cloudflare Worker",
-        comfyui_vibevoice_exists: false,
-        comfyui_vibevoice_path: "RunPod Serverless",
-        model_cache_found: false,
-        model_cache_path: "",
-        tokenizer_found: false,
-        tokenizer_path: "",
-        timeout_seconds: 0,
-      },
-      runpod_serverless: {
-        available: runpodAvailable,
-        provider: "runpod-serverless-vibevoice",
-        configured: runpodAvailable,
-        endpoint_id: env.RUNPOD_ENDPOINT_ID || "",
-        request_mode: "async",
-        default_model_id: "vibevoice-large-aoi-pinned",
-        model_presets: vibeVoiceModelPresets(),
-        reason: runpodAvailable ? "" : "RUNPOD_ENDPOINT_ID または RUNPOD_API_KEY が設定されていません。",
-      },
-    },
-  };
-}
-
-async function createVibeVoiceReferenceAudioFromUrl(_request, _env) {
-  throw httpError(501, "URL reference audio extraction is only available in the local FastAPI app");
-}
-
-async function createVibeVoiceJob(request, env) {
-  const form = await request.formData();
-  const originalScript = await readVibeVoiceScriptFromForm(form);
-  if (!originalScript.trim()) {
-    throw httpError(400, "script is required");
-  }
-  const scriptPlan = await prepareVibeVoiceScriptForGeneration(form, env, originalScript);
-  const voiceBlobs = [];
-  for (let slot = 1; slot <= 4; slot += 1) {
-    const blob = optionalBlob(form, `voice_file_${slot}`);
-    if (blob && Number(blob.size || 0) > 0) {
-      voiceBlobs.push({ slot, blob });
-      continue;
-    }
-    if (stringFormValue(form, `voice_url_${slot}`, "").trim()) {
-      throw httpError(
-        400,
-        "URL reference audio is not available on the Cloudflare public demo. Upload or record reference audio instead.",
-      );
-    }
-  }
-  if (voiceBlobs.length < 1) {
-    throw httpError(400, "voice sample is required");
-  }
-  await enforcePublicFeatureAccess(request, env, "skitvoice", {
-    scriptChars: originalScript.trim().length,
-    audioBytes: Math.max(0, ...voiceBlobs.map((item) => Number(item.blob.size || 0))),
-  });
-  const voices = [];
-  for (const item of voiceBlobs) {
-    const audioBytes = await item.blob.arrayBuffer();
-    const audioMimeType = normalizeMimeType(item.blob.type || guessAudioMimeType(item.blob.name));
-    voices.push({
-      speaker: item.slot,
-      filename: item.blob.name || `voice-${item.slot}.${extensionForMimeType(audioMimeType)}`,
-      audio_mime_type: audioMimeType,
-      audio_base64: arrayBufferToBase64(audioBytes),
-    });
-  }
-  const body = await submitRunpodJob(env, {
-    operation_mode: "vibevoice",
-    script: scriptPlan.script,
-    script_translation: scriptPlan.diagnostics,
-    voices,
-    generation: vibeVoiceGenerationPayloadFromForm(form),
-    response_audio_format: stringFormValue(form, "response_audio_format", "mp3"),
-  });
-  const health = await runpodHealthForQueuedJob(body, env);
-  return jobSnapshotFromRunpod(
-    body,
-    "vibevoice",
-    health,
-    stringFormValue(form, "model_id", "vibevoice-large-aoi-pinned"),
-  );
-}
-
-async function readVibeVoiceScriptFromForm(form) {
-  const inline = stringFormValue(form, "script", "").trim();
-  if (inline) {
-    return normalizeVibeVoiceScriptLineEndings(inline);
-  }
-  const file = optionalBlob(form, "script_file");
-  if (file && Number(file.size || 0) > 0 && typeof file.text === "function") {
-    return normalizeVibeVoiceScriptLineEndings((await file.text()).trim());
-  }
-  return "";
-}
-
-function normalizeVibeVoiceScriptLineEndings(text) {
-  return String(text || "").replace(/\r\n?/g, "\n");
-}
-
-async function prepareVibeVoiceScriptForGeneration(form, env, script) {
-  const outputLanguage = supportedVibeVoiceOutputLanguage(stringFormValue(form, "output_language", "zh-CN"));
-  const translationMode = stringFormValue(form, "translate_script", "false").trim().toLowerCase();
-  const auto = translationMode === "auto";
-  const requested = auto || optionEnabled(translationMode);
-  const diagnostics = {
-    requested,
-    enabled: false,
-    output_language: outputLanguage,
-    source_language: auto ? "auto" : "ja-JP",
-    source_script: script,
-    translated_script: script,
-    model: "",
-    provider: "",
-  };
-  if (!requested) {
-    return { script, diagnostics };
-  }
-  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra";
-  const translationResult = parseVibeVoiceTranslationResult(await openAiText(env, {
-    model,
-    instructions: [
-      "Detect the dialogue language of this skit script.",
-      `If it is not ${VIBEVOICE_OUTPUT_LANGUAGES[outputLanguage].speech_name}, translate only dialogue text into that language; if it is already the target language, return it unchanged.`,
-      "Preserve speaker tags exactly.",
-      "Preserve the number of non-empty lines and preserve line order.",
-      "Return strict JSON with keys source_language and script.",
-      "source_language must be a BCP 47 language code and script must contain the final script.",
-    ].join(" "),
-    input: script,
-  }));
-  const translated = normalizeVibeVoiceTranslatedScript(translationResult.script);
-  validateVibeVoiceTranslatedScript(script, translated);
-  return {
-    script: translated,
-    diagnostics: {
-      ...diagnostics,
-      enabled: translated !== script,
-      source_language: translationResult.source_language,
-      translated_script: translated,
-      model,
-      provider: "openai-responses",
-    },
-  };
-}
-
-async function createVibeVoiceScript(request, env) {
-  const settings = await readPublicAccessSettings(env);
-  if (settings.google_login_required) {
-    if (!publicGoogleAuthConfigured(env)) {
-      throw httpError(503, "Google login is not configured");
-    }
-    if (!(await readPublicSession(request, env))) {
-      throw httpError(401, "Google login is required");
-    }
-  }
-  const payload = await request.json().catch(() => ({}));
-  const seedScript = String(payload?.seed_script || "").trim();
-  if (seedScript.length > 5_000) {
-    throw httpError(413, "seed_script must be 5000 characters or fewer");
-  }
-  const model = env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL || env.OPENAI_TRANSLATION_MODEL || "gpt-5.6-terra";
-  const script = normalizeVibeVoiceTranslatedScript(await openAiText(env, {
-    model,
-    instructions: [
-      "Write a natural, friendly Japanese everyday conversation for speech synthesis.",
-      "Return exactly five non-empty lines, alternating speakers 1, 2, 1, 2, 1.",
-      "Every line must start with the speaker number and one space.",
-      "Return only the script with no title or notes.",
-    ].join(" "),
-    input: seedScript
-      ? `次の台本を着想元として、話題や状況を自然に連想・発展させて再構成してください。\n\n${seedScript}`
-      : "短い日常会話を新規に作ってください。",
-  }));
-  const lines = script.split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length !== 5 || lines.map((line) => line.trim().split(/\s+/, 1)[0]).join(",") !== "1,2,1,2,1") {
-    throw httpError(502, "AI script generation must return exactly five alternating speaker lines");
-  }
-  return { script: lines.join("\n") };
-}
-
-function parseVibeVoiceTranslationResult(value) {
-  const text = normalizeVibeVoiceTranslatedScript(value);
-  try {
-    const payload = JSON.parse(text);
-    if (!payload || typeof payload !== "object" || !String(payload.script || "").trim()) {
-      throw new Error("missing script");
-    }
-    return {
-      source_language: String(payload.source_language || "auto"),
-      script: String(payload.script),
-    };
-  } catch (error) {
-    if (text.startsWith("{")) {
-      throw httpError(502, `VibeVoice script translation returned invalid JSON: ${error.message || error}`);
-    }
-    return { source_language: "auto", script: text };
-  }
-}
-
-function supportedVibeVoiceOutputLanguage(value) {
-  const language = String(value || "zh-CN").trim();
-  if (!Object.prototype.hasOwnProperty.call(VIBEVOICE_OUTPUT_LANGUAGES, language)) {
-    throw httpError(400, `unsupported VibeVoice output language: ${language}`);
-  }
-  return language;
-}
-
-function normalizeVibeVoiceTranslatedScript(text) {
-  let translated = String(text || "").trim();
-  if (translated.startsWith("```")) {
-    translated = translated.replace(/^```(?:text|txt)?/i, "").replace(/```$/i, "").trim();
-  }
-  return translated.split(/\r?\n/).map((line) => line.trimEnd()).join("\n").trim();
-}
-
-function validateVibeVoiceTranslatedScript(sourceScript, translatedScript) {
-  if (!translatedScript.trim()) {
-    throw httpError(502, "VibeVoice script translation returned empty text");
-  }
-  const sourceLines = String(sourceScript || "").split(/\r?\n/).filter((line) => line.trim());
-  const translatedLines = String(translatedScript || "").split(/\r?\n/).filter((line) => line.trim());
-  if (sourceLines.length > 0 && sourceLines.length !== translatedLines.length) {
-    throw httpError(
-      502,
-      `VibeVoice script translation must preserve non-empty line count: source=${sourceLines.length} translated=${translatedLines.length}`,
-    );
-  }
-}
-
-function vibeVoiceGenerationPayloadFromForm(form) {
-  return {
-    model_id: stringFormValue(form, "model_id", "vibevoice-large-aoi-pinned"),
-    cfg_scale: numberFormValue(form, "cfg_scale", 1.3),
-    inference_steps: clampInt(stringFormValue(form, "inference_steps", "10"), 1, 50, 10),
-    seed: clampInt(stringFormValue(form, "seed", "42"), 0, 999999999, 42),
-    do_sample: optionEnabled(stringFormValue(form, "do_sample", "true")),
-    temperature: numberFormValue(form, "temperature", 0.95),
-    top_p: numberFormValue(form, "top_p", 0.95),
-    top_k: clampInt(stringFormValue(form, "top_k", "0"), 0, 1000, 0),
-    max_voice_seconds: numberFormValue(form, "max_voice_seconds", 5),
-    line_by_line: optionEnabled(stringFormValue(form, "line_by_line", "false")),
-    line_gap: numberFormValue(form, "line_gap", 1),
-    directed_line_mode: optionEnabled(stringFormValue(form, "directed_line_mode", "true")),
-    directed_retry_low_score: optionEnabled(stringFormValue(form, "directed_retry_low_score", "true")),
-    directed_retry_score_threshold: numberFormValue(form, "directed_retry_score_threshold", 0.65),
-    directed_retry_max_multiplier: numberFormValue(form, "directed_retry_max_multiplier", 1),
-  };
-}
-
-function vibeVoiceModelPresets() {
-  return [
-    { model_id: "vibevoice-1.5b-pinned", label: "VibeVoice 1.5B 固定版", supported_backends: ["local", "runpod_serverless"] },
-    { model_id: "vibevoice-1.5b-latest", label: "VibeVoice 1.5B 最新", supported_backends: ["local", "runpod_serverless"] },
-    { model_id: "vibevoice-large-aoi-pinned", label: "VibeVoice Large (RunPod)", supported_backends: ["runpod_serverless"] },
-  ];
 }
 
 function createChinesePinyinText(text) {

@@ -11,11 +11,11 @@
 | Cloudflare Worker | Googleログイン結果、入力テキスト、音声bytes、job状態 | 認証、quota、API gateway、短期job中継 |
 | Google OAuth | OAuth認証に必要な情報 | 公開生成APIと管理画面のログイン |
 | OpenAI | 対象機能の入力音声またはテキスト | ASR、翻訳、テキスト加工、TTS |
-| RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声。管理者研究時は参照音声、台本、翻訳結果、生成設定 | FunASR、Seed-VC、管理者専用VibeVoice |
+| RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声 | FunASR、Seed-VC |
 
-ブラウザへOpenAI・RunPodのAPI keyを渡さない。URL参照音声の取得はローカルFastAPIだけで行う。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
+ブラウザへOpenAI・RunPodのAPI keyを渡さない。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
 
-同意・AI生成表示・保存/削除・外部送信・abuse対応はVibeVoice固有ではなく、Seed-VCと将来の音声providerにも適用するVoice Lab共通方針とする。利用者が送信権限を持つ音声だけを扱い、用途、送信先、Voice Lab側の保存有無を送信前に表示する。checkboxは第三者本人の同意を証明するものではないため、公開入力面とserver contractでも扱える参照音声を制限する。
+同意・AI生成表示・保存/削除・外部送信・abuse対応は、Seed-VCと将来の音声providerに適用するVoice Lab共通方針とする。利用者が送信権限を持つ音声だけを扱い、用途、送信先、Voice Lab側の保存有無を送信前に表示する。checkboxは第三者本人の同意を証明するものではないため、公開入力面とserver contractでも扱える参照音声を制限する。
 
 ## Voice Labが保存する情報
 
@@ -26,7 +26,7 @@
 - Googleログイン後のブラウザには署名cookieを保存する。cookieの内容はemail、発行時刻、有効期限である。保存属性は `HttpOnly`、`Secure`、`SameSite=Lax` とする。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
 - D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
 - R2は管理者が公開用として登録したサンプル音声だけを保存する。
-- 既存SkitVoice sampleは由来・許諾・生成model・AI生成表示を確認できないため、一般向けsample APIから返さない。外部R2 objectはこのローカル変更では削除せず、管理者経路でのみ確認・管理する。
+- 過去の研究機能で登録したsampleは、一般向けsample APIから返らない。保持は保証せず、管理者のsample保存・削除操作で削除され得る。
 - KVは短期job snapshot、ready状態、設定、bindingがない環境のfallbackに使う。短期job snapshotは1時間、fallbackの日次quotaは48時間、audit eventは90日で失効する。fallbackの累計quotaは公開デモの運用中に限り保持する。管理設定の `admin_google_emails` には運営者の平文emailを保存し、`/fun` のuser settingsには管理者が入力した設定・本文を保存できる。一般利用者のquota・audit識別子とは用途を分ける。
 - ローカルFastAPI版は開発者の端末へ音声履歴と診断情報を保存でき、Cloudflare公開版とは保存境界が異なる。
 

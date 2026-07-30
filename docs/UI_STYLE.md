@@ -1,14 +1,14 @@
 # 公開UIスタイル方針
 
-更新日: 2026-07-21
+更新日: 2026-07-30
 
 ## 対象と基準
 
-この文書は、Voice Labの公開ポータルとSpeakLoop、SkitVoiceの非公開案内、管理3画面に適用する。管理者専用の`/fun`も最低基準は本方針へ揃える。揃える対象はブランドheaderと基本token、overflowとfocusである。
+この文書は、Voice Labの公開ポータルとSpeakLoop、管理2画面に適用する。管理者専用の`/fun`も最低基準は本方針へ揃える。揃える対象はブランドheaderと基本token、overflowとfocusである。
 
 - `/` のVoice Labポータルを視覚基準にする。
 - 暖かいニュートラル背景、控えめな影、明快な見出しを維持する。少数のアクセント色と十分な余白も維持する。
-- 公開ポータルとSpeakLoopは青を主accentにする。SkitVoiceのテラコッタaccentは管理者研究画面と直接URLの控えめな非公開案内に限る。共通の管理操作とfocusは青を使う。
+- 公開ポータルとSpeakLoopは青を主accentにする。共通の管理操作とfocusも青を使う。
 - 録音ボタンは待機中から赤系で識別し、録音中はより強い赤、波形、`REC`表示を組み合わせる。エラーと削除は録音色より暗い赤と明示的な文言で区別する。
 - SaaSダッシュボード風のカード乱用や、機能と関係のない装飾を避ける。
 - React公開UIは、route単位でTailwind CSS v4とshadcn/uiへ段階移行する。移行済みrouteでは旧`styles.css`を同時に読み込まず、1画面内に2つのスタイル方式を混在させない。
@@ -17,7 +17,7 @@
 
 - 新規または移行済みのReact routeでは、Tailwind CSS v4をCSS生成基盤、shadcn/uiのrepo所有コンポーネントをUI部品の起点とする。
 - shadcn/uiは完成テーマをそのまま適用するためではなく、アクセシブルな構造とvariantをrepo内で管理するために使う。本書のVoice Lab方針へ合わせる対象は配色、余白、角丸、影である。
-- 公開ポータル`/`は専用の軽量Tailwind entryを使う。SpeakLoop、SkitVoice、管理画面、実験画面は共通のTailwind buildを使う。あわせて既存controller selectorを保つcompatibility layerも使う。
+- 公開ポータル`/`は専用の軽量Tailwind entryを使う。SpeakLoop、管理画面、実験画面は共通のTailwind buildを使う。あわせて既存controller selectorを保つcompatibility layerも使う。
 - faviconは、Voice Lab共通の青い吹き出しと音声波形の二色マークを全routeで使う。16pxでも識別できる太い形を維持し、製品ごとの別faviconを増やさない。
 - 移行済みrouteのHTMLは`/static/styles.css`を直接読まない。旧selectorが必要な間はVite build内のcompatibility layerとして取り込み、適用順と削除境界を一箇所で管理する。
 - 共通部品へ昇格するのは、利用routeが同じスタイル基盤へ移行してからとする。移行前にTailwind依存の見える部品を旧routeへ持ち込まない。
@@ -65,12 +65,11 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 
 ### 管理画面の共通契約
 
-- headerに `Voice Lab 管理` と、総合管理・SpeakLoop・SkitVoice・公開画面への短いnavigationを置く。
+- headerに `Voice Lab 管理` と、総合管理・SpeakLoop・公開画面への短いnavigationを置く。
 - 保存・削除など通信を伴うボタンは、`保存中…` / `削除中…`、成功、失敗の状態をボタン自身と近接した `role="status"` の両方へ表示する。処理中は二重送信を防ぎ、成功表示は一定時間後に通常ラベルへ戻してよい。
 - 複数カードをまとめて保存する領域では、状態表示をカード群の下だけに置かず、保存ボタンと同じヘッダー内にも配置する。
 - `/admin` は実行設定と結果をPCで2列にし、結果を確認しながら左側の設定を変更できるようにする。スマホでは1列へ戻す。
 - `/speakloop/admin` は公開制限・サンプル設定、録音履歴・お手本履歴をそれぞれ同格の2列にし、狭い幅では1列にする。
-- `/skitvoice/admin` は公開設定・日英中サンプル・台本・参照音声・詳細生成設定の順を明確にし、生成CTAを詳細設定の中で見失わせない。
 - 公開制限・サンプル・運用設定は既定で短いsummaryにまとめ、主要な変換、履歴、生成を先に使えるようにする。DOMは折りたたみ内にも常駐させる。
 - 既定値で実行できる高度な生成・VC設定は必要時に展開する。閉じた状態でも主要CTAを表示し、開いた状態でもsticky要素で設定controlを覆わない。
 - 管理画面は情報量が多いため、カードを増やすのではなく、section見出し・divider・grid・sticky結果領域で階層を作る。
@@ -81,7 +80,7 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 ### Voice Labポータル
 
 - 上部はブランドと配色設定だけの短いheaderとし、設定を常に右上へ置く。
-- intro-copyの見出しと説明は維持し、その直後にSpeakLoopだけを主製品・主actionとして表示する。SkitVoiceを同格のカードや副製品として表示しない。
+- intro-copyの見出しと説明は維持し、その直後にSpeakLoopだけを主製品・主actionとして表示する。
 - `1440x900`、`1024x768`、`390x844`の初期状態では、原則としてSpeakLoopの価値とactionまでを1viewport内に収める。
 - 文字拡大や長文で収まらない場合はスクロールを許容し、固定高による切れや操作不能を起こさない。
 - モバイルでは見出しを読める大きさのまま段階的に縮め、カードの装飾余白と二重paddingを先に減らす。
@@ -109,24 +108,9 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 - 「聞こえた言葉」の差分は単語・文字の脱落だけを `_` で示し、ASRが付けなかった句読点や記号は発音誤りとして表示しない。差分リンクは対応するフレーズ区間がある場合だけ操作可能にし、クリック時はそのフレーズの先頭からお手本と復唱を比較再生する。
 - 非同期更新で録音対象、結果、本文、スクロール位置を不用意に動かさない。
 
-### SkitVoice
-
-- 公開 `/skitvoice` は研究機能が一般公開されていないことを短く伝え、`SpeakLoopで練習する` を唯一の主要actionにする。表示しないものは生成フォーム・sample・model・RunPod endpoint・login CTAである。匿名、通常Googleログイン、error状態で同じ非生成境界を維持する。
-- 生成フォーム・参照音声・サンプル・進捗・診断は `/skitvoice/admin` とローカル研究画面だけに残す。
-- SkitVoice管理画面のサンプル登録も英語、中国語、日本語の順でPCでは横並びにする。公開表示名を編集させず、ファイル選択後は音声プレビューと保存状態で確認できるようにする。ファイル名は表示しない。
-- Voice Labの公開・管理画面で利用者が操作する音声は、ブラウザ既定のaudio controlsを露出しない。対象はサンプル・参照音声・生成結果・行ごとの中間音声・履歴を含む。共通の再生／一時停止ボタン、シーク、経過時間／総時間表示を使う。キーボード操作と読み上げ用ラベルを維持し、実際のaudio要素は再生エンジンとして残す。
-- 台本、生成、参照音声の優先順を保つ。
-- 生成CTAを見失わせず、進捗、取消、エラーの表示で作業領域を不必要にずらさない。
-- 参照音声slotの同格操作は同じサイズと配置にする。
-- タブ音声録音はブラウザの機能検出を行い、非対応環境では操作と案内文中の選択肢を表示しない。APIが存在しても実行時に非対応と判明した場合はtoastで代替手段を案内し、そのセッション中は操作を隠す。権限キャンセルは非対応扱いにしない。
-- 参照音声の保存成功・利用不可・権限拒否などの短い操作結果は、出力言語や生成設定の直下へ混在させず、画面を押し下げないtoastへ表示する。生成中の進捗、取消、長い失敗理由は生成カード内のstatusを維持する。
-- 言語選択肢は `🇺🇸 English`、`🇨🇳 中文`、`🇯🇵 日本語` のように国旗と各言語の自称表記を使う。SkitVoiceの出力音声サンプル名は、別途定めた日本語UIの固定名を維持する。
-
 ## レスポンシブ契約
 
-- `1120px以上`: SkitVoice管理画面は台本、参照音声、生成の3列にする。
-- `821〜1119px`: SkitVoice管理画面は台本と生成の2列にし、参照音声は下段にする。
-- `820px以下`: 1列にし、SkitVoice管理画面は台本、追従生成、参照音声の順にする。設定はヘッダー右上、authは必要時だけ次段に置く。
+- `820px以下`: 1列にする。設定はヘッダー右上、authは必要時だけ次段に置く。
 - `480px以下`: touch target、折り返し、録音ボタン、action群を個別に調整する。
 - すべての対応幅で意図しない横スクロール、切れ、重なりを発生させない。
 - ブレークポイントの直前直後でも情報の優先順位と操作順を維持する。
@@ -144,15 +128,6 @@ SpeakLoop:
 - 保存済み結果
 - error
 
-SkitVoice管理画面:
-
-- editing
-- validating／uploading
-- queued／running
-- succeeded
-- failed
-- cancelling／cancelled
-
 共通:
 
 - auth表示／非表示
@@ -163,11 +138,6 @@ SkitVoice管理画面:
 - Light／Dark／System
 - theme menu、dialog、sticky要素の展開状態
 
-公開 `/skitvoice`:
-
-- 通常の直接URL
-- 匿名／通常Googleログイン
-- assetまたはsession取得error
 - Light／Dark
 - 長い日本語でも主要actionと説明が切れない状態
 
@@ -203,10 +173,8 @@ hidden要素のための空列を残さない。非同期表示の出入りで�
 
 - `/`
 - `/speakloop`
-- `/skitvoice`
 - `/admin`
 - `/speakloop/admin`
-- `/skitvoice/admin`
 
 基準幅:
 

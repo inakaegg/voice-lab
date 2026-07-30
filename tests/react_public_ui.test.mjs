@@ -3,19 +3,18 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [portal, speakloop, skitvoice, privacy, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, skitvoiceHtml, privacyHtml] = await Promise.all([
+const [portal, speakloop, privacy, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, privacyHtml] = await Promise.all([
   read("apps/web/src/portal/main.tsx"), read("apps/web/src/speakloop/main.tsx"),
-  read("apps/web/src/skitvoice/main.tsx"), read("apps/web/src/privacy/main.tsx"),
+  read("apps/web/src/privacy/main.tsx"),
   read("apps/web/src/shared/components.tsx"),
   read("src/mo_speech/web/styles.css"),
   read("cloudflare/worker.mjs"), read("package.json"), read("apps/web/vite.config.ts"),
-  read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/skitvoice.html"), read("apps/web/privacy.html"),
+  read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/privacy.html"),
 ]);
 
-test("public portal, SpeakLoop, SkitVoice, and privacy policy are React TypeScript entries", () => {
+test("public portal, SpeakLoop, and privacy policy are React TypeScript entries", () => {
   assert.match(portal, /mountPublicPage\(<Portal/);
   assert.match(speakloop, /mountPublicPage\(<SpeakLoop/);
-  assert.match(skitvoice, /mountPublicPage\(<SkitVoice/);
   assert.match(privacy, /mountPublicPage\(<PrivacyPolicy/);
   assert.match(shared, /function ProductHeader/);
   assert.match(shared, /activateCompactLayout/);
@@ -23,20 +22,17 @@ test("public portal, SpeakLoop, SkitVoice, and privacy policy are React TypeScri
   assert.match(pkg, /"check:web"/);
 });
 
-test("React public UI preserves SpeakLoop controller while the SkitVoice public page has no generation controller", () => {
+test("React public UI preserves the SpeakLoop controller and worker asset mapping", () => {
   assert.match(speakloop, /app_practice\.js/);
-  assert.doesNotMatch(skitvoice, /app_vibevoice\.js/);
-  assert.doesNotMatch(skitvoice, /id="vibevoice-form"|voice_file_|vibevoice-job-progress/);
   assert.match(worker, /assetUrl\.pathname = "\/react\/portal\.html"/);
   assert.match(worker, /assetUrl\.pathname = "\/react\/speakloop\.html"/);
-  assert.match(worker, /assetUrl\.pathname = "\/react\/skitvoice\.html"/);
+  assert.doesNotMatch(worker, /react\/skitvoice\.html|assetUrl\.pathname = "\/vibevoice\.html"/);
 });
 
 test("React pages expose the DOM ids required by legacy controllers", () => {
   for (const id of ["practice-target-language-select", "practice-comparison-model-select", "practice-playback-padding-slider", "practice-playback-padding-value", "practice-chinese-script-setting", "practice-script-simplified", "practice-script-traditional", "practice-native-record-button", "practice-native-cancel-button", "practice-prompt-panel", "practice-repeat-cancel-button", "practice-play-model-button", "practice-speed-slider", "practice-overall-comment", "practice-phrase-feedback", "practice-status", "practice-error"]) {
     assert.match(speakloop, new RegExp(`id=["']${id}["']`));
   }
-  assert.doesNotMatch(skitvoice, /vibevoice-form|vibevoice-script|vibevoice-generate-button|vibevoice-result|vibevoice-diagnostics/);
 });
 
 test("SpeakLoop uses a contained microphone icon instead of oversized legacy pseudo-elements", () => {
@@ -52,12 +48,8 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.doesNotMatch(portal, /href:\s*"\/skitvoice"|SkitVoice|VibeVoice/);
   assert.match(portal, /href:\s*"\/speakloop"/);
   assert.match(speakloop, /react-practice-flow/);
-  assert.match(skitvoice, /研究機能は一般公開していません/);
-  assert.match(skitvoice, /href="\/speakloop"[\s\S]*SpeakLoopで練習する/);
-  assert.doesNotMatch(skitvoice, /出力音声サンプル|SampleAudio|app_sample_audio_controls\.js/);
   assert.doesNotMatch(speakloop, /<SampleAudio/);
   assert.doesNotMatch(speakloop, /音声履歴を保存/);
-  assert.doesNotMatch(skitvoice, /履歴を保存/);
 });
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {
@@ -120,12 +112,6 @@ test("SpeakLoop exposes an opt-in Seed-VC model voice control with hover and foc
   assert.match(styles, /\.practice-own-voice-setting:focus-within[\s\S]*\.practice-own-voice-tooltip/);
 });
 
-test("SkitVoice public page exposes no interactive generation or samples", () => {
-  assert.doesNotMatch(skitvoice, /<form|<input|<textarea|<audio|fetch\(|RunPod|aoi-ot|vibevoice-large/);
-  assert.match(skitvoice, /一般公開していません/);
-  assert.match(skitvoice, /bg-foreground[\s\S]*text-background/);
-});
-
 test("SpeakLoop keeps comparison playback simple without an auto-play preference control", () => {
   assert.doesNotMatch(speakloop, /practice-auto-play-comparison|練習終了後すぐ再生/);
   assert.match(speakloop, /practice-play-model-button/);
@@ -170,9 +156,7 @@ test("public React routes use the staged Tailwind and shadcn migration boundary"
   assert.match(portal, /@\/components\/ui\/card/);
   assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
   assert.match(speakloopHtml, /src\/styles\/app\.css/);
-  assert.match(skitvoiceHtml, /src\/styles\/app\.css/);
   assert.doesNotMatch(speakloopHtml, /\/static\/styles\.css/);
-  assert.doesNotMatch(skitvoiceHtml, /\/static\/styles\.css/);
 });
 
 test("public UI finalizes the compact layout and exposes theme settings", () => {
@@ -187,8 +171,7 @@ test("public UI finalizes the compact layout and exposes theme settings", () => 
 });
 
 test("Voice Lab gives each product a distinct accent and keeps recording red", () => {
-  assert.match(styles, /\.react-public-body\.practice-body,\s*\n\.react-public-body\.vibevoice-body\s*\{[^}]*--react-accent:\s*#536da8/s);
-  assert.match(styles, /\.react-public-body\.vibevoice-body\s*\{[^}]*--react-accent:\s*#9a5b36/s);
+  assert.match(styles, /\.react-public-body\.practice-body\s*\{[^}]*--react-accent:\s*#536da8/s);
   assert.match(styles, /\.record-orb\s*\{[^}]*background:\s*var\(--user-record-ready\)/s);
   assert.match(styles, /--user-record-ready:\s*#e65a43/);
   assert.match(styles, /--user-recording:\s*#c7372f/);
@@ -197,7 +180,6 @@ test("Voice Lab gives each product a distinct accent and keeps recording red", (
 test("public workbench keeps settings at the mobile top right and avoids cramped columns", () => {
   assert.match(styles, /\.react-theme-settings summary svg\s*\{[^}]*fill:\s*none;/s);
   assert.match(styles, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
-  assert.match(styles, /@media \(min-width:\s*1120px\)/);
   assert.match(styles, /\.react-practice-flow:has\(#practice-prompt-panel\[hidden\]\)/);
 });
 
@@ -207,7 +189,6 @@ test("public pages declare share metadata (description, OGP, canonical, icons)",
   const pages = [
     { name: "portal", html: portalHtml, url: `${PUBLIC_ORIGIN}/` },
     { name: "speakloop", html: speakloopHtml, url: `${PUBLIC_ORIGIN}/speakloop` },
-    { name: "skitvoice", html: skitvoiceHtml, url: `${PUBLIC_ORIGIN}/skitvoice` },
     { name: "privacy", html: privacyHtml, url: `${PUBLIC_ORIGIN}/privacy` },
   ];
   for (const page of pages) {

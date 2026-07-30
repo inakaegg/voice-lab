@@ -43,7 +43,6 @@ export default defineConfig({
       MO_PRELOAD_VOICE_CONVERSION: "0",
       MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START: "0",
       MO_USER_SETTINGS_PATH: "tmp/playwright-user-settings.json",
-      MO_VIBEVOICE_DEBUG_RESULT_DIR: "off",
     },
   },
 });

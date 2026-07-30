@@ -14,7 +14,7 @@ RunPod向けDockerfile、CLI補助スクリプト、Serverless handler、Cloudfl
 4. Seed-VCのwarm実行が十分速いと実測できた場合だけ、ユーザー画面ではVCを既定動作にし、`にてるこえ` トグルを隠す検討に進む。
 5. 公開MVPではUI/gatewayをCloudflare側へ分け、RunPodは推論APIだけにする。
 
-Serverless handlerは、SpeakLoopの中国語発音練習用 `practice_asr` を受ける。加えて音声翻訳、テキスト読み上げ、Seed-VC、VibeVoiceも受ける。`practice_asr` はお手本と復唱の2音声をFunASR Paraformer Chineseでtimestamp付きASRし、VAD・句読点モデルを併用する。SpeakLoopの英語発音練習は両音声にOpenAI `whisper-1` を使う。母語で話す録音はOpenAIの自動言語判定を引き続き使う。
+Serverless handlerは、SpeakLoopの中国語発音練習用 `practice_asr` を受ける。加えて音声翻訳、テキスト読み上げ、Seed-VCも受ける。`practice_asr` はお手本と復唱の2音声をFunASR Paraformer Chineseでtimestamp付きASRし、VAD・句読点モデルを併用する。SpeakLoopの英語発音練習は両音声にOpenAI `whisper-1` を使う。母語で話す録音はOpenAIの自動言語判定を引き続き使う。
 
 SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り `/status/<job-id>` をpollingする。handlerが送るprogress updateの種類は次のとおり。
 
@@ -26,11 +26,8 @@ SpeakLoopの中国語比較は `/runsync` で待たず、`/run` でjobを作り 
 
 queue中はjob statusと `/health` のworker数から、worker割り当て待ちとworker初期化中を区別する。RunPodが返す `delayTime` と `executionTime` もUIの補足情報に使う。
 
-SkitVoiceも同じ非同期job経路で進捗を返す。handlerがモデル名付きで送るprogress updateの種類は次のとおり。
+Seed-VCも同じ非同期job経路で進捗を返す。handlerが送るprogress updateの種類は次のとおり。
 
-- `loading_vibevoice_model`
-- `vibevoice_generation`
-- `directed_asr`
 - `loading_seed_vc_model`
 - `voice_conversion`
 - `reconstruct`
@@ -123,15 +120,10 @@ cp scripts/runpod.env.example .runpod.env
 | `FUNASR_MODEL` / `FUNASR_FA_MODEL` | 中国語発音練習ASRとforced alignmentのモデル。既定は `funasr/paraformer-zh` と `funasr/fa-zh`。 |
 | `FUNASR_VAD_MODEL` / `FUNASR_PUNC_MODEL` | 中国語発音練習のVADと句読点モデル。既定は `funasr/fsmn-vad` と `funasr/ct-punc`。 |
 | `FUNASR_HUB` / `FUNASR_DEVICE` | FunASRの取得元と実行device。RunPod imageの既定は `hf` / `cuda`。 |
-| `MO_RUNPOD_PRELOAD_FUNASR_ON_START` | 起動時にFunASRを先読みするか。VibeVoiceやSeed-VCとVRAMを共用するため既定は `0`。 |
+| `MO_RUNPOD_PRELOAD_FUNASR_ON_START` | 起動時にFunASRを先読みするか。Seed-VCとVRAMを共用するため既定は `0`。 |
 | `MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR` | FunASRをロードする前に常駐Seed-VCを解放するか。既定は `1`。 |
-| `MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION` / `MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE` | Seed-VCまたはVibeVoiceの前にFunASRを解放するか。既定は `1`。 |
-| `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー。VibeVoice指定台詞モードの既定ASRでも使う。 |
-| `MO_VIBEVOICE_DIRECTED_ASR_PROVIDER` | VibeVoice指定台詞モードのtimestamp ASR。既定は `openai`。GPU上の自前ASRを使う場合だけ `faster-whisper` にする。 |
-| `MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL` | 指定台詞モードでOpenAI ASRを使う時のモデル。timestamp取得のため既定は `whisper-1`。 |
-| `MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE` | 指定台詞モードのASR言語。既定は `auto`。必要な時だけ `ja-JP` などへ固定する。 |
-| `MO_VIBEVOICE_DIRECTED_VC_ENABLED` | 指定台詞モードでVibeVoice出力へSeed-VCをかけてからASR/再配置するか。既定は `1`。 |
-| `MO_VIBEVOICE_DIRECTED_VC_BACKEND` | 指定台詞モードで使うVC backend。既定は `seed-vc`。 |
+| `MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION` | Seed-VC実行前にFunASRを解放するか。既定は `1`。 |
+| `OPENAI_API_KEY` | OpenAI API経路を使う場合だけ設定するAPIキー。 |
 
 課金リソースを作らずにコマンドだけ確認する場合は、各CLIスクリプトに `RUNPOD_DRY_RUN=1` を付ける。
 
@@ -225,7 +217,7 @@ push後にRunPod Serverlessへ反映する通常手順では、まず `scripts/r
 | `scripts/runpod_update_serverless_template.sh` | imageは既にbuild/push済みで、既存templateのimage/envだけを更新したい時 | `.runpod.env` のtemplate/image/registry credentialを使い、RunPod REST APIで既存templateを更新する。endpoint切替やworker入れ替えは行わない |
 | `scripts/runpod_create_serverless_template.sh` | 手動で新templateだけ作りたい時 | `.runpod.env` のimageとregistry credentialからRunPod REST APIで新しいServerless templateを作る。返ったtemplate IDの保存とendpoint切替は手動で行う |
 | `scripts/runpod_build_push.sh` | ローカルDockerで直接build/pushしたい時 | `Dockerfile.runpod` をローカルでbuildx buildしてregistryへpushする。Actions運用では通常使わない |
-| `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、中国語練習ASR、VibeVoiceなどのjobを直接投げる |
+| `scripts/runpod_smoke_serverless.py` | deploy後の確認、または生成問題の切り分け | RunPod Serverless handlerへdiagnostics、翻訳、中国語練習ASR、Seed-VCなどのjobを直接投げる |
 
 判断に迷う場合は、`RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh` で実行予定のtag、template名、workflow起動内容を確認してからdry-runなしで実行する。
 
@@ -235,7 +227,7 @@ push後にRunPod Serverlessへ反映する通常手順では、まず `scripts/r
 scripts/runpod_deploy_serverless_image.sh
 ```
 
-既定のimage tagは `runpod-vibevoice-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
+既定のimage tagは `runpod-app-<short-sha>`、template名は `mo-speech-serverless-<short-sha>` とする。これにより、固定tag再利用によるRunPod image cacheや既存workerの取り違えを避ける。
 
 同じcommitでdeployを再実行した場合、template名も同じになる。前回実行でtemplate作成後に失敗した場合でも、deployスクリプトは同名の自分のtemplateを検索する。失敗要因の例はendpoint更新、worker起動、diagnostics、残高不足などである。検索後はRunPod REST APIのtemplate PATCHでimage、env、registry credentialを更新して再利用する。RunPod側の `Template name must be unique` が出た場合は、まず最新のdeployスクリプトで同じcommitのまま再実行する。
 
@@ -249,10 +241,10 @@ RUNPOD_DRY_RUN=1 scripts/runpod_deploy_serverless_image.sh
 
 ```bash
 gh workflow run runpod-image.yml \
-  --ref feature/vibevoice-zhskit-mode \
+  --ref main \
   -f image_name=docker.io/<user>/<private-repository> \
   -f expected_visibility=private \
-  -f image_tag=runpod-vibevoice-$(git rev-parse --short HEAD)
+  -f image_tag=runpod-app-$(git rev-parse --short HEAD)
 ```
 
 Actions実行が成功したら、出力されたimage tagを `.runpod.env` の `RUNPOD_IMAGE` に反映し、Serverless templateを更新する。Docker HubへのpushはGitHub側で完了しているため、ローカルではRunPod APIへの小さいリクエストだけで済む。deployスクリプトを使う場合、この `.runpod.env` 更新も自動で行う。
@@ -263,7 +255,7 @@ Actions経由でpush済みなら、ローカルで `scripts/runpod_build_push.sh
 
 ```bash
 # .runpod.env
-RUNPOD_IMAGE=docker.io/<user>/<private-repository>:runpod-vibevoice-<short-sha>
+RUNPOD_IMAGE=docker.io/<user>/<private-repository>:runpod-app-<short-sha>
 RUNPOD_IMAGE_VISIBILITY=private
 RUNPOD_REGISTRY_AUTH_ID=<RunPod registry credential ID>
 ```
@@ -284,7 +276,7 @@ scripts/runpod_create_serverless_template.sh
 
 返ってきたtemplate IDを `.runpod.env` の `RUNPOD_SERVERLESS_TEMPLATE_ID` に反映し、RunPod管理画面またはREST APIでendpointの `templateId` をそのIDへ更新する。既存workerが残る場合は、一時的に `workersMax=0` へ下げてから `workersMax=1` へ戻すと、旧workerを避けて新templateから起動し直せる。
 
-image更新後は、生成jobを投げる前に軽量なdiagnostics jobでworker内の実行コードを確認する。`runpod-image.yml` はbuild時のGit commit SHAをimage環境変数 `MO_IMAGE_REVISION` に埋め込み、diagnosticsはその値と `/app/src/mo_speech/vibevoice_cli.py` の実装マーカーを返す。VibeVoice確認では `vibevoice_cli.uses_parsed_scripts=false`、`vibevoice_cli.uses_raw_text_processor_call=true`、`vibevoice_cli.installs_vibevoice_modules_utils_alias=true`、`image.revision` がbuild対象commitに一致することを先に確認する。
+image更新後は、生成jobを投げる前に軽量なdiagnostics jobでworker内の実行コードを確認する。`runpod-image.yml` はbuild時のGit commit SHAをimage環境変数 `MO_IMAGE_REVISION` に埋め込み、diagnosticsはその値を返す。`image.revision` がbuild対象commitに一致することを先に確認する。
 
 ```bash
 python scripts/runpod_smoke_serverless.py \
@@ -292,19 +284,7 @@ python scripts/runpod_smoke_serverless.py \
   --request-mode async
 ```
 
-diagnosticsが未対応、`uses_raw_text_processor_call=false`、または `installs_vibevoice_modules_utils_alias=false` を返す場合、RunPod endpointは古いimageまたは古いworkerを使っている。Serverless templateのimage更新、endpointのworker入れ替え、またはidle timeout後の再実行を先に行い、VibeVoice生成の成否判断に進まない。
-
-diagnosticsが新imageを示した後、VibeVoice単体のServerless smokeを実行する。UIやローカルFastAPIを介さず、RunPod handlerへ直接 `operation_mode=vibevoice` を投げる。これにより、endpoint側のモデルロード、参照音声処理、VibeVoice CLI実行の問題を分けて確認できる。
-
-```bash
-python scripts/runpod_smoke_serverless.py \
-  --operation-mode vibevoice \
-  --request-mode async \
-  --script "Speaker 1: こんにちは。" \
-  --voice-audio 1:/path/to/reference.wav \
-  --vibevoice-inference-steps 2 \
-  --vibevoice-max-voice-seconds 3
-```
+diagnosticsが未対応、または古いrevisionを返す場合、RunPod endpointは古いimageまたは古いworkerを使っている。Serverless templateのimage更新、endpointのworker入れ替え、またはidle timeout後の再実行を先に行い、生成jobの成否判断に進まない。
 
 `runpodctl template get` などの確認コマンドは、template envの値をそのまま表示する場合がある。出力を保存・共有するときはAPI keyやtokenが含まれていないことを確認し、必要なら伏せる。
 
@@ -553,11 +533,11 @@ Serverlessでは、完全にscale-to-zeroすると初回リクエストでworker
 
 FlashBoot状態はRunPod REST APIのendpoint詳細で `flashboot=true` を確認する。`runpodctl serverless create --help` ではFlashBootが既定有効になっているが、既存endpointの確認や更新はCLIのversion差分を受ける場合がある。既存endpointが `flashboot=false` の場合は、REST APIの `POST /v1/endpoints/{endpoint_id}/update` に `{"flashboot": true}` を送るか、FlashBoot有効のendpointを作り直す。
 
-VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードできる。ただしVibeVoice Largeを同じworkerで使う場合、Seed-VC residentが数GiBのVRAMを保持し、20GB級GPUではLargeのロード中にOOMしやすい。そのためVibeVoice用image/envでは `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0` を既定にし、必要な時だけwarmup requestでVCを前倒しする。中国語練習用FunASRも同じworker processへ遅延ロードするが、Seed-VCまたはVibeVoiceを使う操作へ切り替える際はFunASRを解放し、逆にFunASRを使う前は常駐Seed-VCを解放する。つまりDocker imageとendpointは共通でも、大きいGPUモデルをすべて同時常駐させる構成ではない。`MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE=1` の場合、VibeVoice request前にも既存のVC serviceを解放してVRAMを空ける。指定台詞モードは `全話者VibeVoice生成 -> 話者別Seed-VC -> VC後音声のASR -> 分割/再配置` の順に進める。指定台詞モードのASRは既定でOpenAI `whisper-1` を使い、Largeとfaster-whisperを同じGPUへ載せない。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前に管理者用画面 `/admin` の手動準備ボタンからwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。CloudflareのページHTML配信だけではRunPod jobは起きず、管理者用画面の手動操作、または録音送信後の実変換でRunPod jobが作られる。
+VC単体の検証では `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` と `SEED_VC_EXECUTION_MODE=resident` を使い、handler起動時にVC serviceとSeed-VCモデルをworker process内へロードできる。中国語練習用FunASRも同じworker processへ遅延ロードするが、Seed-VCを使う操作へ切り替える際はFunASRを解放し、逆にFunASRを使う前は常駐Seed-VCを解放する。つまりDocker imageとendpointは共通でも、大きいGPUモデルをすべて同時常駐させる構成ではない。30GBのNetwork VolumeでSeed-VC最小構成を試す場合は、通常pipelineの起動時preloadを避けるため `MO_PRELOAD_MODELS=0`、VC backendを絞るため `MO_VC_BACKENDS=seed-vc` にする。`RUNPOD_WORKERS_MIN=0` のままでも、デモ直前に管理者用画面 `/admin` の手動準備ボタンからwarmup requestを投げ、`RUNPOD_IDLE_TIMEOUT_SECONDS=300` の範囲内で利用すれば、待機課金を常時発生させずにwarm workerを使いやすい。CloudflareのページHTML配信だけではRunPod jobは起きず、管理者用画面の手動操作、または録音送信後の実変換でRunPod jobが作られる。
 
 `RUNPOD_WORKERS_MAX` を増やすと、同時アクセス時にRunPodが追加workerを起動できる。ただし `RUNPOD_WORKERS_MIN=0` のデモ運用では、追加workerは基本的にcold状態から起動し、各worker内でSeed-VC preloadが必要になる。1つ目のwarm workerだけで処理できる程度の同時数なら `workers-max=1` の方が予測しやすい。複数人が同時にVCを使うデモでは `workers-max=2` を試せるが、2人目以降の初回VCはcold start分だけ遅くなる可能性を測定して判断する。
 
-スマホから見るデモでは、ローカルMacのFastAPIをUI/gatewayにしない。Cloudflare gatewayを置く前の暫定運用では、同じRunPod imageをGPU Podとして起動し、`CMD` のFastAPI/Uvicornを `8000/http` で公開する。VC専用デモで `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` の場合、Webサーバー起動時にVC preloadが完了してから画面を返せるため、cold start後に `/` が表示されたことを「Webプロセスと常駐VC providerの初期化が完了した」シグナルとして扱える。VibeVoice Large検証ではこのpreloadを切り、LargeのためにVRAMを空ける。
+スマホから見るデモでは、ローカルMacのFastAPIをUI/gatewayにしない。Cloudflare gatewayを置く前の暫定運用では、同じRunPod imageをGPU Podとして起動し、`CMD` のFastAPI/Uvicornを `8000/http` で公開する。VC専用デモで `MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=1` の場合、Webサーバー起動時にVC preloadが完了してから画面を返せるため、cold start後に `/` が表示されたことを「Webプロセスと常駐VC providerの初期化が完了した」シグナルとして扱える。
 
 ## 完了条件
 

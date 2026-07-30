@@ -12,10 +12,8 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 
 - `/`
 - `/speakloop`
-- `/skitvoice`
 - `/admin`
 - `/speakloop/admin`
-- `/skitvoice/admin`
 
 管理者専用の実験routeも、共通ブランド、横overflow、主要操作の到達性を検査する。
 
@@ -33,10 +31,8 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 - visibleな主要controlがviewport左右からはみ出さない
 - h1と主要actionが表示され、keyboard focusできる
 - 公開3画面のLight／Dark／Systemと設定menu
-- ポータルのSpeakLoop主導線が初期viewport内にあり、SkitVoice製品導線がない
+- ポータルのSpeakLoop主導線が初期viewport内にある
 - SpeakLoopのprompt表示前後の列構成
-- 公開 `/skitvoice` が認証前後と直接URLで同じ非生成案内を維持し、生成フォームとsampleを表示しない
-- `/skitvoice/admin` の台本・生成・参照音声の順とbreakpoint
 - 管理画面のsection順、フォーム幅、長い履歴、empty／error
 
 ## 実行環境

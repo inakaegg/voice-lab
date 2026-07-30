@@ -31,7 +31,7 @@ from .api_audio_history import (
     serialize_audio_history_settings as _serialize_audio_history_settings,
     upload_suffix as _upload_suffix,
 )
-from .api_jobs import TextToSpeechJobStore, TranslationJobStore, VibeVoiceJobStore, VoiceConversionJobStore
+from .api_jobs import TextToSpeechJobStore, TranslationJobStore, VoiceConversionJobStore
 from .api_requests import (
     create_pipeline_request as _create_pipeline_request,
     create_seed_vc_settings as _create_seed_vc_settings,
@@ -53,7 +53,6 @@ from .factory import (
     create_realtime_translation_pipeline,
     create_runpod_serverless_pipeline,
 )
-from .media_reference import MediaReferenceAudioExtractor
 from .pipeline import SpeechTranslationPipeline
 from .pipeline import PipelineResult
 from .practice import (
@@ -105,17 +104,6 @@ from .user_settings import (
     prepare_user_settings_for_write,
     serialize_user_settings,
 )
-from .vibevoice import (
-    RunpodServerlessVibeVoiceService,
-    VibeVoiceError,
-    VibeVoiceGenerator,
-    VibeVoiceGenerationOptions,
-    VibeVoiceService,
-    VibeVoiceVoiceSample,
-    directed_retry_max_lines_for_script,
-    normalize_vibevoice_backend,
-    validate_vibevoice_model_backend,
-)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
@@ -130,13 +118,6 @@ _HAN_CODEPOINT_RANGES = (
 )
 _PINYIN_OMITTED_PUNCTUATION = "，。！？；：、,.!?;:\"'“”‘’（）()[]【】《》<>"
 _PINYIN_WHITESPACE_RE = re.compile(r"\s+")
-_VIBEVOICE_OUTPUT_LANGUAGES = {
-    "en-US": {"label": "英語", "openai_name": "English"},
-    "zh-CN": {"label": "中国語", "openai_name": "Chinese"},
-    "ja-JP": {"label": "日本語（低品質）", "openai_name": "Japanese"},
-}
-
-
 def _configure_logging() -> None:
     if LOGGER.handlers:
         return
@@ -545,258 +526,6 @@ def _update_practice_attempt_history(
     store.update_metadata(entry, metadata)
 
 
-async def _read_vibevoice_script(script: str, script_file: UploadFile | None) -> str:
-    if script_file is not None and script_file.filename:
-        content = await script_file.read()
-        if not content:
-            raise ValueError("script file is empty")
-        try:
-            return _normalize_vibevoice_script_line_endings(content.decode("utf-8"))
-        except UnicodeDecodeError as exc:
-            raise ValueError("script file must be UTF-8") from exc
-    return _normalize_vibevoice_script_line_endings(script)
-
-
-def _normalize_vibevoice_script_line_endings(text: str) -> str:
-    return str(text or "").replace("\r\n", "\n").replace("\r", "\n")
-
-
-async def _save_vibevoice_upload(upload: UploadFile, directory: Path, fallback_name: str) -> Path:
-    audio_bytes = await upload.read()
-    if not audio_bytes:
-        raise ValueError(f"{fallback_name} is empty")
-    limit = int(os.getenv("MO_VIBEVOICE_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
-    if len(audio_bytes) > limit:
-        raise ValueError(f"{fallback_name} is too large: max {limit} bytes")
-    suffix = _upload_suffix(upload.filename) or ".wav"
-    output = directory / f"{fallback_name}{suffix}"
-    output.write_bytes(audio_bytes)
-    return output
-
-
-def _vibevoice_url_reference_specs(
-    *,
-    voice_url_1: str,
-    voice_url_start_1: str | None,
-    voice_url_duration_1: str,
-    voice_url_2: str,
-    voice_url_start_2: str | None,
-    voice_url_duration_2: str,
-    voice_url_3: str,
-    voice_url_start_3: str | None,
-    voice_url_duration_3: str,
-    voice_url_4: str,
-    voice_url_start_4: str | None,
-    voice_url_duration_4: str,
-) -> dict[int, dict[str, object]]:
-    raw_values = {
-        1: (voice_url_1, voice_url_start_1, voice_url_duration_1),
-        2: (voice_url_2, voice_url_start_2, voice_url_duration_2),
-        3: (voice_url_3, voice_url_start_3, voice_url_duration_3),
-        4: (voice_url_4, voice_url_start_4, voice_url_duration_4),
-    }
-    specs: dict[int, dict[str, object]] = {}
-    for slot, (url_value, start_value, duration_value) in raw_values.items():
-        url = str(url_value or "").strip()
-        if not url:
-            continue
-        specs[slot] = {
-            "url": url,
-            "start_seconds": _optional_float_form_value(start_value),
-            "duration_seconds": _required_float_form_value(duration_value, f"voice_url_duration_{slot}"),
-        }
-    return specs
-
-
-def _url_reference_audio_enabled(request: Request) -> bool:
-    configured = str(os.getenv("MO_VIBEVOICE_URL_REFERENCE_ENABLED", "")).strip().lower()
-    if configured in {"1", "true", "yes", "on"}:
-        return True
-    if configured in {"0", "false", "no", "off"}:
-        return False
-    return (request.url.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
-
-
-def _require_url_reference_audio(request: Request, url_references: dict[int, dict[str, object]]) -> None:
-    if url_references and not _url_reference_audio_enabled(request):
-        raise HTTPException(
-            status_code=403,
-            detail="URL参照音声取得はローカルFastAPIへのloopback接続でのみ利用できます。",
-        )
-
-
-def _reference_audio_tool_diagnostics(extractor: object) -> dict[str, object]:
-    diagnostics = getattr(extractor, "diagnostics", None)
-    if not callable(diagnostics):
-        return {}
-    try:
-        value = diagnostics()
-    except Exception as exc:
-        return {"diagnostics_error": str(exc)}
-    return value if isinstance(value, dict) else {}
-
-
-async def _save_vibevoice_voice_uploads(
-    uploads: list[UploadFile | None],
-    directory: Path,
-    *,
-    url_references: dict[int, dict[str, object]] | None = None,
-    reference_audio_extractor: MediaReferenceAudioExtractor | None = None,
-) -> tuple[list[VibeVoiceVoiceSample], dict[str, object]]:
-    voice_paths: list[VibeVoiceVoiceSample] = []
-    url_reference_audio: list[dict[str, object]] = []
-    for index, upload in enumerate(uploads, start=1):
-        if upload is not None and upload.filename:
-            voice_paths.append(
-                VibeVoiceVoiceSample(
-                    slot=index,
-                    path=await _save_vibevoice_upload(upload, directory, f"voice-{index}"),
-                )
-            )
-            continue
-        url_reference = (url_references or {}).get(index)
-        if url_reference is None:
-            continue
-        extractor = reference_audio_extractor or MediaReferenceAudioExtractor()
-        clip = extractor.extract_from_url(
-            str(url_reference["url"]),
-            start_seconds=url_reference.get("start_seconds"),
-            duration_seconds=float(url_reference["duration_seconds"]),
-        )
-        suffix = Path(clip.filename).suffix or ".wav"
-        path = directory / f"voice-{index}{suffix}"
-        path.write_bytes(clip.audio_bytes)
-        voice_paths.append(VibeVoiceVoiceSample(slot=index, path=path))
-        url_reference_audio.append(
-            {
-                "slot": index,
-                "filename": clip.filename,
-                "source_url": clip.source_url,
-                "start_seconds": clip.start_seconds,
-                "detected_start_seconds": clip.detected_start_seconds,
-                "duration_seconds": clip.duration_seconds,
-                "size_bytes": len(clip.audio_bytes),
-            }
-        )
-    if not voice_paths:
-        raise ValueError("voice sample is required")
-    diagnostics: dict[str, object] = {}
-    if url_reference_audio:
-        diagnostics["url_reference_audio"] = url_reference_audio
-    return voice_paths, diagnostics
-
-
-def _vibevoice_generation_options(
-    *,
-    script_text: str,
-    model_id: str,
-    cfg_scale: str,
-    inference_steps: str,
-    seed: str,
-    do_sample: str,
-    temperature: str,
-    top_p: str,
-    top_k: str,
-    max_voice_seconds: str,
-    line_by_line: str,
-    line_gap: str,
-    directed_line_mode: str,
-    directed_retry_low_score: str,
-    directed_retry_score_threshold: str,
-    directed_retry_max_lines: str,
-    directed_retry_max_multiplier: str,
-) -> VibeVoiceGenerationOptions:
-    retry_max_lines = _directed_retry_max_lines_form_value(
-        script_text=script_text,
-        directed_retry_max_lines=directed_retry_max_lines,
-        directed_retry_max_multiplier=directed_retry_max_multiplier,
-    )
-    return VibeVoiceGenerationOptions(
-        model_id=model_id,
-        cfg_scale=_float_form_value(cfg_scale, 1.3),
-        inference_steps=max(1, _int_form_value(inference_steps, 10)),
-        seed=_int_form_value(seed, 42),
-        do_sample=_bool_form_value(do_sample, default=True),
-        temperature=_float_form_value(temperature, 0.95),
-        top_p=_float_form_value(top_p, 0.95),
-        top_k=max(0, _int_form_value(top_k, 0)),
-        max_voice_seconds=max(0.0, _float_form_value(max_voice_seconds, 5.0)),
-        line_by_line=_bool_form_value(line_by_line, default=False),
-        line_gap=max(0.0, _float_form_value(line_gap, 1.0)),
-        directed_line_mode=_bool_form_value(directed_line_mode, default=True),
-        directed_retry_low_score=_bool_form_value(directed_retry_low_score, default=True),
-        directed_retry_score_threshold=max(0.0, min(1.0, _float_form_value(directed_retry_score_threshold, 0.65))),
-        directed_retry_max_lines=retry_max_lines,
-    )
-
-
-def _directed_retry_max_lines_form_value(
-    *,
-    script_text: str,
-    directed_retry_max_lines: str | None,
-    directed_retry_max_multiplier: str | None,
-) -> int:
-    value = str(directed_retry_max_lines or "").strip()
-    if value and value.lower() != "auto":
-        return max(0, _int_form_value(value, 0))
-    multiplier = _float_form_value(directed_retry_max_multiplier, 1.0)
-    return directed_retry_max_lines_for_script(script_text, multiplier=multiplier)
-
-
-def _select_vibevoice_generator(
-    *,
-    backend: str,
-    options: VibeVoiceGenerationOptions,
-    local_service: VibeVoiceGenerator,
-    runpod_service: VibeVoiceGenerator,
-) -> VibeVoiceGenerator:
-    backend_id = normalize_vibevoice_backend(backend)
-    validate_vibevoice_model_backend(options.model_id, backend_id)
-    return runpod_service if backend_id == "runpod_serverless" else local_service
-
-
-def _float_form_value(value: str | None, default: float) -> float:
-    if value is None or str(value).strip() == "":
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
-
-
-def _optional_float_form_value(value: str | None) -> float | None:
-    if value is None or str(value).strip() == "":
-        return None
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError("start_seconds must be a number") from exc
-
-
-def _required_float_form_value(value: str | None, name: str) -> float:
-    if value is None or str(value).strip() == "":
-        raise ValueError(f"{name} is required")
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be a number") from exc
-
-
-def _int_form_value(value: str | None, default: int) -> int:
-    if value is None or str(value).strip() == "":
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
-def _bool_form_value(value: str | None, *, default: bool) -> bool:
-    if value is None or str(value).strip() == "":
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _practice_display_text(text: str, target_language: str, *, include_pinyin: bool = False) -> dict[str, str]:
     if target_language == "zh-CN":
         pinyin_text = _practice_pinyin_text(text) if include_pinyin else ""
@@ -926,175 +655,6 @@ def _practice_diff_pinyin_chars(text: str) -> list[str]:
             result[index:end] = tokens
         index = end
     return result
-
-
-def _supported_vibevoice_output_language(value: str | None) -> str:
-    language = str(value or "zh-CN").strip()
-    if language not in _VIBEVOICE_OUTPUT_LANGUAGES:
-        raise ValueError(f"unsupported VibeVoice output language: {language}")
-    return language
-
-
-def _vibevoice_script_translation_model() -> str:
-    return os.getenv(
-        "OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL",
-        os.getenv("OPENAI_TRANSLATION_MODEL", "gpt-5.6-terra"),
-    )
-
-
-def _prepare_vibevoice_script_for_generation(
-    *,
-    script_text: str,
-    output_language: str | None,
-    translate_script: str | None,
-) -> tuple[str, dict[str, object]]:
-    language = _supported_vibevoice_output_language(output_language)
-    auto = str(translate_script or "").strip().lower() == "auto"
-    requested = auto or _bool_form_value(translate_script, default=False)
-    diagnostics: dict[str, object] = {
-        "script_translation": {
-            "requested": requested,
-            "enabled": False,
-            "source_language": "auto" if auto else "ja-JP",
-            "output_language": language,
-            "output_language_label": _VIBEVOICE_OUTPUT_LANGUAGES[language]["label"],
-            "source_script": script_text,
-            "translated_script": script_text,
-            "model": "",
-            "provider": "",
-        }
-    }
-    if not requested:
-        return script_text, diagnostics
-
-    model = _vibevoice_script_translation_model()
-    translation_result = _openai_vibevoice_translate_script(script_text, language, model)
-    source_language, translated_text = _parse_vibevoice_translation_result(translation_result)
-    translated_script = _normalize_vibevoice_translated_script(translated_text)
-    _validate_vibevoice_translated_script(script_text, translated_script)
-    diagnostics["script_translation"].update(
-        {
-            "enabled": translated_script != script_text,
-            "source_language": source_language,
-            "translated_script": translated_script,
-            "model": model,
-            "provider": "openai-responses",
-        }
-    )
-    return translated_script, diagnostics
-
-
-def _openai_vibevoice_translate_script(script_text: str, output_language: str, model: str) -> str:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY is required for VibeVoice script translation")
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise ValueError("openai package is required for VibeVoice script translation") from exc
-
-    language_name = _VIBEVOICE_OUTPUT_LANGUAGES[output_language]["openai_name"]
-    response = OpenAI().responses.create(
-        model=model,
-        instructions=(
-            "Detect the dialogue language of this skit script. "
-            f"If it is not {language_name}, translate only dialogue text into natural spoken {language_name}; "
-            "if it is already the target language, return it unchanged. "
-            "Preserve speaker tags exactly, preserve the number of non-empty lines, "
-            "preserve line order, and return strict JSON with keys source_language and script. "
-            "source_language must be a BCP 47 language code and script must contain the final script."
-        ),
-        input=script_text,
-    )
-    output_text = getattr(response, "output_text", None)
-    if output_text is not None:
-        return str(output_text)
-    if hasattr(response, "model_dump"):
-        try:
-            dumped = response.model_dump()
-            return _openai_response_text_from_dict(dumped)
-        except Exception:
-            pass
-    return str(response)
-
-
-def _parse_vibevoice_translation_result(value: object) -> tuple[str, str]:
-    if isinstance(value, tuple) and len(value) == 2:
-        return str(value[0]), str(value[1])
-    text = _normalize_vibevoice_translated_script(str(value))
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return "auto", text
-    if not isinstance(payload, dict) or not str(payload.get("script") or "").strip():
-        raise ValueError("VibeVoice script translation returned invalid JSON")
-    return str(payload.get("source_language") or "auto"), str(payload["script"])
-
-
-def _openai_vibevoice_generate_script(seed_script: str) -> str:
-    if not os.getenv("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY is required for VibeVoice script generation")
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise ValueError("openai package is required for VibeVoice script generation") from exc
-    response = OpenAI().responses.create(
-        model=_vibevoice_script_translation_model(),
-        instructions=(
-            "Write a natural, friendly Japanese everyday conversation for speech synthesis. "
-            "Return exactly five non-empty lines, alternating speakers 1, 2, 1, 2, 1. "
-            "Every line must start with the speaker number and one space. Use only the script, with no title or notes."
-        ),
-        input=(
-            "次の台本を着想元として、話題や状況を自然に連想・発展させて再構成してください。\n\n"
-            + seed_script.strip()
-            if seed_script.strip()
-            else "短い日常会話を新規に作ってください。"
-        ),
-    )
-    text = str(getattr(response, "output_text", "") or "")
-    script = _normalize_vibevoice_translated_script(text)
-    lines = [line for line in script.splitlines() if line.strip()]
-    if len(lines) != 5 or [line.split(maxsplit=1)[0] for line in lines] != ["1", "2", "1", "2", "1"]:
-        raise ValueError("AI script generation must return exactly five alternating speaker lines")
-    return "\n".join(lines)
-
-
-def _openai_response_text_from_dict(body: dict[str, object]) -> str:
-    if isinstance(body.get("output_text"), str):
-        return str(body["output_text"])
-    chunks: list[str] = []
-    output = body.get("output")
-    if isinstance(output, list):
-        for item in output:
-            if not isinstance(item, dict):
-                continue
-            content = item.get("content")
-            if not isinstance(content, list):
-                continue
-            for part in content:
-                if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    chunks.append(str(part["text"]))
-    return "".join(chunks)
-
-
-def _normalize_vibevoice_translated_script(text: str) -> str:
-    translated = str(text or "").strip()
-    if translated.startswith("```"):
-        translated = re.sub(r"^```(?:text|txt)?", "", translated, flags=re.IGNORECASE).strip()
-        translated = re.sub(r"```$", "", translated).strip()
-    return "\n".join(line.rstrip() for line in translated.splitlines()).strip()
-
-
-def _validate_vibevoice_translated_script(source_script: str, translated_script: str) -> None:
-    if not translated_script.strip():
-        raise ValueError("VibeVoice script translation returned empty text")
-    source_lines = [line for line in source_script.splitlines() if line.strip()]
-    translated_lines = [line for line in translated_script.splitlines() if line.strip()]
-    if source_lines and len(source_lines) != len(translated_lines):
-        raise ValueError(
-            "VibeVoice script translation must preserve the number of non-empty lines: "
-            f"source={len(source_lines)} translated={len(translated_lines)}"
-        )
 
 
 def _practice_pinyin_text_openai(text: str) -> str:
@@ -1351,9 +911,6 @@ def create_app(
     runpod_practice_asr_provider: RunpodServerlessPracticeAsrProvider | None = None,
     text_tts_providers: dict[str, object] | None = None,
     voice_conversion_service: VoiceConversionService | None = None,
-    vibevoice_service: VibeVoiceService | None = None,
-    runpod_vibevoice_service: VibeVoiceGenerator | None = None,
-    reference_audio_extractor: MediaReferenceAudioExtractor | None = None,
     audio_history_store: AudioHistoryStore | None = None,
     user_settings_store: UserSettingsStore | None = None,
     public_sample_audio_store: PublicSampleAudioStore | None = None,
@@ -1399,9 +956,6 @@ def create_app(
     active_practice_voice_conversion_service = voice_conversion_service or VoiceConversionService(
         providers=[RunpodServerlessVoiceConversionProvider()]
     )
-    active_vibevoice_service = vibevoice_service or VibeVoiceService.from_env()
-    active_runpod_vibevoice_service = runpod_vibevoice_service or RunpodServerlessVibeVoiceService.from_env()
-    active_reference_audio_extractor = reference_audio_extractor or MediaReferenceAudioExtractor()
     active_audio_history_store = audio_history_store or AudioHistoryStore.from_env()
     active_user_settings_store = user_settings_store or UserSettingsStore.from_env()
     active_public_sample_audio_store = public_sample_audio_store or PublicSampleAudioStore.from_env()
@@ -1431,7 +985,6 @@ def create_app(
         active_practice_voice_conversion_service,
         active_audio_history_store,
     )
-    vibevoice_job_store = VibeVoiceJobStore()
     if os.getenv("MO_PRELOAD_MODELS") == "1":
         active_pipeline.preload()
     if os.getenv("MO_PRELOAD_VOICE_CONVERSION") == "1" or os.getenv("MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START") == "1":
@@ -1463,16 +1016,6 @@ def create_app(
     def practice_admin() -> FileResponse:
         return FileResponse(WEB_DIR / "practice_admin.html")
 
-    @app.get("/skitvoice")
-    @app.get("/skitvoice/")
-    def skitvoice() -> FileResponse:
-        return FileResponse(WEB_DIR / "react" / "skitvoice.html")
-
-    @app.get("/skitvoice/admin")
-    @app.get("/skitvoice/admin/")
-    def vibevoice_admin() -> FileResponse:
-        return FileResponse(WEB_DIR / "vibevoice.html")
-
     @app.get("/admin")
     def admin() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
@@ -1499,50 +1042,6 @@ def create_app(
                 "practice_developer_settings": True,
                 "practice_history_preview": bool(active_audio_history_store.enabled),
             },
-        }
-
-    @app.get("/api/vibevoice/status")
-    def vibevoice_status(request: Request) -> dict[str, object]:
-        local_status = active_vibevoice_service.status()
-        return {
-            **local_status,
-            "url_reference_audio": {
-                "enabled": _url_reference_audio_enabled(request),
-                "scope": "loopback_or_explicit_override",
-                "tools": _reference_audio_tool_diagnostics(active_reference_audio_extractor),
-            },
-            "backends": {
-                "local": local_status,
-                "runpod_serverless": active_runpod_vibevoice_service.status(),
-            },
-        }
-
-    @app.post("/api/vibevoice/reference-audio-from-url")
-    async def vibevoice_reference_audio_from_url(
-        request: Request,
-        url: Annotated[str, Form()] = "",
-        start_seconds: Annotated[str | None, Form()] = None,
-        duration_seconds: Annotated[str, Form()] = "5",
-    ) -> dict[str, object]:
-        _require_url_reference_audio(request, {1: {"url": url}} if str(url or "").strip() else {})
-        try:
-            clip = active_reference_audio_extractor.extract_from_url(
-                url,
-                start_seconds=_optional_float_form_value(start_seconds),
-                duration_seconds=_required_float_form_value(duration_seconds, "duration_seconds"),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return {
-            "audio_mime_type": clip.audio_mime_type,
-            "audio_base64": base64.b64encode(clip.audio_bytes).decode("ascii"),
-            "filename": clip.filename,
-            "source_url": clip.source_url,
-            "start_seconds": clip.start_seconds,
-            "detected_start_seconds": clip.detected_start_seconds,
-            "duration_seconds": clip.duration_seconds,
         }
 
     @app.get("/api/user-settings")
@@ -1695,263 +1194,6 @@ def create_app(
             },
         )
         return _serialize_pipeline_result(result)
-
-    @app.post("/api/vibevoice/scripts")
-    async def generate_vibevoice_script(request: Request) -> dict[str, str]:
-        try:
-            try:
-                payload = await request.json()
-            except Exception:
-                payload = {}
-            seed_script = str(payload.get("seed_script") or "") if isinstance(payload, dict) else ""
-            if len(seed_script) > 5_000:
-                raise ValueError("seed_script must be 5000 characters or fewer")
-            return {"script": _openai_vibevoice_generate_script(seed_script)}
-        except ValueError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.post("/api/vibevoice/generate")
-    async def vibevoice_generate(
-        request: Request,
-        script: Annotated[str, Form()] = "",
-        script_file: Annotated[UploadFile | None, File()] = None,
-        voice_file_1: Annotated[UploadFile | None, File()] = None,
-        voice_file_2: Annotated[UploadFile | None, File()] = None,
-        voice_file_3: Annotated[UploadFile | None, File()] = None,
-        voice_file_4: Annotated[UploadFile | None, File()] = None,
-        voice_url_1: Annotated[str, Form()] = "",
-        voice_url_start_1: Annotated[str | None, Form()] = None,
-        voice_url_duration_1: Annotated[str, Form()] = "5",
-        voice_url_2: Annotated[str, Form()] = "",
-        voice_url_start_2: Annotated[str | None, Form()] = None,
-        voice_url_duration_2: Annotated[str, Form()] = "5",
-        voice_url_3: Annotated[str, Form()] = "",
-        voice_url_start_3: Annotated[str | None, Form()] = None,
-        voice_url_duration_3: Annotated[str, Form()] = "5",
-        voice_url_4: Annotated[str, Form()] = "",
-        voice_url_start_4: Annotated[str | None, Form()] = None,
-        voice_url_duration_4: Annotated[str, Form()] = "5",
-        cfg_scale: Annotated[str, Form()] = "1.3",
-        inference_steps: Annotated[str, Form()] = "10",
-        seed: Annotated[str, Form()] = "42",
-        do_sample: Annotated[str, Form()] = "true",
-        temperature: Annotated[str, Form()] = "0.95",
-        top_p: Annotated[str, Form()] = "0.95",
-        top_k: Annotated[str, Form()] = "0",
-        max_voice_seconds: Annotated[str, Form()] = "5",
-        line_by_line: Annotated[str, Form()] = "false",
-        line_gap: Annotated[str, Form()] = "1",
-        directed_line_mode: Annotated[str, Form()] = "true",
-        directed_retry_low_score: Annotated[str, Form()] = "true",
-        directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
-        directed_retry_max_lines: Annotated[str, Form()] = "auto",
-        directed_retry_max_multiplier: Annotated[str, Form()] = "1",
-        output_language: Annotated[str, Form()] = "zh-CN",
-        translate_script: Annotated[str, Form()] = "false",
-        backend: Annotated[str, Form()] = "local",
-        model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
-    ) -> dict[str, object]:
-        try:
-            script_text = await _read_vibevoice_script(script, script_file)
-            script_text, script_diagnostics = _prepare_vibevoice_script_for_generation(
-                script_text=script_text,
-                output_language=output_language,
-                translate_script=translate_script,
-            )
-            options = _vibevoice_generation_options(
-                script_text=script_text,
-                model_id=model_id,
-                cfg_scale=cfg_scale,
-                inference_steps=inference_steps,
-                seed=seed,
-                do_sample=do_sample,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_voice_seconds=max_voice_seconds,
-                line_by_line=line_by_line,
-                line_gap=line_gap,
-                directed_line_mode=directed_line_mode,
-                directed_retry_low_score=directed_retry_low_score,
-                directed_retry_score_threshold=directed_retry_score_threshold,
-                directed_retry_max_lines=directed_retry_max_lines,
-                directed_retry_max_multiplier=directed_retry_max_multiplier,
-            )
-            url_references = _vibevoice_url_reference_specs(
-                voice_url_1=voice_url_1,
-                voice_url_start_1=voice_url_start_1,
-                voice_url_duration_1=voice_url_duration_1,
-                voice_url_2=voice_url_2,
-                voice_url_start_2=voice_url_start_2,
-                voice_url_duration_2=voice_url_duration_2,
-                voice_url_3=voice_url_3,
-                voice_url_start_3=voice_url_start_3,
-                voice_url_duration_3=voice_url_duration_3,
-                voice_url_4=voice_url_4,
-                voice_url_start_4=voice_url_start_4,
-                voice_url_duration_4=voice_url_duration_4,
-            )
-            _require_url_reference_audio(request, url_references)
-            with TemporaryDirectory(prefix="mo-vibevoice-api-") as temp_dir:
-                voice_paths, voice_diagnostics = await _save_vibevoice_voice_uploads(
-                    [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
-                    Path(temp_dir),
-                    url_references=url_references,
-                    reference_audio_extractor=active_reference_audio_extractor,
-                )
-                generator = _select_vibevoice_generator(
-                    backend=backend,
-                    options=options,
-                    local_service=active_vibevoice_service,
-                    runpod_service=active_runpod_vibevoice_service,
-                )
-                vibevoice_result = generator.generate(
-                    script_text=script_text,
-                    voice_paths=voice_paths,
-                    options=options,
-                )
-        except (ValueError, FileNotFoundError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except VibeVoiceError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        diagnostics = dict(vibevoice_result.diagnostics)
-        diagnostics.update(script_diagnostics)
-        diagnostics.update(voice_diagnostics)
-        return {
-            "audio_mime_type": vibevoice_result.audio_mime_type,
-            "audio_base64": base64.b64encode(vibevoice_result.audio_bytes).decode("ascii"),
-            "normalized_script": vibevoice_result.normalized_script,
-            "providers": vibevoice_result.providers,
-            "timings_ms": vibevoice_result.timings_ms,
-            "diagnostics": diagnostics,
-            "artifacts": list(getattr(vibevoice_result, "artifacts", [])),
-        }
-
-    @app.post("/api/vibevoice/jobs")
-    async def create_vibevoice_job(
-        request: Request,
-        script: Annotated[str, Form()] = "",
-        script_file: Annotated[UploadFile | None, File()] = None,
-        voice_file_1: Annotated[UploadFile | None, File()] = None,
-        voice_file_2: Annotated[UploadFile | None, File()] = None,
-        voice_file_3: Annotated[UploadFile | None, File()] = None,
-        voice_file_4: Annotated[UploadFile | None, File()] = None,
-        voice_url_1: Annotated[str, Form()] = "",
-        voice_url_start_1: Annotated[str | None, Form()] = None,
-        voice_url_duration_1: Annotated[str, Form()] = "5",
-        voice_url_2: Annotated[str, Form()] = "",
-        voice_url_start_2: Annotated[str | None, Form()] = None,
-        voice_url_duration_2: Annotated[str, Form()] = "5",
-        voice_url_3: Annotated[str, Form()] = "",
-        voice_url_start_3: Annotated[str | None, Form()] = None,
-        voice_url_duration_3: Annotated[str, Form()] = "5",
-        voice_url_4: Annotated[str, Form()] = "",
-        voice_url_start_4: Annotated[str | None, Form()] = None,
-        voice_url_duration_4: Annotated[str, Form()] = "5",
-        cfg_scale: Annotated[str, Form()] = "1.3",
-        inference_steps: Annotated[str, Form()] = "10",
-        seed: Annotated[str, Form()] = "42",
-        do_sample: Annotated[str, Form()] = "true",
-        temperature: Annotated[str, Form()] = "0.95",
-        top_p: Annotated[str, Form()] = "0.95",
-        top_k: Annotated[str, Form()] = "0",
-        max_voice_seconds: Annotated[str, Form()] = "5",
-        line_by_line: Annotated[str, Form()] = "false",
-        line_gap: Annotated[str, Form()] = "1",
-        directed_line_mode: Annotated[str, Form()] = "true",
-        directed_retry_low_score: Annotated[str, Form()] = "true",
-        directed_retry_score_threshold: Annotated[str, Form()] = "0.65",
-        directed_retry_max_lines: Annotated[str, Form()] = "auto",
-        directed_retry_max_multiplier: Annotated[str, Form()] = "1",
-        output_language: Annotated[str, Form()] = "zh-CN",
-        translate_script: Annotated[str, Form()] = "false",
-        backend: Annotated[str, Form()] = "local",
-        model_id: Annotated[str, Form()] = "vibevoice-1.5b-pinned",
-    ) -> dict[str, object]:
-        temp_dir = Path(mkdtemp(prefix="mo-vibevoice-job-"))
-        try:
-            script_text = await _read_vibevoice_script(script, script_file)
-            script_text, script_diagnostics = _prepare_vibevoice_script_for_generation(
-                script_text=script_text,
-                output_language=output_language,
-                translate_script=translate_script,
-            )
-            options = _vibevoice_generation_options(
-                script_text=script_text,
-                model_id=model_id,
-                cfg_scale=cfg_scale,
-                inference_steps=inference_steps,
-                seed=seed,
-                do_sample=do_sample,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_voice_seconds=max_voice_seconds,
-                line_by_line=line_by_line,
-                line_gap=line_gap,
-                directed_line_mode=directed_line_mode,
-                directed_retry_low_score=directed_retry_low_score,
-                directed_retry_score_threshold=directed_retry_score_threshold,
-                directed_retry_max_lines=directed_retry_max_lines,
-                directed_retry_max_multiplier=directed_retry_max_multiplier,
-            )
-            url_references = _vibevoice_url_reference_specs(
-                voice_url_1=voice_url_1,
-                voice_url_start_1=voice_url_start_1,
-                voice_url_duration_1=voice_url_duration_1,
-                voice_url_2=voice_url_2,
-                voice_url_start_2=voice_url_start_2,
-                voice_url_duration_2=voice_url_duration_2,
-                voice_url_3=voice_url_3,
-                voice_url_start_3=voice_url_start_3,
-                voice_url_duration_3=voice_url_duration_3,
-                voice_url_4=voice_url_4,
-                voice_url_start_4=voice_url_start_4,
-                voice_url_duration_4=voice_url_duration_4,
-            )
-            _require_url_reference_audio(request, url_references)
-            voice_paths, voice_diagnostics = await _save_vibevoice_voice_uploads(
-                [voice_file_1, voice_file_2, voice_file_3, voice_file_4],
-                temp_dir,
-                url_references=url_references,
-                reference_audio_extractor=active_reference_audio_extractor,
-            )
-            generator = _select_vibevoice_generator(
-                backend=backend,
-                options=options,
-                local_service=active_vibevoice_service,
-                runpod_service=active_runpod_vibevoice_service,
-            )
-            return vibevoice_job_store.start(
-                generator=generator,
-                script_text=script_text,
-                voice_paths=voice_paths,
-                options=options,
-                temp_dir=temp_dir,
-                result_diagnostics={**script_diagnostics, **voice_diagnostics},
-            )
-        except (ValueError, FileNotFoundError) as exc:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    @app.get("/api/vibevoice/jobs/{job_id}")
-    def get_vibevoice_job(job_id: str) -> dict[str, object]:
-        try:
-            return vibevoice_job_store.snapshot(job_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="job not found") from exc
-
-    @app.post("/api/vibevoice/jobs/{job_id}/cancel")
-    def cancel_vibevoice_job(job_id: str) -> dict[str, object]:
-        try:
-            return vibevoice_job_store.cancel(job_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="job not found") from exc
 
     def _create_practice_prompt_result(
         *,

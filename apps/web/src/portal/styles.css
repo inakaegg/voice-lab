@@ -87,19 +87,9 @@ html[data-theme="dark"] .portal-atmosphere {
     radial-gradient(circle at 96% 10%, color-mix(in oklab, #547dc7 25%, transparent), transparent 34rem);
 }
 
-.portal-product-link-skit {
-  --product-accent: #a85d2d;
-  --product-soft: #fff0dc;
-}
-
 .portal-product-link-speak {
   --product-accent: #3e68ad;
   --product-soft: #e8efff;
-}
-
-html[data-theme="dark"] .portal-product-link-skit {
-  --product-accent: #efad79;
-  --product-soft: rgb(126 70 38 / 0.32);
 }
 
 html[data-theme="dark"] .portal-product-link-speak {

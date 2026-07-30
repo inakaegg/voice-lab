@@ -154,7 +154,7 @@ def run_checks(base_url: str) -> tuple[list[str], int]:
         Check("/privacy", 200),
         Check("/api/public-sample-audios", 200, validate_json_object),
         Check("/api/public-session", 200, validate_public_session),
-        Check("/api/vibevoice/status", 401, validate_json_object),
+        Check("/api/public-users", 401, validate_json_object),
     ]
     failures: list[str] = []
 

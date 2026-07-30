@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speakloopHtml, skitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml] = await Promise.all([
+const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speakloopHtml, adminHtml, practiceAdminHtml, funHtml] = await Promise.all([
   read("package.json"),
   read("pyproject.toml"),
   read("src/mo_speech/api.py"),
@@ -12,10 +12,8 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speaklo
   read("apps/web/portal.html"),
   read("apps/web/privacy.html"),
   read("apps/web/speakloop.html"),
-  read("apps/web/skitvoice.html"),
   read("src/mo_speech/web/index.html"),
   read("src/mo_speech/web/practice_admin.html"),
-  read("src/mo_speech/web/vibevoice.html"),
   read("src/mo_speech/web/user.html"),
 ]);
 const portalStyles = await read("apps/web/src/portal/styles.css");
@@ -34,13 +32,12 @@ test("Voice Lab is the application and package brand without renaming the Python
 
 test("all active pages use the built Voice Lab style assets instead of direct legacy CSS", () => {
   assert.doesNotMatch(portalHtml, /\/static\/styles\.css/);
-  for (const html of [speakloopHtml, skitvoiceHtml, adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml]) {
+  for (const html of [speakloopHtml, adminHtml, practiceAdminHtml, funHtml]) {
     assert.doesNotMatch(html, /\/static\/styles\.css/);
   }
   assert.match(viteConfig, /appStyles/);
   assert.match(speakloopHtml, /src\/styles\/app\.css/);
-  assert.match(skitvoiceHtml, /src\/styles\/app\.css/);
-  for (const html of [adminHtml, practiceAdminHtml, skitvoiceAdminHtml, funHtml]) {
+  for (const html of [adminHtml, practiceAdminHtml, funHtml]) {
     assert.match(html, /\/react\/assets\/app\.css/);
   }
 });
@@ -50,10 +47,8 @@ test("all active pages use the shared multi-size Voice Lab favicon", async () =>
     portalHtml,
     privacyHtml,
     speakloopHtml,
-    skitvoiceHtml,
     adminHtml,
     practiceAdminHtml,
-    skitvoiceAdminHtml,
     funHtml,
   ]) {
     assert.match(html, /<link rel="icon" href="\/react\/favicon\.ico" sizes="any" \/>/);
@@ -80,13 +75,12 @@ test("all active pages use the shared multi-size Voice Lab favicon", async () =>
 });
 
 test("all admin pages expose a consistent Voice Lab admin shell and navigation", () => {
-  for (const html of [adminHtml, practiceAdminHtml, skitvoiceAdminHtml]) {
+  for (const html of [adminHtml, practiceAdminHtml]) {
     assert.match(html, /Voice Lab/);
     assert.match(html, /voice-lab-admin-body/);
     assert.match(html, /admin-nav/);
     assert.match(html, /href="\/admin"/);
     assert.match(html, /href="\/speakloop\/admin"/);
-    assert.match(html, /href="\/skitvoice\/admin"/);
     assert.match(html, /href="\/fun">実験画面<\/a>/);
   }
 });
@@ -103,7 +97,6 @@ test("Playwright layout tests are wired into npm and CI", () => {
 });
 
 test("portal product accents distinguish creation from learning", () => {
-  assert.match(portalStyles, /\.portal-product-link-skit\s*\{[^}]*--product-accent:\s*#a85d2d/s);
   assert.match(portalStyles, /\.portal-product-link-speak\s*\{[^}]*--product-accent:\s*#3e68ad/s);
 });
 

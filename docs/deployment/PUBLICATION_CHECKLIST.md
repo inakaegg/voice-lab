@@ -36,7 +36,6 @@ CloudflareのSpeakLoopデモはproduction公開中である。GitHub repository�
 - [x] frontend bundleの依存ライセンス本文をbuild時に生成し、wheelへ同梱する。
 - [x] 主なモデル・GPU依存を `THIRD_PARTY_NOTICES.md` へ列挙する。
 - [x] Seed-VC 0.4.3のGPL-3.0を記録し、Seed-VCを含むcontainer imageをpublic配布しない。
-- [x] Microsoft公式VibeVoiceの現在状態、固定model、第三者実装・mirrorを区別し、一般向け生成機能として公開しない。
 - [x] GitHub source、Cloudflare demo、Docker Hub、RunPod runtimeの公開範囲を別々に確認する。
 - [x] public container imageを配布しない。将来変更する場合はSBOM、transitive license、Corresponding Sourceを再監査する。
 

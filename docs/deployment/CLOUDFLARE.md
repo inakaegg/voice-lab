@@ -10,7 +10,7 @@
 
 日次quotaと監査ログの期限切れ削除は、`wrangler.toml` のCron Triggerで毎日03:17 UTCに実行する。48時間を超えた日次quotaと90日を超えた監査ログを削除するため、日次実行の間隔を含む実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaは利用上限維持のため公開デモの運用中に保持する。
 
-この文書はproduction公開環境へ反映済みのCloudflareデモ構成を説明する。公開ポートフォリオの主機能はSpeakLoopとし、SkitVoice/VibeVoiceは既存Google管理者セッションで保護する研究機能へ閉じる。発音練習アプリと研究機能を物理的に分ける場合は、同一repoから2つのCloudflare projectまたはWorkerへデプロイする方針を [APP_SPLIT.md](APP_SPLIT.md) にまとめている。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
+この文書はproduction公開環境へ反映済みのCloudflareデモ構成を説明する。公開ポートフォリオの主機能はSpeakLoopとする。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
 データフロー、保存範囲、保持期間と削除処理は [PRIVACY.md](PRIVACY.md)、利用者向けの説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を参照する。公開画面では `/privacy` とSpeakLoopフッターから確認できる。
 
@@ -19,16 +19,12 @@ Browser
   -> Cloudflare Worker Static Assets
   -> Cloudflare Worker API gateway
   -> OpenAI API: 母語ASR、英語復唱ASR、翻訳、TTS、表示用テキスト加工、ジョークTTS
-  -> private RunPod Serverless Job API: 中国語復唱FunASR、Seed-VC、管理者専用SkitVoice/VibeVoice、warmup
+  -> private RunPod Serverless Job API: 中国語復唱FunASR、Seed-VC、warmup
 ```
 
-## SkitVoice/VibeVoiceの認可とentry point
+## 退役route
 
-Cloudflare版は `/` にSpeakLoopだけを主製品として表示し、`/skitvoice` は生成フォーム・sample・model情報のない非公開案内を返す。`/skitvoice/admin` と `/static/vibevoice.html` は管理者認証必須である。旧routeは404を維持する。対象は `/vibevoice`・`/vibevoice/simple`・`/vibevoice/admin`・`/vibevoice.html`・`/vibevoice_simple.html`・`/static/vibevoice_simple.html` である。
-
-VibeVoiceのstatus・URL参照・script・job submit・job status・cancelは、既存Google管理者セッションを使う共通API guardで保護する。匿名利用者は401、通常Googleユーザーは403とする。routeごとのUI条件をsecurity boundaryにしない。Cloudflare版にはsync generation APIを持たせず、ローカルFastAPIだけが `POST /api/vibevoice/generate` を維持する。
-
-非admin向け `GET /api/public-session` はSkitVoiceのfeature/quotaを含めない。非admin向け `GET /api/public-sample-audios` は既存SkitVoice sampleを返さない。管理者は同じsample APIで研究dataを管理できる。これらの境界はproduction公開URLで確認済みである。
+旧研究機能のrouteはWorkerが404を返す。対象は `/skitvoice`・`/skitvoice/admin`・`/vibevoice`・`/vibevoice/simple`・`/vibevoice/admin` と、その直接配信用HTMLである。
 
 ## 秘密情報
 
@@ -56,14 +52,14 @@ Google OAuth clientの「承認済みのリダイレクトURI」には `https://
 2. Google OAuth clientへ新しい承認済みリダイレクトURIを追加する。
 3. `npx wrangler d1 migrations apply mo-speech-demo-db --remote` で未適用のD1 migrationを本番databaseへ適用する。
 4. `npx wrangler deploy` で新Workerをデプロイする。
-5. 新URLでそれぞれsmoke確認する。対象はトップページ・Googleログイン・SpeakLoop・公開 `/skitvoice` の非生成表示・許可済みGoogle管理者による `/skitvoice/admin` の研究用生成である。
+5. 新URLでそれぞれsmoke確認する。対象はトップページ・Googleログイン・SpeakLoopである。
 6. 利用箇所を新URLへ切り替えた後、旧Workerと旧OAuth redirect URIを削除する。
 
 新Workerのsmoke確認が終わるまで旧Workerを削除しない。secretが不足した状態で新Workerを本番移行先として公開しない。
 
 ## API gateway範囲
 
-Workerは次のAPI互換エンドポイントを提供する。VibeVoice系は公開ユーザー用ではなく、共通の管理者guardを通る研究用endpointである。
+Workerは次のAPI互換エンドポイントを提供する。
 
 - `GET /api/runtime`
 - `GET /api/user-settings`
@@ -78,19 +74,13 @@ Workerは次のAPI互換エンドポイントを提供する。VibeVoice系は�
 - `POST /api/voice-conversion-jobs`
 - `GET /api/voice-conversion-jobs/{job_id}`
 - `GET /api/practice/voice-jobs/{job_id}`
-- `GET /api/vibevoice/status`
-- `POST /api/vibevoice/jobs`
-- `GET /api/vibevoice/jobs/{job_id}`
-- `POST /api/vibevoice/jobs/{job_id}/cancel`
 - `POST /api/warmup`
 
 音声翻訳のASR、翻訳、TTSはCloudflare WorkerからOpenAI APIを直接呼び、POST時点で `succeeded` の完了jobとして返す。既存UIとの互換のため、完了job snapshotは短時間KVに保存し、`GET /api/translate-speech-jobs/{job_id}` でも同じ結果を返す。
 
-Seed-VC・SkitVoice/VibeVoice・warmup・SpeakLoopの中国語復唱比較はRunPod Serverlessの非同期jobへ中継する。RunPodのjob IDをUI向けjob IDとして返し、status pollingで `queued`・`running`・`succeeded`・`failed` 形式へ変換する。中国語比較では、お手本と復唱の両音声を1つのRunPod jobへ送る。progress updateと `/health` を使ってUIへ返す状態は、worker割り当て待ち・worker初期化・FunASRモデル読込・両音声の解析・完了／失敗である。SkitVoiceでは同じprogress updateを別のUI状態に分けて返す。分ける状態はVibeVoiceモデル読込／生成・指定台詞ASR・Seed-VCモデル読込／声質変換・再配置・出力仕上げである。status pollingはquotaを追加消費しない。
+Seed-VC・warmup・SpeakLoopの中国語復唱比較はRunPod Serverlessの非同期jobへ中継する。RunPodのjob IDをUI向けjob IDとして返し、status pollingで `queued`・`running`・`succeeded`・`failed` 形式へ変換する。中国語比較では、お手本と復唱の両音声を1つのRunPod jobへ送る。progress updateと `/health` を使ってUIへ返す状態は、worker割り当て待ち・worker初期化・FunASRモデル読込・両音声の解析・完了／失敗である。status pollingはquotaを追加消費しない。
 
 SpeakLoopの英語復唱比較はWorkerがお手本と復唱の両音声をOpenAI `whisper-1` で並列解析し、同じjob snapshot形式の完了結果をPOSTのレスポンスで直接返す。
-
-公開 `/skitvoice` には参照音声入力も生成フォームも置かない。Cloudflare管理者研究画面では、参照音声をファイル、マイク、タブ音声の3方式で指定できる。タブ音声は管理者がブラウザの共有操作で選択した音声trackだけを録音し、映像、URL、cookieは送信しない。WorkerのVibeVoice生成APIは管理者認証後も `voice_url_1` から `voice_url_4` をRunPodへ送らず拒否し、RunPod handlerは `audio_base64` の参照音声だけを受け取る。`POST /api/vibevoice/reference-audio-from-url` もCloudflare版では利用不可とし、URLからの切り出しはローカルFastAPI版またはローカルでの事前素材作成だけで扱う。
 
 ## ユーザー設定と音声履歴の境界
 
@@ -109,7 +99,7 @@ Cloudflareデモでは、管理画面から保存するユーザー画面設定�
 
 ジョーク候補は管理画面保存時に正規化し、`joke_variation_count` が1以上ならOpenAI Responses APIでバリエーションを生成して `joke_variants` と `joke_pool` に保存する。ユーザーの変換処理中にはバリエーション生成を行わない。
 
-音声履歴はローカルFastAPI版だけの機能とする。Cloudflare版は入力音声と生成音声を履歴として保存しない。対象は翻訳・VC・SpeakLoop・SkitVoice・TTSである。共有管理画面との状態判定用に `GET /api/audio-history` と `GET /api/practice-history` は `enabled: false` と空配列を返すが、履歴音声の登録・取得・削除APIは提供しない。
+音声履歴はローカルFastAPI版だけの機能とする。Cloudflare版は入力音声と生成音声を履歴として保存しない。対象は翻訳・VC・SpeakLoop・TTSである。共有管理画面との状態判定用に `GET /api/audio-history` と `GET /api/practice-history` は `enabled: false` と空配列を返すが、履歴音声の登録・取得・削除APIは提供しない。
 
 公開サンプル音声はblobをR2、metadataをD1へ置く。bindingがないローカル・テスト環境ではKVへfallbackする。R2 bindingは公開サンプル用であり、ユーザー音声履歴の保存を有効にしない。
 
@@ -124,7 +114,7 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 - `PUBLIC_GOOGLE_AUTH_REQUIRED=1` または管理画面設定でGoogleログイン必須にする。
 - ログイン済みGoogleアカウントのemailをSHA-256 hash化し、feature別の日次回数と累計回数をD1へ保存する。D1 bindingがない環境だけKVへfallbackする。
 - `ADMIN_GOOGLE_EMAILS` または管理画面設定の管理者メールに含まれるアカウントは、管理画面へアクセスでき、日次・累計quotaを消費しない。
-- quota対象は、SpeakLoop録音、従来の音声変換/TTS、Seed-VC変換である。SkitVoice生成は管理者研究経路だけに閉じ、管理者は公開quotaを消費しない。
+- quota対象は、SpeakLoop録音、従来の音声変換/TTS、Seed-VC変換である。管理者は公開quotaを消費しない。
 - job status polling、静的ページ表示、runtime確認、管理画面閲覧は公開quotaを消費しない。
 - Google OAuth設定が不足している状態でGoogleログイン必須にした場合、生成APIは `503` を返す。課金APIを開放したまま失敗するより、fail closedを優先する。
 
@@ -133,7 +123,6 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 - Googleログイン必須のON/OFF
 - 管理画面へのアクセスを許可するGoogle email
 - SpeakLoopの日次/累計回数、録音最大byte数、対象文最大文字数
-- SkitVoiceの台本最大文字数、参照音声最大byte数。既存の日次/累計設定は互換のため残るが、非adminのfeature/quotaとして公開しない
 - へんな変換/翻訳/TTSの日次/累計回数、録音最大byte数、テキスト最大文字数
 - Seed-VCの日次/累計回数、source/reference音声最大byte数
 
@@ -143,7 +132,7 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 
 ログインした利用者のemailと日時は `public_users` へ保存し、管理者専用の `GET /api/public-users` と `/admin` の利用者一覧から確認する。audit eventのemailはSHA-256 hashのままとする。
 
-sample metadataはD1、音声blobは非公開R2へ保存する。`/skitvoice/admin` では日本語、中国語、英語を個別登録・削除できる。現在のSkitVoice sampleは由来を確認できないため、非adminの `GET /api/public-sample-audios` から除外する。削除は `DELETE /api/public-sample-audios/skitvoice?language=<code>` を使うが、外部R2 dataの削除はこのローカル変更では行わない。将来一般表示へ戻す場合は、先に由来・許諾・生成model・AI生成表示を確認する。
+sample metadataはD1、音声blobは非公開R2へ保存する。過去の研究機能で登録したsample dataは一般向けAPIから返らない。保持は保証せず、管理者のsample保存・削除操作でD1 rowとR2 objectごと削除され得る。
 
 ## warmup
 
@@ -161,13 +150,13 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 ## デプロイ
 
-`wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleでroute、認証、`/api/*` を処理する。`/`、`/speakloop`、`/skitvoice` は公開する。`/admin`、`/speakloop/admin`、`/skitvoice/admin`、`/fun` は管理者認証で保護する。旧routeと旧HTML直指定は404にする。Static Assetsの `run_worker_first` と `html_handling="none"` を使い、認証前にHTML clean URL処理へ渡さない。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
+`wrangler.toml` のStatic Assetsで `src/mo_speech/web` を配信し、Worker moduleでroute、認証、`/api/*` を処理する。`/`、`/speakloop` は公開する。`/admin`、`/speakloop/admin`、`/fun` は管理者認証で保護する。旧routeと旧HTML直指定は404にする。Static Assetsの `run_worker_first` と `html_handling="none"` を使い、認証前にHTML clean URL処理へ渡さない。秘密情報はリポジトリへ書かず、`wrangler secret put` で登録する。
 
-`workers.dev` のまま公開ページを認証なしにして管理機能を守るため、公開生成APIと管理機能の認証をWorker内のGoogle OAuthへ一本化する。対象routeは `/admin`、`/skitvoice/admin`、`/speakloop/admin`、`/fun` である。対象APIは管理画面が使う設定保存、履歴機能の状態確認、warmup APIである。未ログインの管理ページはGoogleログインへ遷移し、ログイン済みでもemailが管理者リストにない場合は403を返す。管理APIは同じ条件で401または403を返す。Google OAuth設定または管理者メールが不足する場合はfail closedで503を返す。
+`workers.dev` のまま公開ページを認証なしにして管理機能を守るため、公開生成APIと管理機能の認証をWorker内のGoogle OAuthへ一本化する。対象routeは `/admin`、`/speakloop/admin`、`/fun` である。対象APIは管理画面が使う設定保存、履歴機能の状態確認、warmup APIである。未ログインの管理ページはGoogleログインへ遷移し、ログイン済みでもemailが管理者リストにない場合は403を返す。管理APIは同じ条件で401または403を返す。Google OAuth設定または管理者メールが不足する場合はfail closedで503を返す。
 
 `/fun`を含む公開生成APIも同じGoogleセッションを使う。`/fun`のテキスト・音声生成APIとSeed-VC APIは、公開生成のGoogleログイン必須設定にかかわらず管理者だけに許可する。許可範囲はjob作成、status polling、結果取得を含む。管理者メールに含まれるアカウントはquotaを消費しないが、入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
-production Workerとstaging Workerは配備済みである。現在は2 Workerを同じrepoから配備する。stagingの必須Worker secretは登録済みで、deploy後smokeも成功している。Googleログインの実操作確認は未実施である。製品分割は利用量や障害を独立管理する必要が生じた場合だけ [APP_SPLIT.md](APP_SPLIT.md) に従って検討する。
+production Workerとstaging Workerは配備済みである。現在は2 Workerを同じrepoから配備する。stagingの必須Worker secretは登録済みで、deploy後smokeも成功している。Googleログインの実操作確認は未実施である。
 
 ### production
 
@@ -253,11 +242,11 @@ GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する�
 
 ## 検索・共有メタ情報
 
-公開4route(`/`・`/speakloop`・`/skitvoice`・`/privacy`)の配信HTMLには共有・検索用のメタ情報を静的に埋め込む。内容はmeta description・OGP・Twitter Card・canonical URL・apple-touch-iconである。共有カード用のOG画像は全routeで `og-voice-lab.png`(1200×630)を共用し、`apps/web/public/` からビルドで `/react/` 配下へ配置する。`/` と `/speakloop` にはJSON-LD構造化データ(`WebSite`・`WebApplication`)を置く。
+公開3route(`/`・`/speakloop`・`/privacy`)の配信HTMLには共有・検索用のメタ情報を静的に埋め込む。内容はmeta description・OGP・Twitter Card・canonical URL・apple-touch-iconである。共有カード用のOG画像は全routeで `og-voice-lab.png`(1200×630)を共用し、`apps/web/public/` からビルドで `/react/` 配下へ配置する。`/` と `/speakloop` にはJSON-LD構造化データ(`WebSite`・`WebApplication`)を置く。
 
 Workerは `/robots.txt` と `/sitemap.xml` を配信する。クロール許可は `PUBLIC_CANONICAL_ORIGIN` が要求originと一致する配備だけに与える。productionでは `wrangler.toml` の `[vars]` でこの値を公開URLへ設定する。stagingは設定しないため、robots.txtが全体Disallowを返しsitemapは404になる。`PUBLIC_GOOGLE_AUTH_REQUIRED` は生成APIのログイン必須設定でありページ閲覧を制限しないため、クロール可否の判定に使わない。
 
-sitemapへ載せるのは `/`・`/speakloop`・`/privacy` だけとする。`/skitvoice` は非公開案内のため載せない。管理系routeと `/api/`・`/auth/` はrobots.txtでDisallowする。対象の管理系routeは `/admin`・`/fun`・`/speakloop/admin`・`/skitvoice/admin` である。
+sitemapへ載せるのは `/`・`/speakloop`・`/privacy` だけとする。管理系routeと `/api/`・`/auth/` はrobots.txtでDisallowする。対象の管理系routeは `/admin`・`/fun`・`/speakloop/admin` である。
 
 deploy後smokeはrobots.txtとsitemap.xmlの整合も確認する。HTMLメタとWorker配信の回帰は `tests/react_public_ui.test.mjs` と `tests/cloudflare_worker.test.mjs` が検査する。Google Search Consoleへの登録とsitemap送信は外部操作のため未実施である。
 

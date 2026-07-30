@@ -6,10 +6,9 @@ import { assertNoHorizontalOverflow, assertVisibleControlsInsideViewport, instal
 const publicRoutes = [
   { path: "/", heading: "声から、", action: "練習をはじめる", actionRole: "link" },
   { path: "/speakloop", heading: "言いたいことで発音練習", action: "言いたいことを録音", actionRole: "button" },
-  { path: "/skitvoice", heading: "研究機能", action: "SpeakLoopで練習する", actionRole: "link" },
 ] as const;
 
-const adminRoutes = ["/admin", "/speakloop/admin", "/skitvoice/admin"];
+const adminRoutes = ["/admin", "/speakloop/admin"];
 const utilityRoutes = [
   { path: "/fun", heading: "はなしてください", action: "ろくおん" },
 ] as const;
@@ -143,15 +142,6 @@ test("portal keeps the SpeakLoop action within the initial viewport", async ({ p
   expect((box?.y || 0) + (box?.height || 0)).toBeLessThanOrEqual(viewportHeight + 1);
   await expect(page.getByText("SkitVoice", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewportHeight + 1);
-});
-
-test("direct public SkitVoice access stays closed without generation or samples", async ({ page }) => {
-  await page.goto("/skitvoice");
-  await expect(page.getByRole("heading", { name: "研究機能は一般公開していません" })).toBeVisible();
-  await expect(page.locator("#vibevoice-form")).toHaveCount(0);
-  await expect(page.locator("#vibevoice-generate-button")).toHaveCount(0);
-  await expect(page.locator("[data-public-sample-language]")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "SpeakLoopで練習する" })).toHaveAttribute("href", "/speakloop");
 });
 
 test("public theme menu is keyboard reachable and persists dark mode", async ({ page }) => {
@@ -1541,146 +1531,6 @@ test("SpeakLoop plays the converted model audio but submits the original TTS for
   await expect(page.locator("#practice-own-voice-toggle")).toBeChecked();
 });
 
-test("admin SkitVoice hides tab-audio capture when the browser does not support it", async ({ page }, testInfo) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "mediaDevices", {
-      value: { getUserMedia: undefined, getDisplayMedia: undefined },
-      configurable: true,
-    });
-  });
-  await page.goto("/skitvoice/admin");
-  await expect(page.locator("[data-tab-audio-slot]:visible")).toHaveCount(0);
-  await expect(page.locator("[data-reference-source-help]")).toContainText("ファイル・録音");
-  await expect(page.locator(".voice-lab-toast")).toHaveCount(0);
-  await expect(page.locator("#vibevoice-message")).toBeEmpty();
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.waitForTimeout(250);
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-skitvoice-tab-audio-hidden.png`, fullPage: true });
-  }
-
-  await page.locator('input[name="voice_file_1"]').setInputFiles({
-    name: "voice.wav",
-    mimeType: "audio/wav",
-    buffer: Buffer.from("voice audio"),
-  });
-  const savedToast = page.locator(".voice-lab-toast", { hasText: "Speaker 1 の参照音声を保存しました" });
-  await expect(savedToast).toBeVisible();
-  await expect(savedToast).toHaveAttribute("role", "status");
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.waitForTimeout(250);
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-skitvoice-toast.png`, fullPage: true });
-    await page.locator("html").evaluate((element) => {
-      element.setAttribute("data-theme", "dark");
-      element.setAttribute("data-theme-preference", "dark");
-    });
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-skitvoice-toast.png`, fullPage: true });
-  }
-  await assertNoHorizontalOverflow(page);
-});
-
-test("admin SkitVoice requires reference-audio rights confirmation before tab capture", async ({ page }) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(window, "__tabAudioRequestCount", { value: 0, writable: true });
-    class FakeMediaRecorder extends EventTarget {
-      static isTypeSupported() { return true; }
-    }
-    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
-    Object.defineProperty(navigator, "mediaDevices", {
-      value: {
-        getDisplayMedia: async () => {
-          (window as typeof window & { __tabAudioRequestCount: number }).__tabAudioRequestCount += 1;
-          throw new DOMException("capture is not supported", "NotSupportedError");
-        },
-      },
-      configurable: true,
-    });
-  });
-
-  await page.goto("/skitvoice/admin");
-  const confirmation = page.locator("#vibevoice-rights-confirmed");
-  const confirmationPanel = page.locator(".vibevoice-rights-confirmation");
-  const actions = page.locator(".vibevoice-actions");
-  const generateButton = page.locator("#vibevoice-generate-button");
-  await expect(confirmation).not.toBeChecked();
-  const [actionsBox, confirmationBox, generateBox] = await Promise.all([
-    actions.boundingBox(),
-    confirmationPanel.boundingBox(),
-    generateButton.boundingBox(),
-  ]);
-  if ((page.viewportSize()?.width || 0) > 820) {
-    expect((confirmationBox?.width || 0)).toBeGreaterThanOrEqual(
-      (actionsBox?.width || 0) - (generateBox?.width || 0) - 40,
-    );
-    expect((generateBox?.x || 0)).toBeGreaterThanOrEqual(
-      (confirmationBox?.x || 0) + (confirmationBox?.width || 0) - 2,
-    );
-    expect(Math.abs(
-      ((confirmationBox?.y || 0) + (confirmationBox?.height || 0) / 2) -
-      ((generateBox?.y || 0) + (generateBox?.height || 0) / 2),
-    )).toBeLessThanOrEqual(8);
-  } else {
-    expect((confirmationBox?.width || 0)).toBeGreaterThanOrEqual((actionsBox?.width || 0) - 24);
-    expect((generateBox?.y || 0)).toBeGreaterThanOrEqual(
-      (confirmationBox?.y || 0) + (confirmationBox?.height || 0) - 2,
-    );
-  }
-  await confirmation.check();
-  await page.reload();
-  await expect(confirmation).not.toBeChecked();
-
-  await page.locator('[data-tab-audio-slot="1"]').click();
-  await expect(confirmation).toBeFocused();
-  await expect(page.locator("#vibevoice-message")).toContainText("本人から許諾");
-  await expect.poll(() => page.evaluate(() => (
-    window as typeof window & { __tabAudioRequestCount: number }
-  ).__tabAudioRequestCount)).toBe(0);
-
-  await confirmation.check();
-  await page.locator('[data-tab-audio-slot="1"]').click();
-  await expect.poll(() => page.evaluate(() => (
-    window as typeof window & { __tabAudioRequestCount: number }
-  ).__tabAudioRequestCount)).toBe(1);
-});
-
-test("admin SkitVoice explains a runtime tab-audio incompatibility once and then hides the controls", async ({ page }) => {
-  await page.addInitScript(() => {
-    class FakeMediaRecorder extends EventTarget {
-      static isTypeSupported() { return true; }
-    }
-    Object.defineProperty(window, "MediaRecorder", { value: FakeMediaRecorder });
-    Object.defineProperty(navigator, "mediaDevices", {
-      value: {
-        getDisplayMedia: async () => {
-          throw new DOMException("capture is not supported", "NotSupportedError");
-        },
-      },
-      configurable: true,
-    });
-  });
-  await page.goto("/skitvoice/admin");
-  await expect(page.locator('[data-tab-audio-slot="1"]')).toBeVisible();
-  await page.locator("#vibevoice-rights-confirmed").check();
-  await page.locator('[data-tab-audio-slot="1"]').click();
-  const unsupportedToast = page.locator(".voice-lab-toast", { hasText: "このブラウザではタブ音声録音を使えません" });
-  await expect(unsupportedToast).toBeVisible();
-  await expect(unsupportedToast).toHaveAttribute("role", "alert");
-  await expect(page.locator("[data-tab-audio-slot]:visible")).toHaveCount(0);
-  await expect(page.locator("[data-reference-source-help]")).toContainText("ファイル・録音");
-});
-
-test("admin SkitVoice keeps its reference slots and generation action available", async ({ page }, testInfo) => {
-  await page.goto("/skitvoice/admin");
-  await expect(page.locator(".vibevoice-upload-slot")).toHaveCount(4);
-  await expect(page.locator("#vibevoice-generate-button")).toBeVisible();
-  await assertNoHorizontalOverflow(page);
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-skitvoice-admin-reference-slots.png`, fullPage: true });
-  }
-});
-
 test("SpeakLoop keeps primary progress generic and shows subdued technical details", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     const technicalLogs: unknown[][] = [];
@@ -2037,215 +1887,6 @@ test("SpeakLoop switches from one task card to a responsive two-step flow", asyn
   }
 });
 
-test("admin SkitVoice keeps its research language and work areas available", async ({ page }) => {
-  await page.goto("/skitvoice/admin");
-  await expect(page.locator("#vibevoice-output-language")).toHaveValue("en-US");
-  await expect(page.getByRole("region", { name: "台本" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "参照音声" })).toBeVisible();
-  await expect(page.locator("#vibevoice-generate-button")).toBeVisible();
-  await assertNoHorizontalOverflow(page);
-});
-
-test("admin SkitVoice keeps progress readable while retaining technical progress logs", async ({ page }) => {
-  let statusCall = 0;
-  await page.route("**/api/vibevoice/jobs**", async (route) => {
-    const request = route.request();
-    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/vibevoice/jobs") {
-      return route.fulfill({
-        status: 202,
-        contentType: "application/json",
-        body: JSON.stringify({
-          job_id: "vv-ui-job",
-          status: "queued",
-          current_stage: {
-            stage: "gpu_wait",
-            label: "利用可能なGPUを待っています",
-            provider: "RunPod Serverless",
-            model: "vibevoice-large-aoi-pinned",
-            detail: "RunPodのqueueでworkerの割り当てを待っています。",
-          },
-          progress_log: [],
-        }),
-      });
-    }
-    statusCall += 1;
-    if (statusCall === 1) {
-      return route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          job_id: "vv-ui-job",
-          status: "running",
-          current_stage: {
-            stage: "loading_vibevoice_model",
-            label: "VibeVoice Largeモデルを読み込んでいます",
-            provider: "RunPod Serverless",
-            model: "vibevoice-large-aoi-pinned",
-            detail: "初回起動時は数分かかる場合があります。",
-          },
-          progress_log: [],
-        }),
-      });
-    }
-    if (statusCall <= 4) {
-      return route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          job_id: "vv-ui-job",
-          status: "running",
-          current_stage: {
-            stage: "loading_seed_vc_model",
-            label: "Seed-VCモデルを読み込んでいます",
-            provider: "RunPod Serverless",
-            model: "Seed-VC",
-            detail: "",
-          },
-          progress_log: [{
-            stage: "loading_seed_vc_model",
-            label: "Seed-VCモデルを読み込んでいます",
-            model: "Seed-VC",
-          }],
-        }),
-      });
-    }
-    return route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        job_id: "vv-ui-job",
-        status: "succeeded",
-        current_stage: { stage: "complete", label: "完了", provider: "" },
-        progress_log: [{ stage: "complete", label: "完了", provider: "" }],
-        result: {
-          audio_mime_type: "audio/wav",
-          audio_base64: "UklGRg==",
-          normalized_script: "Speaker 1: こんにちは。",
-          diagnostics: {},
-          providers: { vibevoice: "fake" },
-          artifacts: [],
-        },
-      }),
-    });
-  });
-
-  await page.goto("/skitvoice/admin");
-  await page.locator("#vibevoice-script").fill("1 こんにちは。");
-  await page.locator("#vibevoice-directed-line-mode").evaluate((element) => {
-    const control = element as HTMLInputElement;
-    control.checked = false;
-    control.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  await page.locator('input[name="voice_file_1"]').setInputFiles({
-    name: "voice.wav",
-    mimeType: "audio/wav",
-    buffer: Buffer.from("RIFF voice"),
-  });
-  await page.locator("#vibevoice-rights-confirmed").check();
-  await page.locator("#vibevoice-generate-button").click();
-
-  await expect(page.locator("#vibevoice-message")).toContainText(/VibeVoice|Seed-VC|音声生成/);
-  await expect(page.locator("#vibevoice-progress-log")).toContainText("Seed-VCモデルを読み込んでいます");
-  await expect(page.locator("#vibevoice-progress-log")).not.toContainText("loading_seed_vc_model");
-  await assertNoHorizontalOverflow(page);
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.screenshot({
-      path: `tmp/playwright/visual-review/${test.info().project.name}-skitvoice-runpod-progress.png`,
-      fullPage: true,
-    });
-    await page.locator("html").evaluate((element) => {
-      element.setAttribute("data-theme", "dark");
-      element.setAttribute("data-theme-preference", "dark");
-    });
-    await page.screenshot({
-      path: `tmp/playwright/visual-review/${test.info().project.name}-dark-skitvoice-runpod-progress.png`,
-      fullPage: true,
-    });
-  }
-  await expect(page.locator("#vibevoice-message")).toHaveText("生成しました。", { timeout: 5_000 });
-});
-
-test("SkitVoice uses Voice Lab audio controls for references and generated results", async ({ page }) => {
-  for (const route of ["/skitvoice/admin"]) {
-    await page.goto(route);
-    const referenceInput = page.locator('input[name="voice_file_1"]');
-    await referenceInput.setInputFiles({ name: "voice.wav", mimeType: "audio/wav", buffer: Buffer.from("RIFF reference") });
-    const referenceAudio = page.locator('[data-saved-voice-preview-slot="1"]');
-    const referenceControl = referenceAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
-    await expect(referenceAudio).toBeHidden();
-    await expect(referenceControl).toBeVisible();
-    const [voiceSlotBox, referenceControlBox] = await Promise.all([
-      referenceInput.locator("xpath=..").boundingBox(),
-      referenceControl.boundingBox(),
-    ]);
-    expect(voiceSlotBox).not.toBeNull();
-    expect(referenceControlBox).not.toBeNull();
-    expect(referenceControlBox?.width || 0).toBeGreaterThanOrEqual((voiceSlotBox?.width || 0) * 0.8);
-
-    await page.evaluate(() => {
-      const result = document.querySelector<HTMLElement>("#vibevoice-result");
-      const audio = document.querySelector<HTMLAudioElement>("#vibevoice-audio");
-      if (!result || !audio) return;
-      result.hidden = false;
-      audio.src = "data:audio/wav;base64,UklGRg==";
-      window.ensureVoiceLabAudioControl?.(audio, "生成結果");
-    });
-    const resultAudio = page.locator("#vibevoice-audio");
-    const resultControl = resultAudio.locator("xpath=following-sibling::*[@data-sample-audio-control][1]");
-    await expect(resultAudio).toBeHidden();
-    await expect(resultControl).toBeVisible();
-    await expect(resultControl.locator(".sample-audio-play-button")).toHaveAttribute("aria-label", "生成結果を再生");
-    await assertNoHorizontalOverflow(page);
-    if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-      const slug = `${route.includes("admin") ? "admin-" : ""}voice-lab-players`;
-      await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-${slug}.png`, fullPage: true });
-    }
-  }
-});
-
-test("SkitVoice sample save stays admin-only and does not appear on the public page", async ({ page }) => {
-  await page.goto("/skitvoice/admin");
-  await page.locator(".admin-config-group > summary").click();
-  for (const [language] of [["en-US"], ["zh-CN"], ["ja-JP"]]) {
-    const section = page.locator(`[data-public-sample-language="${language}"]`);
-    await section.locator("[data-public-sample-file]").setInputFiles({
-      name: `${language}.wav`,
-      mimeType: "audio/wav",
-      buffer: Buffer.from(`RIFF ${language} sample audio`),
-    });
-  }
-  const saveButton = page.locator("[data-public-samples-save]");
-  await saveButton.click();
-  await expect(saveButton).toBeDisabled();
-  await expect(saveButton).toHaveText("保存中…");
-  await expect(saveButton).toHaveText("保存済み");
-  await expect(page.locator("[data-public-samples-status]")).toContainText("一般画面には表示されません");
-  await expect(page.getByText(/\.wav/)).toHaveCount(0);
-  await expect(page.locator(".skitvoice-samples-admin .sample-audio-control")).toHaveCount(3);
-  await expect(page.locator(".skitvoice-samples-admin audio[data-sample-audio-custom]").first()).toBeHidden();
-  const adminSampleBoxes = await Promise.all(["en-US", "zh-CN", "ja-JP"].map((language) => page.locator(`[data-public-sample-language="${language}"]`).boundingBox()));
-  if ((page.viewportSize()?.width || 0) > 820) {
-    expect(Math.abs((adminSampleBoxes[0]?.y || 0) - (adminSampleBoxes[1]?.y || 0))).toBeLessThanOrEqual(8);
-    expect(adminSampleBoxes[0]?.x || 0).toBeLessThan(adminSampleBoxes[1]?.x || 0);
-    expect(adminSampleBoxes[1]?.x || 0).toBeLessThan(adminSampleBoxes[2]?.x || 0);
-  }
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await mkdir("tmp/playwright/visual-review", { recursive: true });
-    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-sample-save-success.png`, fullPage: true });
-  }
-
-  await page.goto("/skitvoice");
-  await expect(page.getByRole("heading", { name: "研究機能は一般公開していません" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "出力音声サンプル" })).toHaveCount(0);
-  await expect(page.locator("[data-public-sample-language]")).toHaveCount(0);
-  await expect(page.locator("#vibevoice-form")).toHaveCount(0);
-  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
-    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-skitvoice-public-closed.png`, fullPage: true });
-    await page.evaluate(() => localStorage.setItem("mo-speech-theme", "dark"));
-    await page.reload();
-    await expect(page.locator("[data-public-sample-language]")).toHaveCount(0);
-    await page.screenshot({ path: `tmp/playwright/visual-review/${test.info().project.name}-skitvoice-public-closed-dark.png`, fullPage: true });
-  }
-});
-
 test("sample save failure leaves a visible retry action", async ({ page }) => {
   await page.route("**/api/public-sample-audios", async (route) => {
     if (route.request().method() === "PUT") {
@@ -2254,10 +1895,10 @@ test("sample save failure leaves a visible retry action", async ({ page }) => {
     }
     await route.fallback();
   });
-  await page.goto("/skitvoice/admin");
+  await page.goto("/admin");
   await page.locator(".admin-config-group > summary").click();
-  const englishSection = page.locator('[data-public-sample-language="en-US"]');
-  await englishSection.locator("[data-public-sample-file]").setInputFiles({
+  const funSection = page.locator('[data-public-sample-admin-feature="fun"]');
+  await funSection.locator("[data-public-sample-file]").setInputFiles({
     name: "english-sample.wav",
     mimeType: "audio/wav",
     buffer: Buffer.from("RIFF sample audio"),
@@ -2373,16 +2014,6 @@ test("admin work areas use side-by-side desktop layouts and stack on mobile", as
     expect(modelBox?.y || 0).toBeGreaterThan((recordingBox?.y || 0) + (recordingBox?.height || 0) - 2);
   }
 
-  await page.goto("/skitvoice/admin");
-  const [adminScript, adminControls] = await Promise.all([
-    page.getByRole("region", { name: "台本" }).boundingBox(),
-    page.locator(".vibevoice-control-stack").boundingBox(),
-  ]);
-  if (viewportWidth > 820) {
-    expect(Math.abs((adminScript?.y || 0) - (adminControls?.y || 0))).toBeLessThanOrEqual(8);
-  } else {
-    expect(adminControls?.y || 0).toBeGreaterThan((adminScript?.y || 0) + (adminScript?.height || 0) - 2);
-  }
 });
 
 test("advanced admin settings stay optional and never hide the primary action", async ({ page }) => {
@@ -2390,23 +2021,6 @@ test("advanced admin settings stay optional and never hide the primary action", 
   const workbenchAdvanced = page.locator(".control-panel > .admin-advanced-group");
   await expect(workbenchAdvanced).not.toHaveAttribute("open", "");
   await expect(page.locator("#submit-button")).toBeVisible();
-
-  await page.goto("/skitvoice/admin");
-  const generationAdvanced = page.locator(".vibevoice-settings-panel.admin-advanced-group");
-  const generateButton = page.locator("#vibevoice-generate-button");
-  await expect(generationAdvanced).not.toHaveAttribute("open", "");
-  await expect(generateButton).toBeVisible();
-  if ((page.viewportSize()?.width || 0) > 820) {
-    const initialGenerateBox = await generateButton.boundingBox();
-    expect((initialGenerateBox?.y || 0) + (initialGenerateBox?.height || 0)).toBeLessThanOrEqual((page.viewportSize()?.height || 0) + 1);
-  }
-
-  await generationAdvanced.locator("summary").click();
-  const [advancedBox, generateBox] = await Promise.all([
-    generationAdvanced.boundingBox(),
-    generateButton.boundingBox(),
-  ]);
-  expect(generateBox?.y || 0).toBeGreaterThanOrEqual((advancedBox?.y || 0) + (advancedBox?.height || 0) - 2);
   await assertNoHorizontalOverflow(page);
 });
 
