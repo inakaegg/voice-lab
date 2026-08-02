@@ -39,6 +39,21 @@ def test_alignment_harness_reports_vad_agreement_without_calling_it_boundary_acc
     assert row["vad_edge_within_250ms"] == 1.0
 
 
+def test_alignment_harness_compares_onsets_only_with_island_starts() -> None:
+    words = [{"text": "你", "start": 0.65, "end": 0.7}]
+    comparison = {
+        "phrases": [{"attempt": {"word_start_index": 0, "word_end_index": 1}}]
+    }
+
+    row = evaluate_side(
+        words,
+        [(0.0, 0.7)],
+        phrase_spans(comparison, words, "attempt"),
+    )
+
+    assert row["vad_edge_distances"] == [0.65, 0.0]
+
+
 def test_alignment_harness_summarizes_vad_agreement_with_stable_thresholds() -> None:
     rows = [
         {"reference": {"word_speech_overlap_rate": 1.0, "vad_edge_distances": [0.1, 0.3]}},
@@ -53,6 +68,25 @@ def test_alignment_harness_summarizes_vad_agreement_with_stable_thresholds() -> 
         "vad_edge_within_120ms": 0.25,
         "vad_edge_within_250ms": 0.5,
         "vad_edge_distance_worst": 0.4,
+    }
+
+
+def test_alignment_harness_summarizes_attempt_and_reference_together() -> None:
+    rows = [
+        {
+            "attempt": {"word_speech_overlap_rate": 1.0, "vad_edge_distances": [0.1, 0.3]},
+            "reference": {"word_speech_overlap_rate": 0.5, "vad_edge_distances": [0.2]},
+        }
+    ]
+
+    assert alignment_harness.summarize_all_sides(rows) == {
+        "cases": 2,
+        "vad_edges": 3,
+        "word_speech_overlap_rate_mean": 0.75,
+        "vad_edge_distance_median": 0.2,
+        "vad_edge_within_120ms": 0.333,
+        "vad_edge_within_250ms": 0.667,
+        "vad_edge_distance_worst": 0.3,
     }
 
 
@@ -128,3 +162,4 @@ def test_evaluate_cases_keeps_the_aligned_result_collection_separate_from_each_t
     result = alignment_harness.evaluate_cases([case], FakeProvider())
 
     assert result["aligned_vad_agreement"][0]["attempt"]["word_count"] == 1
+    assert result["summary"]["combined"] == result["summary"]["attempt"]

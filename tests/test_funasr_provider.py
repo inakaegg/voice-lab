@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mo_speech.providers.funasr import FunAsrPracticeProvider, transcription_from_funasr_result
 from mo_speech.providers.openai_api import AsrTranscription
 
@@ -173,3 +175,34 @@ def test_funasr_provider_forced_alignment_uses_raw_joined_text_and_shared_hf_hub
         {"text": "好", "start": 0.25, "end": 0.55},
     ]
     assert aligned.segments == [{"text": "你好。", "start": 0.0, "end": 0.55}]
+
+
+def test_funasr_provider_rejects_alignment_token_and_timestamp_count_mismatch(
+    tmp_path: Path,
+) -> None:
+    class FakeAlignmentModel:
+        def generate(self, *, input, data_type):
+            assert data_type == ("sound", "text")
+            return [{"text": "你 好 多", "timestamp": [[100, 250], [250, 500]]}]
+
+    audio_path = tmp_path / "model.wav"
+    audio_path.write_bytes(b"audio")
+    provider = FunAsrPracticeProvider(
+        alignment_model_factory=lambda **_kwargs: FakeAlignmentModel(),
+    )
+    transcription = AsrTranscription(
+        text="你好。",
+        model="funasr/paraformer-zh",
+        words=[
+            {"text": "你", "start": 0.4, "end": 0.7},
+            {"text": "好", "start": 0.7, "end": 1.0},
+        ],
+        timestamp_granularities=["word"],
+    )
+
+    with pytest.raises(ValueError, match="token or timestamp count does not match"):
+        provider.force_align_detail(
+            audio_path,
+            transcription,
+            speech_islands=[(0.0, 0.55)],
+        )
