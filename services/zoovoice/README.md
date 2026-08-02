@@ -1,18 +1,28 @@
 # Zoovoice 音声合成サービス
 
-Zoovoice は発話の無音区間へ動物の鳴き声を重ねるローカルデモです。
+Zoovoice は発話の無音区間へ動物の鳴き声を重ねるデモです。
 このディレクトリには Go 製の合成 API と素材マスタを置いています。
-Phase 1 では Cloud Run や Cloudflare Worker へデプロイしません。
+公開のUI・API入り口はCloudflare Workerであり、Workerが有効化した配備ではこのGoサービスをprivateなGoogle Cloud Run上のコンテナとして呼び出します。
+Cloud Run配備の契約は[Cloud Run配備](#cloud-run配備)を、公開側の全体構成は[ARCHITECTURE.md](../../docs/deployment/ARCHITECTURE.md)を参照してください。
 
 ## 必要なソフトウェア
 
 - Go 1.21 以上
 - ffmpeg と ffprobe
-- ローカル画面も使う場合は Voice Lab 本体の Python と Node.js 環境
+- リポジトリ全体のローカル確認にはNode.jsとWrangler、および`gcloud`(private Cloud Run smoke時)
 
 ## 起動方法
 
-リポジトリの `services/zoovoice` へ移動して起動します。
+通常のローカル確認は、リポジトリ直下で次を実行します。
+
+```sh
+npm run dev:zoovoice
+```
+
+このコマンドはWrangler local、local D1、このGoサービスを起動し、FastAPIは使いません。
+`http://127.0.0.1:8787/zoovoice` を開くとCloudflare Worker local経由で確認できます。
+
+このディレクトリのGoサービス単体だけを確認する場合は、`services/zoovoice`へ移動して起動します。
 
 ```sh
 go run .
@@ -25,35 +35,33 @@ repo 外の追加素材も使う場合は規格化済み WAV のディレクト�
 ZOOVOICE_EXTRA_ASSETS_DIR=<repo-outside-assets>/taira-komori go run .
 ```
 
-別のターミナルで FastAPI を起動すると `/zoovoice` から利用できます。
+private Cloud Runとの接続を確認する場合は、`ZOOVOICE_CLOUD_RUN_URL`・`ZOOVOICE_GCP_PROJECT`・`ZOOVOICE_SMOKE_SERVICE_ACCOUNT`を設定し次を実行します。
 
 ```sh
-PYTHONPATH=src \
-  ZOOVOICE_BACKEND_URL=http://127.0.0.1:8090 \
-  python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
+npm run dev:zoovoice:cloud-run
 ```
 
-ブラウザで `http://127.0.0.1:8000/zoovoice` を開きます。
-画面は録音した音声をローカルの Go サービスへ送信します。
+この経路はgcloud service account impersonationでaudience付きの短期ID tokenを取得し、一時env file経由でlocal Wranglerへ渡します。
+取得するID tokenはproduction credentialではなく、smoke専用service accountの権限だけに限定されます。
 
 ## 環境変数
 
 | 変数 | 既定値 | 用途 |
 | --- | --- | --- |
-| `ZOOVOICE_PORT` | `8090` | Go API の待受ポート |
+| `ZOOVOICE_PORT` | `8090` | Go API の待受ポート。設定時はこちらを優先する |
+| `PORT` | `8090` | `ZOOVOICE_PORT` 未設定時のfallback。Cloud Runが自動注入する |
 | `ZOOVOICE_ASSETS_DIR` | 自動検出した `assets` | `animals.json` と `cc0/` の親ディレクトリ |
 | `ZOOVOICE_EXTRA_ASSETS_DIR` | 未設定 | repo 外の追加 WAV ディレクトリ |
 | `ZOOVOICE_TIMEOUT_SECONDS` | `30` | ffmpeg と ffprobe を含む1リクエストの上限秒数 |
 | `ZOOVOICE_LOG_PATH` | リポジトリ直下の `logs/zoovoice.log` | JST時刻と経過時間を含むサービスログ |
-| `ZOOVOICE_BACKEND_URL` | `http://127.0.0.1:8090` | FastAPI proxy が接続する Go API |
 
 追加素材の場所が未設定または不在でも起動できます。
 その場合は警告をログへ記録し、実在する CC0 素材だけを公開します。
 
 ## API
 
-Go API はローカルの内部 API です。
-ブラウザは同じ契約を FastAPI の `/api/zoovoice/*` 経由で利用します。
+Go API はprivateな内部APIです。
+ブラウザは同じ契約をCloudflare Workerの `/api/zoovoice/*` 経由で利用します。
 
 ### `GET /healthz`
 
@@ -169,6 +177,25 @@ curl -X POST http://127.0.0.1:8090/compose \
 追加素材が存在する場合でも `/animals` は種と件数だけを返します。
 合成結果以外から追加素材を取り出す経路は提供しません。
 
+## Cloud Run配備
+
+Cloud Runへの配備は`./scripts/deploy_zoovoice_cloud_run.sh`を使います。
+既定はdry-runで、コマンドが実行する予定の操作を表示するだけで実際のremote writeは行いません。
+`ZOOVOICE_DEPLOY_APPLY=1`を設定した場合だけ、image push、Cloud Run deploy、IAM設定などのremote writeを実行します。
+
+Cloud Runの配備契約は次のとおりです。
+
+- region: `us-central1`
+- private（`--no-allow-unauthenticated`、`allUsers`と`allAuthenticatedUsers`は不可）
+- CPU 1、メモリ512Mi、port 8080、timeout 90秒、concurrency 1、min 0、max 2
+- imageはtagではなくdigestを固定して指定する
+
+invoker権限は、smoke専用のservice accountだけへservice単位で`roles/run.invoker`を付与します。
+active developerのgcloudアカウントは、そのservice account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
+
+このリポジトリの変更では、上記scriptのdry-run確認までを行っています。
+実際のGCP project、Artifact Registry、Cloud Run、IAMへの反映と、Cloud Runへの実接続smokeは未実施です。
+
 ## 検証
 
 ```sh
@@ -178,3 +205,6 @@ go test ./...
 
 統合テストには ffmpeg で生成した決定的な fixture を使います。
 repo 外の追加素材がない環境でも全テストが通ります。
+
+`npm run dev:zoovoice`によるローカル実測では、Wrangler local・Turnstile test key・local D1・このGoサービスを経由する経路が成功しています。
+実WAV(PCM s16le、24kHz、mono、入力4.70秒)から出力7.22秒の合成結果を確認し、local D1のcounter増加も確認しています。

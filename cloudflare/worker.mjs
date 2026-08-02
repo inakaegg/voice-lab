@@ -6,6 +6,7 @@ import {
   serializeAsrTimestamps,
   storePracticeModelAsrCache,
 } from "./src/practice-model-asr-cache.ts";
+import { handleZoovoiceApiRequest } from "./zoovoice-gateway.mjs";
 
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
@@ -1093,6 +1094,10 @@ async function handleApiRequest(request, env, ctx, url) {
     if (request.method === "OPTIONS") {
       return jsonResponse({}, { status: 204 });
     }
+    const zoovoiceResponse = await handleZoovoiceApiRequest(request, env, url);
+    if (zoovoiceResponse) {
+      return zoovoiceResponse;
+    }
     if (request.method === "GET" && url.pathname === "/api/public-session") {
       return jsonResponse(await publicSessionPayload(request, env));
     }
@@ -1202,6 +1207,12 @@ async function serveAsset(request, env, url) {
   if (!env.ASSETS) {
     return new Response("Cloudflare static assets binding is not configured.", { status: 503 });
   }
+  if (
+    env.ZOOVOICE_ENABLED !== "1"
+    && ["/zoovoice", "/react/zoovoice.html"].includes(normalizePathname(url.pathname))
+  ) {
+    return new Response("Not Found", { status: 404 });
+  }
   const assetUrl = new URL(request.url);
   const retiredPaths = new Set([
     "/fun",
@@ -1232,6 +1243,8 @@ async function serveAsset(request, env, url) {
     assetUrl.pathname = "/react/privacy.html";
   } else if (url.pathname === "/speakloop" || url.pathname === "/speakloop/") {
     assetUrl.pathname = "/react/speakloop.html";
+  } else if (url.pathname === "/zoovoice" || url.pathname === "/zoovoice/") {
+    assetUrl.pathname = "/react/zoovoice.html";
   } else if (
     url.pathname === "/speakloop/admin" ||
     url.pathname === "/speakloop/admin/"

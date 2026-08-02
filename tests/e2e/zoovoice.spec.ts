@@ -114,9 +114,69 @@ test("zoovoice keeps the unified selector aligned with the lucky arrangement", a
   await expect(page.getByLabel("おわり")).toHaveValue("cat");
 });
 
-async function installZoovoiceApi(page: Page) {
+test("zoovoice waits for a single-use Turnstile token before compose", async ({ page }, testInfo) => {
+  let composeBody = "";
+  await installZoovoiceApi(page, {
+    turnstileRequired: true,
+    onCompose: (body) => {
+      composeBody = body;
+    },
+  });
+  await page.route("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: `window.turnstile={
+        render(element, options) {
+          element.textContent = "Turnstile test widget";
+          queueMicrotask(() => options.callback("browser-turnstile-token"));
+          return "test-widget";
+        },
+        reset() {},
+        remove() {}
+      };`,
+    });
+  });
+  await page.goto("/zoovoice");
+
+  await page.getByRole("button", { name: "録音する" }).click();
+  await page.waitForTimeout(100);
+  await page.getByRole("button", { name: "録音を止める" }).click();
+
+  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "合成する" })).toBeEnabled();
+  await assertNoHorizontalOverflow(page);
+  await assertVisibleControlsInsideViewport(page);
+  await captureIfRequested(page, testInfo, "turnstile-ready-light");
+  await page.getByLabel("配色設定").click();
+  await page.getByRole("radio", { name: "暗色" }).click();
+  await page.keyboard.press("Escape");
+  await assertNoHorizontalOverflow(page);
+  await captureIfRequested(page, testInfo, "turnstile-ready-dark");
+  await page.getByRole("button", { name: "合成する" }).click();
+  await expect(page.getByText("できあがりました。再生して確認できます。")).toBeVisible();
+  assertMultipartField(composeBody, "turnstile_token", "browser-turnstile-token");
+});
+
+async function installZoovoiceApi(
+  page: Page,
+  options: { turnstileRequired?: boolean; onCompose?: (body: string) => void } = {},
+) {
   await page.route("**/api/zoovoice/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/zoovoice/config") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          enabled: true,
+          turnstile_required: options.turnstileRequired === true,
+          turnstile_site_key: options.turnstileRequired ? "1x00000000000000000000AA" : "",
+          audio_max_bytes: 10_000_000,
+          origin_timeout_seconds: options.turnstileRequired ? 90 : 30,
+        }),
+      });
+    }
     if (path === "/api/zoovoice/animals") {
       return route.fulfill({
         status: 200,
@@ -125,6 +185,7 @@ async function installZoovoiceApi(page: Page) {
       });
     }
     if (path === "/api/zoovoice/compose") {
+      options.onCompose?.(route.request().postData() || "");
       await new Promise((resolve) => setTimeout(resolve, 120));
       return route.fulfill({
         status: 200,
@@ -145,6 +206,11 @@ async function installZoovoiceApi(page: Page) {
     }
     return route.continue();
   });
+}
+
+function assertMultipartField(body: string, name: string, value: string) {
+  expect(body).toContain(`name="${name}"`);
+  expect(body).toContain(value);
 }
 
 function silentWav(): Buffer {
@@ -173,6 +239,7 @@ async function captureIfRequested(page: Page, testInfo: TestInfo, state: string)
   const outputDir = "tmp/playwright/zoovoice-visual";
   await mkdir(outputDir, { recursive: true });
   await page.evaluate(() => document.fonts.ready);
+  if (state.endsWith("-dark")) await page.waitForTimeout(200);
   await page.screenshot({
     path: `${outputDir}/${testInfo.project.name}-${state}.png`,
     fullPage: true,

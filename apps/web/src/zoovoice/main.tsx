@@ -1,10 +1,18 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, Mic2, RotateCcw, Sparkles, WandSparkles } from "lucide-react";
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
-import { composeRecording, fetchAnimals, wavBlobFromBase64, type Animal, type ComposeResponse } from "./api";
+import {
+  composeRecording,
+  fetchAnimals,
+  fetchZoovoiceConfig,
+  wavBlobFromBase64,
+  type Animal,
+  type ComposeResponse,
+  type ZoovoiceConfig,
+} from "./api";
 import { ResultPlayer } from "./result-player";
 import {
   initialZoovoiceState,
@@ -13,6 +21,7 @@ import {
   zoovoiceReducer,
   type Arrangement,
 } from "./state";
+import { TurnstileWidget } from "./turnstile-widget";
 import { useRecorder } from "./use-recorder";
 
 activateCompactLayout();
@@ -28,17 +37,25 @@ function Zoovoice() {
   const [arrangement, setArrangement] = useState<Arrangement>(() => singleAnimalArrangement("cat"));
   const [intensity, setIntensity] = useState(50);
   const [result, setResult] = useState<ResultState | null>(null);
+  const [config, setConfig] = useState<ZoovoiceConfig | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileResetVersion, setTurnstileResetVersion] = useState(0);
   const recorder = useRecorder();
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetchAnimals(controller.signal)
-      .then((available) => {
+    void (async () => {
+      const loadedConfig = await fetchZoovoiceConfig(controller.signal);
+      setConfig(loadedConfig);
+      if (!loadedConfig.enabled) {
+        throw new Error("Zoovoiceは現在利用できません。");
+      }
+      const available = await fetchAnimals(controller.signal);
         const initial = available.some((animal) => animal.id === "cat") ? "cat" : available[0].id;
         setAnimals(available);
         setArrangement(singleAnimalArrangement(initial));
         dispatch({ type: "animals_loaded" });
-      })
+    })()
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         dispatch({ type: "failed", message: messageFromError(error, "動物を読み込めませんでした。") });
@@ -61,6 +78,8 @@ function Zoovoice() {
     [animals],
   );
   const isBusy = state.phase === "processing";
+  const turnstileReady = !config?.turnstile_required || Boolean(turnstileToken);
+  const handleTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
   const singleSelection = arrangement.opening === arrangement.gaps
     && arrangement.gaps === arrangement.ending
     && arrangement.opening !== null
@@ -76,6 +95,8 @@ function Zoovoice() {
       URL.revokeObjectURL(result.url);
       setResult(null);
     }
+    setTurnstileToken("");
+    setTurnstileResetVersion((current) => current + 1);
     recorder.clear();
     try {
       await recorder.start();
@@ -95,9 +116,13 @@ function Zoovoice() {
       dispatch({ type: "failed", message: "先に声を録音してください。" });
       return;
     }
+    if (config?.turnstile_required && !turnstileToken) {
+      dispatch({ type: "failed", message: "不正利用防止の確認が完了するまでお待ちください。" });
+      return;
+    }
     dispatch({ type: "compose_started" });
     try {
-      const payload = await composeRecording(recorder.blob, arrangement, intensity);
+      const payload = await composeRecording(recorder.blob, arrangement, intensity, turnstileToken);
       if (result) URL.revokeObjectURL(result.url);
       const url = URL.createObjectURL(wavBlobFromBase64(payload.audio.base64));
       setResult({ payload, url });
@@ -107,6 +132,11 @@ function Zoovoice() {
         type: "failed",
         message: messageFromError(error, "音声を合成できませんでした。もう一度お試しください。"),
       });
+    } finally {
+      if (config?.turnstile_required) {
+        setTurnstileToken("");
+        setTurnstileResetVersion((current) => current + 1);
+      }
     }
   };
 
@@ -242,9 +272,14 @@ function Zoovoice() {
     <section className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
       <Card className="gap-0 rounded-[1.5rem] border-border/80 py-0 shadow-sm">
         <CardContent className="grid gap-3 p-5 sm:p-6">
+          {recorder.blob && config?.turnstile_required && <TurnstileWidget
+            siteKey={config.turnstile_site_key}
+            resetVersion={turnstileResetVersion}
+            onToken={handleTurnstileToken}
+          />}
           <button
             type="button"
-            disabled={!recorder.blob || recorder.isRecording || isBusy}
+            disabled={!recorder.blob || recorder.isRecording || isBusy || !turnstileReady}
             onClick={() => void submit()}
             className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-5 py-3 text-sm font-bold text-background shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-[4px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none"
           >

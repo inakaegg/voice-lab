@@ -7,6 +7,7 @@ import {
   singleAnimalArrangement,
   zoovoiceReducer,
 } from "../apps/web/src/zoovoice/state.ts";
+import * as zoovoiceApi from "../apps/web/src/zoovoice/api.ts";
 
 test("zoovoice state follows recording compose and success phases", () => {
   const ready = zoovoiceReducer(initialZoovoiceState, { type: "animals_loaded" });
@@ -57,4 +58,49 @@ test("single animal and lucky controls always set all three slots", () => {
     gaps: "lucky",
     ending: "lucky",
   });
+});
+
+test("zoovoice public config distinguishes local and Turnstile gateways", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    enabled: true,
+    turnstile_required: true,
+    turnstile_site_key: "public-site-key",
+    audio_max_bytes: 10_000_000,
+    origin_timeout_seconds: 90,
+  });
+  try {
+    assert.deepEqual(await zoovoiceApi.fetchZoovoiceConfig(), {
+      enabled: true,
+      turnstile_required: true,
+      turnstile_site_key: "public-site-key",
+      audio_max_bytes: 10_000_000,
+      origin_timeout_seconds: 90,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("zoovoice compose sends the current single-use Turnstile token", async () => {
+  const originalFetch = globalThis.fetch;
+  let submittedForm: FormData | null = null;
+  globalThis.fetch = async (_input, init) => {
+    submittedForm = init?.body as FormData;
+    return Response.json({
+      audio: { format: "wav", base64: "UklGRg==" },
+      meta: { insertions: [], input_duration_seconds: 1, output_duration_seconds: 1 },
+    });
+  };
+  try {
+    await zoovoiceApi.composeRecording(
+      new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
+      { opening: "cat", gaps: null, ending: null },
+      40,
+      "single-use-turnstile-token",
+    );
+    assert.equal(submittedForm?.get("turnstile_token"), "single-use-turnstile-token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

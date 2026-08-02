@@ -36,7 +36,7 @@ func main() {
 		timeout,
 		logger,
 	)
-	port := integerFromEnv("ZOOVOICE_PORT", 8090)
+	port := serverPort()
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           newHTTPHandler(catalog, activeComposer, logger),
@@ -69,6 +69,13 @@ func main() {
 			logger.Printf("zoovoice shutdown failed: %v", err)
 		}
 	}
+}
+
+func serverPort() int {
+	if os.Getenv("ZOOVOICE_PORT") != "" {
+		return integerFromEnv("ZOOVOICE_PORT", 8090)
+	}
+	return integerFromEnv("PORT", 8090)
 }
 
 func defaultAssetsRoot() string {

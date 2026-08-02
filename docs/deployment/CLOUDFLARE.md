@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-07-30
+更新日: 2026-08-02
 
 ## 目的
 
@@ -44,6 +44,20 @@ Browser
 
 Google OAuth clientの「承認済みのリダイレクトURI」には `https://voice-lab.inakaegg.workers.dev/auth/google/callback` を登録する。旧Worker URLから切り替える間は旧URIを残してよいが、新URLでログイン確認が完了した後に不要な旧URIを削除する。
 
+### Zoovoiceのsecretとflag
+
+Zoovoiceを有効にする配備では、`ZOOVOICE_TURNSTILE_SECRET_KEY` をWorker secretとして登録する。既定の配備では登録しない。
+
+WorkerがCloud Runを呼ぶ際の認証方式は未決定であり、未実装である。Workerの `ZOOVOICE_ORIGIN_MODE` は現在 `local-origin` と `cloud-run-smoke` の2つだけを持ち、どちらもloopback originからの `ZOOVOICE_LOCAL_DEV=1` 配備でしか動かない。production向けにCloud Runを安全に呼ぶ認証方式は今後決める。
+
+ローカルのTurnstile確認は、Cloudflare公式のalways-pass test site key・secret keyだけを使う。このtest key組はproduction設定と混在させない。
+
+`cloud-run-smoke`モードは、developer端末のgcloudでservice account impersonationを行い、audience付きの短期ID tokenを取得する。取得したtokenは一時env file経由でlocal Wranglerへ渡すだけであり、Worker secretとしては保存しない。このモードの利用には `ZOOVOICE_CLOUD_RUN_URL`・`ZOOVOICE_GCP_PROJECT`・`ZOOVOICE_SMOKE_SERVICE_ACCOUNT` を設定し、`npm run dev:zoovoice:cloud-run` を使う。
+
+flagと公開設定は `[vars]` へ置く。`ZOOVOICE_ENABLED` は既定で未設定とし、`1` を設定した配備だけがZoovoiceを公開する。同じ配備で `ZOOVOICE_TURNSTILE_SITE_KEY` と `ZOOVOICE_CLOUD_RUN_URL` も設定する。
+
+Cloud Run側の準備は別の外部操作gateである。region、サービス契約、IAM方針、配備scriptの詳細は [ARCHITECTURE.md](ARCHITECTURE.md) と `services/zoovoice/README.md` を参照する。
+
 ### Worker名変更時の移行
 
 `wrangler.toml` の `name` を変えると、既存Workerの名前がその場で変わるのではなく、新しいWorkerが作成される。KV、D1、R2は設定済みbindingを通じて既存resourceを引き継げるが、Worker secretは引き継がれず値も読み戻せない。ブランド変更時は次の順で移行する。
@@ -74,6 +88,8 @@ Workerは次の主要なAPI互換エンドポイントを提供する。
 - `GET /api/voice-conversion-jobs/{job_id}`
 - `POST /api/warmup`
 - `GET /api/warmup/{job_id}`
+
+Zoovoice用に `GET /api/zoovoice/config`、`GET /api/zoovoice/animals`、`POST /api/zoovoice/compose` も同じmoduleが処理する。動物一覧と合成は `ZOOVOICE_ENABLED=1` の配備だけで動き、それ以外では503を返す。configは無効な配備でもflagの状態を返す。この3つはGoogleログインとSpeakLoop用quotaの対象外であり、Turnstile検証とZoovoice共通の利用上限で保護する。
 
 Seed-VC・warmup・SpeakLoopの中国語復唱比較はRunPod Serverlessの非同期jobへ中継する。RunPodのjob IDをUI向けjob IDとして返し、status pollingで `queued`・`running`・`succeeded`・`failed` 形式へ変換する。中国語比較では、お手本と復唱の両音声を1つのRunPod jobへ送る。progress updateと `/health` を使ってUIへ返す状態は、worker割り当て待ち・worker初期化・FunASRモデル読込・両音声の解析・完了／失敗である。status pollingはquotaを追加消費しない。
 
@@ -139,7 +155,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 管理画面の単体Seed-VCとwarmupは同じGoogleセッションを使う。単体Seed-VCはjob作成から結果取得まで管理者だけに許可する。管理者メールに含まれるアカウントはquotaを消費しない。入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
-production Workerとstaging Workerは配備済みである。現在は2 Workerを同じrepoから配備する。stagingの必須Worker secretは登録済みで、deploy後smokeも成功している。Googleログインの実操作確認は未実施である。
+現行deploy経路はproduction Workerだけである。staging用の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryから削除済みで、現在このrepoからstagingへ再deployする経路はない。過去に作成したremote staging Worker・D1・KV・R2は削除していない。
 
 ### production
 
@@ -173,52 +189,13 @@ wrangler secret put ADMIN_GOOGLE_EMAILS
 
 ### staging
 
-`[env.staging]` は `voice-lab-staging` として配備する。productionの利用者データへ触れないよう、永続resourceを次のように分ける。
+staging用の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryから削除済みである。このrepoから新たにstagingへdeployする経路は現在ない。
 
-| binding | production | staging |
-| --- | --- | --- |
-| `MO_SPEECH_KV` | `MO_SPEECH_KV` | `MO_SPEECH_KV_STAGING` |
-| `MO_SPEECH_DB` | `mo-speech-demo-db` | `mo-speech-staging-db` |
-| `MO_SPEECH_AUDIO_R2` | `mo-speech-audio` | `mo-speech-audio-preview` |
-
-stagingはproductionのCron Triggerを継承しないよう、`crons = []` を明示する。通常のWorker設定値は `[env.staging.vars]` へ複製する。ただし `PUBLIC_CANONICAL_ORIGIN` はクロール許可を正規公開originへ限定するため複製しない。初回配備から課金APIを匿名公開しないよう、`PUBLIC_GOOGLE_AUTH_REQUIRED=1` を既定にする。Worker secretも環境間で継承されない。
-
-`Deploy Cloudflare Staging` は `workflow_dispatch` 専用である。GitHub Actionsの実行画面でbranchを選び、そのrevisionのReact成果物を再生成する。その後に次の順でstagingへ反映する。
-
-1. `npx wrangler d1 migrations apply mo-speech-staging-db --env staging --remote`
-2. `npx wrangler deploy --env staging`
-3. `python3 scripts/smoke_cloudflare_deployment.py --base-url https://voice-lab-staging.inakaegg.workers.dev`
-
-staging Workerには次のsecretを環境指定で登録する。`PUBLIC_SESSION_SECRET` はproductionと別の値を生成する。
-
-```sh
-wrangler secret put RUNPOD_API_KEY --env staging
-wrangler secret put RUNPOD_ENDPOINT_ID --env staging
-wrangler secret put OPENAI_API_KEY --env staging
-wrangler secret put GOOGLE_CLIENT_ID --env staging
-wrangler secret put GOOGLE_CLIENT_SECRET --env staging
-openssl rand -base64 32
-wrangler secret put PUBLIC_SESSION_SECRET --env staging
-wrangler secret put ADMIN_GOOGLE_EMAILS --env staging
-```
-
-Google OAuth clientの承認済みリダイレクトURIには、`https://voice-lab-staging.inakaegg.workers.dev/auth/google/callback` を追加する。
-
-staging Workerは2026-07-22（米国太平洋時間）に初回deploy済みである。Cloudflare APIの記録は `2026-07-23T04:38:20Z` である。2026-07-23に `OPENAI_API_KEY`、`RUNPOD_API_KEY`、`RUNPOD_ENDPOINT_ID`、`PUBLIC_SESSION_SECRET` を登録した。同日に `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`ADMIN_GOOGLE_EMAILS` も登録し、deploy後smokeの全6項目が成功した。Google OAuth clientのリダイレクトURIとGoogleログインの実操作は別途確認する。
-
-残るstaging確認は次の順で行う。
-
-1. Google OAuth clientへstagingのリダイレクトURIを追加する。
-2. `Deploy Cloudflare Staging` で確認対象branchを選ぶ。
-3. D1 migration、Worker deploy、deploy後smokeの成功を確認する。
-4. Googleログインと管理画面の認可を確認する。
-5. 費用上限を確認してから、最小入力でOpenAI経路とRunPod経路を個別に確認する。
-
-GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する。Worker secretが無い初回deployでは静的画面を配信できるが、対応する生成APIは503でfail closedする。Google OAuth用secretまたは管理者メールが無い場合も、ログインと管理機能は503でfail closedする。
+過去にstaging Worker `voice-lab-staging` をこの経路でdeployし、2026-07-22（米国太平洋時間）に初回deploy、2026-07-23に必須Worker secretの登録とdeploy後smoke成功を確認した。Googleログインの実操作確認は当時未実施のまま残っている。remote staging Worker・D1・KV・R2は削除していない。staging構成を復元する場合は、削除前の設定をgit historyから確認する。
 
 ## ログと監視
 
-- Workers Logsは `wrangler.toml` の `[observability]` で本番とstagingの両方を有効にする。
+- Workers Logsは `wrangler.toml` の `[observability]` で本番Workerに対して有効にする。
 - WorkerはOpenAI upstream失敗・API失敗・練習jobの失敗をconsole.errorへ記録する。ログへ音声データや台本などのpayloadは含めない。
 - 過去ログはCloudflare dashboardの対象Worker → Logsで確認する。リアルタイム確認は `npx wrangler tail voice-lab` を使う。
 - Workers LogsのFreeプラン枠は1日20万イベント・保持3日である。超過する場合は `head_sampling_rate` を下げる。
@@ -227,7 +204,7 @@ GitHub Actions secretsが無い場合はmigration前にworkflowが失敗する�
 
 公開3route(`/`・`/speakloop`・`/privacy`)の配信HTMLには共有・検索用のメタ情報を静的に埋め込む。内容はmeta description・OGP・Twitter Card・canonical URL・apple-touch-iconである。共有カード用のOG画像は全routeで `og-voice-lab.png`(1200×630)を共用し、`apps/web/public/` からビルドで `/react/` 配下へ配置する。`/` と `/speakloop` にはJSON-LD構造化データ(`WebSite`・`WebApplication`)を置く。
 
-Workerは `/robots.txt` と `/sitemap.xml` を配信する。クロール許可は `PUBLIC_CANONICAL_ORIGIN` が要求originと一致する配備だけに与える。productionでは `wrangler.toml` の `[vars]` でこの値を公開URLへ設定する。stagingは設定しないため、robots.txtが全体Disallowを返しsitemapは404になる。`PUBLIC_GOOGLE_AUTH_REQUIRED` は生成APIのログイン必須設定でありページ閲覧を制限しないため、クロール可否の判定に使わない。
+Workerは `/robots.txt` と `/sitemap.xml` を配信する。クロール許可は `PUBLIC_CANONICAL_ORIGIN` が要求originと一致する配備だけに与える。productionでは `wrangler.toml` の `[vars]` でこの値を公開URLへ設定する。この値を設定しない配備では、robots.txtが全体Disallowを返しsitemapは404になる。`PUBLIC_GOOGLE_AUTH_REQUIRED` は生成APIのログイン必須設定でありページ閲覧を制限しないため、クロール可否の判定に使わない。
 
 sitemapへ載せるのは `/`・`/speakloop`・`/privacy` だけとする。管理系routeと `/api/`・`/auth/` はrobots.txtでDisallowする。対象の管理系routeは `/admin` と `/speakloop/admin` である。
 

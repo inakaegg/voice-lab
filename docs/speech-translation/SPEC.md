@@ -1,10 +1,12 @@
 # Voice Lab Webアプリ仕様
 
-更新日: 2026-07-30
+更新日: 2026-08-02
 
 ## 目的
 
 Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフォリオの主機能とする。ローカルFastAPI、Cloudflare Worker、RunPod Serverlessの責任を分離し、秘密情報とGPU処理をブラウザへ置かない。この構成はproduction公開環境へ反映済みである。
+
+Zoovoiceは同じWorkerへ載せる別機能であり、合成本体だけをGoogle Cloud Run上のGo APIへ委譲する。production公開はflagで止めており、有効化条件は [Zoovoice](#zoovoice) に定める。
 
 ## 正式route
 
@@ -12,6 +14,7 @@ Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフ�
 | --- | --- | --- |
 | `/` | Voice Labポータル | 公開 |
 | `/speakloop` | SpeakLoop | 公開 |
+| `/zoovoice` | Zoovoice | `ZOOVOICE_ENABLED=1` の配備だけ公開 |
 | `/admin` | 総合管理 | 管理者認証必須 |
 | `/speakloop/admin` | SpeakLoop管理 | 管理者認証必須 |
 
@@ -108,18 +111,70 @@ Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフ�
 - 公開UIの主要ステータスとエラーは、providerを変更しても成立する文言にする。provider名・モデル名・raw stage・内部エラーは主要文言に含めない。分離先は弱い技術詳細・管理画面・ブラウザconsole・サーバーログとする。
 - 外部AIプロバイダの利用枠超過は例外として原因カテゴリだけを利用者へ伝える。固定文言「現在サーバー側のAI利用枠を超えているため処理できません。時間をおいてもう一度お試しください。」をHTTP 503で返し、クレジット残高や課金状態の詳細は表示しない。
 
+## Zoovoice
+
+Zoovoiceは、録音した発話のすき間へ動物の鳴き声を重ねる機能である。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
+
+### 公開範囲
+
+- `/zoovoice` と合成系APIは `ZOOVOICE_ENABLED=1` の配備だけで公開する。この値が無い配備では `/zoovoice` を404にする。
+- 公開APIは `GET /api/zoovoice/config`、`GET /api/zoovoice/animals`、`POST /api/zoovoice/compose` の3つとする。
+- 無効な配備では動物一覧と合成を503で拒否する。configだけはflagの状態を伝えるため応答する。
+
+### APIの担当
+
+- `GET /api/zoovoice/config` は有効・無効の状態と公開設定を返す。UIはこの応答だけで利用可否を判断する。
+- `GET /api/zoovoice/animals` はWorker Static Assetsの静的JSONを返す。この経路は合成backendを起動せず音声データも扱わない。
+- `POST /api/zoovoice/compose` は録音と配置設定を受け取る。Workerは合成前にTurnstile検証と利用上限判定を行う。
+- 合成本体はGoogle Cloud Run上のGo APIが担当する。Workerはprivate Cloud Runへ認証付きで中継し、ブラウザからGo APIへ直接送る経路は持たない。
+
+### ローカル確認
+
+ローカル確認の正本はWranglerで動かすWorkerとする。確認modeは次の2つとし、いずれも用語をここで定義する。
+
+- local origin modeとは、同じ開発端末で動くGo APIへWorkerが認証なしで接続する確認modeを指す。
+- Cloud Run smoke modeとは、ローカルのWorkerから実際のprivate Cloud Runへ認証付きで接続する確認modeを指す。
+
+local origin modeは次の3条件をすべて満たす場合だけ成立する。1つでも欠けた場合は認証なし接続を許さない。
+
+- 配備設定で明示的にlocal modeを指定している
+- requestのhostnameがloopbackである
+- 接続先originがloopbackのHTTPである
+
+Cloud Run smoke modeの条件は次のとおりとする。
+
+- loopback上で動くWranglerだけがこのmodeを使える
+- ローカルのgcloudがservice account impersonationで短期のGoogle ID tokenを取得する
+- 取得したID tokenはloopback上のWranglerへlocal secretとして渡す。Worker自身はID tokenを取得しない
+- production用のservice account keyは使わない
+- 接続先はus-central1のprivate Cloud Runとする
+
+ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の根拠に使わない。SpeakLoopのFastAPI版は従来どおり維持する。
+
+### productionの扱い
+
+- production配備のZoovoiceはまだ有効化していない。
+- production向けのcredential方式は未決定である。決まるまでproductionでの有効化を行わない。
+- ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
+- 外部deployとproduction有効化は別のgateで扱う。対象はimage公開、GCP resource作成、IAM設定、region設定と確認である。
+
 ## 実行環境の責任
 
-| 処理 | ローカルFastAPI | Cloudflare Worker | RunPod handler |
-| --- | --- | --- | --- |
-| UI配信 | ○ | Static Assets | — |
-| Google OAuth・公開quota | — | ○ | — |
-| OpenAI ASR・翻訳・TTS | 母語入力、英語復唱、翻訳、TTS | 母語入力、英語復唱、翻訳、TTS | — |
-| SpeakLoop中国語比較ASR | provider経由で非同期jobを依頼・polling | お手本／復唱音声bytesを非同期jobとして中継 | `paraformer-zh`でASR後に`fa-zh`整列とVADスナップ |
-| Seed-VC GPU推論 | provider経由で依頼 | job APIを中継 | ○ |
-| quota・監査・サンプルmetadata | ローカルファイル | D1、bindingなし時のみfallback | — |
-| 音声履歴 | ローカルファイル | 保存しない | 保存しない |
-| 公開サンプル音声blob | ローカルファイル | R2、bindingなし時のみfallback | — |
+| 処理 | ローカルFastAPI | Cloudflare Worker | RunPod handler | Zoovoice Go API |
+| --- | --- | --- | --- | --- |
+| UI配信 | ○ | Static Assets | — | — |
+| Google OAuth・公開quota | — | ○ | — | — |
+| OpenAI ASR・翻訳・TTS | 母語入力、英語復唱、翻訳、TTS | 母語入力、英語復唱、翻訳、TTS | — | — |
+| SpeakLoop中国語比較ASR | provider経由で非同期jobを依頼・polling | お手本／復唱音声bytesを非同期jobとして中継 | `paraformer-zh`でASR後に`fa-zh`整列とVADスナップ | — |
+| Seed-VC GPU推論 | provider経由で依頼 | job APIを中継 | ○ | — |
+| quota・監査・サンプルmetadata | ローカルファイル | D1、bindingなし時のみfallback | — | — |
+| 音声履歴 | ローカルファイル | 保存しない | 保存しない | 保存しない |
+| 公開サンプル音声blob | ローカルファイル | R2、bindingなし時のみfallback | — | — |
+| Zoovoice動物一覧 | 担当しない | Static AssetsのJSONを返す | — | — |
+| Zoovoice合成 | 担当しない | Turnstile検証、利用上限、認証付き中継 | — | ○ |
+| Zoovoice利用上限counter | 担当しない | D1 | — | — |
+
+Zoovoice Go APIはGoogle Cloud Run上のcontainerとして動かす。Cloud Runはprivate IAMを前提とし、unauthenticated requestとブラウザからの直接requestを拒否する。local smoke用に権限を持つdeveloperまたはservice accountは呼び出せるため、到達経路はCloudflare Workerだけに限定されない。
 
 RunPod handlerの契約:
 
@@ -161,6 +216,7 @@ npm test
 npm run check:js
 npm run check:web
 npm run test:e2e
+cd services/zoovoice && go vet ./... && go test ./...
 ```
 
 RunPod image buildとGPU smokeは通常CIから分離し、ローカルのモデル非依存テスト通過後に必要最小限だけ実行する。

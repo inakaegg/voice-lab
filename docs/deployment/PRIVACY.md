@@ -1,6 +1,6 @@
 # 公開デモのデータ取扱い境界
 
-更新日: 2026-07-30
+更新日: 2026-08-02
 
 この文書は実装上のデータフローと保存境界を固定する技術文書である。利用者向けの案内は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とし、公開画面の `/privacy` から同じ内容を確認できるようにする。
 
@@ -12,6 +12,10 @@
 | Google OAuth | OAuth認証に必要な情報 | 公開生成APIと管理画面のログイン |
 | OpenAI | 対象機能の入力音声またはテキスト | ASR、翻訳、テキスト加工、TTS |
 | RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声 | FunASR、Seed-VC |
+| Cloudflare Turnstile | Zoovoiceの検証tokenとclient IP | 自動化された大量利用の抑止 |
+| Google Cloud Run | Zoovoiceの録音音声と配置設定 | 動物の鳴き声を重ねた音声の合成 |
+
+最後の2行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。Zoovoiceは公開環境へdeployしていない。
 
 ブラウザへOpenAI・RunPodのAPI keyを渡さない。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
 
@@ -37,6 +41,29 @@
 RunPod requestは入力音声base64と台本をapplication logやerrorへ含めない。cancel、failure、timeout、malformed responseでもraw payloadを文字列化しない。これはVoice Lab application logの契約であり、RunPod platform側のjob input/result/log保持を削除する保証ではない。
 
 Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの既定でjobを実行する。Cloudflare公開版は音声をVoice Labの履歴へ保存しない。RunPod側の一時処理・保持は同社のサービス条件に従うため、Voice Labが保持ゼロを保証する表現はしない。これは外部送信の説明事項であり、operation別policyの設定を公開停止条件にはしない。
+
+## Zoovoiceのデータ境界
+
+Zoovoiceは `ZOOVOICE_ENABLED=1` の配備だけで公開routeとAPIを提供する。公開環境へはdeployしていない。この節は有効化した配備でのデータ境界を示す。
+
+compose用の録音はブラウザからCloudflare Workerへ送り、WorkerがGoogle Cloud Runへ一時送信する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。productionのWorkerがCloud Runを呼ぶ際の認証方式は未決定であり、未実装である。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す経路だけを実装している。
+
+WorkerはTurnstileをserver-sideで検証する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesと配置設定JSONだけである。
+
+入力上限と利用上限は合成前に判定する。音声ファイルは10MB以下、設定JSONは64KB以下とする。利用上限はUTC日次100件、UTC月次1,200件とする。この上限は利用者ごとではなく、Zoovoice全体の合計へ適用する。
+
+次のいずれかに当たる場合、WorkerはCloud Runを呼ばない。
+
+- Turnstileの検証に失敗した
+- Cloud Run向けID tokenを取得できなかった
+- D1へ到達できない、またはcounterを更新できなかった
+- 日次または月次の上限を超えた
+
+D1へ音声と入力本文を保存しない。保存するのはZoovoice共通の日次・月次counterと更新時刻だけである。Cloudflare公開版は入力音声と生成音声をVoice Labの履歴として保存しない。ただしCloudflareとGoogleの側で起こる一時処理やlog保持がゼロだとは保証しない。
+
+動物一覧はCloud Runを起動せず、Worker Static Assetsの静的JSONから返す。この経路では音声データを扱わない。
+
+Cloud Runのregionは `us-central1` とする。実際のCloud Run deployと有効化は別の外部操作gateであり、今回は行っていない。有効化する前に本書と [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を確認する。
 
 ## 保持期間、削除と問い合わせ
 

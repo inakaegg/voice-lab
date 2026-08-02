@@ -22,12 +22,36 @@ export type ComposeResponse = {
   };
 };
 
+export type ZoovoiceConfig = {
+  enabled: boolean;
+  turnstile_required: boolean;
+  turnstile_site_key: string;
+  audio_max_bytes: number;
+  origin_timeout_seconds: number;
+};
+
 type ErrorEnvelope = {
   error?: {
     code?: string;
     message?: string;
   };
 };
+
+export async function fetchZoovoiceConfig(signal?: AbortSignal): Promise<ZoovoiceConfig> {
+  const response = await fetch("/api/zoovoice/config", { signal });
+  const payload = await response.json() as Partial<ZoovoiceConfig> & ErrorEnvelope;
+  if (!response.ok) throw new Error(errorMessage(payload, "Zoovoiceの設定を読み込めませんでした。"));
+  if (
+    typeof payload.enabled !== "boolean"
+    || typeof payload.turnstile_required !== "boolean"
+    || typeof payload.turnstile_site_key !== "string"
+    || typeof payload.audio_max_bytes !== "number"
+    || typeof payload.origin_timeout_seconds !== "number"
+  ) {
+    throw new Error("Zoovoiceの設定を確認できませんでした。");
+  }
+  return payload as ZoovoiceConfig;
+}
 
 export async function fetchAnimals(signal?: AbortSignal): Promise<Animal[]> {
   const response = await fetch("/api/zoovoice/animals", { signal });
@@ -43,10 +67,12 @@ export async function composeRecording(
   recording: Blob,
   arrangement: Arrangement,
   intensity: number,
+  turnstileToken = "",
 ): Promise<ComposeResponse> {
   const form = new FormData();
   form.append("audio", recording, recordingFilename(recording.type));
   form.append("settings", JSON.stringify({ arrangement, intensity }));
+  if (turnstileToken) form.append("turnstile_token", turnstileToken);
   const response = await fetch("/api/zoovoice/compose", {
     method: "POST",
     body: form,

@@ -10,6 +10,8 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:visual": "PLAYWRIGHT_VISUAL_REVIEW=1 playwright test tests/e2e/visual-review.spec.ts",
+    "dev:zoovoice": "bash scripts/run_zoovoice_local_cloudflare.sh local",
+    "dev:zoovoice:cloud-run": "bash scripts/run_zoovoice_local_cloudflare.sh cloud-run",
     "test": "node --test tests/*.mjs tests/*.mts",
     "test:worker": "node --test tests/*.mjs tests/*.mts",
     "check:js": "node --check cloudflare/worker.mjs && node --check src/mo_speech/web/*.js",

@@ -1,0 +1,16 @@
+{
+  "animals": [
+    {"id": "cat", "label_ja": "猫", "variants": 1},
+    {"id": "cow", "label_ja": "牛", "variants": 1},
+    {"id": "cricket", "label_ja": "コオロギ", "variants": 1},
+    {"id": "dog", "label_ja": "犬", "variants": 1},
+    {"id": "duck", "label_ja": "カモ・アヒル", "variants": 1},
+    {"id": "elephant", "label_ja": "ゾウ", "variants": 1},
+    {"id": "frog", "label_ja": "カエル", "variants": 1},
+    {"id": "goat", "label_ja": "ヤギ", "variants": 1},
+    {"id": "horse", "label_ja": "馬", "variants": 1},
+    {"id": "lion", "label_ja": "ライオン", "variants": 1},
+    {"id": "rooster", "label_ja": "おんどり", "variants": 1},
+    {"id": "sheep", "label_ja": "羊", "variants": 1}
+  ]
+}

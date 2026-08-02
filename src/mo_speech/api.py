@@ -20,7 +20,6 @@ from zoneinfo import ZoneInfo
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.concurrency import run_in_threadpool
 
 from .api_audio_history import (
     audio_media_type as _audio_media_type,
@@ -87,11 +86,6 @@ from .providers.voice import (
     prepare_seed_vc_reference_preview as _prepare_seed_vc_reference_preview,
 )
 from .text_display import create_user_display_text
-from .zoovoice_proxy import (
-    ZoovoiceBackendClient,
-    ZoovoiceBackendResponse,
-    ZoovoiceBackendUnavailable,
-)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
@@ -123,23 +117,6 @@ _configure_logging()
 
 def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
-
-
-def _log_zoovoice_proxy(
-    started: float,
-    *,
-    stage: str,
-    status: str,
-    detail: str = "",
-) -> None:
-    LOGGER.info(
-        "time=%s elapsed_ms=%.1f feature=zoovoice stage=%s status=%s%s",
-        datetime.now(JST).isoformat(timespec="milliseconds"),
-        _elapsed_ms(started),
-        stage,
-        status,
-        f" {detail}" if detail else "",
-    )
 
 
 def _practice_alignment_error_envelope(
@@ -919,7 +896,6 @@ def create_app(
     public_sample_audio_store: PublicSampleAudioStore | None = None,
     practice_llm_service: PracticeLlmService | None = None,
     practice_attempt_state_store: PracticeAttemptStateStore | None = None,
-    zoovoice_client: ZoovoiceBackendClient | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Voice Lab")
 
@@ -958,7 +934,6 @@ def create_app(
     active_practice_attempt_state_store = (
         practice_attempt_state_store or PracticeAttemptStateStore.from_env()
     )
-    active_zoovoice_client = zoovoice_client or ZoovoiceBackendClient.from_env()
     practice_prompt_job_store = PracticeJobStore()
     practice_attempt_job_store = PracticeJobStore()
     practice_attempt_llm_options: dict[str, dict[str, object]] = {}
@@ -996,11 +971,6 @@ def create_app(
     def practice() -> FileResponse:
         return FileResponse(WEB_DIR / "react" / "speakloop.html")
 
-    @app.get("/zoovoice")
-    @app.get("/zoovoice/")
-    def zoovoice() -> FileResponse:
-        return FileResponse(WEB_DIR / "react" / "zoovoice.html")
-
     @app.get("/privacy")
     @app.get("/privacy/")
     def privacy() -> FileResponse:
@@ -1036,86 +1006,6 @@ def create_app(
     @app.get("/api/public-sample-audios")
     def public_sample_audios() -> dict[str, object]:
         return active_public_sample_audio_store.read()
-
-    def zoovoice_backend_response(
-        response: ZoovoiceBackendResponse,
-    ) -> Response:
-        return Response(
-            content=response.body,
-            status_code=response.status,
-            headers={"Content-Type": response.content_type},
-        )
-
-    def zoovoice_unavailable_response() -> JSONResponse:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "error": {
-                    "code": "zoovoice_backend_unavailable",
-                    "message": "音声合成サービスに接続できませんでした。",
-                }
-            },
-        )
-
-    @app.get("/api/zoovoice/animals")
-    async def zoovoice_animals() -> Response:
-        started = perf_counter()
-        _log_zoovoice_proxy(
-            started,
-            stage="animals",
-            status="start",
-        )
-        try:
-            backend_response = await run_in_threadpool(
-                active_zoovoice_client.get_animals,
-            )
-        except ZoovoiceBackendUnavailable as error:
-            _log_zoovoice_proxy(
-                started,
-                stage="animals",
-                status="failed",
-                detail=f"error={type(error).__name__}",
-            )
-            return zoovoice_unavailable_response()
-        _log_zoovoice_proxy(
-            started,
-            stage="animals",
-            status="complete",
-            detail=f"backend_status={backend_response.status}",
-        )
-        return zoovoice_backend_response(backend_response)
-
-    @app.post("/api/zoovoice/compose")
-    async def zoovoice_compose(request: Request) -> Response:
-        started = perf_counter()
-        _log_zoovoice_proxy(
-            started,
-            stage="compose",
-            status="start",
-        )
-        body = await request.body()
-        content_type = request.headers.get("content-type", "")
-        try:
-            backend_response = await run_in_threadpool(
-                active_zoovoice_client.compose,
-                body,
-                content_type,
-            )
-        except ZoovoiceBackendUnavailable as error:
-            _log_zoovoice_proxy(
-                started,
-                stage="compose",
-                status="failed",
-                detail=f"error={type(error).__name__}",
-            )
-            return zoovoice_unavailable_response()
-        _log_zoovoice_proxy(
-            started,
-            stage="compose",
-            status="complete",
-            detail=f"backend_status={backend_response.status}",
-        )
-        return zoovoice_backend_response(backend_response)
 
     @app.put("/api/public-sample-audios")
     def update_public_sample_audios(payload: dict[str, object] = Body(...)) -> dict[str, object]:

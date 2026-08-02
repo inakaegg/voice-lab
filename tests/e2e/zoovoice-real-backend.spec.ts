@@ -17,8 +17,8 @@ test.use({
   },
 });
 
-test("MediaRecorder output can be composed by the real Go backend", async ({ page }) => {
-  test.skip(!runRealBackend, "ローカルの Zoovoice Go backend を明示起動した場合だけ実行する");
+test("MediaRecorder output can be composed through local Wrangler and the real Go backend", async ({ page }, testInfo) => {
+  test.skip(!runRealBackend, "Zoovoice用のローカルWranglerとGo backendを明示起動した場合だけ実行する");
 
   await page.goto("/zoovoice");
   await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
@@ -38,9 +38,15 @@ test("MediaRecorder output can be composed by the real Go backend", async ({ pag
   await page.getByRole("button", { name: "結果を再生" }).click();
   await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
   await page.getByRole("button", { name: "結果を一時停止" }).click();
-  await expect(page.getByRole("link", { name: "WAVを保存" })).toHaveAttribute(
+  const downloadLink = page.getByRole("link", { name: "WAVを保存" });
+  await expect(downloadLink).toHaveAttribute(
     "download",
     "zoovoice.wav",
   );
+  const downloadPromise = page.waitForEvent("download");
+  await downloadLink.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("zoovoice.wav");
+  await download.saveAs(testInfo.outputPath("zoovoice.wav"));
   await assertNoHorizontalOverflow(page);
 });
