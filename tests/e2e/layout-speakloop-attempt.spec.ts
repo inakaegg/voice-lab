@@ -227,6 +227,7 @@ test("SpeakLoop uses whole playback for missing LLM ranges and exposes LLM error
   await expect(page.locator("#practice-result-panel")).toBeVisible();
   await expect(page.locator("#practice-play-model-button")).toContainText("全体比較再生");
   await expect(page.locator("#practice-comparison-note")).toHaveText("フレーズの区切りを確認できなかったため、全体を比較します。");
+  await expect(page.locator("#practice-recognized-text .practice-diff-phrase")).toHaveCount(0);
   await assertNoHorizontalOverflow(page);
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
     await mkdir("tmp/playwright/visual-review", { recursive: true });
@@ -735,6 +736,19 @@ test("SpeakLoop keeps primary progress generic and shows subdued technical detai
   await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-heard").evaluateAll(
     (elements) => elements.map((element) => element.textContent || "").join(""),
   )).toBe("你好坏色今天去哪里");
+  await expect.poll(() => page.locator("#practice-recognized-text .practice-diff-phrase").evaluateAll(
+    (groups) => groups.map((group) => Array.from(group.querySelectorAll(".practice-diff-heard"))
+      .map((element) => element.textContent || "")
+      .join("")),
+  )).toEqual(["你好坏", "色今天去哪里"]);
+  const phraseRows = await page.locator("#practice-recognized-text .practice-diff-phrase").evaluateAll(
+    (groups) => groups.map((group) => {
+      const bounds = group.getBoundingClientRect();
+      return { left: Math.round(bounds.left), top: Math.round(bounds.top) };
+    }),
+  );
+  expect(phraseRows[1].top).toBeGreaterThan(phraseRows[0].top);
+  expect(Math.abs(phraseRows[1].left - phraseRows[0].left)).toBeLessThanOrEqual(1);
   await expect(page.locator("#practice-recognized-text .practice-diff-cell.is-substitute")).toHaveCount(2);
   await expect(page.locator("#practice-recognized-text button.practice-diff-cell.is-substitute")).toHaveCount(1);
   await expect(page.locator("#practice-recognized-text .practice-diff-correction").filter({ hasText: "吗" })).toHaveCount(1);

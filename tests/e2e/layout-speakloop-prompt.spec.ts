@@ -114,6 +114,32 @@ test("SpeakLoop shows prompt ASR, translation, and speech generation stages", as
       }),
     });
   });
+  let markAttemptPostStarted: () => void = () => {};
+  let releaseAttemptPost: () => void = () => {};
+  const attemptPostStarted = new Promise<void>((resolve) => {
+    markAttemptPostStarted = resolve;
+  });
+  let attemptPosts = 0;
+  await page.route("**/api/practice/attempt-jobs", async (route) => {
+    attemptPosts += 1;
+    if (attemptPosts > 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: "{}",
+      });
+      return;
+    }
+    markAttemptPostStarted();
+    await new Promise<void>((resolve) => {
+      releaseAttemptPost = resolve;
+    });
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "比較を開始できませんでした。" }),
+    });
+  });
 
   await page.goto("/speakloop");
   const native = page.locator("#practice-native-record-button");
@@ -131,6 +157,32 @@ test("SpeakLoop shows prompt ASR, translation, and speech generation stages", as
   await expect(page.locator("#practice-job-status-model")).toHaveText("OpenAI / gpt-4o-mini-tts");
   await expect(page.locator("#practice-prompt-panel")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("#practice-target-text")).toContainText("Where are you going today?");
+  await expect(page.locator("#practice-job-status-label")).toHaveText("完了しました");
+  const repeat = page.locator("#practice-repeat-record-button");
+  await repeat.click();
+  await repeat.click();
+  await attemptPostStarted;
+  await expect(page.locator("#practice-job-status")).toHaveAttribute("data-state", "running");
+  await expect(page.locator("#practice-job-status-label")).toHaveText("録音を確認しています");
+  await expect(page.locator("#practice-job-status-model")).toBeHidden();
+  await expect(page.locator("#practice-job-status-detail")).toBeHidden();
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    await mkdir("tmp/playwright/visual-review", { recursive: true });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-light-speakloop-attempt-submit-progress.png`, fullPage: true });
+    await page.locator("html").evaluate((element) => {
+      element.setAttribute("data-theme", "dark");
+      element.setAttribute("data-theme-preference", "dark");
+    });
+    await page.screenshot({ path: `tmp/playwright/visual-review/${testInfo.project.name}-dark-speakloop-attempt-submit-progress.png`, fullPage: true });
+  }
+  releaseAttemptPost();
+  await expect(page.locator("#practice-job-status")).toBeHidden();
+  await expect(page.locator("#practice-error")).toHaveText("比較を開始できませんでした。");
+  await repeat.click();
+  await repeat.click();
+  await expect.poll(() => attemptPosts).toBe(2);
+  await expect(page.locator("#practice-job-status")).toBeHidden();
+  await expect(page.locator("#practice-error")).toHaveText("比較結果を作成できませんでした。もう一度お試しください。");
 });
 
 test("SpeakLoop handles terminal initial prompt job snapshots", async ({ page }, testInfo) => {

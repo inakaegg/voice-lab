@@ -100,20 +100,21 @@
   function comparisonPhraseIndexForTargetOffset({ targetText, targetOffset, alignment }) {
     const offset = Number(targetOffset);
     const target = comparableTargetText(targetText);
+    const targetCharacters = Array.from(target);
     const phrases = Array.isArray(alignment?.phrases) ? alignment.phrases : [];
     if (!target || !Number.isInteger(offset) || offset < 0 || !phrases.length) {
       return null;
     }
 
     let coreOffset = 0;
-    for (let index = 0; index < offset && index < target.length; index += 1) {
-      if (target[index] !== " ") coreOffset += 1;
+    for (let index = 0; index < offset && index < targetCharacters.length; index += 1) {
+      if (targetCharacters[index] !== " ") coreOffset += 1;
     }
 
     let cursor = 0;
     let selectedIndex = null;
     for (const phrase of phrases) {
-      const phraseCoreLength = coreTargetText(phrase?.target_text).length;
+      const phraseCoreLength = Array.from(coreTargetText(phrase?.target_text)).length;
       if (!phraseCoreLength) continue;
       const end = cursor + phraseCoreLength;
       if (coreOffset < end) {
@@ -285,6 +286,24 @@
     return compacted;
   }
 
+  function groupPracticeDiffCellsByPhrase(cells, { targetText = "", alignment = null } = {}) {
+    const groups = [];
+    cells.forEach((cell) => {
+      const phraseIndex = comparisonPhraseIndexForTargetOffset({
+        targetText,
+        targetOffset: cell.targetOffset,
+        alignment,
+      });
+      const previous = groups[groups.length - 1];
+      if (previous && previous.phraseIndex === phraseIndex) {
+        previous.cells.push(cell);
+        return;
+      }
+      groups.push({ phraseIndex, cells: [cell] });
+    });
+    return groups;
+  }
+
   global.voiceLabPracticePlayback = {
     comparisonPlaybackPlan,
     comparisonRangeForTargetOffset,
@@ -293,5 +312,6 @@
     comparableTargetText,
     buildPracticeDiffCells,
     compactPracticeDiffCells,
+    groupPracticeDiffCellsByPhrase,
   };
 })(globalThis);
