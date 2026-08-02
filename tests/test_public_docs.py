@@ -186,6 +186,21 @@ def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
     assert "必須チェックを毎回要求しない" not in vibevoice
 
 
+def test_comparison_playback_docs_match_timestamp_implementation() -> None:
+    spec = read_text("docs/speech-translation/SPEC.md")
+    explainer = read_text("docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md")
+    implementation = read_text("src/mo_speech/practice_llm.py")
+
+    assert "VADスナップはフレーズ境界を入力に取らない" in spec
+    assert "この計算はVADや無音検出を入力に取らない" in spec
+    assert "無音だけへ延長する" not in spec
+    assert "フレーズ境界を±0.35秒以内" not in explainer
+    assert "このスクリプトが比較するのは2つの構成" in explainer
+    assert "| スナップだけ足す |" not in explainer
+    assert "| fa-zhだけ |" not in explainer
+    assert "無音側だけへ延長" not in implementation
+
+
 def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
     workflow = read_text(".github/workflows/ci.yml")
     secret_workflow = read_text(".github/workflows/secret-scan.yml")

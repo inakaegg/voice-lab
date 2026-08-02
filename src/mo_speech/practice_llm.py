@@ -282,7 +282,7 @@ def clamped_playback_range(
     audio_duration: float,
     padding: float,
 ) -> tuple[float, float]:
-    """選択範囲を無音側だけへ延長し、隣接する発話の手前で止める。"""
+    """選択範囲へ余白を足し、隣接する認識単位の時刻と音声長でクランプする。"""
     selected = words[start_index:end_index]
     start = _required_finite_number(selected[0].get("start"), "word start")
     end = _required_finite_number(selected[-1].get("end"), "word end")
