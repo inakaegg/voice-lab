@@ -112,7 +112,9 @@ def summarize_all_sides(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for side in ("attempt", "reference")
         if row.get(side)
     ]
-    return summarize(combined_rows, "combined")
+    summary = summarize(combined_rows, "combined")
+    summary["cases"] = len(rows)
+    return summary
 
 
 def find_reference_audio(

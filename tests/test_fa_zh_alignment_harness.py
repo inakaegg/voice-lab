@@ -80,7 +80,7 @@ def test_alignment_harness_summarizes_attempt_and_reference_together() -> None:
     ]
 
     assert alignment_harness.summarize_all_sides(rows) == {
-        "cases": 2,
+        "cases": 1,
         "vad_edges": 3,
         "word_speech_overlap_rate_mean": 0.75,
         "vad_edge_distance_median": 0.2,

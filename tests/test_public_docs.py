@@ -172,13 +172,18 @@ def test_status_docs_do_not_claim_cloudflare_gateway_is_unimplemented() -> None:
     assert "D1" in known_limits
 
 
-def test_current_spec_limits_own_voice_to_the_same_recording_request() -> None:
+def test_current_spec_tracks_tab_audio_and_rights_notice() -> None:
     spec = read_text("docs/speech-translation/SPEC.md")
 
-    assert "同じ `POST /api/practice/recordings` request" in spec
     assert "タブ音声" in spec
     assert "利用条件" in spec
     assert "プライバシー" in spec
+
+    vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
+    assert "ブラウザの共有許可" in vibevoice
+    assert "コンテンツの利用許諾" in vibevoice
+    assert "タブ音声録音の開始前に権利確認を必須とする" in vibevoice
+    assert "必須チェックを毎回要求しない" not in vibevoice
 
 
 def test_comparison_playback_docs_match_timestamp_implementation() -> None:
@@ -251,6 +256,7 @@ def test_publication_record_tracks_public_repository_and_external_controls() -> 
     assert "保持期間" in checklist
     assert "Seed-VC" in checklist
     assert "GPL-3.0" in checklist
+    assert "VibeVoice" in checklist
     assert "外部状態スナップショット" in checklist
     assert "is_private=true" in checklist
     assert "Secret scanningとGitHub Push Protectionは有効" in checklist
@@ -311,8 +317,10 @@ def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
     assert "THIRD_PARTY_NOTICES.md" in readme
     assert "Seed-VC" in notices
     assert "GPL-3.0" in notices
+    assert "ComfyUI-VibeVoice" in notices
     assert "bundled dependency licenses" in notices
     assert "public container imageを配布しない" in notices
+    assert "self-hosted runtimeへ実装済みとは表示しない" in notices
 
     browser_bundle = notices.split("## ブラウザbundle", 1)[1].split("## Cloudflare Worker", 1)[0]
     worker_bundle = notices.split("## Cloudflare Worker", 1)[1].split("## Python・GPU image", 1)[0]
@@ -378,12 +386,16 @@ def test_public_summaries_focus_on_speakloop_while_technical_boundaries_remain()
     readme = read_text("README.md")
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     spec = read_text("docs/speech-translation/SPEC.md")
+    vibevoice = read_text("docs/speech-translation/VIBEVOICE.md")
 
-    for document in (readme, roadmap, spec):
+    for document in (readme, roadmap):
         assert "SpeakLoop" in document
         assert "SkitVoice" not in document
         assert "VibeVoice" not in document
     assert "VIBEVOICE.md" not in readme
+    assert "生成フォームやsampleを含まない" in spec
+    assert "public sample APIはSkitVoice sampleを返さない" in vibevoice
+    assert "aoi-ot/VibeVoice-LargeをMicrosoft公式配布と表現しない" in read_text("THIRD_PARTY_NOTICES.md")
 
 
 def test_current_state_docs_match_the_deployed_production_boundary() -> None:
@@ -392,6 +404,7 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         "docs/deployment/CLOUDFLARE.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
+        "docs/deployment/APP_SPLIT.md",
         "docs/speech-translation/SPEC.md",
     ):
         document = read_text(relative_path)
@@ -412,7 +425,7 @@ def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> N
     assert "ローカルsimulation" in roadmap
     assert "本番リソースへ接続しない" in roadmap
     assert "job単位のDurable Object" in roadmap
-    assert "お手本ASRキャッシュ" in roadmap
+    assert "お手本ASR cache" in roadmap
     assert "公開文書の整理" in roadmap
     assert "既存文書への統合" in roadmap
     assert "`_ai/`" in roadmap
@@ -430,16 +443,12 @@ def test_speech_translation_docs_are_consolidated() -> None:
     assert not (ROOT / "docs/speech-translation/REFERENCE_SELECTION.md").exists()
 
     local_providers = read_text("docs/speech-translation/LOCAL_PROVIDERS.md")
-    assert "SpeechProviderBundle" in local_providers
-    assert "MO_TRANSLATION_PROVIDER" in local_providers
-    assert "benchmark_pipeline.py" not in local_providers
-    assert "OPENAI_REALTIME_TRANSLATION" not in local_providers
+    assert "benchmark_pipeline.py" in local_providers
+    assert "要件未達" in local_providers
 
     voice_clone = read_text("docs/speech-translation/VOICE_CLONE.md")
     assert "silencedetect" in voice_clone
     assert "REFERENCE_SELECTION.md" not in voice_clone
-    assert "voice_mode" not in voice_clone
-    assert "id-ID" not in voice_clone
 
 
 def test_storage_plan_matches_the_implemented_r2_pilot_and_d1_boundary() -> None:
@@ -512,11 +521,12 @@ def test_frontend_migration_plan_preserves_current_api_and_state_boundaries() ->
     assert "TypeScript" in migration
     assert "API互換" in migration
     assert "SpeakLoop" in migration
+    assert "SkitVoice" in migration
     assert "状態遷移" in migration
     assert "一括移行しない" in migration
 
 
-def test_public_docs_define_only_current_routes_and_retired_fun_boundary() -> None:
+def test_public_docs_define_only_current_routes_and_fun_admin_boundary() -> None:
     readme = read_text("README.md")
     spec = read_text("docs/speech-translation/SPEC.md")
     architecture = read_text("docs/deployment/ARCHITECTURE.md")
@@ -525,20 +535,20 @@ def test_public_docs_define_only_current_routes_and_retired_fun_boundary() -> No
     assert "/speakloop" in readme
     for document in (spec, architecture, cloudflare):
         assert "/speakloop" in document
-    for document in (readme, spec, architecture):
-        assert "/skitvoice" not in document
-        assert "/fun" not in document
+        assert "/skitvoice" in document
+    assert "/skitvoice" not in readme
 
+    assert "`/fun` は管理者認証済みの場合だけ" in spec
     assert "同じGoogle OAuthセッション" in spec
     assert "別の管理パスワードや管理者cookieは設けない" in spec
     assert "管理機能の認証をWorker内のGoogle OAuthへ一本化" in cloudflare
     assert "管理者専用の別パスワード、別cookie、認証例外は設けない" in cloudflare
-    assert "退役route" in cloudflare
-    assert "`/fun`" in cloudflare
-    assert "旧音声翻訳APIも404" in cloudflare
     assert "`/user`" not in spec
     assert "`/vibevoice`" not in spec
     assert "Cloudflare Pages" not in architecture
+    assert "ファイル、マイク、タブ音声" in cloudflare
+    assert "2話者・5行" in spec
+    assert "1120px以上" in spec
     assert "D1" in spec
     assert "R2" in spec
 
