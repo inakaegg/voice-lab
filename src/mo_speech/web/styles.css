@@ -2254,6 +2254,18 @@ fieldset.public-samples-admin {
   max-width: 100%;
 }
 
+.practice-diff-grid[data-language="zh-CN"] {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.practice-diff-phrase {
+  align-items: end;
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
 .practice-diff-cell {
   align-items: end;
   background: transparent;
