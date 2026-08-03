@@ -85,6 +85,11 @@ func (api *httpAPI) compose(writer http.ResponseWriter, request *http.Request) {
 			"base64": result.AudioBase64,
 		},
 		"meta": map[string]any{
+			"transcript":              result.Transcript,
+			"selected_animal":         result.SelectedAnimal,
+			"evidence_term":           result.EvidenceTerm,
+			"selection_strategy":      result.SelectionStrategy,
+			"fallback_reason":         result.FallbackReason,
 			"insertions":              result.Insertions,
 			"input_duration_seconds":  result.InputDurationSeconds,
 			"output_duration_seconds": result.OutputDurationSeconds,
@@ -197,8 +202,7 @@ func readLimitedPart(part *multipart.Part, maximum int64) ([]byte, error) {
 
 func parseComposeSettings(payload []byte) (ComposeSettings, *APIError) {
 	var wire struct {
-		Arrangement *Arrangement `json:"arrangement"`
-		Intensity   *int         `json:"intensity"`
+		Intensity *int `json:"intensity"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(payload)))
 	decoder.DisallowUnknownFields()
@@ -208,13 +212,13 @@ func parseComposeSettings(payload []byte) (ComposeSettings, *APIError) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return ComposeSettings{}, invalidSettingsError(errors.New("settings must contain one JSON value"))
 	}
-	if wire.Arrangement == nil || wire.Intensity == nil {
-		return ComposeSettings{}, invalidSettingsError(errors.New("arrangement and intensity are required"))
+	if wire.Intensity == nil {
+		return ComposeSettings{}, invalidSettingsError(errors.New("intensity is required"))
 	}
 	if _, err := mapIntensity(*wire.Intensity); err != nil {
 		return ComposeSettings{}, invalidSettingsError(err)
 	}
-	return ComposeSettings{Arrangement: *wire.Arrangement, Intensity: *wire.Intensity}, nil
+	return ComposeSettings{Intensity: *wire.Intensity}, nil
 }
 
 func invalidMultipartError(err error) *APIError {
@@ -230,7 +234,7 @@ func invalidSettingsError(err error) *APIError {
 	return &APIError{
 		Status:  400,
 		Code:    "invalid_settings",
-		Message: "動物とアニマル度の設定を確認してください。",
+		Message: "アニマル度の設定を確認してください。",
 		Err:     err,
 	}
 }

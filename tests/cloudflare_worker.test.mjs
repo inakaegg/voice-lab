@@ -202,10 +202,7 @@ test("Cloudflare worker allows an unauthenticated Zoovoice origin only for local
     }
     assert.equal(target, "http://127.0.0.1:8090/compose");
     assert.equal(new Headers(init.headers).has("Authorization"), false);
-    return json({
-      audio: { format: "wav", base64: "UklGRg==" },
-      meta: { insertions: [], input_duration_seconds: 1, output_duration_seconds: 1 },
-    });
+    return json(validZoovoiceOriginResponse());
   });
   env.ZOOVOICE_LOCAL_DEV = "1";
   env.ZOOVOICE_ORIGIN_MODE = "local-origin";
@@ -228,10 +225,7 @@ test("Cloudflare worker accepts incomplete Turnstile metadata only for the offic
     const target = String(url);
     if (target.includes("siteverify")) return json({ success: true });
     if (target === "http://127.0.0.1:8090/compose") {
-      return json({
-        audio: { format: "wav", base64: "UklGRg==" },
-        meta: { insertions: [], input_duration_seconds: 1, output_duration_seconds: 1 },
-      });
+      return json(validZoovoiceOriginResponse());
     }
     throw new Error(`unexpected fetch: ${target}`);
   });
@@ -272,14 +266,10 @@ test("Cloudflare worker uses a supplied short-lived ID token only for local Clou
       const form = await new Response(init.body).formData();
       assert.equal(form.get("turnstile_token"), null);
       assert.equal(form.get("settings"), JSON.stringify({
-        arrangement: { opening: "cat", gaps: null, ending: null },
         intensity: 40,
       }));
       assert.equal((await form.get("audio").arrayBuffer()).byteLength, 3);
-      return json({
-        audio: { format: "wav", base64: "UklGRg==" },
-        meta: { insertions: [], input_duration_seconds: 1, output_duration_seconds: 1 },
-      });
+      return json(validZoovoiceOriginResponse());
     }
     throw new Error(`unexpected fetch: ${target}`);
   });
@@ -451,6 +441,53 @@ test("Cloudflare worker rejects malformed successful responses from Zoovoice ori
 
   assert.equal(response.status, 502);
   assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+});
+
+test("Cloudflare worker accepts only intensity settings before Turnstile, budget, and origin", async () => {
+  for (const settings of [
+    {},
+    { intensity: 40.5 },
+    { intensity: -1 },
+    { intensity: 101 },
+    { intensity: 40, extra: true },
+    { intensity: 40, arrangement: { opening: "cat", gaps: null, ending: null } },
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      calls.push(String(url));
+      throw new Error("invalid settings must not call an external service");
+    }, { db });
+    const response = await handleRequest(zoovoiceComposeRequest({ settings }), env);
+    assert.equal(response.status, 400, JSON.stringify(settings));
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_settings");
+    assert.deepEqual(calls, []);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker validates every Zoovoice success metadata field", async () => {
+  const invalidPayloads = [
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "長".repeat(20_001) } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selected_animal: { id: "", label_ja: "猫" } } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: 3 } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selection_strategy: "heuristic" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, fallback_reason: "unknown" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, insertions: [{ slot: "middle", species: "cat", at_seconds: 1 }] } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, input_duration_seconds: "1" } },
+  ];
+  for (const payload of invalidPayloads) {
+    const env = await zoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      return json(payload);
+    });
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+  }
 });
 
 test("Cloudflare worker serves Zoovoice animals from a cacheable static asset", async () => {
@@ -3314,15 +3351,29 @@ function useOfficialLocalTurnstileCredentials(env) {
 function zoovoiceComposeRequest({
   audio = new Uint8Array([1, 2, 3]),
   url = "http://127.0.0.1:8787/api/zoovoice/compose",
+  settings = { intensity: 40 },
 } = {}) {
   const form = new FormData();
   form.append("audio", new Blob([audio], { type: "audio/webm" }), "recording.webm");
-  form.append("settings", JSON.stringify({
-    arrangement: { opening: "cat", gaps: null, ending: null },
-    intensity: 40,
-  }));
+  form.append("settings", JSON.stringify(settings));
   form.append("turnstile_token", "turnstile-response-token");
   return new Request(url, { method: "POST", body: form });
+}
+
+function validZoovoiceOriginResponse() {
+  return {
+    audio: { format: "wav", base64: "UklGRg==" },
+    meta: {
+      transcript: "猫が窓辺で眠っています",
+      selected_animal: { id: "cat", label_ja: "猫" },
+      evidence_term: "猫",
+      selection_strategy: "direct",
+      fallback_reason: null,
+      insertions: [{ slot: "opening", species: "cat", at_seconds: 0 }],
+      input_duration_seconds: 1,
+      output_duration_seconds: 1.4,
+    },
+  };
 }
 
 function fakeZoovoiceBudgetD1({ row = null, error = null } = {}) {

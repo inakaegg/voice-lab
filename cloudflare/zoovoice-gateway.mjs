@@ -134,14 +134,7 @@ async function proxyCompose(request, env) {
     body: outgoing,
   }, originAccess);
   const payload = await validatedOriginJson(response, env, "compose");
-  if (
-    response.ok && (
-      payload.audio?.format !== "wav"
-      || typeof payload.audio?.base64 !== "string"
-      || payload.audio.base64.length === 0
-      || !payload.meta
-    )
-  ) {
+  if (response.ok && !isValidComposeResponse(payload)) {
     throw new ZoovoiceGatewayError(502, "zoovoice_invalid_origin_response", "合成結果を確認できませんでした。");
   }
   return gatewayJson(payload, { status: response.status });
@@ -154,17 +147,75 @@ function isFileLike(value) {
 function validateComposeSettings(value) {
   try {
     const parsed = JSON.parse(value);
-    const arrangement = parsed?.arrangement;
-    const intensity = Number(parsed?.intensity);
-    if (!arrangement || !["opening", "gaps", "ending"].every((key) => arrangement[key] === null || typeof arrangement[key] === "string")) {
-      throw new Error("invalid arrangement");
-    }
-    if (!Number.isInteger(intensity) || intensity < 0 || intensity > 100) {
+    if (
+      !isPlainObject(parsed)
+      || Object.keys(parsed).length !== 1
+      || !Object.hasOwn(parsed, "intensity")
+      || !Number.isInteger(parsed.intensity)
+      || parsed.intensity < 0
+      || parsed.intensity > 100
+    ) {
       throw new Error("invalid intensity");
     }
   } catch (_error) {
-    throw new ZoovoiceGatewayError(400, "zoovoice_invalid_settings", "動物とアニマル度の設定を確認してください。");
+    throw new ZoovoiceGatewayError(400, "zoovoice_invalid_settings", "アニマル度の設定を確認してください。");
   }
+}
+
+function isValidComposeResponse(payload) {
+  if (!isPlainObject(payload) || !isPlainObject(payload.audio) || !isPlainObject(payload.meta)) return false;
+  if (
+    payload.audio.format !== "wav"
+    || !isBoundedString(payload.audio.base64, 1, DEFAULT_RESPONSE_MAX_BYTES)
+  ) return false;
+
+  const meta = payload.meta;
+  if (
+    !isBoundedString(meta.transcript, 1, 20_000)
+    || !isPlainObject(meta.selected_animal)
+    || !isBoundedIdentifier(meta.selected_animal.id, 80)
+    || !isBoundedString(meta.selected_animal.label_ja, 1, 80)
+    || !["direct", "conceptnet", "random_fallback"].includes(meta.selection_strategy)
+    || !Array.isArray(meta.insertions)
+    || meta.insertions.length > 10
+    || !isPositiveFiniteNumber(meta.input_duration_seconds)
+    || !isPositiveFiniteNumber(meta.output_duration_seconds)
+    || meta.output_duration_seconds < meta.input_duration_seconds
+  ) return false;
+
+  if (meta.selection_strategy === "random_fallback") {
+    if (meta.evidence_term !== null || meta.fallback_reason !== "no_direct_or_conceptnet_match") return false;
+  } else if (
+    !isBoundedString(meta.evidence_term, 1, 200)
+    || meta.fallback_reason !== null
+  ) return false;
+
+  return meta.insertions.every((insertion) => (
+    isPlainObject(insertion)
+    && ["opening", "gaps", "ending"].includes(insertion.slot)
+    && insertion.species === meta.selected_animal.id
+    && isNonNegativeFiniteNumber(insertion.at_seconds)
+  ));
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isBoundedString(value, minimum, maximum) {
+  return typeof value === "string" && value.trim().length >= minimum && value.length <= maximum;
+}
+
+function isBoundedIdentifier(value, maximum) {
+  return isBoundedString(value, 1, maximum) && /^[a-z0-9_-]+$/.test(value);
+}
+
+function isPositiveFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isNonNegativeFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 async function verifyTurnstile(request, env, token) {

@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const defaultComposeTimeout = 85 * time.Second
+
 func main() {
 	logger, closer := openServiceLogger(defaultLogPath())
 	defer closer.Close()
@@ -28,10 +30,20 @@ func main() {
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
-	timeout := durationFromEnv("ZOOVOICE_TIMEOUT_SECONDS", 30*time.Second)
+	runtimeDependencies, err := loadRuntimeDependencies(
+		execCommandRunner{},
+		filepath.Join(assetsRoot, "association-aliases.json"),
+	)
+	if err != nil {
+		logger.Fatalf("zoovoice startup failed: %v", err)
+	}
+	defer runtimeDependencies.Close()
+	timeout := durationFromEnv("ZOOVOICE_TIMEOUT_SECONDS", defaultComposeTimeout)
 	activeComposer := newComposer(
 		catalog,
 		execCommandRunner{},
+		runtimeDependencies.transcriber,
+		runtimeDependencies.associator,
 		rand.New(rand.NewSource(time.Now().UnixNano())),
 		timeout,
 		logger,

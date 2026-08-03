@@ -10,6 +10,28 @@ fail() {
   exit 1
 }
 
+required_file() {
+  local name=$1
+  local value=$2
+  [[ -n "$value" ]] || fail "$name is required"
+  [[ -f "$value" ]] || fail "$name must be a regular file"
+}
+
+canonical_file() {
+  local value=$1
+  local directory
+  local filename
+  if [[ "$value" == */* ]]; then
+    directory=${value%/*}
+    filename=${value##*/}
+  else
+    directory=.
+    filename=$value
+  fi
+  directory=$(cd "$directory" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "$directory" "$filename"
+}
+
 mode=${1:-}
 case "$mode" in
   local|cloud-run) ;;
@@ -26,6 +48,21 @@ dry_run=${ZOOVOICE_DRY_RUN:-0}
 cloud_run_url=""
 gcp_project=""
 smoke_service_account=""
+whisper_command=""
+asr_model=""
+conceptnet_index=""
+
+if [[ "$mode" == "local" ]]; then
+  whisper_command=${ZOOVOICE_WHISPER_COMMAND:-}
+  asr_model=${ZOOVOICE_ASR_MODEL_PATH:-}
+  conceptnet_index=${ZOOVOICE_CONCEPTNET_INDEX_PATH:-}
+  required_file ZOOVOICE_WHISPER_COMMAND "$whisper_command"
+  required_file ZOOVOICE_ASR_MODEL_PATH "$asr_model"
+  required_file ZOOVOICE_CONCEPTNET_INDEX_PATH "$conceptnet_index"
+  whisper_command=$(canonical_file "$whisper_command")
+  asr_model=$(canonical_file "$asr_model")
+  conceptnet_index=$(canonical_file "$conceptnet_index")
+fi
 
 if [[ "$mode" == "cloud-run" ]]; then
   cloud_run_url=${ZOOVOICE_CLOUD_RUN_URL:-}
@@ -54,7 +91,8 @@ if [[ "$dry_run" == "1" ]]; then
   echo "[dry-run] npx wrangler d1 migrations apply MO_SPEECH_DB --local --persist-to $persist_directory"
   if [[ "$mode" == "local" ]]; then
     echo "[dry-run] env: ZOOVOICE_ORIGIN_MODE=local-origin"
-    echo "[dry-run] ZOOVOICE_PORT=8090 go run ."
+    echo "[dry-run] ASR and ConceptNet runtime artifacts: verified"
+    echo "[dry-run] ZOOVOICE_PORT=8090 ZOOVOICE_TIMEOUT_SECONDS=85 go run ."
   else
     echo "[dry-run] gcloud auth print-identity-token --impersonate-service-account=<redacted> --audiences=$cloud_run_url --project=$gcp_project --quiet"
     echo "[dry-run] env: ZOOVOICE_ORIGIN_MODE=cloud-run-smoke"
@@ -120,7 +158,12 @@ npx wrangler d1 migrations apply MO_SPEECH_DB --local --persist-to "$persist_dir
 if [[ "$mode" == "local" ]]; then
   (
     cd "$repository_root/services/zoovoice"
-    ZOOVOICE_PORT=8090 go run .
+    ZOOVOICE_PORT=8090 \
+	  ZOOVOICE_TIMEOUT_SECONDS=85 \
+      ZOOVOICE_WHISPER_COMMAND="$whisper_command" \
+      ZOOVOICE_ASR_MODEL_PATH="$asr_model" \
+      ZOOVOICE_CONCEPTNET_INDEX_PATH="$conceptnet_index" \
+      go run .
   ) &
   go_pid=$!
 

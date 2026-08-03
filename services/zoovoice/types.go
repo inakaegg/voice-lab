@@ -37,15 +37,8 @@ type IntensityConfig struct {
 	MaxInsertions     int
 }
 
-type Arrangement struct {
-	Opening *string `json:"opening"`
-	Gaps    *string `json:"gaps"`
-	Ending  *string `json:"ending"`
-}
-
 type ComposeSettings struct {
-	Arrangement Arrangement `json:"arrangement"`
-	Intensity   int         `json:"intensity"`
+	Intensity int `json:"intensity"`
 }
 
 type ResolvedInsertion struct {
@@ -59,4 +52,9 @@ type AnimalSummary struct {
 	ID       string `json:"id"`
 	LabelJA  string `json:"label_ja"`
 	Variants int    `json:"variants"`
+}
+
+type SelectedAnimal struct {
+	ID      string `json:"id"`
+	LabelJA string `json:"label_ja"`
 }

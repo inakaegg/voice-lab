@@ -13,7 +13,7 @@
 | OpenAI | 対象機能の入力音声またはテキスト | ASR、翻訳、テキスト加工、TTS |
 | RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声 | FunASR、Seed-VC |
 | Cloudflare Turnstile | Zoovoiceの検証tokenとclient IP | 自動化された大量利用の抑止 |
-| Google Cloud Run | Zoovoiceの録音音声と配置設定 | 動物の鳴き声を重ねた音声の合成 |
+| Google Cloud Run | Zoovoiceの録音音声とアニマル度 | 日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成 |
 
 最後の2行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。Zoovoiceは公開環境へdeployしていない。
 
@@ -46,9 +46,20 @@ Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの
 
 Zoovoiceは `ZOOVOICE_ENABLED=1` の配備だけで公開routeとAPIを提供する。公開環境へはdeployしていない。この節は有効化した配備でのデータ境界を示す。
 
-compose用の録音はブラウザからCloudflare Workerへ送り、WorkerがGoogle Cloud Runへ一時送信する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。productionのWorkerがCloud Runを呼ぶ際の認証方式は未決定であり、未実装である。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す経路だけを実装している。
+この節が示すASR、動物の自動連想、応答metadataはリポジトリの現在のコードに実装済みである。Cloud Runへのdeployと本番有効化は未実施である。機能仕様は [SPEC](../speech-translation/SPEC.md) を正とする。
 
-WorkerはTurnstileをserver-sideで検証する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesと配置設定JSONだけである。
+### 用語
+
+- アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
+- 動物の自動連想とは、ASR本文から動物1種を自動で選ぶ処理を指す。
+- 根拠語とは、その選択に使ったASR本文中の語を指す。
+- 連想metadataとは、選ばれた動物と根拠語と選択方式を指す。random fallbackではその理由も含む。
+
+### 送信経路と処理
+
+compose用の録音とアニマル度は、ブラウザからCloudflare Workerへ送る。WorkerはこれをGoogle Cloud Runへ一時送信する。Cloud Runは日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成を担当する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。productionのWorkerがCloud Runを呼ぶ際の認証方式は未決定であり、未実装である。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す経路だけを実装している。
+
+WorkerはTurnstileをserver-sideで検証する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesとアニマル度の設定JSONだけである。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。
 
 入力上限と利用上限は合成前に判定する。音声ファイルは10MB以下、設定JSONは64KB以下とする。利用上限はUTC日次100件、UTC月次1,200件とする。この上限は利用者ごとではなく、Zoovoice全体の合計へ適用する。
 
@@ -58,6 +69,22 @@ WorkerはTurnstileをserver-sideで検証する。この検証では検証token�
 - Cloud Run向けID tokenを取得できなかった
 - D1へ到達できない、またはcounterを更新できなかった
 - 日次または月次の上限を超えた
+
+ASR本文、根拠語、録音、生成音声は応答の生成に必要な間だけ扱う。これらをapplication log、D1、R2、Voice Labの履歴へ書かない。合成応答は、ASR本文と連想metadataを送信元と同じブラウザへ返す。
+
+合成requestの処理でGo APIのサービスログへ記録するのは、次の項目である。
+
+- 処理段階と状態、失敗時のエラーコード
+- 各段階の経過時間
+- HTTPのmethodとpath、応答status
+- 選んだ種IDと選択方式
+- 入力と出力のbyte数、アニマル度の値
+- 入力音声と出力音声の長さ、発話の合計時間
+- 無音判定の最小秒数、無音区間数、挿入数
+
+このほか、プロセスの起動時には待受port、利用可能な動物数、timeoutの設定秒数を記録する。追加素材が見つからない場合の警告や、起動に失敗した理由も記録する。
+
+いずれの項目も音声や本文の内容そのものを含まない。録音と生成音声の内容、ASR本文、根拠語はサービスログへ書かない。
 
 D1へ音声と入力本文を保存しない。保存するのはZoovoice共通の日次・月次counterと更新時刻だけである。Cloudflare公開版は入力音声と生成音声をVoice Labの履歴として保存しない。ただしCloudflareとGoogleの側で起こる一時処理やlog保持がゼロだとは保証しない。
 

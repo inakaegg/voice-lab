@@ -6,7 +6,7 @@
 
 Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフォリオの主機能とする。ローカルFastAPI、Cloudflare Worker、RunPod Serverlessの責任を分離し、秘密情報とGPU処理をブラウザへ置かない。この構成はproduction公開環境へ反映済みである。
 
-Zoovoiceは同じWorkerへ載せる別機能であり、合成本体だけをGoogle Cloud Run上のGo APIへ委譲する。production公開はflagで止めており、有効化条件は [Zoovoice](#zoovoice) に定める。
+Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成までをGoogle Cloud Run上のGo APIへ委譲する。production公開はflagで止めており、有効化条件は [Zoovoice](#zoovoice) に定める。
 
 ## 正式route
 
@@ -113,7 +113,21 @@ Zoovoiceは同じWorkerへ載せる別機能であり、合成本体だけをGoo
 
 ## Zoovoice
 
-Zoovoiceは、録音した発話のすき間へ動物の鳴き声を重ねる機能である。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
+Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
+
+この節の自動連想と1画面UIはリポジトリの現在のコードに実装済みである。Cloud Runへのdeployと本番有効化は未実施である。
+
+### 用語
+
+- 動物連想とは、ASR本文から根拠語を探し、利用できる音源を持つ動物1種を自動で選ぶ処理を指す。
+- 連想根拠とは、選ばれた動物と、その選択に使った語またはfallbackの理由を指す。
+- アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
+
+### 通常の流れ
+
+- 通常の流れはマイク録音から始める。その後はサーバー側ASR、動物連想、合成、再生の順で進める。
+- 利用者は通常UIで動物を選ばない。録音、合成、再生、ダウンロードは設定ではなく操作として扱う。
+- 動物の手動選択、preset、ランダム選択ボタン、挿入位置の個別指定は通常UIへ置かない。
 
 ### 公開範囲
 
@@ -125,12 +139,38 @@ Zoovoiceは、録音した発話のすき間へ動物の鳴き声を重ねる機
 
 - `GET /api/zoovoice/config` は有効・無効の状態と公開設定を返す。UIはこの応答だけで利用可否を判断する。
 - `GET /api/zoovoice/animals` はWorker Static Assetsの静的JSONを返す。この経路は合成backendを起動せず音声データも扱わない。
-- `POST /api/zoovoice/compose` は録音と配置設定を受け取る。Workerは合成前にTurnstile検証と利用上限判定を行う。
-- 合成本体はGoogle Cloud Run上のGo APIが担当する。Workerはprivate Cloud Runへ認証付きで中継し、ブラウザからGo APIへ直接送る経路は持たない。
+- 自動連想が選べる動物は、この一覧にある音源付きの動物に限る。
+- `POST /api/zoovoice/compose` は録音とアニマル度を受け取る。通常の設定契約は `{intensity}` だけとし、動物と挿入位置はGo APIが決める。
+- Workerは合成前にTurnstile検証と利用上限判定を行う。
+- ASR、動物連想、合成はGoogle Cloud Run上のGo APIが担当する。Workerはprivate Cloud Runへ認証付きで中継し、ブラウザからGo APIへ直接送る経路は持たない。
+
+### 日本語ASR
+
+- ASRはサーバー側で行う。ブラウザの音声認識APIとクラウドASR APIは使わない。
+- Go APIはwhisper.cppの `whisper-cli` とsmallモデルを日本語固定で呼ぶ。
+- ASRへ渡す音声は16kHz、mono、16-bit PCMへ変換する。合成に使う音声とは別に用意する。
+- 認識結果が空の場合は動物を選ばず、発話を認識できなかったことを示すエラーを返す。
+
+### 動物の自動連想
+
+- 連想は日本語ASR本文を形態素解析し、語を基本形と読みへそろえてから候補を探す。
+- 候補語には表層形、基本形、読みに加えて、隣接する2語から3語の連接も含める。
+- 順位は、動物名やオノマトペの直接言及を最優先し、次に日本語ConceptNetの1-hop候補を使う。どちらでも決まらない入力はrandom fallbackにする。
+- 直接言及が複数ある場合は、ASR本文の先頭に近いものを選ぶ。
+- ConceptNet候補は、関係の種類ごとの係数をweightへ掛けた合計で順位を決める。同点の場合は本文の先頭に近い根拠語を優先する。
+- 採用するのは最上位の1種だけとする。複数候補を利用者へ提示しない。
+- 1回の合成で使う動物は1種だけとし、すべての挿入位置へ同じ動物を配置する。
+- 合成応答のmetadataはASR本文、選ばれた動物、根拠語を返す。
+- 合成応答のmetadataは選択方式、fallback理由、挿入位置、入出力の長さも返す。
+- UIは、根拠語のある連想とrandom fallbackを利用者が区別できるように表示する。
+- ASRモデル、ConceptNet index、必要な外部commandのいずれかが欠けた場合はエラーを返す。固定の動物へ黙って切り替えない。
+- ASR本文と根拠語は応答とサーバーのメモリ内だけで扱い、ログや保存先へ残さない。
 
 ### ローカル確認
 
-ローカル確認の正本はWranglerで動かすWorkerとする。確認modeは次の2つとし、いずれも用語をここで定義する。
+ローカル確認の正本はWranglerで動かすWorkerとする。ブラウザでの手動確認とPlaywrightのe2e確認は、どちらもWrangler localを起動する。Go APIは起動時にwhisper.cppのcommand、ASRモデル、ConceptNet indexの実在を確認し、欠けた場合は起動しない。これらはリポジトリ外へ置き、環境変数でpathを渡す。
+
+確認modeは次の2つとし、いずれも用語をここで定義する。
 
 - local origin modeとは、同じ開発端末で動くGo APIへWorkerが認証なしで接続する確認modeを指す。
 - Cloud Run smoke modeとは、ローカルのWorkerから実際のprivate Cloud Runへ認証付きで接続する確認modeを指す。
@@ -149,6 +189,8 @@ Cloud Run smoke modeの条件は次のとおりとする。
 - production用のservice account keyは使わない
 - 接続先はus-central1のprivate Cloud Runとする
 
+local origin modeの通し確認はPlaywrightのe2eで行う。対象は録音から日本語ASR、動物の自動連想、合成を経て再生とダウンロードまでとする。この確認はTurnstileのtest keyを使い、実モデルと実indexを持つlocalのGo APIへ接続する。
+
 ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の根拠に使わない。SpeakLoopのFastAPI版は従来どおり維持する。
 
 ### productionの扱い
@@ -157,6 +199,10 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 - production向けのcredential方式は未決定である。決まるまでproductionでの有効化を行わない。
 - ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
 - 外部deployとproduction有効化は別のgateで扱う。対象はimage公開、GCP resource作成、IAM設定、region設定と確認である。
+- 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
+- ASRモデルと連想indexを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
+- 実測はApple Silicon上のlinux/amd64 emulationで行っており、Cloud Runの実CPU上の処理時間は未確認である。
+- production deploy、Artifact Registryへのpush、GCP resourceとIAMの変更、production Worker認証はいずれも未実施である。これらを終えるまでproduction readyとして扱わない。
 
 ## 実行環境の責任
 
@@ -171,6 +217,7 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 | 音声履歴 | ローカルファイル | 保存しない | 保存しない | 保存しない |
 | 公開サンプル音声blob | ローカルファイル | R2、bindingなし時のみfallback | — | — |
 | Zoovoice動物一覧 | 担当しない | Static AssetsのJSONを返す | — | — |
+| Zoovoice ASR・動物連想 | 担当しない | 担当しない | — | ○ |
 | Zoovoice合成 | 担当しない | Turnstile検証、利用上限、認証付き中継 | — | ○ |
 | Zoovoice利用上限counter | 担当しない | D1 | — | — |
 
@@ -198,6 +245,7 @@ RunPod handlerの契約:
 - 公開デモのquota・audit識別子はGoogle emailをSHA-256 hash化してD1またはKV fallbackへ保存し、平文emailを新規のquota・audit履歴へ保存しない。
 - ログインしたemailと日時だけは `public_users` へ平文で保存し、管理者専用の `GET /api/public-users` と `/admin` の利用者一覧から読む。保持は公開デモの運用中に限る。quota・auditは引き続きhashだけを使う。
 - 音声履歴はローカルFastAPI版だけで保存する。Cloudflare公開版は入力音声と生成音声を履歴として保存しない。
+- Zoovoiceは録音、生成音声、ASR本文のいずれも保存しない。WorkerとGo APIは、これらを応答の生成に必要な間だけ扱う。
 - ローカルFastAPI版は、RunPod比較の選択条件とterminal snapshotを短期job stateへ既定で1時間保存する。このstateは音声bytesを含まず、音声履歴の有効・無効とは分離する。
 - 公開画面では、外部サービスで処理される音声へ個人情報や機密情報を含めないよう案内する。
 - 生成物を私的利用の範囲を超えて公開・共有する場合は、参照音声の利用条件を確認する。

@@ -1,0 +1,14 @@
+[
+  {"id":"dog","terms":["犬","いぬ","イヌ"],"onomatopoeia":["わんわん","ワンワン"]},
+  {"id":"cat","terms":["猫","ねこ","ネコ"],"onomatopoeia":["にゃー","ニャー","にゃあ","ニャア"]},
+  {"id":"cow","terms":["牛","うし","ウシ"],"onomatopoeia":["もー","モー"]},
+  {"id":"rooster","terms":["鶏","にわとり","ニワトリ","雄鶏","おんどり","オンドリ"],"onomatopoeia":["こけこっこー","コケコッコー"]},
+  {"id":"horse","terms":["馬","うま","ウマ"],"onomatopoeia":["ひひーん","ヒヒーン"]},
+  {"id":"sheep","terms":["羊","ひつじ","ヒツジ"],"onomatopoeia":["めーめー","メーメー"]},
+  {"id":"goat","terms":["山羊","やぎ","ヤギ"],"onomatopoeia":["めぇ","メェ"]},
+  {"id":"duck","terms":["家鴨","あひる","アヒル","鴨","かも","カモ"],"onomatopoeia":["がーがー","ガーガー"]},
+  {"id":"frog","terms":["蛙","かえる","カエル"],"onomatopoeia":["けろけろ","ケロケロ"]},
+  {"id":"cricket","terms":["蟋蟀","こおろぎ","コオロギ"],"onomatopoeia":["ころころ","コロコロ"]},
+  {"id":"elephant","terms":["象","ぞう","ゾウ"],"onomatopoeia":["ぱおーん","パオーン"]},
+  {"id":"lion","terms":["ライオン","獅子","しし","シシ"],"onomatopoeia":["がおー","ガオー"]}
+]

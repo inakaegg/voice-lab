@@ -2,10 +2,16 @@ import { defineConfig } from "@playwright/test";
 
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const baseURL = externalBaseUrl || "http://127.0.0.1:4173";
+const zoovoiceTests = [
+  "**/zoovoice.spec.ts",
+  "**/zoovoice-real-backend.spec.ts",
+];
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testIgnore: process.env.PLAYWRIGHT_VISUAL_REVIEW ? [] : ["**/visual-review.spec.ts"],
+  testIgnore: process.env.PLAYWRIGHT_VISUAL_REVIEW
+    ? zoovoiceTests
+    : [...zoovoiceTests, "**/visual-review.spec.ts"],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

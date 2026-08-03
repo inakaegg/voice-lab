@@ -61,6 +61,10 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 	audio := []byte("wav result")
 	composer := &fakeAudioComposer{result: ComposeResult{
 		AudioBase64:           base64.StdEncoding.EncodeToString(audio),
+		Transcript:            "犬が公園を走っています",
+		SelectedAnimal:        SelectedAnimal{ID: "dog", LabelJA: "犬"},
+		EvidenceTerm:          stringPointer("犬"),
+		SelectionStrategy:     strategyDirect,
 		Insertions:            []ResolvedInsertion{{Slot: "opening", Species: "dog", AtSeconds: 0}},
 		InputDurationSeconds:  2,
 		OutputDurationSeconds: 2.3,
@@ -69,7 +73,7 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 	request := multipartComposeRequest(
 		t,
 		[]byte("input audio"),
-		`{"arrangement":{"opening":"dog","gaps":null,"ending":null},"intensity":50}`,
+		`{"intensity":50}`,
 	)
 	response := httptest.NewRecorder()
 
@@ -84,6 +88,11 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 			Base64 string `json:"base64"`
 		} `json:"audio"`
 		Meta struct {
+			Transcript            string              `json:"transcript"`
+			SelectedAnimal        SelectedAnimal      `json:"selected_animal"`
+			EvidenceTerm          *string             `json:"evidence_term"`
+			SelectionStrategy     SelectionStrategy   `json:"selection_strategy"`
+			FallbackReason        *string             `json:"fallback_reason"`
 			Insertions            []ResolvedInsertion `json:"insertions"`
 			InputDurationSeconds  float64             `json:"input_duration_seconds"`
 			OutputDurationSeconds float64             `json:"output_duration_seconds"`
@@ -98,6 +107,12 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 	if len(payload.Meta.Insertions) != 1 || payload.Meta.Insertions[0].Species != "dog" {
 		t.Fatalf("meta = %#v", payload.Meta)
 	}
+	if payload.Meta.Transcript != "犬が公園を走っています" ||
+		payload.Meta.SelectedAnimal.ID != "dog" || payload.Meta.EvidenceTerm == nil ||
+		*payload.Meta.EvidenceTerm != "犬" || payload.Meta.SelectionStrategy != strategyDirect ||
+		payload.Meta.FallbackReason != nil {
+		t.Fatalf("association meta = %#v", payload.Meta)
+	}
 }
 
 func TestComposeEndpointMapsTypedProcessingError(t *testing.T) {
@@ -110,7 +125,7 @@ func TestComposeEndpointMapsTypedProcessingError(t *testing.T) {
 	request := multipartComposeRequest(
 		t,
 		[]byte("input audio"),
-		`{"arrangement":{"opening":"dog","gaps":null,"ending":null},"intensity":50}`,
+		`{"intensity":50}`,
 	)
 	response := httptest.NewRecorder()
 
@@ -138,7 +153,7 @@ func TestComposeEndpointRejectsTrailingSettingsJSON(t *testing.T) {
 	request := multipartComposeRequest(
 		t,
 		[]byte("input audio"),
-		`{"arrangement":{"opening":"dog","gaps":null,"ending":null},"intensity":50} {}`,
+		`{"intensity":50} {}`,
 	)
 	response := httptest.NewRecorder()
 
@@ -149,6 +164,28 @@ func TestComposeEndpointRejectsTrailingSettingsJSON(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"code":"invalid_settings"`) {
 		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestParseComposeSettingsAcceptsOnlyIntegerIntensity(t *testing.T) {
+	settings, apiError := parseComposeSettings([]byte(`{"intensity":50}`))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	if settings.Intensity != 50 {
+		t.Fatalf("settings = %#v", settings)
+	}
+	for _, payload := range []string{
+		`{}`,
+		`{"intensity":50.5}`,
+		`{"intensity":-1}`,
+		`{"intensity":101}`,
+		`{"intensity":50,"extra":true}`,
+		`{"arrangement":{"opening":"dog"},"intensity":50}`,
+	} {
+		if _, apiError := parseComposeSettings([]byte(payload)); apiError == nil || apiError.Code != "invalid_settings" {
+			t.Errorf("payload %s error = %#v", payload, apiError)
+		}
 	}
 }
 
@@ -174,6 +211,10 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 	composer := newComposer(
 		catalog,
 		execCommandRunner{},
+		fixedTranscriber{transcript: "鶏が朝に鳴いています"},
+		fixedAssociator{selection: AnimalSelection{
+			Species: "rooster", LabelJA: "鶏", EvidenceTerm: "鶏", Strategy: strategyDirect,
+		}},
 		rand.New(rand.NewSource(11)),
 		30*time.Second,
 		log.New(io.Discard, "", 0),
@@ -182,7 +223,7 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 	request := multipartComposeRequest(
 		t,
 		input,
-		`{"arrangement":{"opening":"rooster","gaps":"cow","ending":"rooster"},"intensity":100}`,
+		`{"intensity":100}`,
 	)
 	response := httptest.NewRecorder()
 
@@ -260,6 +301,10 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 			probedDuration,
 		)
 	}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func multipartComposeRequest(t *testing.T, audio []byte, settings string) *http.Request {

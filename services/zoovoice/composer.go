@@ -21,6 +21,11 @@ var errDurationUnavailable = errors.New("audio duration metadata is unavailable"
 
 type ComposeResult struct {
 	AudioBase64           string
+	Transcript            string
+	SelectedAnimal        SelectedAnimal
+	EvidenceTerm          *string
+	SelectionStrategy     SelectionStrategy
+	FallbackReason        *string
 	Insertions            []ResolvedInsertion
 	InputDurationSeconds  float64
 	OutputDurationSeconds float64
@@ -31,27 +36,33 @@ type audioComposer interface {
 }
 
 type composer struct {
-	catalog *assetCatalog
-	runner  commandRunner
-	rng     *rand.Rand
-	rngMu   sync.Mutex
-	timeout time.Duration
-	logger  *log.Logger
+	catalog     *assetCatalog
+	runner      commandRunner
+	transcriber transcriber
+	associator  animalAssociator
+	rng         *rand.Rand
+	rngMu       sync.Mutex
+	timeout     time.Duration
+	logger      *log.Logger
 }
 
 func newComposer(
 	catalog *assetCatalog,
 	runner commandRunner,
+	transcriber transcriber,
+	associator animalAssociator,
 	rng *rand.Rand,
 	timeout time.Duration,
 	logger *log.Logger,
 ) *composer {
 	return &composer{
-		catalog: catalog,
-		runner:  runner,
-		rng:     rng,
-		timeout: timeout,
-		logger:  logger,
+		catalog:     catalog,
+		runner:      runner,
+		transcriber: transcriber,
+		associator:  associator,
+		rng:         rng,
+		timeout:     timeout,
+		logger:      logger,
 	}
 }
 
@@ -85,6 +96,7 @@ func (c *composer) Compose(
 
 	inputPath := filepath.Join(workDir, "input.audio")
 	normalizedPath := filepath.Join(workDir, "normalized.wav")
+	asrPath := filepath.Join(workDir, "asr.wav")
 	outputPath := filepath.Join(workDir, "composed.wav")
 	if err := os.WriteFile(inputPath, audio, 0o600); err != nil {
 		return ComposeResult{}, internalProcessingError("write uploaded audio", err)
@@ -216,23 +228,65 @@ func (c *composer) Compose(
 	}
 	logProgress(c.logger, started, "silence_detect", "complete", "gap_count=%d", len(gaps))
 
+	logProgress(c.logger, started, "asr_audio", "start", "")
+	if err := c.prepareASRAudio(contextWithTimeout, normalizedPath, asrPath); err != nil {
+		return ComposeResult{}, c.privateStageAPIError(
+			contextWithTimeout, started, "asr_audio", "asr_failed", "音声を文字に変換できませんでした。", err,
+		)
+	}
+	logProgress(c.logger, started, "asr_audio", "complete", "")
+
+	logProgress(c.logger, started, "asr", "start", "")
+	transcript, err := c.transcriber.Transcribe(contextWithTimeout, asrPath)
+	if err != nil {
+		code := "asr_failed"
+		message := "音声を文字に変換できませんでした。"
+		status := 500
+		if errors.Is(err, errASREmpty) {
+			code = "asr_empty"
+			message = "音声から発話を認識できませんでした。"
+			status = 422
+		}
+		return ComposeResult{}, c.privateStageAPIErrorWithStatus(
+			contextWithTimeout, started, "asr", status, code, message, err,
+		)
+	}
+	logProgress(c.logger, started, "asr", "complete", "")
+
+	var insertions []ResolvedInsertion
 	c.rngMu.Lock()
-	insertions, err := resolveArrangement(
-		c.catalog,
-		settings,
-		gaps,
-		inputDuration,
-		c.rng,
-	)
+	selection, err := c.associator.Select(contextWithTimeout, transcript, c.catalog.Animals, c.rng)
+	if err == nil {
+		var arrangementErr error
+		insertions, arrangementErr = resolveArrangement(
+			c.catalog,
+			selection.Species,
+			settings.Intensity,
+			gaps,
+			inputDuration,
+			c.rng,
+		)
+		err = arrangementErr
+	}
 	c.rngMu.Unlock()
 	if err != nil {
-		return ComposeResult{}, &APIError{
-			Status:  400,
-			Code:    "invalid_settings",
-			Message: "動物の指定を確認してください。",
-			Err:     err,
+		var apiError *APIError
+		if !errors.As(err, &apiError) {
+			apiError = &APIError{Status: 500, Code: "association_failed", Message: "動物を選べませんでした。", Err: err}
 		}
+		return ComposeResult{}, c.privateStageAPIErrorWithStatus(
+			contextWithTimeout,
+			started,
+			"association",
+			apiError.Status,
+			apiError.Code,
+			apiError.Message,
+			apiError,
+		)
 	}
+	logProgress(
+		c.logger, started, "association", "complete", "species=%s strategy=%s", selection.Species, selection.Strategy,
+	)
 
 	var outputAudio []byte
 	outputDuration := inputDuration
@@ -276,10 +330,71 @@ func (c *composer) Compose(
 	logProgress(c.logger, started, "request", "complete", "output_bytes=%d", len(outputAudio))
 	return ComposeResult{
 		AudioBase64:           base64.StdEncoding.EncodeToString(outputAudio),
+		Transcript:            transcript,
+		SelectedAnimal:        SelectedAnimal{ID: selection.Species, LabelJA: selection.LabelJA},
+		EvidenceTerm:          optionalString(selection.EvidenceTerm),
+		SelectionStrategy:     selection.Strategy,
+		FallbackReason:        optionalString(selection.FallbackReason),
 		Insertions:            insertions,
 		InputDurationSeconds:  roundSeconds(inputDuration),
 		OutputDurationSeconds: roundSeconds(outputDuration),
 	}, nil
+}
+
+func (c *composer) prepareASRAudio(ctx context.Context, normalizedPath, outputPath string) error {
+	output, err := c.runner.Run(
+		ctx,
+		"ffmpeg",
+		"-nostdin",
+		"-y",
+		"-v", "error",
+		"-i", normalizedPath,
+		"-ar", "16000",
+		"-ac", "1",
+		"-c:a", "pcm_s16le",
+		outputPath,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare ASR audio: %w: %s", err, compactCommandError(output.Stderr))
+	}
+	return nil
+}
+
+func (c *composer) privateStageAPIError(
+	ctx context.Context,
+	started time.Time,
+	stage string,
+	code string,
+	message string,
+	err error,
+) error {
+	return c.privateStageAPIErrorWithStatus(ctx, started, stage, 500, code, message, err)
+}
+
+func (c *composer) privateStageAPIErrorWithStatus(
+	ctx context.Context,
+	started time.Time,
+	stage string,
+	status int,
+	code string,
+	message string,
+	err error,
+) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		status, code, message = 500, "processing_timeout", "音声処理が時間内に完了しませんでした。"
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		status, code, message = 500, "processing_cancelled", "音声処理が中断されました。"
+	}
+	logProgress(c.logger, started, stage, "failed", "code=%s", code)
+	return &APIError{Status: status, Code: code, Message: message, Err: err}
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (c *composer) probeDuration(ctx context.Context, path string) (float64, error) {
@@ -397,7 +512,7 @@ func (c *composer) commandAPIError(
 		code = "processing_cancelled"
 		message = "音声処理が中断されました。"
 	}
-	logProgress(c.logger, started, stage, "failed", "error=%q", compactCommandError(err.Error()))
+	logProgress(c.logger, started, stage, "failed", "code=%s", code)
 	return &APIError{
 		Status:  status,
 		Code:    code,
