@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-02
+更新日: 2026-08-03
 
 ## 目的
 
@@ -46,15 +46,63 @@ Google OAuth clientの「承認済みのリダイレクトURI」には `https://
 
 ### Zoovoiceのsecretとflag
 
-Zoovoiceを有効にする配備では、`ZOOVOICE_TURNSTILE_SECRET_KEY` をWorker secretとして登録する。既定の配備では登録しない。
+Zoovoiceを有効にする配備では、`ZOOVOICE_GCP_SA_KEY` と `ZOOVOICE_TURNSTILE_SECRET_KEY` をWorker secretとして登録する。既定の配備では登録しない。
 
-WorkerがCloud Runを呼ぶ際の認証方式は未決定であり、未実装である。Workerの `ZOOVOICE_ORIGIN_MODE` は現在 `local-origin` と `cloud-run-smoke` の2つだけを持ち、どちらもloopback originからの `ZOOVOICE_LOCAL_DEV=1` 配備でしか動かない。production向けにCloud Runを安全に呼ぶ認証方式は今後決める。
+Workerの `ZOOVOICE_ORIGIN_MODE` は `local-origin`・`cloud-run-smoke`・`cloud-run` の3つを持つ。前2つはローカル確認用で、loopback originからの `ZOOVOICE_LOCAL_DEV=1` 配備でしか動かない。`cloud-run` はproduction用で、逆に `ZOOVOICE_LOCAL_DEV=1` の配備とloopback hostnameからのrequestを502で拒否する。条件を満たさない配備はCloud Runを呼ばずfail closedにする。
+
+production認証は次の流れで行う。
+
+1. secret `ZOOVOICE_GCP_SA_KEY` から専用invoker service accountのkey JSONを読む。
+2. WorkerがWebCryptoのRS256でservice account JWTへ署名する。
+3. Googleのtoken endpointへJWT bearer grantをPOSTし、正規化済みCloud Run originを `target_audience` とするID tokenへ交換する。
+4. 得たID tokenを `Authorization: Bearer` としてprivate Cloud Runへ送る。認可はGoogle IAMが行う。
+
+invoker service accountには対象service単位の `roles/run.invoker` だけを付与する。Cloud Runの `allUsers` へ `roles/run.invoker` を付けず、privateを維持する。
+
+`ZOOVOICE_CLOUD_RUN_URL` は検証を通った値だけを使う。条件はhttpsであること、path・query・fragment・credentialを含まないこと、hostnameが `.run.app` で終わることである。検証後の正規化済みoriginを、fetch先と `target_audience` の両方へ使う。
+
+取得したID tokenはisolate内のmemoryだけへcacheし、token payloadの `exp` の300秒前まで再利用する。KV・D1・R2・Cache APIへtokenを保存しない。service account key、JWT、ID tokenはresponseとlogへ含めない。
+
+この認証の実装とfake token endpointによる契約testは完了している。実keyの発行、secret登録、Cloud Run deploy、本番有効化はいずれも未実施の外部操作である。
 
 ローカルのTurnstile確認は、Cloudflare公式のalways-pass test site key・secret keyだけを使う。このtest key組はproduction設定と混在させない。
 
 `cloud-run-smoke`モードは、developer端末のgcloudでservice account impersonationを行い、audience付きの短期ID tokenを取得する。取得したtokenは一時env file経由でlocal Wranglerへ渡すだけであり、Worker secretとしては保存しない。このモードの利用には `ZOOVOICE_CLOUD_RUN_URL`・`ZOOVOICE_GCP_PROJECT`・`ZOOVOICE_SMOKE_SERVICE_ACCOUNT` を設定し、`npm run dev:zoovoice:cloud-run` を使う。
 
-flagと公開設定は `[vars]` へ置く。`ZOOVOICE_ENABLED` は既定で未設定とし、`1` を設定した配備だけがZoovoiceを公開する。同じ配備で `ZOOVOICE_TURNSTILE_SITE_KEY` と `ZOOVOICE_CLOUD_RUN_URL` も設定する。
+flagと公開設定は `[vars]` へ置く。Zoovoiceを有効にする配備のvarsは次の5つとする。
+
+- `ZOOVOICE_ENABLED="1"`
+- `ZOOVOICE_ORIGIN_MODE="cloud-run"`
+- `ZOOVOICE_CLOUD_RUN_URL`
+- `ZOOVOICE_TURNSTILE_SITE_KEY`
+- `ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME`
+
+現在の `wrangler.toml` はこれらを設定しておらず、productionのZoovoiceは無効である。有効化の際は、この5つを有効化専用のcommitとして `wrangler.toml` の `[vars]` へ追加し、main経由でdeployする。dashboardやCLIの一時的なvar設定だけで有効化しない。一時設定だけでは、次のmain経由deployで設定が失われるためである。
+
+#### `ZOOVOICE_GCP_SA_KEY` の登録手順
+
+1. GCPで専用invoker service accountのkey JSONを発行する。
+2. `wrangler secret put ZOOVOICE_GCP_SA_KEY` を実行し、key JSON全体を標準入力から渡す。key fileから渡す場合は `wrangler secret put ZOOVOICE_GCP_SA_KEY < <key-file>` の形にする。
+3. key fileをローカルへ保存した場合は、登録後すぐ安全に削除する。
+4. key JSONの実値、生成したJWT、ID tokenをコマンド引数・設定ファイル・リポジトリへ書かない。
+
+#### keyの定期rotation手順
+
+1. 同じinvoker service accountで新しいkeyを発行する。
+2. `wrangler secret put ZOOVOICE_GCP_SA_KEY` でWorker secretを新keyへ置き換える。
+3. main経由でdeployし、Worker経由のcompose 1件で最小smokeを行う。
+4. smoke成功を確認してから、旧keyを無効化して削除する。
+
+新旧keyが併存する時間を短くするため、置換からsmoke、旧key削除までを続けて行う。
+
+#### credential incident対応手順
+
+key漏洩の疑いがある場合は、機能flagのrollbackだけでは直接呼び出しを止められない。次を順に行う。
+
+1. 疑いのあるkeyを直ちに無効化し削除する。
+2. 必要なら対象serviceの `roles/run.invoker` からinvoker service accountを外す。
+3. 認証なしのdirect requestと旧keyでのdirect requestが、いずれも401または403で拒否されることを確認する。
+4. 新しいkeyを発行し、`wrangler secret put ZOOVOICE_GCP_SA_KEY` でsecretを更新する。
 
 Cloud Run側の準備は別の外部操作gateである。region、サービス契約、IAM方針、配備scriptの詳細は [ARCHITECTURE.md](ARCHITECTURE.md) と `services/zoovoice/README.md` を参照する。
 

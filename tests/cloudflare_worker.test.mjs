@@ -3,6 +3,7 @@ import test from "node:test";
 
 import workerEntrypoint from "../cloudflare/src/index.ts";
 import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
+import { clearZoovoiceIdTokenCacheForTests } from "../cloudflare/zoovoice-gateway.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
@@ -287,6 +288,221 @@ test("Cloudflare worker uses a supplied short-lived ID token only for local Clou
     "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     "https://zoovoice.example.run.app/compose",
   ]);
+});
+
+test("Cloudflare worker exchanges a signed JWT and authenticates a production Cloud Run request", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  const idToken = testIdToken({ exp: nowSeconds + 3_600 });
+  const calls = [];
+  const env = await productionZoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      assert.equal(init.method, "POST");
+      assert.equal(new Headers(init.headers).get("Content-Type"), "application/x-www-form-urlencoded");
+      const body = new URLSearchParams(String(init.body));
+      assert.equal(body.get("grant_type"), "urn:ietf:params:oauth:grant-type:jwt-bearer");
+      const assertion = body.get("assertion");
+      assert.equal(assertion.split(".").length, 3);
+      const [encodedHeader, encodedPayload, encodedSignature] = assertion.split(".");
+      assert.equal(await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        serviceAccount.__publicKey,
+        decodeBase64UrlBytes(encodedSignature),
+        new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+      ), true);
+      const claims = decodeJwtPart(encodedPayload);
+      assert.deepEqual(claims, {
+        iss: serviceAccount.client_email,
+        sub: serviceAccount.client_email,
+        aud: "https://oauth2.googleapis.com/token",
+        target_audience: "https://zoovoice.example.run.app",
+        iat: nowSeconds - 60,
+        exp: nowSeconds + 3_540,
+      });
+      return json({ id_token: idToken });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      assert.equal(new Headers(init.headers).get("Authorization"), `Bearer ${idToken}`);
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "https://example.com/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://oauth2.googleapis.com/token",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker caches an ID token until its 300 second refresh window", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  let nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  let tokenExchangeCount = 0;
+  const env = await productionZoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      tokenExchangeCount += 1;
+      return json({ id_token: testIdToken({ exp: nowSeconds + 3_600, nonce: tokenExchangeCount }) });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") return json(validZoovoiceOriginResponse());
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+  env.__ZOOVOICE_NOW = () => nowSeconds * 1_000;
+
+  for (let index = 0; index < 2; index += 1) {
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+    assert.equal(response.status, 200);
+  }
+  assert.equal(tokenExchangeCount, 1);
+
+  nowSeconds += 3_300;
+  const refreshed = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+  assert.equal(refreshed.status, 200);
+  assert.equal(tokenExchangeCount, 2);
+});
+
+test("Cloudflare worker retries a failed production token exchange without caching it", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  let tokenExchangeCount = 0;
+  const env = await productionZoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      tokenExchangeCount += 1;
+      if (tokenExchangeCount === 1) return json({ error: "temporarily_unavailable" }, { status: 503 });
+      return json({ id_token: testIdToken({ exp: nowSeconds + 3_600 }) });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") return json(validZoovoiceOriginResponse());
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+
+  const first = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+  const second = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+
+  assert.equal(first.status, 502);
+  assert.equal((await first.json()).error.code, "zoovoice_origin_auth_failed");
+  assert.equal(second.status, 200);
+  assert.equal(tokenExchangeCount, 2);
+});
+
+test("Cloudflare worker fails closed for invalid production origin authentication inputs", async () => {
+  const validServiceAccount = await testServiceAccountKey();
+  const cases = [
+    { name: "local dev flag", mutate: (env) => { env.ZOOVOICE_LOCAL_DEV = "1"; } },
+    { name: "loopback request", requestUrl: "http://127.0.0.1:8787/api/zoovoice/compose" },
+    { name: "non Cloud Run origin", mutate: (env) => { env.ZOOVOICE_CLOUD_RUN_URL = "https://example.com"; } },
+    { name: "origin path", mutate: (env) => { env.ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice.example.run.app/path"; } },
+    { name: "missing secret", mutate: (env) => { delete env.ZOOVOICE_GCP_SA_KEY; } },
+    { name: "invalid secret json", mutate: (env) => { env.ZOOVOICE_GCP_SA_KEY = "not-json"; } },
+    { name: "invalid private key", mutate: (env) => { env.ZOOVOICE_GCP_SA_KEY = JSON.stringify({ client_email: "invoker@example.invalid", private_key: "not-a-key" }); } },
+  ];
+
+  for (const item of cases) {
+    clearZoovoiceIdTokenCacheForTests();
+    const calls = [];
+    const env = await productionZoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: new URL(item.requestUrl || "https://example.com").hostname });
+      }
+      throw new Error("authentication failure must not reach Cloud Run");
+    }, { nowSeconds: 1_786_000_000, serviceAccount: validServiceAccount });
+    if (item.requestUrl) env.ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME = new URL(item.requestUrl).hostname;
+    item.mutate?.(env);
+
+    const response = await handleRequest(zoovoiceComposeRequest({
+      url: item.requestUrl || "https://example.com/api/zoovoice/compose",
+    }), env);
+    const body = await response.text();
+
+    assert.equal(response.status, 502, item.name);
+    assert.equal(JSON.parse(body).error.code, "zoovoice_origin_auth_failed", item.name);
+    assert.doesNotMatch(body, /PRIVATE KEY|not-a-key|invoker@example\.invalid/, item.name);
+    assert.equal(calls.some((target) => target.endsWith("/compose")), false, item.name);
+  }
+});
+
+test("Cloudflare worker fails closed for invalid token endpoint and ID token responses", async () => {
+  const serviceAccount = await testServiceAccountKey();
+  const nowSeconds = 1_786_000_000;
+  const cases = [
+    { name: "fetch exception", tokenResult: () => { throw new Error("network failed with secret material"); } },
+    { name: "non-2xx", tokenResult: () => json({ error: "invalid_grant" }, { status: 401 }) },
+    { name: "non-json", tokenResult: () => new Response("not-json", { status: 200 }) },
+    { name: "non-string token", tokenResult: () => json({ id_token: 123 }) },
+    { name: "invalid token payload", tokenResult: () => json({ id_token: "not.a-valid-payload.signature" }) },
+    { name: "missing exp", tokenResult: () => json({ id_token: testIdToken({}) }) },
+  ];
+
+  for (const item of cases) {
+    clearZoovoiceIdTokenCacheForTests();
+    let assertion = "";
+    const env = await productionZoovoiceEnv(async (url, init = {}) => {
+      const target = String(url);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      if (target === "https://oauth2.googleapis.com/token") {
+        assertion = new URLSearchParams(String(init.body)).get("assertion") || "";
+        return item.tokenResult();
+      }
+      throw new Error("invalid token response must not reach Cloud Run");
+    }, { nowSeconds, serviceAccount });
+
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+    const body = await response.text();
+    assert.equal(response.status, 502, item.name);
+    assert.equal(JSON.parse(body).error.code, "zoovoice_origin_auth_failed", item.name);
+    assert.equal(body.includes(assertion), false, item.name);
+    assert.equal(body.includes(serviceAccount.private_key), false, item.name);
+  }
+});
+
+test("Cloudflare worker never logs production service account or token material", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const serviceAccount = await testServiceAccountKey();
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...values) => logs.push(values.map(String).join(" "));
+  try {
+    const env = await productionZoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error(`upstream failure ${serviceAccount.private_key}`);
+    }, { nowSeconds: 1_786_000_000, serviceAccount });
+    env.ZOOVOICE_LOG_SAMPLE_RATE = "1";
+
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+
+    assert.equal(response.status, 502);
+    const combined = `${await response.text()}\n${logs.join("\n")}`;
+    assert.equal(combined.includes(serviceAccount.private_key), false);
+    assert.doesNotMatch(combined, /eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9/);
+  } finally {
+    console.log = originalLog;
+  }
 });
 
 test("Cloudflare worker rejects local Zoovoice modes on a production hostname before quota and origin", async () => {
@@ -3341,6 +3557,45 @@ async function zoovoiceEnv(fetchImpl, { db = fakeZoovoiceBudgetD1() } = {}) {
     ZOOVOICE_DAILY_LIMIT: "100",
     ZOOVOICE_MONTHLY_LIMIT: "1200",
   };
+}
+
+async function productionZoovoiceEnv(fetchImpl, { nowSeconds, serviceAccount } = {}) {
+  const env = await zoovoiceEnv(fetchImpl);
+  env.ZOOVOICE_LOCAL_DEV = "0";
+  env.ZOOVOICE_ORIGIN_MODE = "cloud-run";
+  env.ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice.example.run.app/";
+  delete env.ZOOVOICE_GCP_ID_TOKEN;
+  env.ZOOVOICE_GCP_SA_KEY = JSON.stringify(serviceAccount || await testServiceAccountKey());
+  env.__ZOOVOICE_NOW = () => Number(nowSeconds) * 1_000;
+  return env;
+}
+
+async function testServiceAccountKey() {
+  const keyPair = await crypto.subtle.generateKey({
+    name: "RSASSA-PKCS1-v1_5",
+    modulusLength: 2_048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  }, true, ["sign", "verify"]);
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey));
+  const base64 = Buffer.from(pkcs8).toString("base64").match(/.{1,64}/g).join("\n");
+  return {
+    client_email: "zoovoice-invoker@example.invalid",
+    private_key: `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`,
+    __publicKey: keyPair.publicKey,
+  };
+}
+
+function testIdToken(payload) {
+  return `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.test-signature`;
+}
+
+function decodeJwtPart(value) {
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+}
+
+function decodeBase64UrlBytes(value) {
+  return new Uint8Array(Buffer.from(value, "base64url"));
 }
 
 function useOfficialLocalTurnstileCredentials(env) {

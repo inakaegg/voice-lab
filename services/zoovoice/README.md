@@ -376,10 +376,17 @@ compose時間はemulationの影響を受けるため、Cloud Runの実CPU上の�
 
 ### 未実施の範囲
 
+production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker service accountのkeyによるID token取得方式です。
+方式の決定とWorker側の実装、契約testは完了しています。
+認証フローとsecret運用の詳細は[CLOUDFLARE.md](../../docs/deployment/CLOUDFLARE.md)を参照してください。
+
+次のremote操作は未実施です。
+
 - Artifact Registryへのimage push
 - GCP projectでのCloud Run resource作成とdeploy実行
-- production invokerのIAM設定と本番反映
-- production Cloudflare WorkerからCloud Runを呼ぶ認証方式
+- production用invoker service accountの作成とservice単位の `roles/run.invoker` 付与
+- invoker service account keyの発行とWorker secret登録
+- production Workerでの有効化varsの反映と実環境smoke
 
 これらを終えるまでproduction readyとして扱いません。
 

@@ -2,12 +2,15 @@ const ZOOVOICE_CONFIG_PATH = "/api/zoovoice/config";
 const ZOOVOICE_ANIMALS_PATH = "/api/zoovoice/animals";
 const ZOOVOICE_COMPOSE_PATH = "/api/zoovoice/compose";
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DEFAULT_AUDIO_MAX_BYTES = 10_000_000;
 const DEFAULT_SETTINGS_MAX_BYTES = 64 * 1024;
 const DEFAULT_RESPONSE_MAX_BYTES = 8_000_000;
 const DEFAULT_ORIGIN_TIMEOUT_MS = 90_000;
 const DEFAULT_DAILY_LIMIT = 100;
 const DEFAULT_MONTHLY_LIMIT = 1_200;
+const ID_TOKEN_REFRESH_SECONDS = 300;
+const zoovoiceIdTokenCache = new Map();
 
 class ZoovoiceGatewayError extends Error {
   constructor(status, code, message) {
@@ -123,7 +126,7 @@ async function proxyCompose(request, env) {
   }
   validateComposeSettings(settings);
   await verifyTurnstile(request, env, turnstileToken);
-  const originAccess = resolveZoovoiceOriginAccess(request, env);
+  const originAccess = await resolveZoovoiceOriginAccess(request, env);
   await consumeZoovoiceBudget(env);
 
   const outgoing = new FormData();
@@ -317,7 +320,7 @@ async function consumeZoovoiceBudget(env, now = new Date()) {
   }
 }
 
-function resolveZoovoiceOriginAccess(request, env) {
+async function resolveZoovoiceOriginAccess(request, env) {
   const mode = String(env.ZOOVOICE_ORIGIN_MODE || "");
   if (mode === "local-origin") {
     if (!isZoovoiceLocalRequest(request, env)) throw originAuthFailedError();
@@ -347,6 +350,17 @@ function resolveZoovoiceOriginAccess(request, env) {
     if (!token) throw originAuthFailedError();
     return { origin, token };
   }
+  if (mode === "cloud-run") {
+    if (env.ZOOVOICE_LOCAL_DEV === "1" || isLoopbackHostname(new URL(request.url).hostname)) {
+      throw originAuthFailedError();
+    }
+    const origin = validatedCloudRunOrigin(env.ZOOVOICE_CLOUD_RUN_URL);
+    try {
+      return { origin, token: await productionCloudRunIdToken(env, origin) };
+    } catch (_error) {
+      throw originAuthFailedError();
+    }
+  }
   throw originAuthFailedError();
 }
 
@@ -367,7 +381,7 @@ function originAuthFailedError() {
 }
 
 async function fetchPrivateOrigin(request, env, path, init, access = null) {
-  const { origin, token } = access || resolveZoovoiceOriginAccess(request, env);
+  const { origin, token } = access || await resolveZoovoiceOriginAccess(request, env);
   const headers = new Headers(init.headers || {});
   if (typeof token === "string" && token.length > 0) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -404,10 +418,9 @@ async function fetchPrivateOrigin(request, env, path, init, access = null) {
 }
 
 function validatedCloudRunOrigin(value) {
-  const normalized = String(value || "").replace(/\/+$/, "");
   let url;
   try {
-    url = new URL(normalized);
+    url = new URL(String(value || ""));
   } catch (_error) {
     throw originAuthFailedError();
   }
@@ -418,10 +431,141 @@ function validatedCloudRunOrigin(value) {
     || url.hash
     || url.username
     || url.password
+    || !url.hostname.endsWith(".run.app")
   ) {
     throw originAuthFailedError();
   }
-  return normalized;
+  return url.origin;
+}
+
+async function productionCloudRunIdToken(env, origin) {
+  const serviceAccount = parseZoovoiceServiceAccount(env.ZOOVOICE_GCP_SA_KEY);
+  const nowSeconds = Math.floor(runtimeNow(env) / 1_000);
+  const cacheKey = `${origin}\n${serviceAccount.client_email}`;
+  const cached = zoovoiceIdTokenCache.get(cacheKey);
+  if (cached && nowSeconds < cached.expiresAtSeconds - ID_TOKEN_REFRESH_SECONDS) {
+    return cached.token;
+  }
+
+  const assertion = await signedServiceAccountJwt(serviceAccount, origin, nowSeconds);
+  const body = new URLSearchParams({
+    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    assertion,
+  });
+  const response = await runtimeFetch(env)(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!response.ok) throw new Error("token exchange failed");
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (_error) {
+    throw new Error("token response invalid");
+  }
+  if (!isPlainObject(payload) || typeof payload.id_token !== "string") {
+    throw new Error("token response invalid");
+  }
+  const expiresAtSeconds = idTokenExpiry(payload.id_token);
+  zoovoiceIdTokenCache.set(cacheKey, { token: payload.id_token, expiresAtSeconds });
+  return payload.id_token;
+}
+
+function parseZoovoiceServiceAccount(value) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(value || ""));
+  } catch (_error) {
+    throw new Error("service account invalid");
+  }
+  if (
+    !isPlainObject(parsed)
+    || !isBoundedString(parsed.client_email, 1, 320)
+    || !isBoundedString(parsed.private_key, 1, 32_000)
+  ) {
+    throw new Error("service account invalid");
+  }
+  return { client_email: parsed.client_email, private_key: parsed.private_key };
+}
+
+async function signedServiceAccountJwt(serviceAccount, origin, nowSeconds) {
+  const header = base64UrlJson({ alg: "RS256", typ: "JWT" });
+  const issuedAt = nowSeconds - 60;
+  const payload = base64UrlJson({
+    iss: serviceAccount.client_email,
+    sub: serviceAccount.client_email,
+    aud: GOOGLE_TOKEN_URL,
+    target_audience: origin,
+    iat: issuedAt,
+    exp: issuedAt + 3_600,
+  });
+  const unsigned = `${header}.${payload}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemPrivateKeyBytes(serviceAccount.private_key),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(unsigned),
+  );
+  return `${unsigned}.${base64UrlBytes(new Uint8Array(signature))}`;
+}
+
+function pemPrivateKeyBytes(value) {
+  const encoded = String(value)
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");
+  if (!encoded) throw new Error("private key invalid");
+  let binary;
+  try {
+    binary = atob(encoded);
+  } catch (_error) {
+    throw new Error("private key invalid");
+  }
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function base64UrlJson(value) {
+  return base64UrlBytes(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function base64UrlBytes(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function idTokenExpiry(token) {
+  const parts = String(token).split(".");
+  if (parts.length !== 3) throw new Error("id token invalid");
+  let payload;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1])));
+  } catch (_error) {
+    throw new Error("id token invalid");
+  }
+  if (!isPlainObject(payload) || typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) {
+    throw new Error("id token invalid");
+  }
+  return payload.exp;
+}
+
+function base64UrlDecode(value) {
+  const normalized = String(value).replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+export function clearZoovoiceIdTokenCacheForTests() {
+  zoovoiceIdTokenCache.clear();
 }
 
 async function validatedOriginJson(response, env, kind) {
@@ -489,6 +633,12 @@ function logZoovoiceGateway(env, event) {
 
 function runtimeFetch(env) {
   return env.__fetch || fetch;
+}
+
+function runtimeNow(env) {
+  const value = typeof env.__ZOOVOICE_NOW === "function" ? env.__ZOOVOICE_NOW() : Date.now();
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("current time invalid");
+  return value;
 }
 
 function gatewayJson(payload, init = {}) {

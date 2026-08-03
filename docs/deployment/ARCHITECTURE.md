@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-02
+更新日: 2026-08-03
 
 ## 構成
 
@@ -59,7 +59,9 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` には `ZOOVOICE_ENABLED` を設定していない。
 
-Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は動物名やオノマトペの直接言及を最優先し、次に日本語ConceptNetの1-hop候補を使う。どちらでも決まらない入力はrandom fallbackにする。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す経路だけを実装済みである。productionのCloudflare WorkerがCloud Runを呼ぶ際の認証方式は未決定であり、未実装である。
+Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は動物名やオノマトペの直接言及を最優先し、次に日本語ConceptNetの1-hop候補を使う。どちらでも決まらない入力はrandom fallbackにする。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
+
+productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。実keyの発行、Cloud Runへの実deploy、本番有効化は未実施の外部操作である。
 
 ```text
 Browser
@@ -107,12 +109,16 @@ Cloud Runのregionは `us-central1` とする。`scripts/deploy_zoovoice_cloud_r
 
 Wrangler localからGoサービスまでの通しは、Playwrightのe2eで別途確認済みである。この確認はDocker imageではなくnative localのGoサービスを使い、Turnstileのtest keyを経由する。確認する経路は録音から日本語ASR、動物の直接連想、音声合成を経て再生とダウンロードまでである。この通しはtest本体13.1秒、run全体13.7秒で成功している。
 
-Cloud Run側の実際の反映はCloudflare Worker deployとは別の外部操作gateとして扱う。次はいずれも未実施である。
+Cloud Run側の実際の反映はCloudflare Worker deployとは別の外部操作gateとして扱う。production WorkerのCloud Run認証は方式の決定と実装が完了しており、残るのは次のremote操作である。いずれも未実施である。
 
 - Artifact Registryへのcontainer image実push
 - GCP projectでのCloud Run resource作成とdeploy実行
-- production Cloud Run invokerのIAM設定
-- production Cloudflare WorkerからCloud Runを呼ぶ認証方式の確定と実装
+- invoker service accountの作成と対象serviceへの `roles/run.invoker` 付与
+- invoker service account keyの発行とWorker secret登録
+- production Turnstile widgetの作成
+- 本番D1へのZoovoice counter migration適用
+- 有効化varsのcommitとmain経由deploy
+- 実環境での最小smoke確認
 
 これらを終えるまでproduction readyとして扱わない。
 

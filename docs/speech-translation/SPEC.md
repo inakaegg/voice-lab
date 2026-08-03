@@ -1,6 +1,6 @@
 # Voice Lab Webアプリ仕様
 
-更新日: 2026-08-02
+更新日: 2026-08-03
 
 ## 目的
 
@@ -196,13 +196,13 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 ### productionの扱い
 
 - production配備のZoovoiceはまだ有効化していない。
-- production向けのcredential方式は未決定である。決まるまでproductionでの有効化を行わない。
-- ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
-- 外部deployとproduction有効化は別のgateで扱う。対象はimage公開、GCP resource作成、IAM設定、region設定と確認である。
+- production Workerの認証は、専用invoker service accountのkeyによるID token取得方式とする。方式の決定と実装は完了しており、詳細は [CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする。
+- production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
+- 外部deployとproduction有効化は別のgateで扱う。対象はimage公開、GCP resource作成、IAM設定と実key発行、有効化varsのmain経由deployである。
 - 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - ASRモデルと連想indexを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - 実測はApple Silicon上のlinux/amd64 emulationで行っており、Cloud Runの実CPU上の処理時間は未確認である。
-- production deploy、Artifact Registryへのpush、GCP resourceとIAMの変更、production Worker認証はいずれも未実施である。これらを終えるまでproduction readyとして扱わない。
+- Cloud Runへの実deploy、Artifact Registryへのpush、GCP resourceとIAMの作成、実keyのsecret登録と有効化はいずれも未実施である。これらを終えるまでproduction readyとして扱わない。
 
 ## 実行環境の責任
 
