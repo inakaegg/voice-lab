@@ -73,6 +73,19 @@ test("Cloudflare worker exposes only public Zoovoice gateway configuration", asy
   assert.doesNotMatch(body, /secret|private_key/i);
 });
 
+test("Cloudflare worker reports Zoovoice disabled when the flag is absent", async () => {
+  const env = await zoovoiceEnv(async () => {
+    throw new Error("config must not call an external service");
+  });
+  delete env.ZOOVOICE_ENABLED;
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/config"), env);
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).enabled, false);
+});
+
 test("Cloudflare worker does not call Zoovoice services while the feature is disabled", async () => {
   const calls = [];
   const env = await zoovoiceEnv(async (url) => {

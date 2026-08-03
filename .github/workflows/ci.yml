@@ -105,6 +105,9 @@ jobs:
       - name: Responsive UI layout tests
         run: npm run test:e2e
 
+      - name: Zoovoice portal tests
+        run: npm run test:e2e:portal-zoovoice
+
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

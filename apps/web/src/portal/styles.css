@@ -92,9 +92,19 @@ html[data-theme="dark"] .portal-atmosphere {
   --product-soft: #e8efff;
 }
 
+.portal-product-link-zoovoice {
+  --product-accent: #8a4a18;
+  --product-soft: #f7e4d0;
+}
+
 html[data-theme="dark"] .portal-product-link-speak {
   --product-accent: #9bbcff;
   --product-soft: rgb(54 84 145 / 0.36);
+}
+
+html[data-theme="dark"] .portal-product-link-zoovoice {
+  --product-accent: #f2b56b;
+  --product-soft: #4b321f;
 }
 
 .portal-body .react-theme-settings {

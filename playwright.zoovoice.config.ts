@@ -5,7 +5,7 @@ const baseURL = externalBaseUrl || "http://127.0.0.1:4173";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: ["**/zoovoice.spec.ts", "**/zoovoice-real-backend.spec.ts"],
+  testMatch: ["**/zoovoice.spec.ts", "**/zoovoice-real-backend.spec.ts", "**/portal-zoovoice.spec.ts"],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

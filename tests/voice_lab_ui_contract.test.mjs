@@ -16,6 +16,7 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speaklo
   read("src/mo_speech/web/practice_admin.html"),
 ]);
 const portalStyles = await read("apps/web/src/portal/styles.css");
+const portalMain = await read("apps/web/src/portal/main.tsx");
 
 test("Voice Lab is the application and package brand without renaming the Python namespace", () => {
   assert.equal(JSON.parse(pkgText).name, "voice-lab");
@@ -96,7 +97,62 @@ test("Playwright layout tests are wired into npm and CI", () => {
 
 test("portal product accents distinguish creation from learning", () => {
   assert.match(portalStyles, /\.portal-product-link-speak\s*\{[^}]*--product-accent:\s*#3e68ad/s);
+  assert.match(portalMain, /number:\s*"02"[\s\S]*name:\s*"Zoovoice"[\s\S]*href:\s*"\/zoovoice"/);
+  assert.match(portalMain, /title:\s*"話すだけで、ぴったりの動物を。"/);
+  assert.match(portalMain, /description:\s*"話した内容から動物を選び、声のすき間へ鳴き声を重ねます。"/);
+  assert.match(portalMain, /action:\s*"声を変えてみる"/);
+  assert.match(portalMain, /icon:\s*PawPrint/);
+  assert.match(portalMain, /tone:\s*"portal-product-link-zoovoice"/);
+  assert.match(portalStyles, /\.portal-product-link-zoovoice\s*\{[^}]*--product-accent:\s*#8a4a18;[^}]*--product-soft:\s*#f7e4d0;/s);
+  assert.match(portalStyles, /html\[data-theme="dark"\]\s+\.portal-product-link-zoovoice\s*\{[^}]*--product-accent:\s*#f2b56b;[^}]*--product-soft:\s*#4b321f;/s);
+
+  const lightBackground = cssColor(portalStyles, ":root", "--background");
+  const lightMuted = cssColor(portalStyles, ":root", "--muted");
+  const darkBackground = cssColor(portalStyles, 'html[data-theme="dark"]', "--background");
+  const darkMuted = cssColor(portalStyles, 'html[data-theme="dark"]', "--muted");
+  for (const [foreground, backgrounds] of [
+    ["#8a4a18", [lightBackground, lightMuted, "#f7e4d0"]],
+    ["#f2b56b", [darkBackground, darkMuted, "#4b321f"]],
+  ]) {
+    for (const background of backgrounds) {
+      assert.ok(contrastRatio(parseCssColor(foreground), parseCssColor(background)) >= 4.5, `${foreground} on ${background}`);
+    }
+  }
 });
+
+function cssColor(css, selector, property) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const block = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "s"))?.[1] || "";
+  return block.match(new RegExp(`${property}:\\s*([^;]+)`))?.[1].trim() || "";
+}
+
+function parseCssColor(value) {
+  if (value.startsWith("#")) {
+    return [1, 3, 5].map((index) => Number.parseInt(value.slice(index, index + 2), 16) / 255);
+  }
+  const match = value.match(/^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+  assert.ok(match, `unsupported color: ${value}`);
+  const [, lightness, chroma, hue] = match.map(Number);
+  const angle = hue * Math.PI / 180;
+  const a = chroma * Math.cos(angle);
+  const b = chroma * Math.sin(angle);
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ].map((channel) => channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055)
+    .map((channel) => Math.min(1, Math.max(0, channel)));
+}
+
+function contrastRatio(foreground, background) {
+  const luminance = (rgb) => 0.2126 * linear(rgb[0]) + 0.7152 * linear(rgb[1]) + 0.0722 * linear(rgb[2]);
+  const linear = (channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
 
 test("the overview admin page exposes the signed-in user list panel", () => {
   assert.match(adminHtml, /id="public-users-panel"/);

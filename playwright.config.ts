@@ -5,6 +5,7 @@ const baseURL = externalBaseUrl || "http://127.0.0.1:4173";
 const zoovoiceTests = [
   "**/zoovoice.spec.ts",
   "**/zoovoice-real-backend.spec.ts",
+  "**/portal-zoovoice.spec.ts",
 ];
 
 export default defineConfig({
