@@ -29,7 +29,21 @@ function Portal() {
         <span className="flex size-9 items-center justify-center rounded-xl border border-border/70 bg-card/75 text-foreground shadow-sm backdrop-blur-xl" aria-hidden="true"><AudioWaveform className="size-[1.15rem]" strokeWidth={1.9} /></span>
         <span>Voice Lab</span>
       </div>
-      <ThemeSettings />
+      <div className="flex items-center gap-2">
+        <a
+          className="portal-github-link group"
+          href="https://github.com/inakaegg/voice-lab"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHubリポジトリ"
+          aria-describedby="portal-github-tooltip"
+        >
+          <img className="portal-github-mark portal-github-mark-black" src="/react/github-invertocat-black.svg" width="98" height="96" alt="" aria-hidden="true" />
+          <img className="portal-github-mark portal-github-mark-white" src="/react/github-invertocat-white.svg" width="98" height="96" alt="" aria-hidden="true" />
+          <span id="portal-github-tooltip" role="tooltip" className="portal-github-tooltip">実際の動作を動画で確認できます</span>
+        </a>
+        <ThemeSettings />
+      </div>
     </header>
 
     <section className="relative z-10 mx-auto grid w-full max-w-[1180px] min-w-0 flex-1 content-center gap-6 px-5 pb-7 pt-2 sm:px-8 sm:pb-9 min-[900px]:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] min-[900px]:items-center min-[900px]:gap-12 min-[900px]:py-8 lg:gap-16">

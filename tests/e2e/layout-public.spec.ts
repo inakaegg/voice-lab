@@ -140,6 +140,55 @@ test("portal keeps the SpeakLoop action within the initial viewport", async ({ p
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewportHeight + 1);
 });
 
+test("portal GitHub link reveals its video guidance on hover and keyboard focus", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("mo-speech-theme")) localStorage.setItem("mo-speech-theme", "light");
+  });
+  await page.goto("/");
+  const link = page.getByRole("link", { name: "GitHubリポジトリ" });
+  const tooltip = page.locator("#portal-github-tooltip");
+  const marks = link.locator("img.portal-github-mark");
+
+  await expect(link).toHaveAttribute("href", "https://github.com/inakaegg/voice-lab");
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(marks).toHaveCount(2);
+  expect(await marks.evaluateAll((images) => images.every((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth === 98))).toBe(true);
+  await expect(tooltip).toBeHidden();
+
+  if ((page.viewportSize()?.width || 0) > 820) {
+    await link.hover();
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toHaveText("実際の動作を動画で確認できます");
+    await page.getByRole("heading", { name: /声から/ }).hover();
+    await expect(tooltip).toBeHidden();
+  }
+
+  await link.focus();
+  await expect(link).toBeFocused();
+  await expect(tooltip).toBeVisible();
+  const tooltipBox = await tooltip.boundingBox();
+  expect(tooltipBox).not.toBeNull();
+  expect(tooltipBox!.x).toBeGreaterThanOrEqual(0);
+  expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual((page.viewportSize()?.width || 0) + 1);
+  await assertNoHorizontalOverflow(page);
+  await assertVisibleControlsInsideViewport(page);
+
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    const outputDir = "tmp/playwright/portal-github-link";
+    await mkdir(outputDir, { recursive: true });
+    await expect(tooltip).toHaveCSS("opacity", "1");
+    await page.screenshot({ path: `${outputDir}/${testInfo.project.name}-light-focus.png`, fullPage: true });
+    await page.evaluate(() => localStorage.setItem("mo-speech-theme", "dark"));
+    await page.reload();
+    await link.focus();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toHaveCSS("opacity", "1");
+    await page.screenshot({ path: `${outputDir}/${testInfo.project.name}-dark-focus.png`, fullPage: true });
+  }
+});
+
 test("public theme menu is keyboard reachable and persists dark mode", async ({ page }) => {
   await page.goto("/speakloop");
   const settings = page.getByLabel("配色設定");
