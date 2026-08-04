@@ -1,15 +1,44 @@
 # モデル保存とデプロイ方針
 
-更新日: 2026-07-22
+更新日: 2026-08-04
 
 ## 現在の保存方針
 
 - モデル本体、Hugging Faceキャッシュ、生成音声、アップロード録音はgit管理しない。
-- 最初のMVPでは、大きいモデル重みをDocker imageに焼き込まない。
+- GPU推論用の大きいモデル重みはDocker imageに焼き込まない。
 - モデルの置き場は以下のいずれかにする。
   - リポジトリ外のローカルキャッシュ。
   - RunPod Network Volume。
   - Modal Volume。
+- ZoovoiceのCPU用artifactだけは例外とし、imageへ含める。条件は [Zoovoiceのruntime artifact](#zoovoiceのruntime-artifact) に定める。
+
+## Zoovoiceのruntime artifact
+
+ZoovoiceのGoサービスは、日本語ASRと動物連想のために次の3つを必要とする。いずれもgit管理せず、リポジトリ外へ置く。
+
+| artifact | 内容 | 固定する識別子 |
+| --- | --- | --- |
+| whisper.cppソース | `whisper-cli` をbuildする元 | commit `5250a86fdebac4d51085fcfcd0b315cb0c6b91c9` |
+| ASRモデル | 日本語ASR用 `ggml-small.bin` | SHA-256 `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
+| 連想index | ConceptNet 5.7.0から作った日本語のSQLite | SHA-256 `088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71` |
+
+ローカル実行では、環境変数でこの3つのpathを渡す。Cloud Run向けimageでは、buildが検証済みのディレクトリをnamed contextとして受け取り、imageへ取り込む。取り込み後にimage内でSHA-256を照合し、一致しない場合はbuildを失敗させる。
+
+RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のとおりである。
+
+- Cloud Runは永続volumeを前提にせず、起動ごとのdownloadはcold startを長くする。
+- versionとhashをimageへ固定すると、選ばれる動物の再現性を保てる。
+- smallモデルと1-hop indexはCPU向けであり、GPUモデル候補より小さい。
+
+連想indexの帰属と再配布条件は `services/zoovoice/LICENSE-CONCEPTNET.md` を正とする。同じ内容をimageへ同梱する。
+
+動物レキシコンと動物音はgit管理する。これらはリポジトリ外の3つとは扱いを分ける。imageのbuildは、追跡している `services/zoovoice/assets/animal-lexicon.json` のSHA-256も照合する。同梱する動物音のうちStable Audioで生成した24件は表示義務があり、`services/zoovoice/NOTICE-STABILITY-AI.md` をimageへ同梱する。
+
+このimageのlocal buildと起動は実測済みである。linux/amd64のimageをCPU 2とメモリ2GiBの上限付きでnon-root起動し、image size 1,053,233,511 bytes、compose完了後の観測メモリ359.4 MiB / 2 GiBを得た。ASRモデルと連想indexはnon-rootの実行ユーザーから読める。この実測は動物レキシコン導入前のimageに対するものであり、現在のassetsを含むimageでは再測定していない。
+
+取り込んだ `whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。この確認では、`whisper-cli` がwhisper/ggmlを共有libraryとして要求しないことを確かめた。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
+
+この測定はApple Silicon上のlinux/amd64 emulationで行っている。上記の値はいずれもCloud Run実機では未確認である。測定条件と処理時間の詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
 ## モデル候補の容量目安
 

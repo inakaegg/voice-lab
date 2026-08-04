@@ -1,6 +1,6 @@
 # ローカル実プロバイダ
 
-更新日: 2026-07-30
+更新日: 2026-08-02
 
 ## この文書の役割
 
@@ -12,7 +12,7 @@ SpeakLoopが共有するASR・翻訳・TTS providerの構成を説明する。�
 
 本番相当のSpeakLoop経路はOpenAI bundleを使う。母語録音のASR・お手本文の翻訳・通常音声のTTSを順に実行する。中国語の復唱ASRとSeed-VCはRunPod Serverlessへ分ける。
 
-管理画面のテキストTTSは `TextTtsService` を使う。Google Translate TTS endpointとOpenAI TTSを比較できる。Google側は公式APIではないため安定運用の前提にしない。
+管理画面のテキストTTSは `TextTtsService` を使う。利用できるTTS backendはOpenAI TTSだけである。
 
 管理画面のVC比較は `VoiceConversionService` を使う。`SpeechProviderBundle` のTTSとは独立している。
 
@@ -83,7 +83,6 @@ Seed-VCの配置と参照音声処理は [VOICE_CLONE.md](VOICE_CLONE.md) を参
 | `OPENAI_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI TTSモデル。 |
 | `OPENAI_TTS_VOICE` | `coral` | OpenAI TTS voice。 |
 | `OPENAI_TTS_RESPONSE_FORMAT` | `wav` | OpenAI TTSの出力形式。 |
-| `GOOGLE_TTS_TIMEOUT_SECONDS` | `30` | Google Translate TTSのHTTP timeout。 |
 | `MO_VC_BACKENDS` | `seed-vc,chatterbox,openvoice-v2` | 管理画面に出すVC backend。 |
 | `SEED_VC_PYTHON` | 現在のPython | Seed-VCを実行するPython。 |
 

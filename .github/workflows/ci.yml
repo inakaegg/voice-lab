@@ -27,14 +27,35 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: services/zoovoice/go.mod
+          cache-dependency-path: services/zoovoice/go.mod
+
       - name: Install Python dependencies
         run: python3 -m pip install -e ".[dev]"
 
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
       - name: Python tests
         run: python3 -m pytest
+
+      - name: Zoovoice Go checks
+        working-directory: services/zoovoice
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build the Zoovoice service stage
+        run: docker build --target service-builder --file services/zoovoice/Dockerfile --tag zoovoice-service:ci .
 
       - name: Worker and browser tests
         run: npm test
@@ -90,6 +111,10 @@ jobs:
           --project "${{ matrix.browser }}-desktop"
           --project "${{ matrix.browser }}-intermediate"
           --project "${{ matrix.browser }}-mobile"
+
+      - name: Zoovoice portal tests
+        if: matrix.browser == 'chromium'
+        run: npm run test:e2e:portal-zoovoice
 
       - name: Upload Playwright failure artifacts
         if: failure()

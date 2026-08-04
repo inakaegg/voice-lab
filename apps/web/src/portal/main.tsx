@@ -1,8 +1,9 @@
-import { ArrowUpRight, AudioWaveform, Mic2 } from "lucide-react";
+import { ArrowUpRight, AudioWaveform, Mic2, PawPrint } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, ThemeSettings } from "../shared/components";
+import { fetchZoovoiceConfig } from "../zoovoice/api";
 
 import "./styles.css";
 
@@ -19,9 +20,20 @@ const products = [
     icon: Mic2,
     tone: "portal-product-link-speak",
   },
+  {
+    number: "02",
+    name: "Zoovoice",
+    title: "話すだけで、ぴったりの動物を。",
+    description: "話した内容から動物を選び、声のすき間へ鳴き声を重ねます。",
+    action: "声を変えてみる",
+    href: "/zoovoice",
+    icon: PawPrint,
+    tone: "portal-product-link-zoovoice",
+  },
 ] as const;
 
-function Portal() {
+function Portal({ zoovoiceEnabled }: { zoovoiceEnabled: boolean }) {
+  const visibleProducts = zoovoiceEnabled ? products : products.slice(0, 1);
   return <main className="relative isolate flex min-h-svh min-w-0 flex-col overflow-clip bg-background text-foreground" aria-label="Voice Lab">
     <div className="portal-atmosphere" aria-hidden="true" />
     <header className="relative z-20 mx-auto flex h-16 w-full max-w-[1180px] shrink-0 items-center justify-between px-5 sm:h-[4.5rem] sm:px-8">
@@ -54,13 +66,13 @@ function Portal() {
           <span className="block">ことばの体験を</span>
           <span className="block">つくる。</span>
         </h1>
-        <p className="mt-5 max-w-[31rem] text-[0.95rem] leading-7 text-muted-foreground sm:mt-6 sm:text-base sm:leading-8">自分が言いたいことを、学びたい言語の発音練習へ。話して、聞いて、まねして、比べられます。</p>
+        <p className="mt-5 max-w-[31rem] text-[0.95rem] leading-7 text-muted-foreground sm:mt-6 sm:text-base sm:leading-8">声から広がる、ことばと音の体験。話すことを入り口に、Voice Labのアプリを試せます。</p>
       </header>
 
-      <nav className="min-w-0" aria-label="アプリを選ぶ">
+      <nav className="min-w-0" aria-label="アプリを選ぶ" data-zoovoice-state={zoovoiceEnabled ? "shown" : "hidden"}>
         <Card className="gap-0 overflow-hidden rounded-[1.75rem] border-border/75 bg-card/85 py-0 shadow-[0_28px_80px_rgba(31,38,50,0.11)] backdrop-blur-xl dark:shadow-[0_28px_80px_rgba(0,0,0,0.28)]">
           <CardContent className="p-0">
-            {products.map(({ number, name, title, description, action, href, icon: Icon, tone }) => <a
+            {visibleProducts.map(({ number, name, title, description, action, href, icon: Icon, tone }) => <a
               className={`portal-product-link group relative grid min-h-[10.2rem] min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_2.5rem] items-center gap-3 px-[1.125rem] py-5 text-foreground no-underline transition-colors duration-200 before:absolute before:inset-y-5 before:left-0 before:w-1 before:rounded-r-full before:bg-[var(--product-accent)] hover:bg-muted/45 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/45 motion-reduce:transition-none sm:min-h-[10.6rem] sm:grid-cols-[3rem_minmax(0,1fr)_2.75rem] sm:gap-4 sm:px-6 sm:py-6 ${tone}`}
               href={href}
               key={href}
@@ -81,4 +93,18 @@ function Portal() {
   </main>;
 }
 
-mountPublicPage(<Portal />);
+async function startPortal() {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3_000);
+  let zoovoiceEnabled = false;
+  try {
+    zoovoiceEnabled = (await fetchZoovoiceConfig(controller.signal)).enabled;
+  } catch (_error) {
+    zoovoiceEnabled = false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  mountPublicPage(<Portal zoovoiceEnabled={zoovoiceEnabled} />);
+}
+
+void startPortal();

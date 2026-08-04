@@ -9,60 +9,18 @@ def load_wrangler_config() -> dict:
     return tomllib.loads((ROOT / "wrangler.toml").read_text(encoding="utf-8"))
 
 
-def binding_by_name(bindings: list[dict], binding_name: str) -> dict:
-    return next(binding for binding in bindings if binding["binding"] == binding_name)
-
-
-def test_staging_uses_separate_cloudflare_data_resources() -> None:
+def test_staging_worker_configuration_is_removed() -> None:
     config = load_wrangler_config()
-    staging = config["env"]["staging"]
 
-    effective_name = staging.get("name", f'{config["name"]}-staging')
-    assert effective_name == "voice-lab-staging"
-
-    production_kv = binding_by_name(config["kv_namespaces"], "MO_SPEECH_KV")
-    staging_kv = binding_by_name(staging["kv_namespaces"], "MO_SPEECH_KV")
-    assert staging_kv["id"] != production_kv["id"]
-
-    production_d1 = binding_by_name(config["d1_databases"], "MO_SPEECH_DB")
-    staging_d1 = binding_by_name(staging["d1_databases"], "MO_SPEECH_DB")
-    assert staging_d1["database_id"] != production_d1["database_id"]
-    assert staging_d1["database_name"] != production_d1["database_name"]
-
-    production_r2 = binding_by_name(config["r2_buckets"], "MO_SPEECH_AUDIO_R2")
-    staging_r2 = binding_by_name(staging["r2_buckets"], "MO_SPEECH_AUDIO_R2")
-    assert staging_r2["bucket_name"] != production_r2["bucket_name"]
+    assert "staging" not in config.get("env", {})
+    assert not (ROOT / ".github/workflows/deploy-staging.yml").exists()
 
 
-# PUBLIC_CANONICAL_ORIGINは正規公開originだけへクロールを許可するためproduction専用とする。
-# stagingへ複製するとstagingが検索エンジンへ公開されるため、複製対象から除外する。
-PRODUCTION_ONLY_VARS = {"PUBLIC_CANONICAL_ORIGIN"}
-
-
-def test_staging_repeats_vars_requires_login_and_disables_the_production_cron() -> None:
-    config = load_wrangler_config()
-    staging = config["env"]["staging"]
-
-    for name, value in config["vars"].items():
-        if name in PRODUCTION_ONLY_VARS:
-            continue
-        assert staging["vars"][name] == value
-    assert staging["vars"]["PUBLIC_GOOGLE_AUTH_REQUIRED"] == "1"
-    assert staging["triggers"]["crons"] == []
-
-
-def test_workers_logs_observability_is_enabled_for_production_and_staging() -> None:
+def test_workers_logs_observability_and_canonical_origin_remain_enabled_for_production() -> None:
     config = load_wrangler_config()
 
     assert config["observability"]["enabled"] is True
-    assert config["env"]["staging"]["observability"]["enabled"] is True
-
-
-def test_staging_does_not_define_the_canonical_crawl_origin() -> None:
-    config = load_wrangler_config()
-
     assert config["vars"]["PUBLIC_CANONICAL_ORIGIN"] == "https://voice-lab.inakaegg.workers.dev"
-    assert "PUBLIC_CANONICAL_ORIGIN" not in config["env"]["staging"]["vars"]
 
 
 def test_production_deploy_waits_for_successful_main_ci() -> None:
@@ -98,74 +56,24 @@ def test_production_deploy_skips_a_tested_revision_older_than_main() -> None:
     assert workflow.index(revision_check) < workflow.index(migration)
 
 
-def test_staging_deploy_is_manual_and_targets_only_staging() -> None:
-    workflow = (ROOT / ".github/workflows/deploy-staging.yml").read_text(encoding="utf-8")
+def test_production_deploy_builds_the_frontend_before_wrangler() -> None:
+    workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+    build = "npm run build:web"
+    migration = "npx wrangler d1 migrations apply"
+    deploy = "npx wrangler deploy"
 
-    assert "workflow_dispatch:" in workflow
-    assert "push:" not in workflow
-    assert "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}" in workflow
-    assert "CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" in workflow
-
-    migration = (
-        "npx wrangler d1 migrations apply mo-speech-staging-db "
-        "--env staging --remote"
-    )
-    deploy = "npx wrangler deploy --env staging"
-    assert workflow.index(migration) < workflow.index(deploy)
+    assert workflow.index(build) < workflow.index(migration)
+    assert workflow.index(build) < workflow.index(deploy)
 
 
-def test_deploy_workflows_build_the_frontend_before_wrangler() -> None:
-    workflows = [
-        ROOT / ".github/workflows/deploy.yml",
-        ROOT / ".github/workflows/deploy-staging.yml",
-    ]
+def test_production_deploy_smokes_the_deployed_environment() -> None:
+    workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+    deploy = "npx wrangler deploy"
+    smoke = "python3 scripts/smoke_cloudflare_deployment.py"
 
-    for path in workflows:
-        workflow = path.read_text(encoding="utf-8")
-        build = "npm run build:web"
-        migration = "npx wrangler d1 migrations apply"
-        deploy = "npx wrangler deploy"
-        assert workflow.index(build) < workflow.index(migration)
-        assert workflow.index(build) < workflow.index(deploy)
-
-
-def test_deploy_workflows_smoke_the_deployed_environment() -> None:
-    cases = [
-        (
-            ROOT / ".github/workflows/deploy.yml",
-            "https://voice-lab.inakaegg.workers.dev",
-        ),
-        (
-            ROOT / ".github/workflows/deploy-staging.yml",
-            "https://voice-lab-staging.inakaegg.workers.dev",
-        ),
-    ]
-
-    for path, base_url in cases:
-        workflow = path.read_text(encoding="utf-8")
-        deploy = "npx wrangler deploy"
-        smoke = "python3 scripts/smoke_cloudflare_deployment.py"
-        assert workflow.index(deploy) < workflow.index(smoke)
-        assert f"--base-url {base_url}" in workflow
+    assert workflow.index(deploy) < workflow.index(smoke)
+    assert "--base-url https://voice-lab.inakaegg.workers.dev" in workflow
 
 
 def test_cloudflare_deployment_smoke_script_exists() -> None:
     assert (ROOT / "scripts/smoke_cloudflare_deployment.py").is_file()
-
-
-def test_docs_record_the_deployed_staging_worker_and_secret_status() -> None:
-    cloudflare = (ROOT / "docs/deployment/CLOUDFLARE.md").read_text(encoding="utf-8")
-
-    assert "staging Workerは配備済み" in cloudflare
-    assert "stagingの必須Worker secretは登録済み" in cloudflare
-    assert "Googleログインの実操作確認は未実施" in cloudflare
-    assert "2026-07-22（米国太平洋時間）に初回deploy済み" in cloudflare
-    assert "2026-07-23T04:38:20Z" in cloudflare
-    assert (
-        "残るstaging確認は次の順で行う。\n\n"
-        "1. Google OAuth clientへstagingのリダイレクトURIを追加する。"
-    ) in cloudflare
-    assert "staging Worker secretsを登録する" not in cloudflare
-    assert "OPENAI_API_KEY" in cloudflare
-    assert "PUBLIC_SESSION_SECRET" in cloudflare
-    assert "staging Workerは未配備" not in cloudflare

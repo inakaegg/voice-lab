@@ -132,11 +132,13 @@ test("SpeakLoop shows own-voice details from the control hover and focus without
 
 test("portal keeps the SpeakLoop action within the initial viewport", async ({ page }) => {
   await page.goto("/");
+  await expect(page.getByRole("navigation", { name: "アプリを選ぶ" })).toHaveAttribute("data-zoovoice-state", "hidden");
   const viewportHeight = await page.evaluate(() => innerHeight);
   const box = await page.getByText("練習をはじめる", { exact: false }).first().boundingBox();
   expect(box).not.toBeNull();
   expect((box?.y || 0) + (box?.height || 0)).toBeLessThanOrEqual(viewportHeight + 1);
   await expect(page.getByText("SkitVoice", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Zoovoice", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewportHeight + 1);
 });
 
