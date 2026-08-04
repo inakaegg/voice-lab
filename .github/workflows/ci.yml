@@ -54,8 +54,8 @@ jobs:
           go vet ./...
           go test ./...
 
-      - name: Build the Zoovoice Cloud Run image
-        run: docker build --file services/zoovoice/Dockerfile --tag zoovoice:ci .
+      - name: Build the Zoovoice service stage
+        run: docker build --target service-builder --file services/zoovoice/Dockerfile --tag zoovoice-service:ci .
 
       - name: Worker and browser tests
         run: npm test

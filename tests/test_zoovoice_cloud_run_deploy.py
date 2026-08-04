@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/deploy_zoovoice_cloud_run.sh"
 DOCKERFILE = ROOT / "services/zoovoice/Dockerfile"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 WHISPER_COMMIT = "5250a86fdebac4d51085fcfcd0b315cb0c6b91c9"
 MODEL_SHA256 = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
 INDEX_SHA256 = "088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71"
@@ -342,6 +343,13 @@ def test_whisper_builder_supplies_version_without_copying_git_history() -> None:
     assert "-DBUILD_SHARED_LIBS=OFF" in dockerfile
     assert "-DGGML_BUILD_NUMBER=" in dockerfile
     assert "-DGGML_BUILD_COMMIT=$WHISPER_SOURCE_COMMIT" in dockerfile
+
+
+def test_ci_builds_the_repository_owned_service_stage_without_runtime_contexts() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "Build the Zoovoice service stage" in workflow
+    assert "docker build --target service-builder" in workflow
 
 
 def test_runtime_artifacts_are_readable_by_the_nonroot_user() -> None:
