@@ -112,6 +112,79 @@ html[data-theme="dark"] .portal-product-link-zoovoice {
   z-index: 30;
 }
 
+.portal-github-link {
+  align-items: center;
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 8px 28px rgb(31 38 50 / 0.08);
+  color: var(--foreground);
+  display: flex;
+  height: 40px;
+  justify-content: center;
+  position: relative;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+  width: 40px;
+}
+
+.portal-github-link:hover {
+  background: var(--card);
+  border-color: color-mix(in oklab, var(--foreground) 24%, var(--border));
+  transform: translateY(-1px);
+}
+
+.portal-github-link:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--ring) 42%, transparent);
+  outline-offset: 3px;
+}
+
+.portal-github-mark {
+  display: block;
+  height: 19px;
+  width: auto;
+}
+
+.portal-github-mark-white {
+  display: none;
+}
+
+html[data-theme="dark"] .portal-github-mark-black {
+  display: none;
+}
+
+html[data-theme="dark"] .portal-github-mark-white {
+  display: block;
+}
+
+.portal-github-tooltip {
+  background: var(--foreground);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgb(20 26 38 / 0.2);
+  color: var(--background);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.45;
+  max-width: calc(100vw - 2.5rem);
+  opacity: 0;
+  padding: 0.5rem 0.7rem;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.6rem);
+  transform: translateY(-3px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 40;
+}
+
+.portal-github-link:hover .portal-github-tooltip,
+.portal-github-link:focus-visible .portal-github-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
 .portal-body .react-theme-settings summary {
   align-items: center;
   background: color-mix(in oklab, var(--card) 92%, transparent);

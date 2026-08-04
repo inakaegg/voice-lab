@@ -335,12 +335,34 @@ async function submitPracticeRecording(blob, kind) {
       setBusy(false, "");
       throw new Error("お手本の解析用音声が見つかりません。もう一度お手本を作ってください。");
     }
+    renderPracticeJobStatus({
+      status: "running",
+      current_stage: {
+        stage: "transcribing_attempt",
+        label: "録音を確認しています",
+      },
+      metrics: {},
+    });
     form.append(
       "model_audio",
       currentModelAsrAudioBlob,
       `model.${extensionForMimeType(currentModelAsrAudioBlob.type)}`,
     );
-    const submitted = await postPracticeForm("/api/practice/attempt-jobs", form);
+    let submitted;
+    try {
+      submitted = await postPracticeForm("/api/practice/attempt-jobs", form);
+      const submittedStatus = String(submitted?.status || "");
+      const activeSubmission = submittedStatus === "queued" || submittedStatus === "running";
+      if (
+        !["queued", "running", "succeeded", "failed"].includes(submittedStatus) ||
+        (activeSubmission && !submitted?.job_id)
+      ) {
+        throw new Error("比較結果を作成できませんでした。もう一度お試しください。");
+      }
+    } catch (error) {
+      clearPracticeJobStatus();
+      throw error;
+    }
     renderPracticeJobStatus(submitted);
     progress.hidden = true;
     setStatus("");
@@ -2009,9 +2031,27 @@ function renderRecognizedDiff(payload) {
   );
   const grid = document.createElement("span");
   grid.className = "practice-diff-grid";
+  const targetLanguage = payload.target_language || selectedTargetLanguage;
+  grid.dataset.language = targetLanguage;
   const heardForAccessibility = cells.map((cell) => cell.heard).join("");
   grid.setAttribute("aria-label", `聞こえた言葉: ${displayChineseText(heardForAccessibility || "聞き取れませんでした")}`);
-  cells.forEach((cell) => grid.append(renderPracticeDiffCell(cell)));
+  if (targetLanguage !== "zh-CN") {
+    cells.forEach((cell) => grid.append(renderPracticeDiffCell(cell)));
+    recognizedText.replaceChildren(grid);
+    return;
+  }
+  playbackContract.groupPracticeDiffCellsByPhrase(cells, {
+    targetText: target,
+    alignment: currentAttemptComparisonAlignment,
+  }).forEach((group) => {
+    const phrase = document.createElement("span");
+    phrase.className = "practice-diff-phrase";
+    if (Number.isInteger(group.phraseIndex)) {
+      phrase.dataset.phraseIndex = String(group.phraseIndex);
+    }
+    group.cells.forEach((cell) => phrase.append(renderPracticeDiffCell(cell)));
+    grid.append(phrase);
+  });
   recognizedText.replaceChildren(grid);
 }
 

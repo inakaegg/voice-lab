@@ -92,8 +92,14 @@ test("Playwright layout tests are wired into npm and CI", () => {
   assert.ok(pkg.devDependencies?.["@playwright/test"]);
   assert.equal(pkg.scripts?.["test:e2e"], "playwright test");
   assert.match(ci, /ui-e2e:/);
-  assert.match(ci, /playwright install --with-deps chromium/);
-  assert.match(ci, /npm run test:e2e/);
+  assert.match(ci, /browser: \[chromium, webkit, firefox\]/);
+  assert.match(ci, /playwright install --with-deps \$\{\{ matrix\.browser \}\}/);
+  for (const viewport of ["desktop", "intermediate", "mobile"]) {
+    assert.ok(ci.includes(`--project "\${{ matrix.browser }}-${viewport}"`));
+  }
+  assert.match(ci, /playwright-ui-failure-\$\{\{ matrix\.browser \}\}/);
+  assert.match(ci, /ui-e2e-required:\s+name: ui-e2e\s+needs: ui-e2e\s+if: always\(\)/);
+  assert.match(ci, /UI_E2E_RESULT: \$\{\{ needs\.ui-e2e\.result \}\}/);
   assert.match(ci, /pip wheel \. --no-deps/);
   assert.match(ci, /scripts\/verify_wheel_assets\.py/);
 });
