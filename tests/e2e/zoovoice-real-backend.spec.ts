@@ -29,19 +29,14 @@ test("MediaRecorder output can be composed through local Wrangler and the real G
   await expect(page.getByText("REC", { exact: true })).toBeVisible();
   await page.waitForTimeout(4_900);
   await page.getByRole("button", { name: "録音を止める" }).click();
-  await expect(page.getByText("録音できました。不正利用防止の確認後に生成できます。")).toBeVisible();
-
-  await page.getByRole("button", { name: "生成する" }).click();
-
-  await expect(page.getByText("できあがりました。再生して確認できます。")).toBeVisible({
+  await expect(page.getByText("声を聞き取り、動物を連想して合成しています。")).toBeVisible();
+  await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible({
     timeout: 90_000,
   });
   await expect(page.getByText("選ばれた動物", { exact: true })).toBeVisible();
   await expect(page.getByText("聞き取った言葉", { exact: true })).toBeVisible();
   await expect(page.getByText("根拠語", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "結果を再生" }).click();
-  await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
-  await page.getByRole("button", { name: "結果を一時停止" }).click();
+  await expect(page.getByRole("button", { name: /結果を(再生|一時停止)/ })).toBeVisible();
   const downloadLink = page.getByRole("link", { name: "WAVを保存" });
   await expect(downloadLink).toHaveAttribute(
     "download",

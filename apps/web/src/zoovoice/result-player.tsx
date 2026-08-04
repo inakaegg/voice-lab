@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 export function ResultPlayer({
   source,
   fallbackDuration,
+  autoPlay = false,
 }: {
   source: string;
   fallbackDuration: number;
+  autoPlay?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -17,13 +19,20 @@ export function ResultPlayer({
     setPlaying(false);
     setCurrentTime(0);
     setDuration(fallbackDuration);
-  }, [fallbackDuration, source]);
+    if (autoPlay && audioRef.current) {
+      void audioRef.current.play().catch(() => {
+        setPlaying(false);
+      });
+    }
+  }, [autoPlay, fallbackDuration, source]);
 
   const toggle = async () => {
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
-      await audio.play();
+      await audio.play().catch(() => {
+        setPlaying(false);
+      });
     } else {
       audio.pause();
     }

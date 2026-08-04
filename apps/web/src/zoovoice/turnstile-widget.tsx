@@ -23,21 +23,33 @@ export function TurnstileWidget({
   siteKey,
   resetVersion,
   onToken,
+  onUnavailable,
+  onInteractionChange,
 }: {
   siteKey: string;
   resetVersion: number;
   onToken: (token: string) => void;
+  onUnavailable: (message: string) => void;
+  onInteractionChange: (interactive: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<TurnstileWidgetId | null>(null);
   const previousResetVersion = useRef(resetVersion);
+  const onTokenRef = useRef(onToken);
+  const onUnavailableRef = useRef(onUnavailable);
+  const onInteractionChangeRef = useRef(onInteractionChange);
   const [status, setStatus] = useState("不正利用防止の確認を待っています。");
+  onTokenRef.current = onToken;
+  onUnavailableRef.current = onUnavailable;
+  onInteractionChangeRef.current = onInteractionChange;
 
   useEffect(() => {
     let active = true;
     if (!siteKey) {
-      setStatus("不正利用防止の設定を確認できませんでした。");
-      onToken("");
+      const message = "不正利用防止の確認を準備できませんでした。ページを再読み込みしてください。";
+      setStatus(message);
+      onTokenRef.current("");
+      onUnavailableRef.current(message);
       return undefined;
     }
     void loadTurnstile()
@@ -47,27 +59,43 @@ export function TurnstileWidget({
           sitekey: siteKey,
           action: "zoovoice-compose",
           theme: "auto",
+          retry: "auto",
+          "refresh-expired": "auto",
+          "refresh-timeout": "auto",
           callback: (token: string) => {
             if (!active) return;
-            onToken(token);
+            onTokenRef.current(token);
+            onInteractionChangeRef.current(false);
             setStatus("不正利用防止の確認が完了しました。");
           },
           "expired-callback": () => {
             if (!active) return;
-            onToken("");
-            setStatus("確認の有効期限が切れました。もう一度確認してください。");
+            onTokenRef.current("");
+            setStatus("確認の有効期限が切れました。自動で更新しています。");
           },
           "error-callback": () => {
             if (!active) return;
-            onToken("");
-            setStatus("不正利用防止の確認を完了できませんでした。");
+            onTokenRef.current("");
+            setStatus("不正利用防止の確認を再試行しています。");
+          },
+          "before-interactive-callback": () => {
+            if (!active) return;
+            onInteractionChangeRef.current(true);
+            setStatus("表示されている確認を完了してください。");
+          },
+          "after-interactive-callback": () => {
+            if (!active) return;
+            onInteractionChangeRef.current(false);
+            setStatus("不正利用防止の確認を待っています。");
           },
         });
       })
       .catch(() => {
         if (!active) return;
-        onToken("");
-        setStatus("不正利用防止の確認を読み込めませんでした。");
+        const message = "不正利用防止の確認を準備できませんでした。ページを再読み込みしてください。";
+        onTokenRef.current("");
+        setStatus(message);
+        onUnavailableRef.current(message);
       });
     return () => {
       active = false;
@@ -75,18 +103,19 @@ export function TurnstileWidget({
         window.turnstile.remove(widgetIdRef.current);
       }
       widgetIdRef.current = null;
+      onInteractionChangeRef.current(false);
     };
-  }, [onToken, siteKey]);
+  }, [siteKey]);
 
   useEffect(() => {
     if (previousResetVersion.current === resetVersion) return;
     previousResetVersion.current = resetVersion;
-    onToken("");
+    onTokenRef.current("");
     setStatus("不正利用防止の確認を待っています。");
     if (widgetIdRef.current && window.turnstile) {
       window.turnstile.reset(widgetIdRef.current);
     }
-  }, [onToken, resetVersion]);
+  }, [resetVersion]);
 
   return <div className="grid justify-items-center gap-2 rounded-xl border border-border/80 bg-muted/35 px-3 py-3">
     <div ref={containerRef} aria-label="不正利用防止の確認" className="min-h-[65px] max-w-full" />

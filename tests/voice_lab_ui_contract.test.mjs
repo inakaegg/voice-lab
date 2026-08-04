@@ -17,6 +17,9 @@ const [pkgText, pyproject, api, viteConfig, ci, portalHtml, privacyHtml, speaklo
 ]);
 const portalStyles = await read("apps/web/src/portal/styles.css");
 const portalMain = await read("apps/web/src/portal/main.tsx");
+const zoovoiceMain = await read("apps/web/src/zoovoice/main.tsx");
+const zoovoiceOrb = await read("apps/web/src/zoovoice/record-orb.tsx");
+const zoovoiceTurnstile = await read("apps/web/src/zoovoice/turnstile-widget.tsx");
 
 test("Voice Lab is the application and package brand without renaming the Python namespace", () => {
   assert.equal(JSON.parse(pkgText).name, "voice-lab");
@@ -118,6 +121,19 @@ test("portal product accents distinguish creation from learning", () => {
       assert.ok(contrastRatio(parseCssColor(foreground), parseCssColor(background)) >= 4.5, `${foreground} on ${background}`);
     }
   }
+});
+
+test("Zoovoice keeps Turnstile mounted and stops recording into automatic compose", () => {
+  assert.match(zoovoiceMain, /config\?\.turnstile_required && <TurnstileWidget/);
+  assert.match(zoovoiceMain, /composeRecording\(attempt\.blob, attempt\.intensity/);
+  assert.match(zoovoiceMain, /state\.phase !== "finalizing"/);
+  assert.match(zoovoiceOrb, /aria-label="録音をキャンセル"/);
+  assert.match(zoovoiceTurnstile, /"refresh-expired": "auto"/);
+  assert.match(zoovoiceTurnstile, /"refresh-timeout": "auto"/);
+  assert.match(zoovoiceTurnstile, /retry: "auto"/);
+  assert.doesNotMatch(zoovoiceMain, />生成する</);
+  assert.doesNotMatch(zoovoiceMain, /録り直す/);
+  assert.doesNotMatch(zoovoiceMain, /styles\.css|record-orb\.css|practice-record-orb/);
 });
 
 function cssColor(css, selector, property) {

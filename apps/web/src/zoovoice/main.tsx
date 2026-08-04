@@ -1,27 +1,55 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Mic2, RotateCcw, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { Sparkles } from "lucide-react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
 import {
   composeRecording,
   fetchZoovoiceConfig,
+  isRetryableZoovoiceError,
   wavBlobFromBase64,
   type ComposeResponse,
   type SelectionStrategy,
   type ZoovoiceConfig,
 } from "./api";
+import { RecordOrb } from "./record-orb";
 import { ResultPlayer } from "./result-player";
-import { initialZoovoiceState, zoovoiceReducer } from "./state";
+import {
+  controlsForZoovoiceState,
+  initialZoovoiceState,
+  isComposeReady,
+  isTurnstileTokenFresh,
+  zoovoiceReducer,
+} from "./state";
 import { TurnstileWidget } from "./turnstile-widget";
 import { useRecorder } from "./use-recorder";
 
 activateCompactLayout();
 
+const minimumRecordingMilliseconds = 500;
+const verificationTimeoutMilliseconds = 30_000;
+const interactiveTimeoutMilliseconds = 120_000;
+
 type ResultState = {
   payload: ComposeResponse;
   url: string;
+};
+
+type RecordingState = {
+  id: number;
+  blob: Blob;
+  intensity: number;
+};
+
+type ComposeAttempt = RecordingState & {
+  attemptId: number;
+  status: "armed" | "sent";
+};
+
+type TurnstileToken = {
+  value: string;
+  issuedAt: number;
 };
 
 function Zoovoice() {
@@ -29,95 +57,268 @@ function Zoovoice() {
   const [intensity, setIntensity] = useState(50);
   const [result, setResult] = useState<ResultState | null>(null);
   const [config, setConfig] = useState<ZoovoiceConfig | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState("");
+  const [recording, setRecording] = useState<RecordingState | null>(null);
+  const [attempt, setAttempt] = useState<ComposeAttempt | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<TurnstileToken>({ value: "", issuedAt: 0 });
   const [turnstileResetVersion, setTurnstileResetVersion] = useState(0);
+  const [turnstileUnavailable, setTurnstileUnavailable] = useState(false);
+  const [turnstileInteractive, setTurnstileInteractive] = useState(false);
+  const [interactionStartedAt, setInteractionStartedAt] = useState(0);
   const recorder = useRecorder();
+  const recordingIdRef = useRef(0);
+  const attemptIdRef = useRef(0);
+  const activeRecordingRef = useRef<{ id: number; intensity: number } | null>(null);
+  const sentAttemptsRef = useRef(new Set<number>());
+  const resetStaleTokensRef = useRef(new Set<string>());
+  const verificationAttemptRef = useRef(0);
+  const verificationRemainingRef = useRef(verificationTimeoutMilliseconds);
+  const verificationSegmentStartedRef = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchZoovoiceConfig(controller.signal)
       .then((loadedConfig) => {
         setConfig(loadedConfig);
-        if (!loadedConfig.enabled) throw new Error("Zoovoiceは現在利用できません。");
+        if (!loadedConfig.enabled) {
+          dispatch({ type: "failed", kind: "setup_failed", message: "Zoovoiceは現在利用できません。" });
+          return;
+        }
         dispatch({ type: "config_loaded" });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        dispatch({ type: "failed", message: messageFromError(error, "Zoovoiceを準備できませんでした。") });
+        dispatch({
+          type: "failed",
+          kind: "setup_failed",
+          message: messageFromError(error, "Zoovoiceを準備できませんでした。"),
+        });
       });
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
-    if (recorder.blob && state.phase === "recording") {
-      dispatch({ type: "recording_stopped", turnstileRequired: config?.turnstile_required === true });
+    if (
+      state.phase === "recording"
+      && activeRecordingRef.current
+      && (recorder.isFinalizing || !recorder.isRecording)
+    ) {
+      dispatch({ type: "recording_stopping" });
     }
-  }, [config?.turnstile_required, recorder.blob, state.phase]);
+  }, [recorder.isFinalizing, recorder.isRecording, state.phase]);
 
-  useEffect(() => () => {
-    if (result) URL.revokeObjectURL(result.url);
-  }, [result]);
+  useEffect(() => {
+    if (!recorder.blob || state.phase !== "finalizing") return;
+    const active = activeRecordingRef.current;
+    if (!active) return;
+    if (recorder.durationMilliseconds < minimumRecordingMilliseconds) {
+      recorder.clear();
+      activeRecordingRef.current = null;
+      setRecording(null);
+      setAttempt(null);
+      dispatch({ type: "recording_too_short" });
+      return;
+    }
+    const nextRecording: RecordingState = {
+      id: active.id,
+      blob: recorder.blob,
+      intensity: active.intensity,
+    };
+    const nextAttempt: ComposeAttempt = {
+      ...nextRecording,
+      attemptId: ++attemptIdRef.current,
+      status: "armed",
+    };
+    activeRecordingRef.current = null;
+    setRecording(nextRecording);
+    setAttempt(nextAttempt);
+    if (!isComposeReady(
+      config?.turnstile_required === true,
+      turnstileToken.value,
+      turnstileToken.issuedAt,
+    )) {
+      dispatch({ type: "verification_waiting" });
+    }
+  }, [
+    config?.turnstile_required,
+    recorder.blob,
+    recorder.clear,
+    recorder.durationMilliseconds,
+    state.phase,
+    turnstileToken,
+  ]);
 
-  const isBusy = state.phase === "processing";
-  const turnstileReady = !config?.turnstile_required || Boolean(turnstileToken);
-  const handleTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
+  useEffect(() => {
+    if (
+      !attempt
+      || attempt.status !== "armed"
+      || config?.turnstile_required !== true
+      || !turnstileToken.value
+      || isTurnstileTokenFresh(turnstileToken.value, turnstileToken.issuedAt)
+      || resetStaleTokensRef.current.has(turnstileToken.value)
+    ) return;
+    resetStaleTokensRef.current.add(turnstileToken.value);
+    setTurnstileToken({ value: "", issuedAt: 0 });
+    setTurnstileResetVersion((current) => current + 1);
+    dispatch({ type: "verification_waiting" });
+  }, [attempt, config?.turnstile_required, turnstileToken]);
+
+  useEffect(() => {
+    if (!attempt || attempt.status !== "armed" || !config) return;
+    if (!isComposeReady(
+      config.turnstile_required,
+      turnstileToken.value,
+      turnstileToken.issuedAt,
+    )) {
+      if (state.phase !== "verifying") dispatch({ type: "verification_waiting" });
+      return;
+    }
+    if (sentAttemptsRef.current.has(attempt.attemptId)) return;
+    sentAttemptsRef.current.add(attempt.attemptId);
+    setAttempt({ ...attempt, status: "sent" });
+    dispatch({ type: "compose_started" });
+
+    void composeRecording(attempt.blob, attempt.intensity, turnstileToken.value)
+      .then((payload) => {
+        const url = URL.createObjectURL(wavBlobFromBase64(payload.audio.base64));
+        setResult({ payload, url });
+        dispatch({
+          type: "compose_succeeded",
+          fallback: payload.meta.selection_strategy === "random_fallback",
+        });
+      })
+      .catch((error: unknown) => {
+        dispatch({
+          type: "failed",
+          kind: isRetryableZoovoiceError(error) ? "compose_retryable" : "compose_terminal",
+          message: messageFromError(error, "音声を生成できませんでした。もう一度お試しください。"),
+        });
+      })
+      .finally(() => {
+        if (config.turnstile_required) {
+          setTurnstileToken({ value: "", issuedAt: 0 });
+          setTurnstileResetVersion((current) => current + 1);
+        }
+      });
+  }, [attempt, config, state.phase, turnstileToken]);
+
+  useEffect(() => {
+    if (state.phase !== "verifying" || !attempt) return undefined;
+    if (verificationAttemptRef.current !== attempt.attemptId) {
+      verificationAttemptRef.current = attempt.attemptId;
+      verificationRemainingRef.current = verificationTimeoutMilliseconds;
+      verificationSegmentStartedRef.current = 0;
+    }
+    const fail = () => {
+      setAttempt(null);
+      dispatch({
+        type: "failed",
+        kind: "verify_timeout",
+        message: "不正利用防止の確認を完了できませんでした。ページを再読み込みするか、もう一度録音してください。",
+      });
+    };
+
+    let timeout: number;
+    if (turnstileInteractive) {
+      const remaining = Math.max(0, interactiveTimeoutMilliseconds - (Date.now() - interactionStartedAt));
+      timeout = window.setTimeout(fail, remaining);
+    } else {
+      verificationSegmentStartedRef.current = Date.now();
+      timeout = window.setTimeout(fail, verificationRemainingRef.current);
+    }
+    return () => {
+      window.clearTimeout(timeout);
+      if (!turnstileInteractive && verificationSegmentStartedRef.current > 0) {
+        verificationRemainingRef.current = Math.max(
+          0,
+          verificationRemainingRef.current - (Date.now() - verificationSegmentStartedRef.current),
+        );
+        verificationSegmentStartedRef.current = 0;
+      }
+    };
+  }, [attempt, interactionStartedAt, state.phase, turnstileInteractive]);
+
+  useEffect(() => {
+    const url = result?.url;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [result?.url]);
+
+  const handleTurnstileToken = useCallback((token: string) => {
+    setTurnstileToken({ value: token, issuedAt: token ? Date.now() : 0 });
+  }, []);
+
+  const handleTurnstileUnavailable = useCallback((message: string) => {
+    setTurnstileUnavailable(true);
+    dispatch({ type: "failed", kind: "setup_failed", message });
+  }, []);
+
+  const handleTurnstileInteraction = useCallback((interactive: boolean) => {
+    setTurnstileInteractive(interactive);
+    setInteractionStartedAt(interactive ? Date.now() : 0);
+  }, []);
 
   const beginOrStopRecording = async () => {
     if (recorder.isRecording) {
-      recorder.stop();
+      if (recorder.stop()) dispatch({ type: "recording_stopping" });
       return;
     }
-    if (result) {
-      URL.revokeObjectURL(result.url);
-      setResult(null);
-    }
-    setTurnstileToken("");
-    setTurnstileResetVersion((current) => current + 1);
+    if (recorder.isStarting || recorder.isFinalizing) return;
+    const id = ++recordingIdRef.current;
+    activeRecordingRef.current = { id, intensity };
     recorder.clear();
+    setRecording(null);
+    setAttempt(null);
+    setResult(null);
+    dispatch({ type: "recording_starting" });
     try {
-      await recorder.start();
-      dispatch({ type: "recording_started" });
+      if (await recorder.start()) dispatch({ type: "recording_started" });
     } catch (error) {
+      activeRecordingRef.current = null;
       dispatch({
         type: "failed",
+        kind: "mic_denied",
         message: error instanceof DOMException && error.name === "NotAllowedError"
           ? "マイクを使用できません。ブラウザの権限を確認してください。"
-          : messageFromError(error, "マイクを使用できません。ブラウザの設定を確認してください。"),
+          : "マイクを使用できません。ブラウザの設定を確認してください。",
       });
     }
   };
 
-  const submit = async () => {
-    if (!recorder.blob) {
-      dispatch({ type: "failed", message: "先に声を録音してください。" });
-      return;
-    }
-    if (config?.turnstile_required && !turnstileToken) {
-      dispatch({ type: "failed", message: "不正利用防止の確認が完了するまでお待ちください。" });
-      return;
-    }
-    dispatch({ type: "compose_started" });
-    try {
-      const payload = await composeRecording(recorder.blob, intensity, turnstileToken);
-      if (result) URL.revokeObjectURL(result.url);
-      const url = URL.createObjectURL(wavBlobFromBase64(payload.audio.base64));
-      setResult({ payload, url });
-      dispatch({
-        type: "compose_succeeded",
-        fallback: payload.meta.selection_strategy === "random_fallback",
-      });
-    } catch (error) {
-      dispatch({
-        type: "failed",
-        message: messageFromError(error, "音声を生成できませんでした。もう一度お試しください。"),
-      });
-    } finally {
-      if (config?.turnstile_required) {
-        setTurnstileToken("");
-        setTurnstileResetVersion((current) => current + 1);
-      }
+  const cancelRecording = () => {
+    if (!recorder.cancel()) return;
+    activeRecordingRef.current = null;
+    setRecording(null);
+    setAttempt(null);
+    recorder.clear();
+    dispatch({ type: "recording_cancelled" });
+  };
+
+  const retryCompose = () => {
+    if (!recording) return;
+    const nextAttempt: ComposeAttempt = {
+      ...recording,
+      intensity,
+      attemptId: ++attemptIdRef.current,
+      status: "armed",
+    };
+    setRecording({ ...recording, intensity });
+    setAttempt(nextAttempt);
+    if (!isComposeReady(
+      config?.turnstile_required === true,
+      turnstileToken.value,
+      turnstileToken.issuedAt,
+    )) {
+      dispatch({ type: "verification_waiting" });
     }
   };
+
+  const controls = controlsForZoovoiceState(state, {
+    configEnabled: config?.enabled === true && !turnstileUnavailable,
+    hasRecording: Boolean(recording),
+  });
+  const orbDisabled = !controls.orbEnabled || recorder.isStarting || recorder.isFinalizing;
+  const isProcessing = state.phase === "processing";
 
   return <PageShell className="zoovoice-shell max-w-[1120px]">
     <ProductHeader product="zoovoice" title="声から動物を連想する" />
@@ -130,43 +331,22 @@ function Zoovoice() {
     </section>
 
     <main data-testid="zoovoice-workspace" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
-      <Card className="min-w-0 gap-0 overflow-hidden rounded-[1.35rem] border-border/80 py-0 shadow-sm">
+      <Card className="min-w-0 gap-0 overflow-visible rounded-[1.35rem] border-border/80 py-0 shadow-sm">
         <CardHeader className="gap-1 border-b border-border/70 px-4 py-3.5 sm:px-5">
           <p className="text-[0.65rem] font-bold uppercase tracking-[0.15em] text-muted-foreground">01 · Record</p>
           <CardTitle className="text-lg tracking-[-0.025em]">声を録音する</CardTitle>
-          <CardDescription className="text-xs leading-5">60秒まで。動物は話した内容から自動で選びます。</CardDescription>
+          <CardDescription className="text-xs leading-5">停止すると自動で生成を開始します。60秒で自動停止した場合も送信します。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3.5 p-4 sm:p-5">
-          <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3">
-            <div className="flex h-16 min-w-0 items-end justify-center gap-1 overflow-hidden rounded-xl border border-border/70 bg-muted/55 px-3 py-2" aria-label="マイク入力レベル">
-              {recorder.levels.map((level, index) => <span
-                key={index}
-                className={`w-1.5 rounded-full transition-[height,background-color] duration-100 ${recorder.isRecording ? "bg-red-500" : "bg-foreground/25"}`}
-                style={{ height: `${Math.round(10 + level * 34)}px` }}
-              />)}
-            </div>
-            <div className="grid justify-items-center gap-1">
-              <button
-                type="button"
-                aria-label={recorder.isRecording ? "録音を止める" : "録音する"}
-                disabled={isBusy || !config?.enabled}
-                onClick={() => void beginOrStopRecording()}
-                className={`inline-flex size-14 items-center justify-center rounded-full border-4 shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-[4px] focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none ${
-                  recorder.isRecording
-                    ? "border-red-100 bg-red-600 text-white dark:border-red-950"
-                    : "border-background bg-foreground text-background ring-1 ring-border"
-                }`}
-              >
-                {recorder.isRecording
-                  ? <span className="size-4 rounded-sm bg-current" aria-hidden="true" />
-                  : <Mic2 className="size-5" strokeWidth={1.9} aria-hidden="true" />}
-              </button>
-              <strong className={recorder.isRecording ? "text-xs text-red-600 dark:text-red-400" : "text-xs text-foreground"}>
-                {recorder.isRecording ? "REC" : recorder.blob ? "録音済み" : "録音する"}
-              </strong>
-              <span className="text-[0.68rem] tabular-nums text-muted-foreground">{formatMilliseconds(recorder.durationMilliseconds)}</span>
-            </div>
-          </div>
+          <RecordOrb
+            disabled={orbDisabled}
+            durationMilliseconds={recorder.durationMilliseconds}
+            isProcessing={isProcessing}
+            isRecording={recorder.isRecording}
+            levels={recorder.levels}
+            onCancel={cancelRecording}
+            onPress={() => void beginOrStopRecording()}
+          />
 
           <label className="grid gap-1.5 text-sm font-bold text-foreground">
             <span className="flex items-center justify-between gap-4"><span>アニマル度</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensity}</output></span>
@@ -176,42 +356,34 @@ function Zoovoice() {
               min="0"
               max="100"
               value={intensity}
-              disabled={isBusy}
+              disabled={!controls.sliderEnabled}
               onChange={(event) => setIntensity(Number(event.currentTarget.value))}
               className="w-full accent-foreground"
             />
-            <span className="flex justify-between text-[0.65rem] font-medium text-muted-foreground"><span>ひかえめ</span><span>にぎやか</span></span>
+            <span className="flex justify-between gap-3 text-[0.65rem] font-medium text-muted-foreground"><span>ひかえめ</span><span>{controls.retryVisible ? "次の再生成にも反映" : "次の録音に反映"}</span><span>にぎやか</span></span>
           </label>
 
-          {recorder.blob && config?.turnstile_required && <TurnstileWidget
+          {config?.turnstile_required && <TurnstileWidget
             siteKey={config.turnstile_site_key}
             resetVersion={turnstileResetVersion}
             onToken={handleTurnstileToken}
+            onUnavailable={handleTurnstileUnavailable}
+            onInteractionChange={handleTurnstileInteraction}
           />}
 
           <div className="grid gap-1.5">
-            <button
+            {controls.retryVisible && <button
               type="button"
-              disabled={!recorder.blob || recorder.isRecording || isBusy || !turnstileReady}
-              onClick={() => void submit()}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-5 py-2.5 text-sm font-bold text-background shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-[4px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none"
+              onClick={retryCompose}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-5 py-2.5 text-sm font-bold text-background shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40 motion-reduce:transition-none"
             >
-              {isBusy
-                ? <><span className="size-4 animate-spin rounded-full border-2 border-background/35 border-t-background motion-reduce:animate-none" aria-hidden="true" />連想・合成中…</>
-                : <><Sparkles className="size-4" aria-hidden="true" />{state.phase === "error" && recorder.blob ? "もう一度生成" : "生成する"}</>}
-            </button>
-            {recorder.blob && !recorder.isRecording && <button
-              type="button"
-              disabled={isBusy}
-              onClick={() => void beginOrStopRecording()}
-              className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-bold text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
-            >
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              録り直す
+              <Sparkles className="size-4" aria-hidden="true" />
+              もう一度生成
             </button>}
             <p
               role="status"
               aria-live="polite"
+              data-testid="zoovoice-status"
               className={`min-h-5 text-center text-xs leading-5 ${
                 state.phase === "error"
                   ? "font-semibold text-red-700 dark:text-red-300"
@@ -237,7 +409,7 @@ function Zoovoice() {
             ? <ResultDetails result={result} />
             : <div className="grid justify-items-center gap-2 text-center text-muted-foreground">
               <Sparkles className="size-7 opacity-45" strokeWidth={1.5} aria-hidden="true" />
-              <p className="max-w-[28rem] text-sm leading-6">録音して生成すると、選ばれた動物と鳴き声入り音声をここに表示します。</p>
+              <p className="max-w-[28rem] text-sm leading-6">録音を止めると、選ばれた動物と鳴き声入り音声をここに表示します。</p>
             </div>}
         </CardContent>
       </Card>
@@ -262,7 +434,7 @@ function ResultDetails({ result }: { result: ResultState }) {
       <dt className="font-semibold text-muted-foreground">選択方式</dt>
       <dd className="min-w-0 break-words text-foreground">{selectionStrategyLabel(meta.selection_strategy)}</dd>
     </dl>
-    <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} />
+    <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} autoPlay />
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
       {meta.insertions.length}か所に「{meta.selected_animal.label_ja}」の鳴き声を追加しました。
     </p>
@@ -275,11 +447,6 @@ function selectionStrategyLabel(strategy: SelectionStrategy): string {
     conceptnet: "言葉の意味のつながり",
     random_fallback: "ランダム選択",
   }[strategy];
-}
-
-function formatMilliseconds(milliseconds: number): string {
-  const seconds = Math.floor(milliseconds / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function messageFromError(error: unknown, fallback: string): string {
