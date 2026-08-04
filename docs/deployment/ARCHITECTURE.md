@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-03
+更新日: 2026-08-04
 
 ## 構成
 
@@ -59,7 +59,7 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` には `ZOOVOICE_ENABLED` を設定していない。
 
-Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は動物名やオノマトペの直接言及を最優先し、次に日本語ConceptNetの1-hop候補を使う。どちらでも決まらない入力はrandom fallbackにする。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
+Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。`direct` は動物名や鳴き声の直接言及、`pun` はaliasが別の語の一部として現れる語呂合わせである。`conceptnet` は形態素候補と隣接する内容語の連接を使う日本語ConceptNetの1-hopである。どの段でも決まらない入力は `random_fallback` にする。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
 
 productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。実keyの発行、Cloud Runへの実deploy、本番有効化は未実施の外部操作である。
 

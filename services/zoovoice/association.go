@@ -22,9 +22,10 @@ type SelectionStrategy string
 
 const (
 	strategyDirect     SelectionStrategy = "direct"
+	strategyPun        SelectionStrategy = "pun"
 	strategyConceptNet SelectionStrategy = "conceptnet"
 	strategyRandom     SelectionStrategy = "random_fallback"
-	fallbackNoMatch                      = "no_direct_or_conceptnet_match"
+	fallbackNoMatch                      = "no_association_match"
 )
 
 type AnimalSelection struct {
@@ -44,10 +45,9 @@ type conceptCandidateStore interface {
 }
 
 type associationEngine struct {
-	aliases                     animaldefs.Catalog
-	store                       conceptCandidateStore
-	tokenizer                   *tokenizer.Tokenizer
-	onomatopoeiaRequiresContext map[string]bool
+	aliases   animaldefs.Catalog
+	store     conceptCandidateStore
+	tokenizer *tokenizer.Tokenizer
 }
 
 type associationTerm struct {
@@ -71,15 +71,6 @@ var relationMultipliers = map[string]float64{
 	"IsA":         0.5,
 }
 
-var soundContextTerms = map[string]struct{}{
-	"鳴く": {}, "鳴る": {}, "鳴らす": {}, "吠える": {}, "叫ぶ": {},
-	"聞こえる": {}, "響く": {}, "声": {}, "音": {}, "鳴き声": {}, "遠吠え": {},
-}
-
-var contextDependentPartsOfSpeech = map[string]struct{}{
-	"助詞": {}, "助動詞": {}, "副詞": {}, "フィラー": {}, "接続詞": {}, "接頭詞": {}, "その他": {},
-}
-
 func newAssociationEngine(aliasesPath string, store conceptCandidateStore) (*associationEngine, error) {
 	aliases, err := animaldefs.Load(aliasesPath)
 	if err != nil {
@@ -92,15 +83,7 @@ func newAssociationEngine(aliasesPath string, store conceptCandidateStore) (*ass
 	if err != nil {
 		return nil, fmt.Errorf("initialize Japanese tokenizer: %w", err)
 	}
-	requiresContext := make(map[string]bool)
-	for _, definitions := range aliases {
-		for _, alias := range definitions.Onomatopoeia {
-			requiresContext[alias] = isContextDependentOnomatopoeia(jaTokenizer, alias)
-		}
-	}
-	return &associationEngine{
-		aliases: aliases, store: store, tokenizer: jaTokenizer, onomatopoeiaRequiresContext: requiresContext,
-	}, nil
+	return &associationEngine{aliases: aliases, store: store, tokenizer: jaTokenizer}, nil
 }
 
 func (engine *associationEngine) Select(
@@ -129,8 +112,8 @@ func (engine *associationEngine) Select(
 		available[animal.ID] = animal
 	}
 	terms := tokenizeAssociationTermsWith(engine.tokenizer, transcript)
-	if direct, ok := engine.selectDirect(transcript, terms, available); ok {
-		return direct, nil
+	if literal, ok := engine.selectLiteral(transcript, available); ok {
+		return literal, nil
 	}
 
 	queryTerms := make([]string, 0, len(terms))
@@ -161,51 +144,60 @@ func (engine *associationEngine) Select(
 	}, nil
 }
 
-func (engine *associationEngine) selectDirect(
+func (engine *associationEngine) selectLiteral(
 	transcript string,
-	terms []associationTerm,
 	available map[string]availableAnimal,
 ) (AnimalSelection, bool) {
-	type directMatch struct {
+	type literalMatch struct {
 		position int
 		alias    string
 		animal   availableAnimal
+		strategy SelectionStrategy
 	}
-	matches := make([]directMatch, 0)
+	matches := make([]literalMatch, 0)
 	tokenSpans := transcriptTokenSpansFor(engine.tokenizer, transcript)
 	tokenBoundaries := tokenBoundaryPositions(tokenSpans, len(transcript))
-	hasSoundContext := containsSoundContext(terms)
 	for animalID, aliases := range engine.aliases {
 		animal, ok := available[animalID]
 		if !ok {
 			continue
 		}
 		for _, alias := range aliases.Terms {
-			if position, exists := wholeAnimalTermAliasPosition(
-				transcript,
-				alias,
-				tokenBoundaries,
-				tokenSpans,
-			); exists {
-				matches = append(matches, directMatch{position: position, alias: alias, animal: animal})
+			for _, position := range wholeTokenAliasPositions(transcript, alias, tokenBoundaries) {
+				end := position + len(alias)
+				firstMatched, lastMatched, exists := matchingTokenRange(position, end, tokenSpans)
+				if !exists || tokenRangeContainsParticle(firstMatched, lastMatched, tokenSpans) {
+					continue
+				}
+				matches = append(matches, literalMatch{
+					position: position,
+					alias:    alias,
+					animal:   animal,
+					strategy: classifyTermLiteral(alias, firstMatched, lastMatched, tokenSpans),
+				})
 			}
 		}
 		for _, alias := range aliases.Onomatopoeia {
-			position, exists := wholeTokenAliasPosition(transcript, alias, tokenBoundaries)
-			if !exists {
-				continue
+			for _, position := range wholeTokenAliasPositions(transcript, alias, tokenBoundaries) {
+				if _, _, exists := matchingTokenRange(position, position+len(alias), tokenSpans); !exists {
+					continue
+				}
+				matches = append(matches, literalMatch{
+					position: position,
+					alias:    alias,
+					animal:   animal,
+					strategy: strategyDirect,
+				})
 			}
-			if engine.onomatopoeiaRequiresContext[alias] &&
-				!hasSoundContext && !isStandaloneOnomatopoeia(transcript, alias) {
-				continue
-			}
-			matches = append(matches, directMatch{position: position, alias: alias, animal: animal})
 		}
 	}
 	if len(matches) == 0 {
 		return AnimalSelection{}, false
 	}
 	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].strategy != matches[j].strategy {
+			return matches[i].strategy == strategyDirect
+		}
 		if matches[i].position != matches[j].position {
 			return matches[i].position < matches[j].position
 		}
@@ -219,7 +211,7 @@ func (engine *associationEngine) selectDirect(
 		Species:      match.animal.ID,
 		LabelJA:      match.animal.LabelJA,
 		EvidenceTerm: match.alias,
-		Strategy:     strategyDirect,
+		Strategy:     match.strategy,
 	}, true
 }
 
@@ -255,40 +247,33 @@ func tokenBoundaryPositions(spans []transcriptTokenSpan, transcriptLength int) m
 	return boundaries
 }
 
-func wholeAnimalTermAliasPosition(
-	transcript string,
-	alias string,
-	boundaries map[int]bool,
-	spans []transcriptTokenSpan,
-) (int, bool) {
+func wholeTokenAliasPositions(transcript, alias string, boundaries map[int]bool) []int {
+	positions := make([]int, 0)
 	for offset := 0; offset <= len(transcript)-len(alias); {
 		relative := strings.Index(transcript[offset:], alias)
 		if relative < 0 {
-			return 0, false
+			break
 		}
 		position := offset + relative
 		end := position + len(alias)
-		if boundaries[position] && boundaries[end] &&
-			tokenRangeIsAnimalTerm(transcript, position, end, spans) {
-			return position, true
+		if boundaries[position] && boundaries[end] {
+			positions = append(positions, position)
 		}
 		_, size := utf8.DecodeRuneInString(transcript[position:])
 		if size == 0 {
-			return 0, false
+			break
 		}
 		offset = position + size
 	}
-	return 0, false
+	return positions
 }
 
-func tokenRangeIsAnimalTerm(
-	transcript string,
+func matchingTokenRange(
 	start int,
 	end int,
 	spans []transcriptTokenSpan,
-) bool {
+) (int, int, bool) {
 	cursor := start
-	allNouns := true
 	firstMatched := -1
 	lastMatched := -1
 	for index, span := range spans {
@@ -296,51 +281,57 @@ func tokenRangeIsAnimalTerm(
 			continue
 		}
 		if span.start != cursor || span.end > end {
-			return false
+			return 0, 0, false
 		}
 		if firstMatched < 0 {
 			firstMatched = index
 		}
 		lastMatched = index
-		if span.primaryPOS != "名詞" {
-			allNouns = false
-		}
 		cursor = span.end
 	}
 	if cursor != end || firstMatched < 0 {
-		return false
+		return 0, 0, false
 	}
+	return firstMatched, lastMatched, true
+}
 
-	term := transcript[start:end]
-	hiraganaTerm := isHiraganaOnly(term)
-	if firstMatched > 0 {
-		previous := spans[firstMatched-1]
-		if previous.end == start && previous.primaryPOS == "名詞" {
-			return false
+func tokenRangeContainsParticle(firstMatched, lastMatched int, spans []transcriptTokenSpan) bool {
+	for index := firstMatched; index <= lastMatched; index++ {
+		if spans[index].primaryPOS == "助詞" || spans[index].primaryPOS == "助動詞" {
+			return true
 		}
 	}
-	if lastMatched+1 < len(spans) {
-		next := spans[lastMatched+1]
-		if next.start == end && next.primaryPOS == "名詞" {
-			return false
+	return false
+}
+
+func classifyTermLiteral(
+	alias string,
+	firstMatched int,
+	lastMatched int,
+	spans []transcriptTokenSpan,
+) SelectionStrategy {
+	allNouns := tokenRangeIsAllNouns(firstMatched, lastMatched, spans)
+	if containsHanOrKatakana(alias) && allNouns {
+		return strategyDirect
+	}
+	if isHiraganaOnly(alias) {
+		if isClauseInitialHiraganaVerb(firstMatched, lastMatched, spans) {
+			return strategyDirect
+		}
+		if hasAdjacentContentToken(firstMatched, lastMatched, spans) {
+			return strategyPun
+		}
+		if allNouns {
+			return strategyDirect
 		}
 	}
+	return strategyPun
+}
 
-	if allNouns {
-		if hiraganaTerm && firstMatched > 0 {
-			previous := spans[firstMatched-1]
-			if previous.end == start && predicatePartsOfSpeech[previous.primaryPOS] {
-				return false
-			}
-		}
-		return true
-	}
-
-	// Kagome parses clause-initial hiragana animal names such as かえるが as
-	// verbs. Permit only a narrow subject/object form; particles and general
-	// in-sentence verbs must never become direct animal mentions.
-	if !hiraganaTerm || firstMatched != lastMatched ||
-		spans[firstMatched].primaryPOS != "動詞" || !isClauseStart(firstMatched, start, spans) {
+func isClauseInitialHiraganaVerb(firstMatched, lastMatched int, spans []transcriptTokenSpan) bool {
+	if firstMatched != lastMatched ||
+		spans[firstMatched].primaryPOS != "動詞" ||
+		!isClauseStart(firstMatched, spans[firstMatched].start, spans) {
 		return false
 	}
 	if lastMatched+1 >= len(spans) {
@@ -348,7 +339,7 @@ func tokenRangeIsAnimalTerm(
 	}
 	markerIndex := lastMatched + 1
 	marker := spans[markerIndex]
-	if marker.start != end || !ambiguousVerbNounMarkers[marker.surface] ||
+	if marker.start != spans[lastMatched].end || !ambiguousVerbNounMarkers[marker.surface] ||
 		markerIndex+1 >= len(spans) {
 		return false
 	}
@@ -358,8 +349,33 @@ func tokenRangeIsAnimalTerm(
 
 var ambiguousVerbNounMarkers = map[string]bool{"が": true, "は": true, "を": true}
 
-var predicatePartsOfSpeech = map[string]bool{
-	"動詞": true, "形容詞": true, "助動詞": true,
+var contentPartsOfSpeech = map[string]bool{
+	"名詞": true, "動詞": true, "形容詞": true,
+}
+
+func hasAdjacentContentToken(firstMatched, lastMatched int, spans []transcriptTokenSpan) bool {
+	if firstMatched > 0 {
+		previous := spans[firstMatched-1]
+		if previous.end == spans[firstMatched].start && contentPartsOfSpeech[previous.primaryPOS] {
+			return true
+		}
+	}
+	if lastMatched+1 < len(spans) {
+		next := spans[lastMatched+1]
+		if next.start == spans[lastMatched].end && contentPartsOfSpeech[next.primaryPOS] {
+			return true
+		}
+	}
+	return false
+}
+
+func tokenRangeIsAllNouns(firstMatched, lastMatched int, spans []transcriptTokenSpan) bool {
+	for index := firstMatched; index <= lastMatched; index++ {
+		if spans[index].primaryPOS != "名詞" {
+			return false
+		}
+	}
+	return true
 }
 
 func isClauseStart(firstMatched, start int, spans []transcriptTokenSpan) bool {
@@ -385,55 +401,13 @@ func isHiraganaOnly(text string) bool {
 	return true
 }
 
-func wholeTokenAliasPosition(transcript, alias string, boundaries map[int]bool) (int, bool) {
-	for offset := 0; offset <= len(transcript)-len(alias); {
-		relative := strings.Index(transcript[offset:], alias)
-		if relative < 0 {
-			return 0, false
-		}
-		position := offset + relative
-		if boundaries[position] && boundaries[position+len(alias)] {
-			return position, true
-		}
-		_, size := utf8.DecodeRuneInString(transcript[position:])
-		if size == 0 {
-			return 0, false
-		}
-		offset = position + size
-	}
-	return 0, false
-}
-
-func isContextDependentOnomatopoeia(jaTokenizer *tokenizer.Tokenizer, alias string) bool {
-	for _, token := range jaTokenizer.Tokenize(alias) {
-		if token.Class == tokenizer.DUMMY {
-			continue
-		}
-		pos := token.POS()
-		if len(pos) == 0 {
-			return true
-		}
-		if _, dependent := contextDependentPartsOfSpeech[pos[0]]; dependent {
+func containsHanOrKatakana(text string) bool {
+	for _, character := range text {
+		if unicode.In(character, unicode.Han, unicode.Katakana) {
 			return true
 		}
 	}
 	return false
-}
-
-func containsSoundContext(terms []associationTerm) bool {
-	for _, term := range terms {
-		if _, exists := soundContextTerms[term.Text]; exists {
-			return true
-		}
-	}
-	return false
-}
-
-func isStandaloneOnomatopoeia(transcript, alias string) bool {
-	trimmed := strings.TrimFunc(transcript, func(character rune) bool {
-		return unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character)
-	})
-	return trimmed == alias
 }
 
 func tokenizeAssociationTerms(transcript string) []associationTerm {
@@ -448,6 +422,7 @@ func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript s
 	tokens := jaTokenizer.Tokenize(transcript)
 	type contentToken struct {
 		position int
+		end      int
 		forms    []string
 	}
 	content := make([]contentToken, 0, len(tokens))
@@ -462,7 +437,11 @@ func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript s
 		if reading, ok := token.Reading(); ok && reading != "" && reading != "*" {
 			forms = append(forms, reading)
 		}
-		content = append(content, contentToken{position: token.Position, forms: uniqueStrings(forms)})
+		content = append(content, contentToken{
+			position: token.Position,
+			end:      token.Position + len(token.Surface),
+			forms:    uniqueStrings(forms),
+		})
 	}
 
 	terms := make([]associationTerm, 0, len(content)*6)
@@ -481,10 +460,17 @@ func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript s
 		}
 		for length := 2; length <= 3 && index+length <= len(content); length++ {
 			var compound strings.Builder
+			contiguous := true
 			for offset := 0; offset < length; offset++ {
+				if offset > 0 && content[index+offset-1].end != content[index+offset].position {
+					contiguous = false
+					break
+				}
 				compound.WriteString(content[index+offset].forms[0])
 			}
-			add(compound.String(), token.position)
+			if contiguous {
+				add(compound.String(), token.position)
+			}
 		}
 	}
 	return terms

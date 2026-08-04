@@ -167,6 +167,31 @@ test("zoovoice compose sends the current single-use Turnstile token", async () =
   }
 });
 
+test("zoovoice compose preserves pun strategy and its literal evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const strategy: zoovoiceApi.ComposeResponse["meta"]["selection_strategy"] = "pun";
+  globalThis.fetch = async () => Response.json({
+    audio: { format: "wav", base64: "UklGRg==" },
+    meta: {
+      transcript: "ぞうきんを絞る",
+      selected_animal: { id: "elephant", label_ja: "象" },
+      evidence_term: "ぞう",
+      selection_strategy: strategy,
+      fallback_reason: null,
+      insertions: [],
+      input_duration_seconds: 1,
+      output_duration_seconds: 1,
+    },
+  });
+  try {
+    const response = await zoovoiceApi.composeRecording(new Blob(["audio"]), 50);
+    assert.equal(response.meta.selection_strategy, "pun");
+    assert.equal(response.meta.evidence_term, "ぞう");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("zoovoice API errors retain gateway code message and HTTP status", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({

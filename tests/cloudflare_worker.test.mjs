@@ -672,6 +672,31 @@ test("Cloudflare worker rejects malformed successful responses from Zoovoice ori
   assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
 });
 
+test("Cloudflare worker accepts Zoovoice pun metadata with literal evidence", async () => {
+  const punPayload = validZoovoiceOriginResponse();
+  punPayload.meta.selected_animal = { id: "elephant", label_ja: "象" };
+  punPayload.meta.evidence_term = "ぞう";
+  punPayload.meta.selection_strategy = "pun";
+  punPayload.meta.insertions = [{ slot: "opening", species: "elephant", at_seconds: 0 }];
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "http://127.0.0.1:8090/compose") return json(punPayload);
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).meta, punPayload.meta);
+});
+
 test("Cloudflare worker accepts only intensity settings before Turnstile, budget, and origin", async () => {
   for (const settings of [
     {},
@@ -703,6 +728,8 @@ test("Cloudflare worker validates every Zoovoice success metadata field", async 
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: 3 } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selection_strategy: "heuristic" } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, fallback_reason: "unknown" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "pun" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "random_fallback", fallback_reason: "no_direct_or_conceptnet_match" } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, insertions: [{ slot: "middle", species: "cat", at_seconds: 1 }] } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, input_duration_seconds: "1" } },
   ];

@@ -92,7 +92,7 @@ func TestAssociationDirectMentionMustExistLiterallyInTranscript(t *testing.T) {
 	}
 }
 
-func TestAssociationAnimalTermRequiresLiteralContentUsage(t *testing.T) {
+func TestAssociationLiteralTermsUseDirectOrPlayfulStrategy(t *testing.T) {
 	engine := testAssociationEngine(t, fakeCandidateStore{})
 
 	for _, transcript := range []string{
@@ -103,86 +103,88 @@ func TestAssociationAnimalTermRequiresLiteralContentUsage(t *testing.T) {
 		"疲れたかもと感じる",
 		"間に合わないかもと不安になった",
 		"雨かもの日",
-		"増税されるぞう",
-		"元気になるぞうと言った",
-		"家にかえる",
-		"かえるが、今日は予定がある",
-		"うしろから声がした",
-		"うしろを見た",
-		"うしろの席",
-		"ぞうきんを絞る",
+		"モーターが壊れた",
 	} {
 		selection, err := engine.Select(context.Background(), transcript, testAnimals(), rand.New(rand.NewSource(1)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if selection.Strategy == strategyDirect {
-			t.Fatalf("%q selection = %#v, want non-direct fallback", transcript, selection)
+		if selection.Strategy == strategyDirect || selection.Strategy == strategyPun {
+			t.Fatalf("%q selection = %#v, want ConceptNet or random fallback", transcript, selection)
 		}
 	}
 
 	for _, test := range []struct {
-		transcript string
-		animalID   string
+		transcript        string
+		animalID          string
+		evidence          string
+		allowedStrategies []SelectionStrategy
 	}{
-		{transcript: "鴨が池で泳いでいる", animalID: "duck"},
-		{transcript: "かもが池で泳いでいる", animalID: "duck"},
-		{transcript: "象がゆっくり歩く", animalID: "elephant"},
-		{transcript: "ぞうがゆっくり歩く", animalID: "elephant"},
-		{transcript: "昨日猫を見た", animalID: "cat"},
-		{transcript: "今日犬と散歩した", animalID: "dog"},
-		{transcript: "昨日牛を見た", animalID: "cow"},
-		{transcript: "動物園で象さんを見ました", animalID: "elephant"},
-		{transcript: "猫カフェに行った", animalID: "cat"},
-		{transcript: "小さいねこがいる", animalID: "cat"},
-		{transcript: "大きいぞうがいた", animalID: "elephant"},
-		{transcript: "白いやぎがいる", animalID: "goat"},
+		{transcript: "鴨が池で泳いでいる", animalID: "duck", evidence: "鴨", allowedStrategies: []SelectionStrategy{strategyDirect}},
+		{transcript: "かもが池で泳いでいる", animalID: "duck", evidence: "かも", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "象がゆっくり歩く", animalID: "elephant", evidence: "象", allowedStrategies: []SelectionStrategy{strategyDirect}},
+		{transcript: "ぞうがゆっくり歩く", animalID: "elephant", evidence: "ぞう", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "昨日猫を見た", animalID: "cat", evidence: "猫", allowedStrategies: []SelectionStrategy{strategyDirect}},
+		{transcript: "今日犬と散歩した", animalID: "dog", evidence: "犬", allowedStrategies: []SelectionStrategy{strategyDirect}},
+		{transcript: "昨日牛を見た", animalID: "cow", evidence: "牛", allowedStrategies: []SelectionStrategy{strategyDirect}},
+		{transcript: "動物園で象さんを見ました", animalID: "elephant", evidence: "象", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "猫カフェに行った", animalID: "cat", evidence: "猫", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "小さいねこがいる", animalID: "cat", evidence: "ねこ", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "大きいぞうがいた", animalID: "elephant", evidence: "ぞう", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "白いやぎがいる", animalID: "goat", evidence: "やぎ", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "かえるが池で跳ねた", animalID: "frog", evidence: "かえる", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "家にかえる", animalID: "frog", evidence: "かえる", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "かえるが、今日は予定がある", animalID: "frog", evidence: "かえる", allowedStrategies: []SelectionStrategy{strategyDirect, strategyPun}},
+		{transcript: "うしろから声がした", animalID: "cow", evidence: "うし", allowedStrategies: []SelectionStrategy{strategyPun}},
+		{transcript: "ぞうきんを絞る", animalID: "elephant", evidence: "ぞう", allowedStrategies: []SelectionStrategy{strategyPun}},
+		{transcript: "増税されるぞう", animalID: "elephant", evidence: "ぞう", allowedStrategies: []SelectionStrategy{strategyPun}},
 	} {
 		selection, err := engine.Select(context.Background(), test.transcript, testAnimals(), rand.New(rand.NewSource(1)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if selection.Strategy != strategyDirect || selection.Species != test.animalID {
-			t.Fatalf("%q selection = %#v, want direct %s", test.transcript, selection, test.animalID)
+		if !containsStrategy(test.allowedStrategies, selection.Strategy) ||
+			selection.Species != test.animalID || selection.EvidenceTerm != test.evidence {
+			t.Fatalf("%q selection = %#v, want animal=%s evidence=%q strategy in %v", test.transcript, selection, test.animalID, test.evidence, test.allowedStrategies)
 		}
 	}
 }
 
-func TestAssociationOnomatopoeiaRequiresAWholeTokenAndSoundContextWhenAmbiguous(t *testing.T) {
+func TestAssociationOnomatopoeiaUsesLiteralTokenBoundariesWithoutContextGuards(t *testing.T) {
 	engine := testAssociationEngine(t, fakeCandidateStore{})
-	for _, transcript := range []string{
-		"モーターが動いています",
-		"もーちょっと待って",
-		"コロコロを買った",
-		"話がころころ変わる",
-	} {
-		selection, err := engine.Select(context.Background(), transcript, testAnimals(), rand.New(rand.NewSource(1)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if selection.Strategy == strategyDirect {
-			t.Fatalf("%q selection = %#v, want non-direct fallback", transcript, selection)
-		}
-	}
-
 	for _, test := range []struct {
 		transcript string
 		animalID   string
+		evidence   string
 	}{
-		{transcript: "ころころ鳴く虫の声", animalID: "cricket"},
-		{transcript: "にゃー！", animalID: "cat"},
+		{transcript: "もーちょっと待って", animalID: "cow", evidence: "もー"},
+		{transcript: "コロコロを買った", animalID: "cricket", evidence: "コロコロ"},
+		{transcript: "話がころころ変わる", animalID: "cricket", evidence: "ころころ"},
+		{transcript: "ころころ鳴く虫の声", animalID: "cricket", evidence: "ころころ"},
+		{transcript: "にゃー！", animalID: "cat", evidence: "にゃー"},
 	} {
 		selection, err := engine.Select(context.Background(), test.transcript, testAnimals(), rand.New(rand.NewSource(1)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if selection.Strategy != strategyDirect || selection.Species != test.animalID {
+		if selection.Strategy != strategyDirect || selection.Species != test.animalID || selection.EvidenceTerm != test.evidence {
 			t.Fatalf("%q selection = %#v, want direct %s", test.transcript, selection, test.animalID)
 		}
 	}
 }
 
-func TestTokenCandidatesExcludeParticlesAndIncludeFormsAndCompounds(t *testing.T) {
+func TestAssociationDirectOutranksEarlierPun(t *testing.T) {
+	engine := testAssociationEngine(t, fakeCandidateStore{})
+	selection, err := engine.Select(context.Background(), "うしろを見てから犬と歩いた", testAnimals(), rand.New(rand.NewSource(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Strategy != strategyDirect || selection.Species != "dog" || selection.EvidenceTerm != "犬" {
+		t.Fatalf("selection = %#v, want later direct dog to outrank earlier cow pun", selection)
+	}
+}
+
+func TestTokenCandidatesExcludeParticlesAndOnlyJoinAdjacentContentTokens(t *testing.T) {
 	terms := tokenizeAssociationTerms("牧場でミルクをしぼった")
 	texts := make([]string, 0, len(terms))
 	for _, term := range terms {
@@ -193,10 +195,33 @@ func TestTokenCandidatesExcludeParticlesAndIncludeFormsAndCompounds(t *testing.T
 			t.Errorf("excluded token %q appears in %v", excluded, texts)
 		}
 	}
-	for _, required := range []string{"牧場", "ミルク", "しぼる", "牧場ミルク"} {
+	for _, required := range []string{"牧場", "ミルク", "しぼる"} {
 		if !containsString(texts, required) {
 			t.Errorf("required candidate %q missing from %v", required, texts)
 		}
+	}
+	for _, nonAdjacent := range []string{"牧場ミルク", "ミルクしぼっ"} {
+		if containsString(texts, nonAdjacent) {
+			t.Errorf("non-adjacent compound %q appears in %v", nonAdjacent, texts)
+		}
+	}
+
+	separated := tokenizeAssociationTerms("山と羊がいる")
+	separatedTexts := make([]string, 0, len(separated))
+	for _, term := range separated {
+		separatedTexts = append(separatedTexts, term.Text)
+	}
+	if containsString(separatedTexts, "山羊") {
+		t.Fatalf("non-adjacent compound 山羊 appears in %v", separatedTexts)
+	}
+
+	adjacent := tokenizeAssociationTerms("牧場ミルク")
+	adjacentTexts := make([]string, 0, len(adjacent))
+	for _, term := range adjacent {
+		adjacentTexts = append(adjacentTexts, term.Text)
+	}
+	if !containsString(adjacentTexts, "牧場ミルク") {
+		t.Fatalf("adjacent compound 牧場ミルク missing from %v", adjacentTexts)
 	}
 	seen := make(map[string]bool)
 	for _, text := range texts {
@@ -330,6 +355,15 @@ func testAnimals() []availableAnimal {
 }
 
 func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsStrategy(values []SelectionStrategy, target SelectionStrategy) bool {
 	for _, value := range values {
 		if value == target {
 			return true

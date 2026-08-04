@@ -52,7 +52,7 @@ case "${0##*/}:$*" in
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "--output" ]; then
         shift
-        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"evidence_term":"犬","selection_strategy":"direct","fallback_reason":null,"insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' > "$1"
+        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"evidence_term":"犬","selection_strategy":"%s","fallback_reason":null,"insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_SELECTION_STRATEGY:-direct}" > "$1"
       fi
       shift || true
     done
@@ -315,6 +315,23 @@ def test_local_verify_builds_and_smokes_without_gcloud(tmp_path: Path) -> None:
     assert "docker run" in commands
     assert "curl" in commands
     assert "gcloud " not in commands
+    assert "local verification complete" in result.stdout
+
+
+def test_local_verify_accepts_pun_selection_strategy(tmp_path: Path) -> None:
+    command_log = install_recording_fakes(tmp_path)
+    result = run_deploy(
+        {
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "ZOOVOICE_FAKE_COMMAND_LOG": str(command_log),
+            "ZOOVOICE_FAKE_SELECTION_STRATEGY": "pun",
+            "ZOOVOICE_GCP_PROJECT": "example-project",
+            "ZOOVOICE_LOCAL_VERIFY": "1",
+            **valid_artifact_env(tmp_path),
+        }
+    )
+
+    assert result.returncode == 0, result.stderr
     assert "local verification complete" in result.stdout
 
 

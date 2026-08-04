@@ -89,7 +89,7 @@ test("zoovoice explains random fallback without inventing an evidence term", asy
     strategy: "random_fallback",
     selectedAnimal: { id: "frog", label_ja: "カエル" },
     evidenceTerm: null,
-    fallbackReason: "no_direct_or_conceptnet_match",
+    fallbackReason: "no_association_match",
   });
   await page.goto("/zoovoice");
   await recordOnce(page);
@@ -99,6 +99,31 @@ test("zoovoice explains random fallback without inventing an evidence term", asy
   await expect(page.getByText("ランダム選択", { exact: true })).toBeVisible();
   await expect(page.getByText("カエル", { exact: true })).toBeVisible();
   await captureIfRequested(page, testInfo, "fallback-light");
+});
+
+test("zoovoice labels playful literal association without a fallback warning", async ({ page }, testInfo) => {
+  await installZoovoiceApi(page, {
+    transcript: "ぞうきんを絞る",
+    strategy: "pun",
+    selectedAnimal: { id: "elephant", label_ja: "象" },
+    evidenceTerm: "ぞう",
+  });
+  await page.goto("/zoovoice");
+  await recordOnce(page);
+
+  await expect(page.getByText("語呂合わせ", { exact: true })).toBeVisible();
+  await expect(page.getByText("ぞう", { exact: true })).toBeVisible();
+  await expect(page.getByText("象", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("関連する動物が見つからなかったため、ランダムに選びました。")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+  await captureIfRequested(page, testInfo, "pun-success-light");
+
+  await setTheme(page, "暗色");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByText("語呂合わせ", { exact: true })).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+  await captureIfRequested(page, testInfo, "pun-success-dark");
 });
 
 test("zoovoice cancels without compose and the following recording succeeds", async ({ page }) => {
@@ -586,10 +611,10 @@ async function installZoovoiceApi(
     turnstileRequired?: boolean;
     onCompose?: (body: string) => void;
     transcript?: string;
-    strategy?: "direct" | "conceptnet" | "random_fallback";
+    strategy?: "direct" | "pun" | "conceptnet" | "random_fallback";
     selectedAnimal?: { id: string; label_ja: string };
     evidenceTerm?: string | null;
-    fallbackReason?: "no_direct_or_conceptnet_match" | null;
+    fallbackReason?: "no_association_match" | null;
     enabled?: boolean;
     siteKey?: string;
     composeFailures?: Array<{ status: number; code: string; message: string }>;

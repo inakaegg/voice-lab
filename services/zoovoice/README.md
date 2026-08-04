@@ -156,9 +156,9 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 | --- | --- |
 | `transcript` | 日本語ASRの認識本文 |
 | `selected_animal` | 自動で選んだ動物の種IDと日本語ラベル |
-| `evidence_term` | 選択に使った根拠語。random fallbackでは `null` |
-| `selection_strategy` | `direct`・`conceptnet`・`random_fallback` のいずれか |
-| `fallback_reason` | random fallbackのときだけ理由。それ以外は `null` |
+| `evidence_term` | 選択に使った根拠語。`direct`・`pun` では一致したalias、`conceptnet` では概念語、random fallbackでは `null` |
+| `selection_strategy` | `direct`・`pun`・`conceptnet`・`random_fallback` のいずれか |
+| `fallback_reason` | random fallbackのときだけ `no_association_match`。それ以外は `null` |
 | `insertions` | 挿入した鳴き声の位置。`species` は全件同じ動物 |
 
 `insertions` の `slot` は `opening`・`gaps`・`ending` のいずれかです。
@@ -172,10 +172,13 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 連想はASR本文だけを入力にします。
 利用者が動物を選ぶ経路はUIにもAPIにもありません。
 
-1. ASR本文を形態素解析し、表層形・基本形・読みと短い連接語を候補語にする。
-2. 動物名やオノマトペの直接言及があれば、最も前に現れたものを採用する。
-3. 直接言及がなければ、連想indexで候補語の1-hop edgeを引き、関係別の重み付き合計が最大の動物を選ぶ。
-4. どちらでも決まらない場合だけ、利用できる動物からrandomで1種を選ぶ。
+1. ASR本文を形態素解析し、本文の表層でaliasを探す。一致は始まりと終わりがtoken境界にそろう連続token列だけを認め、基本形や読みから一致を作らない。
+2. 動物名aliasの一致は、動物への直接の言及なら `direct` に分類する。
+3. 動物名aliasの一致のうち、別の語句と重なる語呂合わせは `pun` に分類する。「うしろ」の牛、「ぞうきん」の象のような連続token列との一致も意図的に対象にする。
+4. 鳴き声オノマトペaliasの一致は、前後の音の文脈を要求せず `direct` とする。
+5. 一致が複数ある場合は `direct` を `pun` より優先し、同方式では最も前に現れたものを選ぶ。
+6. `direct` と `pun` で決まらなければ、表層形・基本形・読みと隣接する内容語だけの2〜3語連接を候補語にする。連想indexで候補語の1-hop edgeを引き、関係別の重み付き合計が最大の動物を `conceptnet` として選ぶ。
+7. どの段でも決まらない場合だけ、利用できる動物からrandomで1種を選ぶ。
 
 動物名とオノマトペの定義は `assets/association-aliases.json` を正とします。
 選ばれる対象は、音源を持ち `/animals` に載る動物だけです。

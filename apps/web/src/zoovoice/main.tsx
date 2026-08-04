@@ -444,6 +444,7 @@ function ResultDetails({ result }: { result: ResultState }) {
 function selectionStrategyLabel(strategy: SelectionStrategy): string {
   return {
     direct: "動物名・鳴き声の直接言及",
+    pun: "語呂合わせ",
     conceptnet: "言葉の意味のつながり",
     random_fallback: "ランダム選択",
   }[strategy];

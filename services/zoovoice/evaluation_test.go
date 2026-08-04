@@ -16,18 +16,19 @@ import (
 )
 
 type associationFixture struct {
-	ID                string   `json:"id"`
-	Role              string   `json:"role"`
-	Kind              string   `json:"kind"`
-	Input             string   `json:"input"`
-	ExpectedStrategy  string   `json:"expected_strategy"`
-	AcceptableAnimals []string `json:"acceptable_animals"`
+	ID                 string   `json:"id"`
+	Role               string   `json:"role"`
+	Kind               string   `json:"kind"`
+	Input              string   `json:"input"`
+	ExpectedStrategies []string `json:"expected_strategy"`
+	AcceptableAnimals  []string `json:"acceptable_animals"`
+	ExpectedEvidence   *string  `json:"expected_evidence,omitempty"`
 }
 
 func TestPortableAssociationEvaluation(t *testing.T) {
 	store := buildPortableEvaluationIndex(t)
 	defer store.Close()
-	runAssociationEvaluation(t, store, map[string]int{
+	runAssociationEvaluation(t, store, true, map[string]int{
 		"direct": 8, "concept_strategy": 8, "heldout_strategy": 4,
 		"concept_top1": 8, "heldout_top1": 4, "unknown": 5, "homophone": 6,
 		"compound": 2, "boundary": 3,
@@ -48,14 +49,14 @@ func TestFullAssociationEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	runAssociationEvaluation(t, store, map[string]int{
+	runAssociationEvaluation(t, store, false, map[string]int{
 		"direct": 8, "concept_strategy": 6, "heldout_strategy": 3,
 		"concept_top1": 5, "heldout_top1": 3, "unknown": 5, "homophone": 6,
 		"compound": 2, "boundary": 3,
 	})
 }
 
-func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, minimums map[string]int) {
+func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, strictConceptNet bool, minimums map[string]int) {
 	t.Helper()
 	engine, err := newAssociationEngine(filepath.Join("assets", "association-aliases.json"), store)
 	if err != nil {
@@ -67,17 +68,28 @@ func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, minimums 
 	counts := map[string]int{}
 	for _, fixture := range fixtures {
 		selection, selectionErr := engine.Select(context.Background(), fixture.Input, animals, rand.New(rand.NewSource(7)))
+		contractOK := associationFixtureContractMatches(fixture, selection, selectionErr)
+		if (strictConceptNet || fixture.Kind != "conceptnet") && !contractOK {
+			t.Errorf(
+				"%s: selection=%#v error=%v, want strategies=%v animals=%v evidence=%v",
+				fixture.ID,
+				selection,
+				selectionErr,
+				fixture.ExpectedStrategies,
+				fixture.AcceptableAnimals,
+				fixture.ExpectedEvidence,
+			)
+		}
 		switch fixture.Kind {
 		case "boundary":
 			if fixture.ID == "B01" || fixture.ID == "B02" {
-				if selectionErr == nil {
-					t.Errorf("%s: expected empty ASR error", fixture.ID)
+				if contractOK {
+					counts["boundary"]++
 				}
-				counts["boundary"]++
 				continue
 			}
 		case "direct":
-			if selectionErr == nil && string(selection.Strategy) == fixture.ExpectedStrategy && selection.Species == fixture.AcceptableAnimals[0] {
+			if contractOK {
 				counts["direct"]++
 			}
 		case "conceptnet":
@@ -94,19 +106,19 @@ func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, minimums 
 				}
 			}
 		case "unknown":
-			if selectionErr == nil && selection.Strategy == strategyRandom {
+			if contractOK {
 				counts["unknown"]++
 			}
 		case "homophone":
-			if selectionErr == nil && selection.Strategy != strategyDirect {
+			if contractOK {
 				counts["homophone"]++
 			}
 		case "compound":
-			if selectionErr == nil && selection.Strategy != strategyDirect {
+			if contractOK {
 				counts["compound"]++
 			}
 		}
-		if fixture.ID == "B03" && selectionErr == nil && selection.Strategy == strategyRandom {
+		if fixture.ID == "B03" && contractOK {
 			counts["boundary"]++
 		}
 		if selectionErr != nil {
@@ -121,6 +133,29 @@ func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, minimums 
 			t.Errorf("%s = %d, want >= %d (all counts: %#v)", key, counts[key], minimum, counts)
 		}
 	}
+}
+
+func associationFixtureContractMatches(
+	fixture associationFixture,
+	selection AnimalSelection,
+	selectionErr error,
+) bool {
+	if containsString(fixture.ExpectedStrategies, "error") {
+		return selectionErr != nil
+	}
+	if selectionErr != nil || !containsString(fixture.ExpectedStrategies, string(selection.Strategy)) {
+		return false
+	}
+	if len(fixture.AcceptableAnimals) > 0 && !containsString(fixture.AcceptableAnimals, selection.Species) {
+		return false
+	}
+	if fixture.ExpectedEvidence != nil && selection.EvidenceTerm != *fixture.ExpectedEvidence {
+		return false
+	}
+	if selection.Strategy == strategyRandom {
+		return selection.EvidenceTerm == "" && selection.FallbackReason == fallbackNoMatch
+	}
+	return selection.EvidenceTerm != "" && selection.FallbackReason == ""
 }
 
 func buildPortableEvaluationIndex(t *testing.T) *conceptindex.Store {

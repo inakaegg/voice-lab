@@ -245,7 +245,7 @@ if not isinstance(meta.get("transcript"), str) or not meta["transcript"].strip()
     raise SystemExit("invalid local compose transcript")
 if not isinstance(selected.get("id"), str) or not selected["id"]:
     raise SystemExit("invalid local compose selected animal")
-if meta.get("selection_strategy") not in {"direct", "conceptnet", "random_fallback"}:
+if meta.get("selection_strategy") not in {"direct", "pun", "conceptnet", "random_fallback"}:
     raise SystemExit("invalid local compose strategy")
 ' "$temporary_directory/compose.json"
 

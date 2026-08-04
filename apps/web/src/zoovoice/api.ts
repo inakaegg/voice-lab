@@ -1,4 +1,4 @@
-export type SelectionStrategy = "direct" | "conceptnet" | "random_fallback";
+export type SelectionStrategy = "direct" | "pun" | "conceptnet" | "random_fallback";
 
 export type ComposeResponse = {
   audio: {
@@ -13,7 +13,7 @@ export type ComposeResponse = {
     };
     evidence_term: string | null;
     selection_strategy: SelectionStrategy;
-    fallback_reason: "no_direct_or_conceptnet_match" | null;
+    fallback_reason: "no_association_match" | null;
     insertions: Array<{
       slot: "opening" | "gaps" | "ending";
       species: string;

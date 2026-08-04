@@ -178,7 +178,7 @@ function isValidComposeResponse(payload) {
     || !isPlainObject(meta.selected_animal)
     || !isBoundedIdentifier(meta.selected_animal.id, 80)
     || !isBoundedString(meta.selected_animal.label_ja, 1, 80)
-    || !["direct", "conceptnet", "random_fallback"].includes(meta.selection_strategy)
+    || !["direct", "pun", "conceptnet", "random_fallback"].includes(meta.selection_strategy)
     || !Array.isArray(meta.insertions)
     || meta.insertions.length > 10
     || !isPositiveFiniteNumber(meta.input_duration_seconds)
@@ -187,7 +187,7 @@ function isValidComposeResponse(payload) {
   ) return false;
 
   if (meta.selection_strategy === "random_fallback") {
-    if (meta.evidence_term !== null || meta.fallback_reason !== "no_direct_or_conceptnet_match") return false;
+    if (meta.evidence_term !== null || meta.fallback_reason !== "no_association_match") return false;
   } else if (
     !isBoundedString(meta.evidence_term, 1, 200)
     || meta.fallback_reason !== null
