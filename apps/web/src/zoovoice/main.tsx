@@ -414,6 +414,11 @@ function Zoovoice() {
         </CardContent>
       </Card>
     </main>
+    <div className="mx-auto flex w-full max-w-6xl justify-center px-4 pb-2 text-center text-xs font-semibold text-muted-foreground">
+      <a className="rounded-md px-2 py-1 underline decoration-border underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href="https://stability.ai/" rel="noreferrer" target="_blank">
+        Powered by Stability AI
+      </a>
+    </div>
     <PrivacyNotice />
   </PageShell>;
 }

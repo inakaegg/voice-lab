@@ -237,7 +237,7 @@ func TestComposerLogsNeverContainPrivateTextOnFailureTimeoutOrCancel(t *testing.
 
 func repositoryCatalog(t *testing.T) *assetCatalog {
 	t.Helper()
-	catalog, err := loadCatalog("assets/animals.json", "assets/cc0", "", log.New(io.Discard, "", 0))
+	catalog, err := loadCatalog("assets/animal-lexicon.json", "assets")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,23 +1,15 @@
 package main
 
 import (
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/inakaegg/voice-lab/services/zoovoice/internal/animaldefs"
 )
-
-type animalDefinition struct {
-	ID      string        `json:"id"`
-	LabelJA string        `json:"label_ja"`
-	Sources []assetSource `json:"sources"`
-}
-
-type assetSource struct {
-	Dir  string `json:"dir"`
-	File string `json:"file"`
-}
 
 type assetVariant struct {
 	Path string
@@ -34,82 +26,57 @@ type assetCatalog struct {
 	byID    map[string]availableAnimal
 }
 
-func loadCatalog(
-	masterPath string,
-	cc0Dir string,
-	extraDir string,
-	logger *log.Logger,
-) (*assetCatalog, error) {
-	payload, err := os.ReadFile(masterPath)
+func loadCatalog(lexiconPath, assetsRoot string) (*assetCatalog, error) {
+	lexicon, err := animaldefs.Load(lexiconPath)
 	if err != nil {
-		return nil, fmt.Errorf("read animal master: %w", err)
+		return nil, err
 	}
-	var definitions []animalDefinition
-	if err := json.Unmarshal(payload, &definitions); err != nil {
-		return nil, fmt.Errorf("parse animal master: %w", err)
-	}
-
-	extraAvailable := directoryExists(extraDir)
-	if !extraAvailable {
-		logger.Printf("warning: extra assets are unavailable; starting with CC0 assets only")
-	}
-
 	catalog := &assetCatalog{
-		Animals: make([]availableAnimal, 0, len(definitions)),
-		byID:    make(map[string]availableAnimal, len(definitions)),
+		Animals: make([]availableAnimal, 0, len(lexicon)),
+		byID:    make(map[string]availableAnimal, len(lexicon)),
 	}
-	for _, definition := range definitions {
-		if definition.ID == "" || definition.LabelJA == "" {
-			return nil, fmt.Errorf("animal id and label_ja are required")
+	for _, id := range lexicon.IDs() {
+		definition := lexicon[id]
+		if filepath.IsAbs(definition.AudioFile) || filepath.Clean(definition.AudioFile) != definition.AudioFile || definition.AudioFile == "." || definition.AudioFile == ".." || filepath.Dir(definition.AudioFile) == ".." {
+			return nil, fmt.Errorf("animal %q has invalid audio file %q", id, definition.AudioFile)
 		}
-		if _, exists := catalog.byID[definition.ID]; exists {
-			return nil, fmt.Errorf("duplicate animal id %q", definition.ID)
+		path := filepath.Join(assetsRoot, filepath.FromSlash(definition.AudioFile))
+		if !regularFileExists(path) {
+			return nil, fmt.Errorf("animal %q audio is missing: %s", id, definition.AudioFile)
+		}
+		actualSHA, err := fileSHA256(path)
+		if err != nil {
+			return nil, fmt.Errorf("hash animal %q audio: %w", id, err)
+		}
+		if actualSHA != definition.AudioSHA256 {
+			return nil, fmt.Errorf("animal %q audio SHA-256 mismatch", id)
 		}
 		animal := availableAnimal{
-			ID:       definition.ID,
-			LabelJA:  definition.LabelJA,
-			Variants: make([]assetVariant, 0, len(definition.Sources)),
-		}
-		for _, source := range definition.Sources {
-			if filepath.Base(source.File) != source.File || source.File == "." {
-				return nil, fmt.Errorf("animal %q has invalid asset file %q", definition.ID, source.File)
-			}
-			var directory string
-			switch source.Dir {
-			case "cc0":
-				directory = cc0Dir
-			case "extra":
-				if !extraAvailable {
-					continue
-				}
-				directory = extraDir
-			default:
-				return nil, fmt.Errorf("animal %q has invalid asset dir %q", definition.ID, source.Dir)
-			}
-			path := filepath.Join(directory, source.File)
-			if regularFileExists(path) {
-				animal.Variants = append(animal.Variants, assetVariant{Path: path})
-			}
-		}
-		if len(animal.Variants) == 0 {
-			continue
+			ID: id, LabelJA: definition.LabelJA,
+			Variants: []assetVariant{{Path: path}},
 		}
 		catalog.Animals = append(catalog.Animals, animal)
-		catalog.byID[animal.ID] = animal
+		catalog.byID[id] = animal
 	}
-	if len(catalog.Animals) == 0 {
-		return nil, fmt.Errorf("animal catalog has no available audio assets")
+	if err := lexicon.ValidateAvailable(catalog.ids()); err != nil {
+		return nil, err
 	}
 	return catalog, nil
+}
+
+func (catalog *assetCatalog) ids() []string {
+	ids := make([]string, 0, len(catalog.Animals))
+	for _, animal := range catalog.Animals {
+		ids = append(ids, animal.ID)
+	}
+	return ids
 }
 
 func (catalog *assetCatalog) publicAnimals() []AnimalSummary {
 	summaries := make([]AnimalSummary, 0, len(catalog.Animals))
 	for _, animal := range catalog.Animals {
 		summaries = append(summaries, AnimalSummary{
-			ID:       animal.ID,
-			LabelJA:  animal.LabelJA,
-			Variants: len(animal.Variants),
+			ID: animal.ID, LabelJA: animal.LabelJA, Variants: len(animal.Variants),
 		})
 	}
 	return summaries
@@ -126,4 +93,17 @@ func directoryExists(path string) bool {
 func regularFileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

@@ -1,6 +1,6 @@
 package conceptindex
 
-const SchemaVersion = "1"
+const SchemaVersion = "2"
 
 const schemaSQL = `
 PRAGMA journal_mode = DELETE;
@@ -19,4 +19,4 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS edges_concept_idx ON edges(concept);
 `
 
-const transformationDescription = "Japanese ConceptNet 1-hop edges whose opposite endpoint matches a Zoovoice animal alias; duplicate weights keep the maximum"
+const transformationDescription = "Japanese ConceptNet 1-hop edges whose opposite endpoint matches a generated Zoovoice animal lexicon term; duplicate weights keep the maximum"

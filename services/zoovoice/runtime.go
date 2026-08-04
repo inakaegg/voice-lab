@@ -16,7 +16,7 @@ type runtimeDependencies struct {
 
 func loadRuntimeDependencies(
 	runner commandRunner,
-	aliasesPath string,
+	lexiconPath string,
 ) (*runtimeDependencies, error) {
 	threads, err := positiveIntegerEnv("ZOOVOICE_ASR_THREADS", 2)
 	if err != nil {
@@ -35,15 +35,15 @@ func loadRuntimeDependencies(
 	if !regularFileExists(indexPath) {
 		return nil, fmt.Errorf("ZOOVOICE_CONCEPTNET_INDEX_PATH must be a regular file")
 	}
-	aliasSHA, err := conceptindex.FileSHA256(aliasesPath)
+	lexiconSHA, err := conceptindex.FileSHA256(lexiconPath)
 	if err != nil {
-		return nil, fmt.Errorf("hash association aliases: %w", err)
+		return nil, fmt.Errorf("hash animal lexicon: %w", err)
 	}
-	store, err := conceptindex.Open(indexPath, conceptNetSourceSHA256, aliasSHA)
+	store, err := conceptindex.Open(indexPath, conceptNetSourceSHA256, lexiconSHA)
 	if err != nil {
 		return nil, err
 	}
-	associator, err := newAssociationEngine(aliasesPath, store)
+	associator, err := newAssociationEngine(lexiconPath, store)
 	if err != nil {
 		store.Close()
 		return nil, err

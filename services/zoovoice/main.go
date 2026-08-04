@@ -22,17 +22,15 @@ func main() {
 
 	assetsRoot := defaultAssetsRoot()
 	catalog, err := loadCatalog(
-		filepath.Join(assetsRoot, "animals.json"),
-		filepath.Join(assetsRoot, "cc0"),
-		os.Getenv("ZOOVOICE_EXTRA_ASSETS_DIR"),
-		logger,
+		filepath.Join(assetsRoot, "animal-lexicon.json"),
+		assetsRoot,
 	)
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
 	runtimeDependencies, err := loadRuntimeDependencies(
 		execCommandRunner{},
-		filepath.Join(assetsRoot, "association-aliases.json"),
+		filepath.Join(assetsRoot, "animal-lexicon.json"),
 	)
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
@@ -98,7 +96,7 @@ func defaultAssetsRoot() string {
 		filepath.Join("services", "zoovoice", "assets"),
 		"assets",
 	} {
-		if regularFileExists(filepath.Join(candidate, "animals.json")) {
+		if regularFileExists(filepath.Join(candidate, "animal-lexicon.json")) {
 			return candidate
 		}
 	}

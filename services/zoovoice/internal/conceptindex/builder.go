@@ -25,7 +25,7 @@ import (
 type BuildOptions struct {
 	SourcePath      string
 	OutputPath      string
-	AliasesPath     string
+	LexiconPath     string
 	SourceVersion   string
 	SourceURL       string
 	SourceSHA256    string
@@ -46,19 +46,19 @@ func Build(ctx context.Context, options BuildOptions, progress io.Writer) error 
 		return fmt.Errorf("inspect output: %w", err)
 	}
 
-	aliases, err := animaldefs.Load(options.AliasesPath)
+	lexicon, err := animaldefs.Load(options.LexiconPath)
 	if err != nil {
 		return err
 	}
-	aliasLookup := make(map[string]string)
-	for animalID, entry := range aliases {
+	termLookup := make(map[string]string)
+	for animalID, entry := range lexicon {
 		for _, term := range append(append([]string{}, entry.Terms...), entry.Onomatopoeia...) {
-			aliasLookup[normalizeTerm(term)] = animalID
+			termLookup[normalizeTerm(term)] = animalID
 		}
 	}
-	aliasSHA, err := FileSHA256(options.AliasesPath)
+	lexiconSHA, err := FileSHA256(options.LexiconPath)
 	if err != nil {
-		return fmt.Errorf("hash association aliases: %w", err)
+		return fmt.Errorf("hash animal lexicon: %w", err)
 	}
 
 	partialPath := options.OutputPath + ".partial"
@@ -73,7 +73,7 @@ func Build(ctx context.Context, options BuildOptions, progress io.Writer) error 
 		db.Close()
 		return fmt.Errorf("initialize index schema: %w", err)
 	}
-	resumeLine, err := initializeOrValidateMetadata(ctx, db, options, aliasSHA)
+	resumeLine, err := initializeOrValidateMetadata(ctx, db, options, lexiconSHA)
 	if err != nil {
 		db.Close()
 		return err
@@ -91,7 +91,7 @@ func Build(ctx context.Context, options BuildOptions, progress io.Writer) error 
 		return fmt.Errorf("open ConceptNet gzip stream: %w", err)
 	}
 
-	buildErr := scanAndInsert(ctx, db, gzipReader, aliasLookup, resumeLine, options.CheckpointEvery, progress)
+	buildErr := scanAndInsert(ctx, db, gzipReader, termLookup, resumeLine, options.CheckpointEvery, progress)
 	closeGzipErr := gzipReader.Close()
 	closeSourceErr := source.Close()
 	if buildErr != nil {
@@ -126,7 +126,7 @@ func Build(ctx context.Context, options BuildOptions, progress io.Writer) error 
 func validateBuildOptions(options BuildOptions) error {
 	for name, value := range map[string]string{
 		"source path": options.SourcePath, "output path": options.OutputPath,
-		"aliases path": options.AliasesPath, "source version": options.SourceVersion,
+		"lexicon path": options.LexiconPath, "source version": options.SourceVersion,
 		"source URL": options.SourceURL, "source SHA-256": options.SourceSHA256,
 	} {
 		if strings.TrimSpace(value) == "" {
@@ -149,7 +149,7 @@ func initializeOrValidateMetadata(
 	ctx context.Context,
 	db *sql.DB,
 	options BuildOptions,
-	aliasSHA string,
+	lexiconSHA string,
 ) (int64, error) {
 	existing, err := readMetadataDB(ctx, db)
 	if err != nil {
@@ -160,7 +160,7 @@ func initializeOrValidateMetadata(
 		"source_version": options.SourceVersion,
 		"source_url":     options.SourceURL,
 		"source_sha256":  strings.ToLower(options.SourceSHA256),
-		"alias_sha256":   aliasSHA,
+		"lexicon_sha256": lexiconSHA,
 		"license":        "CC BY-SA 4.0",
 		"transformation": transformationDescription,
 	}

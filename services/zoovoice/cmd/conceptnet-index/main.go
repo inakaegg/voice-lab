@@ -13,7 +13,7 @@ func main() {
 	var options conceptindex.BuildOptions
 	flag.StringVar(&options.SourcePath, "source", "", "ConceptNet assertions CSV gzip path")
 	flag.StringVar(&options.OutputPath, "output", "", "output SQLite path")
-	flag.StringVar(&options.AliasesPath, "aliases", "", "association aliases JSON path")
+	flag.StringVar(&options.LexiconPath, "lexicon", "", "generated animal lexicon JSON path")
 	flag.StringVar(&options.SourceVersion, "source-version", "5.7.0", "ConceptNet source version")
 	flag.StringVar(&options.SourceURL, "source-url", "https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz", "ConceptNet source URL")
 	flag.StringVar(&options.SourceSHA256, "source-sha256", "", "ConceptNet source SHA-256")

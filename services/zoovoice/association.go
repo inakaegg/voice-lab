@@ -45,7 +45,7 @@ type conceptCandidateStore interface {
 }
 
 type associationEngine struct {
-	aliases   animaldefs.Catalog
+	lexicon   animaldefs.Catalog
 	store     conceptCandidateStore
 	tokenizer *tokenizer.Tokenizer
 }
@@ -71,8 +71,8 @@ var relationMultipliers = map[string]float64{
 	"IsA":         0.5,
 }
 
-func newAssociationEngine(aliasesPath string, store conceptCandidateStore) (*associationEngine, error) {
-	aliases, err := animaldefs.Load(aliasesPath)
+func newAssociationEngine(lexiconPath string, store conceptCandidateStore) (*associationEngine, error) {
+	lexicon, err := animaldefs.Load(lexiconPath)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func newAssociationEngine(aliasesPath string, store conceptCandidateStore) (*ass
 	if err != nil {
 		return nil, fmt.Errorf("initialize Japanese tokenizer: %w", err)
 	}
-	return &associationEngine{aliases: aliases, store: store, tokenizer: jaTokenizer}, nil
+	return &associationEngine{lexicon: lexicon, store: store, tokenizer: jaTokenizer}, nil
 }
 
 func (engine *associationEngine) Select(
@@ -157,12 +157,12 @@ func (engine *associationEngine) selectLiteral(
 	matches := make([]literalMatch, 0)
 	tokenSpans := transcriptTokenSpansFor(engine.tokenizer, transcript)
 	tokenBoundaries := tokenBoundaryPositions(tokenSpans, len(transcript))
-	for animalID, aliases := range engine.aliases {
+	for animalID, definition := range engine.lexicon {
 		animal, ok := available[animalID]
 		if !ok {
 			continue
 		}
-		for _, alias := range aliases.Terms {
+		for _, alias := range definition.Terms {
 			for _, position := range wholeTokenAliasPositions(transcript, alias, tokenBoundaries) {
 				end := position + len(alias)
 				firstMatched, lastMatched, exists := matchingTokenRange(position, end, tokenSpans)
@@ -177,7 +177,7 @@ func (engine *associationEngine) selectLiteral(
 				})
 			}
 		}
-		for _, alias := range aliases.Onomatopoeia {
+		for _, alias := range definition.Onomatopoeia {
 			for _, position := range wholeTokenAliasPositions(transcript, alias, tokenBoundaries) {
 				if _, _, exists := matchingTokenRange(position, position+len(alias), tokenSpans); !exists {
 					continue

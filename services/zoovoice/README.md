@@ -1,7 +1,9 @@
 # Zoovoice 音声合成サービス
 
+更新日: 2026-08-04
+
 Zoovoice は録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話の無音区間へ重ねるデモです。
-このディレクトリには Go 製の API と素材マスタ、動物連想用の索引生成ツールを置いています。
+このディレクトリには Go 製の API と生成済みの動物レキシコン、鳴き声素材、索引生成ツールを置いています。
 1リクエストの流れは、日本語ASR、動物の自動連想、音声合成の順です。
 公開のUI・API入り口はCloudflare Workerであり、Workerが有効化した配備ではこのGoサービスをprivateなGoogle Cloud Run上のコンテナとして呼び出します。
 Cloud Run配備の契約は[Cloud Run配備](#cloud-run配備)を、公開側の全体構成は[ARCHITECTURE.md](../../docs/deployment/ARCHITECTURE.md)を参照してください。
@@ -47,12 +49,8 @@ export ZOOVOICE_CONCEPTNET_INDEX_PATH=<repo-outside>/data/conceptnet-ja-5.7.0.sq
 go run .
 ```
 
-既定では CC0 の12種だけを読み込みます。
-repo 外の追加素材も使う場合は規格化済み WAV のディレクトリを指定します。
-
-```sh
-ZOOVOICE_EXTRA_ASSETS_DIR=<repo-outside-assets>/taira-komori go run .
-```
+起動時に `assets/animal-lexicon.json` と `assets/animal-sounds/` を読み込み、27種すべてを公開します。
+レキシコンが持つ音声のSHA-256と実ファイルが一致しない場合は起動しません。
 
 private Cloud Runとの接続を確認する場合は、`ZOOVOICE_CLOUD_RUN_URL`・`ZOOVOICE_GCP_PROJECT`・`ZOOVOICE_SMOKE_SERVICE_ACCOUNT`を設定し次を実行します。
 
@@ -69,8 +67,7 @@ npm run dev:zoovoice:cloud-run
 | --- | --- | --- |
 | `ZOOVOICE_PORT` | `8090` | Go API の待受ポート。設定時はこちらを優先する |
 | `PORT` | `8090` | `ZOOVOICE_PORT` 未設定時のfallback。Cloud Runが自動注入する |
-| `ZOOVOICE_ASSETS_DIR` | 自動検出した `assets` | `animals.json`・`association-aliases.json`・`cc0/` の親ディレクトリ |
-| `ZOOVOICE_EXTRA_ASSETS_DIR` | 未設定 | repo 外の追加 WAV ディレクトリ |
+| `ZOOVOICE_ASSETS_DIR` | 自動検出した `assets` | `animal-lexicon.json` と `animal-sounds/` の親ディレクトリ |
 | `ZOOVOICE_WHISPER_COMMAND` | なし（必須） | whisper.cpp の `whisper-cli` の実行ファイル |
 | `ZOOVOICE_ASR_MODEL_PATH` | なし（必須） | 日本語ASRに使う `ggml-small.bin` |
 | `ZOOVOICE_CONCEPTNET_INDEX_PATH` | なし（必須） | ConceptNet派生の連想index（SQLite） |
@@ -82,8 +79,8 @@ npm run dev:zoovoice:cloud-run
 ファイルが無い場合や連想indexのmetadataが想定と違う場合は起動に失敗します。
 固定の動物へ黙って切り替える動作は持ちません。
 
-追加素材の場所が未設定または不在でも起動できます。
-その場合は警告をログへ記録し、実在する CC0 素材だけを公開します。
+連想indexのmetadataは、読み込んだ `assets/animal-lexicon.json` のSHA-256とも照合します。
+レキシコンとindexの組合せが違う場合も起動に失敗します。
 
 ## API
 
@@ -137,7 +134,7 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
   "audio": {"format": "wav", "base64": "..."},
   "meta": {
     "transcript": "夜中に鶏が鳴いていた",
-    "selected_animal": {"id": "rooster", "label_ja": "おんどり"},
+    "selected_animal": {"id": "rooster", "label_ja": "雄鶏"},
     "evidence_term": "鶏",
     "selection_strategy": "direct",
     "fallback_reason": null,
@@ -156,7 +153,7 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 | --- | --- |
 | `transcript` | 日本語ASRの認識本文 |
 | `selected_animal` | 自動で選んだ動物の種IDと日本語ラベル |
-| `evidence_term` | 選択に使った根拠語。`direct`・`pun` では一致したalias、`conceptnet` では概念語、random fallbackでは `null` |
+| `evidence_term` | 選択に使った根拠語。`direct`・`pun` では一致したレキシコンの語、`conceptnet` では概念語、random fallbackでは `null` |
 | `selection_strategy` | `direct`・`pun`・`conceptnet`・`random_fallback` のいずれか |
 | `fallback_reason` | random fallbackのときだけ `no_association_match`。それ以外は `null` |
 | `insertions` | 挿入した鳴き声の位置。`species` は全件同じ動物 |
@@ -172,15 +169,15 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 連想はASR本文だけを入力にします。
 利用者が動物を選ぶ経路はUIにもAPIにもありません。
 
-1. ASR本文を形態素解析し、本文の表層でaliasを探す。一致は始まりと終わりがtoken境界にそろう連続token列だけを認め、基本形や読みから一致を作らない。
-2. 動物名aliasの一致は、動物への直接の言及なら `direct` に分類する。
-3. 動物名aliasの一致のうち、別の語句と重なる語呂合わせは `pun` に分類する。「うしろ」の牛、「ぞうきん」の象のような連続token列との一致も意図的に対象にする。
-4. 鳴き声オノマトペaliasの一致は、前後の音の文脈を要求せず `direct` とする。
+1. ASR本文を形態素解析し、本文の表層でレキシコンの語を探す。一致は始まりと終わりがtoken境界にそろう連続token列だけを認め、基本形や読みから一致を作らない。
+2. 動物名の語の一致は、動物への直接の言及なら `direct` に分類する。
+3. 動物名の語の一致のうち、別の語句と重なる語呂合わせは `pun` に分類する。「うしろ」の牛、「ぞうきん」の象のような連続token列との一致も意図的に対象にする。
+4. 鳴き声オノマトペの一致は、前後の音の文脈を要求せず `direct` とする。
 5. 一致が複数ある場合は `direct` を `pun` より優先し、同方式では最も前に現れたものを選ぶ。
 6. `direct` と `pun` で決まらなければ、表層形・基本形・読みと隣接する内容語だけの2〜3語連接を候補語にする。連想indexで候補語の1-hop edgeを引き、関係別の重み付き合計が最大の動物を `conceptnet` として選ぶ。
 7. どの段でも決まらない場合だけ、利用できる動物からrandomで1種を選ぶ。
 
-動物名とオノマトペの定義は `assets/association-aliases.json` を正とします。
+動物名とオノマトペの定義は生成物の `assets/animal-lexicon.json` を正とします。
 選ばれる対象は、音源を持ち `/animals` に載る動物だけです。
 
 ASR本文と根拠語は応答とプロセスのメモリ内だけで扱います。
@@ -197,10 +194,46 @@ ASR本文と根拠語は応答とプロセスのメモリ内だけで扱いま�
 - 無音判定の最小秒数、無音区間数、挿入数
 
 このほか、プロセスの起動時には待受port、利用可能な動物数、timeoutの設定秒数を記録します。
-追加素材が見つからない場合の警告や、起動に失敗した理由も記録します。
+起動に失敗した理由も記録します。
 
 いずれの項目も音声や本文の内容そのものを含みません。
 録音と生成音声の内容、ASR本文、根拠語はサービスログへ書きません。
+
+## 動物レキシコンの生成
+
+`assets/animal-lexicon.json` は、連想と音声再生が共通で参照するリポジトリ追跡の生成物です。
+現在の対象は第1段階の27種です。
+手書きの語彙定義ファイルは持たず、`cmd/animal-lexicon` が次の3つを入力にして生成します。
+
+| 入力 | 内容 |
+| --- | --- |
+| ConceptNet 5.7.0 assertions | 動物候補の抽出元。リポジトリ外へ置く |
+| `assets/animal-lexicon-judgments.json` | 候補ごとの採否・理由・オノマトペを固定したAI判断の記録 |
+| `assets/animal-sounds/manifest.json` | 採用した音声の形式とSHA-256、生成元の記録 |
+
+3つの入力のSHA-256は、生成物の `metadata` へ埋め込みます。
+
+```sh
+go run ./cmd/animal-lexicon \
+  -source <repo-outside>/conceptnet-assertions-5.7.0.csv.gz \
+  -source-sha256 <元データのSHA-256> \
+  -judgments assets/animal-lexicon-judgments.json \
+  -audio-manifest assets/animal-sounds/manifest.json \
+  -output assets/animal-lexicon.json
+```
+
+候補抽出は、日本語ConceptNetの `IsA` を動物系の上位概念とWordNetの動物senseからたどり、`Synonym` で表記を広げます。
+生成時には採用種の音声実体、日本語ラベルの一致、種をまたぐ語の重複を検査します。
+1つでも崩れた場合は出力せずに失敗します。
+
+`-candidates-output` を付けると、AI判断へ渡す候補一覧を別ファイルへ書き出せます。
+`-output` を省いた実行は候補抽出だけを行います。
+
+語はConceptNet由来のため、動物そのものを指さない表記も入ります。
+例えば `pig` の語は `豚` と `豚肉` です。
+
+生成物を直接編集しないでください。
+入力を直してから再生成し、続けて連想indexも作り直します。
 
 ## 連想indexの生成
 
@@ -211,9 +244,13 @@ ASR本文と根拠語は応答とプロセスのメモリ内だけで扱いま�
 go run ./cmd/conceptnet-index \
   -source <repo-outside>/conceptnet-assertions-5.7.0.csv.gz \
   -output <repo-outside>/data/conceptnet-ja-5.7.0.sqlite \
-  -aliases assets/association-aliases.json \
+  -lexicon assets/animal-lexicon.json \
   -source-sha256 <元データのSHA-256>
 ```
+
+indexは動物レキシコンの語に一致するedgeだけを残し、そのSHA-256を `lexicon_sha256` としてmetadataへ保存します。
+metadataのschema世代は `2` です。
+レキシコンを作り直した場合はindexも作り直します。
 
 処理は長いため、既定で10万行ごとにcheckpointを書きます。
 中断した場合は同じ引数で再実行すると途中から続けます。
@@ -221,63 +258,56 @@ metadataが一致しない再実行は続行せず失敗します。
 
 帰属、変換内容、share-alike条件は [LICENSE-CONCEPTNET.md](LICENSE-CONCEPTNET.md) を参照してください。
 
-## 素材の準備
+## 同梱する動物音
 
-`tools/prepare_assets.sh` は取得済みの音源を実行時形式へ規格化します。
-素材の取得自体は行いません。
+`assets/animal-sounds/` には27種の規格化済み WAV を1種1本ずつ置きます。
+内訳はStable Audioで生成した24種と、CC0音源から移行した3種です。
+27件のWAVの合計は5,965,364 bytes（約5.7 MiB）です。
 
-```sh
-./tools/prepare_assets.sh <raw-cc0-dir> <raw-extra-dir> <output-dir>
-```
+| 区分 | 種数 | ライセンス | 形式 |
+| --- | --- | --- | --- |
+| Stable Audio生成 | 24 | Stability AI Community License | 24kHz、mono、signed 16-bit PCM、5秒 |
+| CC0移行fallback | 3 | CC0 1.0 | 24kHz、mono、signed 16-bit PCM |
 
-一方の素材群を処理しない場合は入力ディレクトリの代わりに `-` を渡します。
-出力は `<output-dir>/cc0` と `<output-dir>/extra` へ分かれます。
-追加素材を使う際は後者を `ZOOVOICE_EXTRA_ASSETS_DIR` に指定します。
-
-処理内容は次のとおりです。
-
-1. `-40dB` を閾値として先頭無音を除去する。
-2. `0.5` 秒以上の内部無音で最初の鳴き声を切り出す。
-3. `2.5` 秒を上限とし、末尾 `0.35` 秒を fade out する。
-4. ピークを `-1dBFS` へ正規化する。
-5. `24kHz`、mono、signed 16-bit PCM WAV へ変換する。
-
-切り出し結果が0.15秒未満なら全長版へフォールバックします。
-進捗はリポジトリ直下の `logs/zoovoice-prepare-assets.log` へ残します。
-このスクリプトは取得条件を伴う素材準備用なので CI では実行しません。
-
-## 同梱する CC0 素材
-
-12件は Freesound の各配布ページから取得した CC0 音源です。
-`assets/manifest.json` には取得時の元音源 SHA-256 と取得日も保存しています。
+犬・猫・コオロギの3種は、既存の連想評価が退行しないようCC0音源のまま残しています。
+この3件は Freesound の各配布ページから取得した音源です。
 
 | 種 | タイトル | 作者 | 配布ページ |
 | --- | --- | --- | --- |
 | 犬 | Single Dog Bark | kwahmah_02 | [Freesound 277058](https://freesound.org/people/kwahmah_02/sounds/277058) |
 | 猫 | Cat meow | philsapphire | [Freesound 256452](https://freesound.org/people/philsapphire/sounds/256452) |
-| 牛 | Cow - Moo 5 - 96kHz.wav | JarredGibb | [Freesound 233134](https://freesound.org/people/JarredGibb/sounds/233134) |
-| おんどり | Rooster crow | jsbarrett | [Freesound 200339](https://freesound.org/people/jsbarrett/sounds/200339) |
-| 馬 | Horse | poodaddy69 | [Freesound 521246](https://freesound.org/people/poodaddy69/sounds/521246) |
-| 羊 | sheep 3.mp3 | esperar | [Freesound 171149](https://freesound.org/people/esperar/sounds/171149) |
-| ヤギ | Single Goat Bleating 2x | Kinoton | [Freesound 581240](https://freesound.org/people/Kinoton/sounds/581240) |
-| カモ・アヒル | Toy Ducks Quacking | nebyoolae | [Freesound 348791](https://freesound.org/people/nebyoolae/sounds/348791) |
-| カエル | Frog croaking sound effect | betterchinese | [Freesound 354132](https://freesound.org/people/betterchinese/sounds/354132) |
 | コオロギ | Crickets chirping loop | Patrick_Corra | [Freesound 633196](https://freesound.org/people/Patrick_Corra/sounds/633196) |
-| ゾウ | Elephant Trumpets Growls.flac | D.jones | [Freesound 527845](https://freesound.org/people/D.jones/sounds/527845) |
-| ライオン | lion roar | bkyte | [Freesound 510476](https://freesound.org/people/bkyte/sounds/510476) |
 
-各音源のライセンスは [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) です。
+この3件のライセンスは [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) です。
+Stable Audioで生成した24件の必須表示と由来は [NOTICE-STABILITY-AI.md](NOTICE-STABILITY-AI.md) を正とします。
+公開UIはfooterへ `Powered by Stability AI` を表示します。
 
-## repo 外の追加素材
+種ごとの出所は `assets/animal-sounds/manifest.json` に保存します。
+Stable Audio分はモデル `stabilityai/stable-audio-3-small-sfx` とそのrevisionを記録します。
+各動物では採用variantのpromptとseed、生成元と規格化後のSHA-256、音声指標を残します。
+不採用を含む候補2件のreceiptも同じmanifestへ残します。
+CC0の3件は作者と配布ページ、移行前の音源のSHA-256を記録します。
 
-小森平の動物効果音は repo に同梱しません。
-素材ファイルの再配布を避け、利用環境が用意した規格化済み WAV だけを読み込みます。
+## 動物音の準備
 
-- 取得元: [動物～フリー効果音・無料効果音素材](https://taira-komori.net/animals01.html)
-- 利用規約: [無料効果音で遊ぼう！](https://taira-komori.net/welcome.html)
+`tools/import_stable_audio.py` は、生成済みの候補から1種1本を採用して規格化し、manifestを書き出します。
+モデルの実行そのものは行いません。
 
-追加素材が存在する場合でも `/animals` は種と件数だけを返します。
-合成結果以外から追加素材を取り出す経路は提供しません。
+```sh
+python3 tools/import_stable_audio.py <stable-audio-output-dir> assets/animal-sounds
+```
+
+処理内容は次のとおりです。
+
+1. 候補manifestとreceiptを突き合わせ、生成元のSHA-256を検査する。
+2. 種ごとにvariant 1を決定論的に採用する。
+3. `24kHz`、mono、signed 16-bit PCM WAV へ変換する。
+4. 生成音声は長さが5秒であること、平均dBFSとピークdBFSが想定範囲にあることを検査する。
+5. 出力するWAV全体の合計が15,000,000 bytesを超えないことを検査する。
+
+CC0の3種は `--include-cc0` で同じ出力へ含めます。
+移行元の素材はリポジトリに残していないため、この3件の再生成には移行前の素材と出所manifestが要ります。
+このスクリプトは取得条件を伴う素材準備用なので CI では実行しません。
 
 ## Docker image
 
@@ -285,22 +315,23 @@ imageは`services/zoovoice/Dockerfile`で作ります。
 モデルと連想indexはリポジトリへcommitしないため、buildはgit外の成果物を named context として受け取ります。
 
 - `whisper_source`: 検証済みのwhisper.cppソース。commitは`5250a86fdebac4d51085fcfcd0b315cb0c6b91c9`に固定する
-- `zoovoice_runtime`: `ggml-small.bin`、連想index、`LICENSE-CONCEPTNET.md`を置いた一時ディレクトリ
+- `zoovoice_runtime`: `ggml-small.bin`、連想index、`LICENSE-CONCEPTNET.md`、`NOTICE-STABILITY-AI.md`を置いた一時ディレクトリ
 
-buildは`ggml-small.bin`と連想index、`assets/association-aliases.json`のSHA-256をimage内で照合します。
-固定値はASRモデルが`1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b`、連想indexが`91f5a07310b3791ebe3b0bab70cfd137c5388ff02dd291673f3fdd8313343344`です。
-alias定義のSHA-256はリポジトリのファイルから算出して渡し、現在の値は`f879910acfac376ff7f09dc7309cc5886f94bc5771f897a8fb370fbabe014f2f`です。
+buildは`ggml-small.bin`と連想index、`assets/animal-lexicon.json`のSHA-256をimage内で照合します。
+固定値はASRモデルが`1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b`、連想indexが`088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71`です。
+動物レキシコンのSHA-256はリポジトリのファイルから算出して`ZOOVOICE_ANIMAL_LEXICON_SHA256`へ渡します。
+現在の値は`ba3f08ca64a8736121704ace37e3766b61d816447befe5364de8edebad7b248d`です。
 whisper.cpp commit、3つのSHA-256、ライセンス識別子はimage labelにも残します。
 
 最終imageに入るのは次だけです。
 
 - Goバイナリと`whisper-cli`
 - `ggml-small.bin`と連想index
-- whisper.cppと連想indexのライセンス表示
+- whisper.cpp、ConceptNet派生index、Stability AIのライセンス表示
 - Debian runtime、CA証明書、ffmpeg
-- リポジトリで追跡するCC0素材12件
+- リポジトリで追跡する動物レキシコンと動物音27件
 
-リポジトリ外の追加素材、secret、開発用ファイルは含めません。
+secretと開発用ファイルは含めません。
 実行ユーザーはuid 10001のnon-rootで、待受portは8080です。
 
 ## Cloud Run配備
@@ -318,12 +349,12 @@ Cloud Runへの配備は`./scripts/deploy_zoovoice_cloud_run.sh`を使います�
 scriptはこれらのcommitとSHA-256、連想indexのmetadataを先に検査します。
 検査対象のmetadataは次のとおりです。
 
-- schema世代
+- schema世代（`2`）
 - ConceptNetのversion
 - ライセンス
 - 元データのSHA-256
 - 変換内容
-- `alias_sha256`とリポジトリの`assets/association-aliases.json`のSHA-256の一致
+- `lexicon_sha256`とリポジトリの`assets/animal-lexicon.json`のSHA-256の一致
 
 1つでも一致しない場合は、buildへ進まず停止します。
 
@@ -350,7 +381,11 @@ CPUとメモリはlocal-only verificationで同じ上限を課して起動を確
 - CPU 2、メモリ2GiB
 - port 8080、timeout 90秒、concurrency 1
 - min 0、max 2
+- imageはlocalでbuildし、privateなArtifact Registryの `us-central1-docker.pkg.dev/<project>/voice-lab/zoovoice:<git-sha>` へpushする
 - imageはtagではなくdigestを固定して指定する
+
+Cloud RunへGit repositoryを接続する自動buildは使いません。
+container imageのbuildとpushはローカルの配備scriptだけが行います。
 
 invoker権限は、smoke専用のservice accountだけへservice単位で`roles/run.invoker`を付与します。
 active developerのgcloudアカウントは、そのservice account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
@@ -377,6 +412,9 @@ libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため
 compose時間はemulationの影響を受けるため、Cloud Runの実CPU上の値とは一致しません。
 上の表の値はすべてこのlocal環境の実測であり、Cloud Run実機では未確認です。
 
+上の表は動物レキシコンと動物音を入れ替える前のimageの実測です。
+現在のassetsを含むimageでは再測定していません。
+
 ### 未実施の範囲
 
 production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker service accountのkeyによるID token取得方式です。
@@ -385,7 +423,7 @@ production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker servi
 
 次のremote操作は未実施です。
 
-- Artifact Registryへのimage push
+- privateなArtifact Registryへのimage push
 - GCP projectでのCloud Run resource作成とdeploy実行
 - production用invoker service accountの作成とservice単位の `roles/run.invoker` 付与
 - invoker service account keyの発行とWorker secret登録
@@ -402,7 +440,9 @@ go test ./...
 
 統合テストには ffmpeg で生成した決定的な fixture を使います。
 ASRとConceptNetはテスト用のfakeと小さな固定indexへ差し替えます。
-repo 外の追加素材、実モデル、実indexがない環境でも全テストが通ります。
+実モデルと実indexがない環境でも全テストが通ります。
+
+動物レキシコンと公開する動物一覧の一致は、リポジトリ直下の `npm test` が検査します。
 
 実モデルと実indexを使う通し確認は `tests/e2e/zoovoice-real-backend.spec.ts` です。
 `ZOOVOICE_REAL_BACKEND=1` を付けた場合だけ実行し、それ以外の環境ではskipします。

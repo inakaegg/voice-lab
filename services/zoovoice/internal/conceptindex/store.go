@@ -22,7 +22,7 @@ type Store struct {
 	db *sql.DB
 }
 
-func Open(path, expectedSourceSHA, expectedAliasSHA string) (*Store, error) {
+func Open(path, expectedSourceSHA, expectedLexiconSHA string) (*Store, error) {
 	databaseURL := (&url.URL{
 		Scheme:   "file",
 		Path:     path,
@@ -45,9 +45,9 @@ func Open(path, expectedSourceSHA, expectedAliasSHA string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("ConceptNet index source mismatch")
 	}
-	if !strings.EqualFold(metadata["alias_sha256"], expectedAliasSHA) {
+	if !strings.EqualFold(metadata["lexicon_sha256"], expectedLexiconSHA) {
 		db.Close()
-		return nil, fmt.Errorf("ConceptNet index alias mismatch")
+		return nil, fmt.Errorf("ConceptNet index lexicon mismatch")
 	}
 	if strings.TrimSpace(metadata["generated_at"]) == "" {
 		db.Close()

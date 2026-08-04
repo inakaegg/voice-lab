@@ -8,9 +8,9 @@ SCRIPT = ROOT / "scripts/deploy_zoovoice_cloud_run.sh"
 DOCKERFILE = ROOT / "services/zoovoice/Dockerfile"
 WHISPER_COMMIT = "5250a86fdebac4d51085fcfcd0b315cb0c6b91c9"
 MODEL_SHA256 = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
-INDEX_SHA256 = "91f5a07310b3791ebe3b0bab70cfd137c5388ff02dd291673f3fdd8313343344"
+INDEX_SHA256 = "088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71"
 SOURCE_SHA256 = "accd65fe94038584295574ddc26e1500c1919c8c4532bf771811cafd0948af7e"
-ALIAS_SHA256 = "f879910acfac376ff7f09dc7309cc5886f94bc5771f897a8fb370fbabe014f2f"
+LEXICON_SHA256 = "ba3f08ca64a8736121704ace37e3766b61d816447befe5364de8edebad7b248d"
 
 
 def run_deploy(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -41,7 +41,7 @@ case "${0##*/}:$*" in
   git:*status\ --porcelain*) printf '%s' "${ZOOVOICE_FAKE_GIT_STATUS:-}"; exit 0 ;;
   shasum:*ggml-small.bin*) printf '%s  model\n' "$ZOOVOICE_FAKE_MODEL_SHA"; exit 0 ;;
   shasum:*conceptnet-ja-5.7.0.sqlite*) printf '%s  index\n' "$ZOOVOICE_FAKE_INDEX_SHA"; exit 0 ;;
-  shasum:*association-aliases.json*) printf '%s  aliases\n' "$ZOOVOICE_FAKE_ALIAS_SHA"; exit 0 ;;
+  shasum:*animal-lexicon.json*) printf '%s  lexicon\n' "$ZOOVOICE_FAKE_LEXICON_SHA"; exit 0 ;;
   sqlite3:*) printf '%s\n' "$ZOOVOICE_FAKE_INDEX_METADATA"; exit 0 ;;
   docker:info*) exit 0 ;;
   docker:run*) printf 'zoovoice-container-id\n'; exit 0 ;;
@@ -92,12 +92,12 @@ def valid_artifact_env(tmp_path: Path) -> dict[str, str]:
     smoke.write_bytes(b"RIFF fixture")
     metadata = "|".join(
         [
-            "1",
+            "2",
             "5.7.0",
             "CC BY-SA 4.0",
             SOURCE_SHA256,
-            ALIAS_SHA256,
-            "Japanese ConceptNet 1-hop edges whose opposite endpoint matches a Zoovoice animal alias; duplicate weights keep the maximum",
+            LEXICON_SHA256,
+            "Japanese ConceptNet 1-hop edges whose opposite endpoint matches a generated Zoovoice animal lexicon term; duplicate weights keep the maximum",
         ]
     )
     return {
@@ -108,7 +108,7 @@ def valid_artifact_env(tmp_path: Path) -> dict[str, str]:
         "ZOOVOICE_FAKE_WHISPER_COMMIT": WHISPER_COMMIT,
         "ZOOVOICE_FAKE_MODEL_SHA": MODEL_SHA256,
         "ZOOVOICE_FAKE_INDEX_SHA": INDEX_SHA256,
-        "ZOOVOICE_FAKE_ALIAS_SHA": ALIAS_SHA256,
+        "ZOOVOICE_FAKE_LEXICON_SHA": LEXICON_SHA256,
         "ZOOVOICE_FAKE_INDEX_METADATA": metadata,
     }
 
@@ -359,5 +359,5 @@ def test_runtime_artifacts_are_readable_by_the_nonroot_user() -> None:
         "COPY --from=zoovoice_runtime --chmod=0444 conceptnet-ja-5.7.0.sqlite "
         "/app/data/conceptnet-ja-5.7.0.sqlite"
     ) in dockerfile
-    assert "ARG ZOOVOICE_ASSOCIATION_ALIASES_SHA256" in dockerfile
-    assert "/app/assets/association-aliases.json | sha256sum --check --strict" in dockerfile
+    assert "ARG ZOOVOICE_ANIMAL_LEXICON_SHA256" in dockerfile
+    assert "/app/assets/animal-lexicon.json | sha256sum --check --strict" in dockerfile

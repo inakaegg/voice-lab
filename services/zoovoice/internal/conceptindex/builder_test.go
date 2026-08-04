@@ -15,7 +15,7 @@ func TestBuildFiltersAndCanonicalizesJapaneseAnimalEdges(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "conceptnet.sqlite")
 	buildMiniIndex(t, context.Background(), outputPath, 100, nil)
 
-	store, err := Open(outputPath, testSourceSHA, testAliasSHA(t))
+	store, err := Open(outputPath, testSourceSHA, testLexiconSHA(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestBuildStoresRequiredMetadata(t *testing.T) {
 	}
 	for _, key := range []string{
 		"schema_version", "source_version", "source_url", "source_sha256",
-		"alias_sha256", "license", "transformation", "generated_at",
+		"lexicon_sha256", "license", "transformation", "generated_at",
 	} {
 		if strings.TrimSpace(metadata[key]) == "" {
 			t.Errorf("metadata[%q] is empty", key)
@@ -76,7 +76,7 @@ func TestBuildResumesPartialDatabaseWithoutDuplicates(t *testing.T) {
 	}
 
 	buildMiniIndex(t, context.Background(), outputPath, 2, nil)
-	store, err := Open(outputPath, testSourceSHA, testAliasSHA(t))
+	store, err := Open(outputPath, testSourceSHA, testLexiconSHA(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,17 +93,17 @@ func TestBuildResumesPartialDatabaseWithoutDuplicates(t *testing.T) {
 func TestOpenRejectsMetadataMismatch(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "conceptnet.sqlite")
 	buildMiniIndex(t, context.Background(), outputPath, 100, nil)
-	if _, err := Open(outputPath, strings.Repeat("f", 64), testAliasSHA(t)); err == nil {
+	if _, err := Open(outputPath, strings.Repeat("f", 64), testLexiconSHA(t)); err == nil {
 		t.Fatal("Open accepted an unexpected source SHA")
 	}
 	if _, err := Open(outputPath, testSourceSHA, strings.Repeat("f", 64)); err == nil {
-		t.Fatal("Open accepted an unexpected alias SHA")
+		t.Fatal("Open accepted an unexpected lexicon SHA")
 	}
 }
 
-func testAliasSHA(t *testing.T) string {
+func testLexiconSHA(t *testing.T) string {
 	t.Helper()
-	hash, err := FileSHA256(filepath.Join("..", "..", "assets", "association-aliases.json"))
+	hash, err := FileSHA256(filepath.Join("..", "..", "assets", "animal-lexicon.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +128,11 @@ func buildMiniIndex(t *testing.T, ctx context.Context, outputPath string, checkp
 
 func buildMiniIndexError(ctx context.Context, outputPath string, checkpoint int64, progress io.Writer) error {
 	root := filepath.Join("..", "..")
-	aliasPath := filepath.Join(root, "assets", "association-aliases.json")
+	lexiconPath := filepath.Join(root, "assets", "animal-lexicon.json")
 	return Build(ctx, BuildOptions{
 		SourcePath:      filepath.Join(root, "testdata", "conceptnet-mini.tsv.gz"),
 		OutputPath:      outputPath,
-		AliasesPath:     aliasPath,
+		LexiconPath:     lexiconPath,
 		SourceVersion:   "5.7.0-test",
 		SourceURL:       "https://example.invalid/conceptnet-mini.tsv.gz",
 		SourceSHA256:    testSourceSHA,

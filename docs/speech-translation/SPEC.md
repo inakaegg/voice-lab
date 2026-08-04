@@ -120,8 +120,30 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 ### 用語
 
 - 動物連想とは、ASR本文から根拠語を探し、利用できる音源を持つ動物1種を自動で選ぶ処理を指す。
+- 動物レキシコンとは、種ID・語・オノマトペ・採用音声の対応を1ファイルへ持つ生成物を指す。
 - 連想根拠とは、選ばれた動物と、その選択に使った語またはfallbackの理由を指す。
 - アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
+
+### 動物レキシコン
+
+- 次の項目は動物レキシコンを唯一の正本とする。
+
+  - 自動連想が選べる動物の種ID
+  - 動物の日本語ラベル
+  - 照合に使う語
+  - 鳴き声オノマトペ
+  - 動物と音声ファイルの対応
+
+- 動物レキシコンは追跡している生成物であり、実体は `services/zoovoice/assets/animal-lexicon.json` とする。同じ内容を実装コードやdocsへ手書きしない。
+- レキシコンの動物は、検証済みの音声ファイルをちょうど1本だけ持つ。レキシコンは音声のSHA-256を記録する。
+- Go APIは起動時に、レキシコンの全動物について音声ファイルの実在とSHA-256の一致を確認する。1件でも欠けるか一致しない配備では起動しない。
+- 第1弾の対象は27種とする。内訳は、Stability AI Community LicenseのStable Audio生成音声24件と、CC0からの移行fallback 3件である。移行fallbackの対象は犬・猫・コオロギとする。
+- 素材ごとの出所、ライセンス、採用hashは `services/zoovoice/assets/animal-sounds/manifest.json` を正とする。
+- 語はConceptNet由来のため、動物そのものを指さない表記も含む。例えば `pig` の語は `豚` と `豚肉` である。
+- 現在の合格条件として、「豚肉は美味しいです」は `random_fallback` にならず `pig` を選ぶ。
+- 生成音声を使う公開UIは `Powered by Stability AI` を表示する。必須の表示文とlink先は [NOTICE-STABILITY-AI.md](../../services/zoovoice/NOTICE-STABILITY-AI.md) を正とする。
+- 対象種の追加は入力の更新と再生成で行う。
+- 約50種規模への拡張は将来の段階として扱う。現在の仕様は27種であり、拡張の時期は含めない。
 
 ### 通常の流れ
 
@@ -145,6 +167,7 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 - `GET /api/zoovoice/config` は有効・無効の状態と公開設定を返す。UIはこの応答だけで利用可否を判断する。
 - `GET /api/zoovoice/animals` はWorker Static Assetsの静的JSONを返す。この経路は合成backendを起動せず音声データも扱わない。
+- この静的JSONは動物レキシコンから生成する。種IDと日本語ラベルだけを載せ、音源のファイル名は載せない。
 - 自動連想が選べる動物は、この一覧にある音源付きの動物に限る。
 - `POST /api/zoovoice/compose` は録音とアニマル度を受け取る。通常の設定契約は `{intensity}` だけとし、動物と挿入位置はGo APIが決める。
 - Workerは合成前にTurnstile検証と利用上限判定を行う。
@@ -161,11 +184,11 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 - 連想は日本語ASR本文を形態素解析し、照合に使うtoken列を得る。
 - 連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。上位の段で決まった時点で確定する。
-- `direct` と `pun` の照合には、ASR本文の表層に現れるaliasだけを使う。基本形や読みから一致を作らない。
-- aliasの一致は、始まりと終わりがtoken境界にそろう連続token列だけを認める。
-- 動物名aliasの一致は `direct` か `pun` のどちらかへ分類する。動物への直接の言及を `direct` とする。
-- 鳴き声オノマトペaliasの一致は、前後の音の文脈を要求せず `direct` とする。
-- `pun` は、動物名aliasが別の語句と重なる語呂合わせとする。「うしろ」の牛、「ぞうきん」の象のように、tokenizer上の連続token列と一致した場合だけ採用する。
+- `direct` と `pun` の照合には、ASR本文の表層に現れる動物レキシコンの語だけを使う。基本形や読みから一致を作らない。
+- 語の一致は、始まりと終わりがtoken境界にそろう連続token列だけを認める。
+- 動物名の語の一致は `direct` か `pun` のどちらかへ分類する。動物への直接の言及を `direct` とする。
+- 鳴き声オノマトペの一致は、前後の音の文脈を要求せず `direct` とする。
+- `pun` は、動物名の語が別の語句と重なる語呂合わせとする。「うしろ」の牛、「ぞうきん」の象のように、tokenizer上の連続token列と一致した場合だけ採用する。
 - 一致が複数ある場合は `direct` を `pun` より優先し、同方式ではASR本文の先頭に近いものを選ぶ。
 - 基本形と読み、隣接する内容語だけの2〜3語連接は、`direct` と `pun` で決まらなかった後のConceptNet queryの候補語にだけ使う。
 - `conceptnet` は、形態素候補と隣接する内容語の2〜3語連接を使う日本語ConceptNetの1-hopとする。関係の種類ごとの係数をweightへ掛けた合計で順位を決め、同点の場合は本文の先頭に近い根拠語を優先する。
@@ -174,7 +197,7 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 - 1回の合成で使う動物は1種だけとし、すべての挿入位置へ同じ動物を配置する。
 - 合成応答のmetadataはASR本文、選ばれた動物、根拠語を返す。
 - 合成応答のmetadataは選択方式、fallback理由、挿入位置、入出力の長さも返す。
-- 根拠語は、`direct` と `pun` では一致したalias、`conceptnet` では概念語とし、`random_fallback` ではnullとする。
+- 根拠語は、`direct` と `pun` では一致したレキシコンの語、`conceptnet` では概念語とし、`random_fallback` ではnullとする。
 - fallback理由は `random_fallback` のときだけ `no_association_match` とし、それ以外はnullとする。
 - UIは、根拠語のある連想とrandom fallbackを利用者が区別できるように表示する。
 - ASRモデル、ConceptNet index、必要な外部commandのいずれかが欠けた場合はエラーを返す。固定の動物へ黙って切り替えない。
@@ -212,11 +235,11 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 - production配備のZoovoiceはまだ有効化していない。
 - production Workerの認証は、専用invoker service accountのkeyによるID token取得方式とする。方式の決定と実装は完了しており、詳細は [CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする。
 - production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
-- 外部deployとproduction有効化は別のgateで扱う。対象はimage公開、GCP resource作成、IAM設定と実key発行、有効化varsのmain経由deployである。
+- 外部deployとproduction有効化は別のgateで扱う。対象はprivateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行、有効化varsのmain経由deployである。
 - 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - ASRモデルと連想indexを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - 実測はApple Silicon上のlinux/amd64 emulationで行っており、Cloud Runの実CPU上の処理時間は未確認である。
-- Cloud Runへの実deploy、Artifact Registryへのpush、GCP resourceとIAMの作成、実keyのsecret登録と有効化はいずれも未実施である。これらを終えるまでproduction readyとして扱わない。
+- Cloud Runへの実deploy、privateなArtifact Registryへのpush、GCP resourceとIAMの作成、実keyのsecret登録と有効化はいずれも未実施である。これらを終えるまでproduction readyとして扱わない。
 
 ## 実行環境の責任
 

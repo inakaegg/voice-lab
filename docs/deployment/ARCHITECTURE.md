@@ -59,7 +59,9 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` には `ZOOVOICE_ENABLED` を設定していない。
 
-Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。`direct` は動物名や鳴き声の直接言及、`pun` はaliasが別の語の一部として現れる語呂合わせである。`conceptnet` は形態素候補と隣接する内容語の連接を使う日本語ConceptNetの1-hopである。どの段でも決まらない入力は `random_fallback` にする。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
+Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。`direct` は動物名や鳴き声の直接言及、`pun` は動物名の語が別の語句の一部として現れる語呂合わせである。`conceptnet` は形態素候補と隣接する内容語の連接を使う日本語ConceptNetの1-hopである。どの段でも決まらない入力は `random_fallback` にする。
+
+連想と音声再生が参照する語彙は、リポジトリで追跡する生成物 `services/zoovoice/assets/animal-lexicon.json` を正とする。生成入力はConceptNet 5.7.0のassertions、採否を固定したAI判断の記録、採用音声のmanifestの3つとする。3つの入力のSHA-256は生成物のmetadataへ埋め込む。現在の対象は第1段階の27種である。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
 
 productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。実keyの発行、Cloud Runへの実deploy、本番有効化は未実施の外部操作である。
 
@@ -79,11 +81,11 @@ Browser
 
 ブラウザが送るのは録音とアニマル度だけとする。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。Workerは合成応答を中継し、ASR本文と連想metadataを送信元と同じブラウザへ返す。
 
-動物一覧はCloud Runを起動せず、Worker Static Assetsの静的JSONから返す。この経路では音声データを扱わない。
+動物一覧はCloud Runを起動せず、Worker Static Assetsの静的JSONから返す。この静的JSONは動物レキシコンから同期し、現在は27種を載せる。この経路では音声データを扱わない。
 
-Cloud Runへ載せるDocker imageは、Goバイナリに加えて実行に必要なDebian runtime、CA証明書、ffmpegを含める。これに日本語ASR用のwhisper.cpp commandとモデル、versionを固定した日本語ConceptNet indexを加える。commandとモデルとindexはリポジトリで管理せず、build時にgit外の検証済みディレクトリから取り込む。取り込むcommitとSHA-256はbuildとdeploy scriptの両方で照合し、image labelへも残す。リポジトリで追跡する `services/zoovoice/assets/association-aliases.json` も、build時にSHA-256を照合してimage labelへ残す。
+Cloud Runへ載せるDocker imageは、Goバイナリに加えて実行に必要なDebian runtime、CA証明書、ffmpegを含める。これに日本語ASR用のwhisper.cpp commandとモデル、versionを固定した日本語ConceptNet indexを加える。commandとモデルとindexはリポジトリで管理せず、build時にgit外の検証済みディレクトリから取り込む。取り込むcommitとSHA-256はbuildとdeploy scriptの両方で照合し、image labelへも残す。リポジトリで追跡する `services/zoovoice/assets/animal-lexicon.json` も、build時にSHA-256を照合してimage labelへ残す。
 
-imageへ入れる音源素材は、リポジトリで追跡するCC0音源だけとする。素材の出所と取得時hashは `services/zoovoice/assets/manifest.json` と `services/zoovoice/README.md` を参照する。ConceptNet派生indexの帰属と再配布条件は `services/zoovoice/LICENSE-CONCEPTNET.md` を正とし、同じ内容をimageへ同梱する。リポジトリ外の追加素材とsecretはimageへ含めない。containerはnon-rootで実行する。
+imageへ入れる音源素材は、リポジトリで追跡する `services/zoovoice/assets/animal-sounds/` の27件だけとする。動物1種につき規格化済みWAVを1本だけ同梱し、27件の合計は5,965,364 bytesである。内訳はStable Audioで生成した24件と、既存の連想評価を退行させないために残したCC0移行の3件である。素材の出所と採用hashは `services/zoovoice/assets/animal-sounds/manifest.json` を正とする。ConceptNet派生indexの帰属は `services/zoovoice/LICENSE-CONCEPTNET.md`、Stability AIの必須表示は `services/zoovoice/NOTICE-STABILITY-AI.md` を正とし、どちらも `/app/licenses` へ同梱する。公開UIはfooterへ `Powered by Stability AI` を表示する。secretと開発用ファイルはimageへ含めない。containerはnon-rootで実行する。
 
 ASRモデル、ConceptNet index、必要な外部commandのいずれかが欠けた場合はエラーを返す。固定の動物へ黙って切り替えない。
 
@@ -97,13 +99,18 @@ Cloud Runのregionは `us-central1` とする。`scripts/deploy_zoovoice_cloud_r
 - CPU 2、メモリ2GiB
 - port 8080、timeout 90秒、concurrency 1
 - min 0、max 2
+- imageはlocalでbuildし、`us-central1-docker.pkg.dev/<project>/voice-lab/zoovoice:<git-sha>` へpushする
 - imageはtagではなくdigestを固定して指定する
 
-配備scriptの実行modeはdry-run、local-only verification、明示applyの3つとする。既定はdry-runであり、remote writeを行うのは明示applyだけである。scriptは実行前に、whisper.cpp commit、ASRモデルとConceptNet indexのSHA-256、index metadataを検査する。検査対象のmetadataはschema世代、ConceptNetのversion、ライセンスである。加えて元データのSHA-256と変換内容も検査する。index metadataの `alias_sha256` が、リポジトリの `association-aliases.json` のSHA-256と一致することも検査する。
+Cloud RunへGit repositoryを接続する自動buildは使わない。container imageのbuildとpushはローカルの配備scriptだけが行う。
+
+配備scriptの実行modeはdry-run、local-only verification、明示applyの3つとする。既定はdry-runであり、remote writeを行うのは明示applyだけである。scriptは実行前に、whisper.cpp commit、ASRモデルとConceptNet indexのSHA-256、index metadataを検査する。検査対象のmetadataはschema世代、ConceptNetのversion、ライセンスである。現在のschema世代は2である。加えて元データのSHA-256と変換内容も検査する。index metadataの `lexicon_sha256` が、リポジトリの `services/zoovoice/assets/animal-lexicon.json` のSHA-256と一致することも検査する。動物レキシコンを作り直した場合は、連想indexを作り直すまでこの検査で止まる。
 
 上のCPUとメモリはlocal-only verificationで実測済みである。linux/amd64のCloud Run相当imageをlocal buildし、CPU 2とメモリ2GiBの上限付きでnon-root起動して測った。image sizeは1,053,233,511 bytes、compose完了後の観測メモリは359.4 MiB / 2 GiB、`/healthz` がreadyになるまでは1,350 msである。2.044秒の日本語fixtureの合成は23,826 msだった。同じ確認で、ASRモデルと連想indexがnon-rootから読めることも確かめた。
 
 `whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。この確認では、`whisper-cli` がwhisper/ggmlを共有libraryとして要求しないことを確かめた。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
+
+上の実測値は動物レキシコン導入前のimageに対するものである。動物音27件を同梱する現在のimageでは再測定していない。
 
 この測定はApple Silicon上のlinux/amd64 emulationで行っている。合成時間はemulationの影響を受けるため、Cloud Runの実CPU上の値とは一致しない。上記の値はすべてこのlocal環境の実測であり、Cloud Run実機では未確認である。
 
@@ -111,7 +118,7 @@ Wrangler localからGoサービスまでの通しは、Playwrightのe2eで別途
 
 Cloud Run側の実際の反映はCloudflare Worker deployとは別の外部操作gateとして扱う。production WorkerのCloud Run認証は方式の決定と実装が完了しており、残るのは次のremote操作である。いずれも未実施である。
 
-- Artifact Registryへのcontainer image実push
+- privateなArtifact Registryへのcontainer image実push
 - GCP projectでのCloud Run resource作成とdeploy実行
 - invoker service accountの作成と対象serviceへの `roles/run.invoker` 付与
 - invoker service account keyの発行とWorker secret登録

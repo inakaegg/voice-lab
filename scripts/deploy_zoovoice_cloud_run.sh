@@ -30,9 +30,9 @@ local_smoke_port=${ZOOVOICE_LOCAL_SMOKE_PORT:-18080}
 
 expected_whisper_commit=5250a86fdebac4d51085fcfcd0b315cb0c6b91c9
 expected_model_sha256=1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
-expected_index_sha256=91f5a07310b3791ebe3b0bab70cfd137c5388ff02dd291673f3fdd8313343344
+expected_index_sha256=088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71
 expected_conceptnet_source_sha256=accd65fe94038584295574ddc26e1500c1919c8c4532bf771811cafd0948af7e
-expected_transformation='Japanese ConceptNet 1-hop edges whose opposite endpoint matches a Zoovoice animal alias; duplicate weights keep the maximum'
+expected_transformation='Japanese ConceptNet 1-hop edges whose opposite endpoint matches a generated Zoovoice animal lexicon term; duplicate weights keep the maximum'
 
 required_value ZOOVOICE_GCP_PROJECT "$project"
 if [[ ! "$project" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]; then
@@ -71,7 +71,7 @@ model_sha256=$(shasum -a 256 "$asr_model" | awk '{print $1}')
 [[ "$model_sha256" == "$expected_model_sha256" ]] || fail "ASR model SHA-256 mismatch"
 index_sha256=$(shasum -a 256 "$conceptnet_index" | awk '{print $1}')
 [[ "$index_sha256" == "$expected_index_sha256" ]] || fail "ConceptNet index SHA-256 mismatch"
-alias_sha256=$(shasum -a 256 "$repository_root/services/zoovoice/assets/association-aliases.json" | awk '{print $1}')
+lexicon_sha256=$(shasum -a 256 "$repository_root/services/zoovoice/assets/animal-lexicon.json" | awk '{print $1}')
 
 metadata=$(sqlite3 -noheader -separator '|' "$conceptnet_index" \
   "SELECT
@@ -79,9 +79,9 @@ metadata=$(sqlite3 -noheader -separator '|' "$conceptnet_index" \
     (SELECT value FROM metadata WHERE key='source_version'),
     (SELECT value FROM metadata WHERE key='license'),
     (SELECT value FROM metadata WHERE key='source_sha256'),
-    (SELECT value FROM metadata WHERE key='alias_sha256'),
+    (SELECT value FROM metadata WHERE key='lexicon_sha256'),
     (SELECT value FROM metadata WHERE key='transformation');") || fail "ConceptNet index metadataを読み取れませんでした。"
-expected_metadata="1|5.7.0|CC BY-SA 4.0|${expected_conceptnet_source_sha256}|${alias_sha256}|${expected_transformation}"
+expected_metadata="2|5.7.0|CC BY-SA 4.0|${expected_conceptnet_source_sha256}|${lexicon_sha256}|${expected_transformation}"
 [[ "$metadata" == "$expected_metadata" ]] || fail "ConceptNet index metadata mismatch"
 unset metadata expected_metadata
 
@@ -178,6 +178,7 @@ mkdir -p "$whisper_context" "$runtime_context"
 cp "$asr_model" "$runtime_context/ggml-small.bin"
 cp "$conceptnet_index" "$runtime_context/conceptnet-ja-5.7.0.sqlite"
 cp services/zoovoice/LICENSE-CONCEPTNET.md "$runtime_context/LICENSE-CONCEPTNET.md"
+cp services/zoovoice/NOTICE-STABILITY-AI.md "$runtime_context/NOTICE-STABILITY-AI.md"
 
 build_arguments=(
   --platform linux/amd64
@@ -186,7 +187,7 @@ build_arguments=(
   --build-arg "WHISPER_SOURCE_COMMIT=$whisper_commit"
   --build-arg "ZOOVOICE_ASR_MODEL_SHA256=$model_sha256"
   --build-arg "ZOOVOICE_CONCEPTNET_INDEX_SHA256=$index_sha256"
-  --build-arg "ZOOVOICE_ASSOCIATION_ALIASES_SHA256=$alias_sha256"
+  --build-arg "ZOOVOICE_ANIMAL_LEXICON_SHA256=$lexicon_sha256"
   --file services/zoovoice/Dockerfile
 )
 

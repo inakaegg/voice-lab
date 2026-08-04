@@ -9,7 +9,7 @@ import (
 func TestCandidatesEmptyInputDoesNotQuery(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "conceptnet.sqlite")
 	buildMiniIndex(t, context.Background(), outputPath, 100, nil)
-	store, err := Open(outputPath, testSourceSHA, testAliasSHA(t))
+	store, err := Open(outputPath, testSourceSHA, testLexiconSHA(t))
 	if err != nil {
 		t.Fatal(err)
 	}

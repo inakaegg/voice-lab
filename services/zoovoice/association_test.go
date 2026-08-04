@@ -23,6 +23,7 @@ func TestAssociationDirectMentions(t *testing.T) {
 		{"コケコッコーで朝目覚めた", "rooster"},
 		{"馬に乗って草原を進んだ", "horse"},
 		{"ライオンの大きな声が聞こえた", "lion"},
+		{"豚肉は美味しいです", "pig"},
 		{"猫のあとに犬が来た", "cat"},
 	}
 	for _, test := range tests {
@@ -330,7 +331,7 @@ func testAssociationEngine(t *testing.T, store fakeCandidateStore) *associationE
 
 func engineWithStore(t *testing.T, store conceptCandidateStore) *associationEngine {
 	t.Helper()
-	engine, err := newAssociationEngine(filepath.Join("assets", "association-aliases.json"), store)
+	engine, err := newAssociationEngine(filepath.Join("assets", "animal-lexicon.json"), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,6 +350,7 @@ func testAnimals() []availableAnimal {
 		{ID: "goat", LabelJA: "山羊", Variants: []assetVariant{{Path: "goat.wav"}}},
 		{ID: "horse", LabelJA: "馬", Variants: []assetVariant{{Path: "horse.wav"}}},
 		{ID: "lion", LabelJA: "ライオン", Variants: []assetVariant{{Path: "lion.wav"}}},
+		{ID: "pig", LabelJA: "ブタ", Variants: []assetVariant{{Path: "pig.wav"}}},
 		{ID: "rooster", LabelJA: "鶏", Variants: []assetVariant{{Path: "rooster.wav"}}},
 		{ID: "sheep", LabelJA: "羊", Variants: []assetVariant{{Path: "sheep.wav"}}},
 	}

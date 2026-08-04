@@ -4,8 +4,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"io"
-	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -40,11 +38,11 @@ func TestFullAssociationEvaluation(t *testing.T) {
 	if indexPath == "" {
 		t.Skip("set ZOOVOICE_CONCEPTNET_INDEX_PATH to evaluate the immutable full index")
 	}
-	aliasSHA, err := conceptindex.FileSHA256(filepath.Join("assets", "association-aliases.json"))
+	lexiconSHA, err := conceptindex.FileSHA256(filepath.Join("assets", "animal-lexicon.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := conceptindex.Open(indexPath, conceptNetSourceSHA256, aliasSHA)
+	store, err := conceptindex.Open(indexPath, conceptNetSourceSHA256, lexiconSHA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +56,7 @@ func TestFullAssociationEvaluation(t *testing.T) {
 
 func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, strictConceptNet bool, minimums map[string]int) {
 	t.Helper()
-	engine, err := newAssociationEngine(filepath.Join("assets", "association-aliases.json"), store)
+	engine, err := newAssociationEngine(filepath.Join("assets", "animal-lexicon.json"), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,21 +186,21 @@ func buildPortableEvaluationIndex(t *testing.T) *conceptindex.Store {
 		t.Fatal(err)
 	}
 
-	aliasPath := filepath.Join("assets", "association-aliases.json")
+	lexiconPath := filepath.Join("assets", "animal-lexicon.json")
 	outputPath := filepath.Join(root, "portable-conceptnet.sqlite")
 	const portableSourceSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if err := conceptindex.Build(context.Background(), conceptindex.BuildOptions{
-		SourcePath: sourcePath, OutputPath: outputPath, AliasesPath: aliasPath,
+		SourcePath: sourcePath, OutputPath: outputPath, LexiconPath: lexiconPath,
 		SourceVersion: "portable-test", SourceURL: "https://example.invalid/portable-conceptnet.tsv.gz",
 		SourceSHA256: portableSourceSHA, CheckpointEvery: 100,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	aliasSHA, err := conceptindex.FileSHA256(aliasPath)
+	lexiconSHA, err := conceptindex.FileSHA256(lexiconPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := conceptindex.Open(outputPath, portableSourceSHA, aliasSHA)
+	store, err := conceptindex.Open(outputPath, portableSourceSHA, lexiconSHA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +222,7 @@ func loadAssociationFixtures(t *testing.T) []associationFixture {
 
 func fullFixtureAnimals(t *testing.T) []availableAnimal {
 	t.Helper()
-	catalog, err := loadCatalog("assets/animals.json", "assets/cc0", "", log.New(io.Discard, "", 0))
+	catalog, err := loadCatalog("assets/animal-lexicon.json", "assets")
 	if err != nil {
 		t.Fatal(err)
 	}

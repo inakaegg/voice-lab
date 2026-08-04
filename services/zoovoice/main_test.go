@@ -41,7 +41,7 @@ func TestLoadRuntimeDependenciesRequiresASRAndConceptNetFiles(t *testing.T) {
 			t.Setenv("ZOOVOICE_WHISPER_COMMAND", test.command)
 			t.Setenv("ZOOVOICE_ASR_MODEL_PATH", test.model)
 			t.Setenv("ZOOVOICE_CONCEPTNET_INDEX_PATH", test.index)
-			if _, err := loadRuntimeDependencies(execCommandRunner{}, "assets/association-aliases.json"); err == nil {
+			if _, err := loadRuntimeDependencies(execCommandRunner{}, "assets/animal-lexicon.json"); err == nil {
 				t.Fatal("startup dependencies accepted invalid runtime files")
 			}
 		})
@@ -63,33 +63,33 @@ func TestDefaultComposeTimeoutLeavesHeadroomForNinetySecondGateway(t *testing.T)
 	}
 }
 
-func TestLoadRuntimeDependenciesRejectsAliasIndexMismatch(t *testing.T) {
+func TestLoadRuntimeDependenciesRejectsLexiconIndexMismatch(t *testing.T) {
 	commandPath, modelPath := createASRFiles(t)
 	root := t.TempDir()
-	aliasesPath := filepath.Join(root, "association-aliases.json")
-	aliases, err := os.ReadFile(filepath.Join("assets", "association-aliases.json"))
+	lexiconPath := filepath.Join(root, "animal-lexicon.json")
+	lexicon, err := os.ReadFile(filepath.Join("assets", "animal-lexicon.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(aliasesPath, aliases, 0o600); err != nil {
+	if err := os.WriteFile(lexiconPath, lexicon, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	indexPath := filepath.Join(root, "index.sqlite")
 	if err := conceptindex.Build(context.Background(), conceptindex.BuildOptions{
 		SourcePath: filepath.Join("testdata", "conceptnet-mini.tsv.gz"), OutputPath: indexPath,
-		AliasesPath: aliasesPath, SourceVersion: "5.7.0-test",
+		LexiconPath: lexiconPath, SourceVersion: "5.7.0-test",
 		SourceURL:    "https://example.invalid/conceptnet-mini.tsv.gz",
 		SourceSHA256: conceptNetSourceSHA256, CheckpointEvery: 100,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(aliasesPath, append(aliases, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(lexiconPath, append(lexicon, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("ZOOVOICE_WHISPER_COMMAND", commandPath)
 	t.Setenv("ZOOVOICE_ASR_MODEL_PATH", modelPath)
 	t.Setenv("ZOOVOICE_CONCEPTNET_INDEX_PATH", indexPath)
-	if _, err := loadRuntimeDependencies(execCommandRunner{}, aliasesPath); err == nil {
-		t.Fatal("startup accepted an index built from different aliases")
+	if _, err := loadRuntimeDependencies(execCommandRunner{}, lexiconPath); err == nil {
+		t.Fatal("startup accepted an index built from a different lexicon")
 	}
 }

@@ -1,81 +1,66 @@
 package animaldefs
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
-	"sort"
 	"testing"
 )
 
-func TestLoadMatchesTrackedCC0Animals(t *testing.T) {
-	aliases, err := Load(filepath.Join("..", "..", "assets", "association-aliases.json"))
+func TestLoadTrackedAnimalLexicon(t *testing.T) {
+	catalog, err := Load(filepath.Join("..", "..", "assets", "animal-lexicon.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	manifestPayload, err := os.ReadFile(filepath.Join("..", "..", "assets", "manifest.json"))
-	if err != nil {
+	if len(catalog) != 27 {
+		t.Fatalf("animal count = %d, want 27", len(catalog))
+	}
+	pig := catalog["pig"]
+	if pig.LabelJA != "ブタ" || pig.AudioFile != "animal-sounds/pig.wav" {
+		t.Fatalf("pig = %#v", pig)
+	}
+	foundPork := false
+	for _, term := range pig.Terms {
+		if term == "豚肉" {
+			foundPork = true
+		}
+	}
+	if !foundPork {
+		t.Fatalf("pig terms = %v, want 豚肉", pig.Terms)
+	}
+	if err := catalog.ValidateAvailable(catalog.IDs()); err != nil {
 		t.Fatal(err)
-	}
-	var manifest []struct {
-		Animal string `json:"animal"`
-	}
-	if err := json.Unmarshal(manifestPayload, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	wantIDs := make([]string, 0, len(manifest))
-	for _, entry := range manifest {
-		wantIDs = append(wantIDs, entry.Animal)
-	}
-	sort.Strings(wantIDs)
-
-	gotIDs := aliases.IDs()
-	if !reflect.DeepEqual(gotIDs, wantIDs) {
-		t.Fatalf("alias IDs = %v, want tracked CC0 IDs %v", gotIDs, wantIDs)
-	}
-	if err := aliases.ValidateAvailable(wantIDs); err != nil {
-		t.Fatalf("ValidateAvailable: %v", err)
 	}
 }
 
-func TestLoadRejectsInvalidAliases(t *testing.T) {
+func TestLoadRejectsInvalidLexicon(t *testing.T) {
+	valid := `{"schema_version":1,"generated":true,"do_not_edit":"generated","metadata":{},"animals":[{"id":"dog","label_ja":"犬","terms":["犬"],"onomatopoeia":[],"audio_file":"animal-sounds/dog.wav","audio_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`
 	tests := []struct {
 		name    string
 		payload string
 	}{
-		{name: "empty id", payload: `[{"id":"","terms":["犬"],"onomatopoeia":[]}]`},
-		{name: "empty terms", payload: `[{"id":"dog","terms":[],"onomatopoeia":[]}]`},
-		{name: "empty alias", payload: `[{"id":"dog","terms":[""],"onomatopoeia":[]}]`},
-		{name: "duplicate normalized alias", payload: `[{"id":"dog","terms":["犬"," 犬 "],"onomatopoeia":[]}]`},
-		{name: "duplicate id", payload: `[{"id":"dog","terms":["犬"],"onomatopoeia":[]},{"id":"dog","terms":["いぬ"],"onomatopoeia":[]}]`},
-		{name: "unknown field", payload: `[{"id":"dog","terms":["犬"],"onomatopoeia":[],"extra":true}]`},
+		{name: "not generated", payload: `{"schema_version":1,"generated":false,"do_not_edit":"generated","metadata":{},"animals":[]}`},
+		{name: "empty terms", payload: `{"schema_version":1,"generated":true,"do_not_edit":"generated","metadata":{},"animals":[{"id":"dog","label_ja":"犬","terms":[],"onomatopoeia":[],"audio_file":"dog.wav","audio_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`},
+		{name: "unknown field", payload: valid[:len(valid)-1] + `,"extra":true}`},
 	}
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "aliases.json")
+			path := filepath.Join(t.TempDir(), "animal-lexicon.json")
 			if err := os.WriteFile(path, []byte(test.payload), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := Load(path); err == nil {
-				t.Fatal("Load accepted invalid aliases")
+				t.Fatal("Load accepted invalid lexicon")
 			}
 		})
 	}
 }
 
-func TestValidateAvailableRejectsUnknownAliasID(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "aliases.json")
-	if err := os.WriteFile(path, []byte(`[{"id":"unicorn","terms":["一角獣"],"onomatopoeia":[]}]`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	aliases, err := Load(path)
+func TestValidateAvailableRejectsMissingAudioID(t *testing.T) {
+	catalog, err := Load(filepath.Join("..", "..", "assets", "animal-lexicon.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := aliases.ValidateAvailable([]string{"dog"}); err == nil {
-		t.Fatal("ValidateAvailable accepted an alias without an available animal")
+	if err := catalog.ValidateAvailable([]string{"dog"}); err == nil {
+		t.Fatal("ValidateAvailable accepted missing animal audio")
 	}
 }
