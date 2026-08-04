@@ -38,7 +38,7 @@ RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のと
 
 取り込んだ `whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。この確認では、`whisper-cli` がwhisper/ggmlを共有libraryとして要求しないことを確かめた。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
 
-この測定はApple Silicon上のlinux/amd64 emulationで行っており、production Cloud Runへのdeployは未実施である。上記の値はいずれもCloud Run実機では未確認である。測定条件と処理時間の詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
+この測定はApple Silicon上のlinux/amd64 emulationで行っている。上記の値はいずれもCloud Run実機では未確認である。測定条件と処理時間の詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
 
 ## モデル候補の容量目安
 

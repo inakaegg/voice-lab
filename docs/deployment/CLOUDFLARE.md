@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-03
+更新日: 2026-08-04
 
 ## 目的
 
@@ -46,7 +46,7 @@ Google OAuth clientの「承認済みのリダイレクトURI」には `https://
 
 ### Zoovoiceのsecretとflag
 
-Zoovoiceを有効にする配備では、`ZOOVOICE_GCP_SA_KEY` と `ZOOVOICE_TURNSTILE_SECRET_KEY` をWorker secretとして登録する。既定の配備では登録しない。
+Zoovoiceを有効にする配備では、`ZOOVOICE_GCP_SA_KEY` と `ZOOVOICE_TURNSTILE_SECRET_KEY` をWorker secretとして登録する。既定の配備では登録しない。production Workerへはこの2つを登録済みである。
 
 Workerの `ZOOVOICE_ORIGIN_MODE` は `local-origin`・`cloud-run-smoke`・`cloud-run` の3つを持つ。前2つはローカル確認用で、loopback originからの `ZOOVOICE_LOCAL_DEV=1` 配備でしか動かない。`cloud-run` はproduction用で、逆に `ZOOVOICE_LOCAL_DEV=1` の配備とloopback hostnameからのrequestを502で拒否する。条件を満たさない配備はCloud Runを呼ばずfail closedにする。
 
@@ -63,9 +63,11 @@ invoker service accountには対象service単位の `roles/run.invoker` だけ�
 
 取得したID tokenはisolate内のmemoryだけへcacheし、token payloadの `exp` の300秒前まで再利用する。KV・D1・R2・Cache APIへtokenを保存しない。service account key、JWT、ID tokenはresponseとlogへ含めない。
 
-この認証の実装とfake token endpointによる契約testは完了している。実keyの発行、secret登録、Cloud Run deploy、本番有効化はいずれも未実施の外部操作である。
+この認証の実装とfake token endpointによる契約testは完了している。実keyの発行、Worker secretへの登録、Cloud Run deployも完了している。
 
 ローカルのTurnstile確認は、Cloudflare公式のalways-pass test site key・secret keyだけを使う。このtest key組はproduction設定と混在させない。
+
+production用のTurnstile managed widgetは作成済みである。allowed hostnamesは公開Worker hostnameとloopbackの2系統に限る。
 
 `cloud-run-smoke`モードは、developer端末のgcloudでservice account impersonationを行い、audience付きの短期ID tokenを取得する。取得したtokenは一時env file経由でlocal Wranglerへ渡すだけであり、Worker secretとしては保存しない。このモードの利用には `ZOOVOICE_CLOUD_RUN_URL`・`ZOOVOICE_GCP_PROJECT`・`ZOOVOICE_SMOKE_SERVICE_ACCOUNT` を設定し、`npm run dev:zoovoice:cloud-run` を使う。
 
@@ -77,7 +79,9 @@ flagと公開設定は `[vars]` へ置く。Zoovoiceを有効にする配備のv
 - `ZOOVOICE_TURNSTILE_SITE_KEY`
 - `ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME`
 
-現在の `wrangler.toml` はこれらを設定しておらず、productionのZoovoiceは無効である。有効化の際は、この5つを有効化専用のcommitとして `wrangler.toml` の `[vars]` へ追加し、main経由でdeployする。dashboardやCLIの一時的なvar設定だけで有効化しない。一時設定だけでは、次のmain経由deployで設定が失われるためである。
+現在の `wrangler.toml` はこの5つを `[vars]` へ設定している。実際の値は `wrangler.toml` を正とし、docsへ二重に書かない。有効・無効の切り替えは常に `wrangler.toml` のcommitとdeployで行う。dashboardやCLIの一時的なvar設定だけで有効化しない。一時設定だけでは、次のdeployで設定が失われるためである。
+
+本番D1への `migrations/0004_zoovoice_usage_counters.sql` の適用と、有効化varsを含むproduction Workerのdeployは完了している。deploy後の実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` が200を返すことを確認した。公開 `/zoovoice` の実ブラウザ表示とproduction Turnstile widgetの表示も確認した。Worker経由の実 `POST /api/zoovoice/compose` は、production Turnstileの人間操作が必要なため未確認である。
 
 #### `ZOOVOICE_GCP_SA_KEY` の登録手順
 
@@ -104,7 +108,7 @@ key漏洩の疑いがある場合は、機能flagのrollbackだけでは直接�
 3. 認証なしのdirect requestと旧keyでのdirect requestが、いずれも401または403で拒否されることを確認する。
 4. 新しいkeyを発行し、`wrangler secret put ZOOVOICE_GCP_SA_KEY` でsecretを更新する。
 
-Cloud Run側の準備は別の外部操作gateである。region、サービス契約、IAM方針、配備scriptの詳細は [ARCHITECTURE.md](ARCHITECTURE.md) と `services/zoovoice/README.md` を参照する。
+Cloud Run側の準備は別の外部操作gateであり、us-central1へのdeployは完了している。region、サービス契約、IAM方針、配備scriptの詳細は [ARCHITECTURE.md](ARCHITECTURE.md) と `services/zoovoice/README.md` を参照する。
 
 ### Worker名変更時の移行
 

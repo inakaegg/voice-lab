@@ -374,7 +374,7 @@ applyはcleanなworking treeを必要とします。
 
 Cloud Runの配備契約は次のとおりです。
 CPUとメモリはlocal-only verificationで同じ上限を課して起動を確認しています。
-残りの項目はscriptが指定する値であり、production環境での適用結果は未確認です。
+この契約で、us-central1のprivate Cloud Run serviceへdeploy済みです。
 
 - region: `us-central1`
 - private（`--no-allow-unauthenticated`、`allUsers`と`allAuthenticatedUsers`は不可）
@@ -387,8 +387,9 @@ CPUとメモリはlocal-only verificationで同じ上限を課して起動を確
 Cloud RunへGit repositoryを接続する自動buildは使いません。
 container imageのbuildとpushはローカルの配備scriptだけが行います。
 
-invoker権限は、smoke専用のservice accountだけへservice単位で`roles/run.invoker`を付与します。
-active developerのgcloudアカウントは、そのservice account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
+invoker権限はservice単位の`roles/run.invoker`だけを付与し、`allUsers`へは付与しません。
+付与先はCloudflare Worker用のinvoker service accountと、smoke専用のservice accountの2つです。
+active developerのgcloudアカウントは、smoke専用service account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
 
 ### local-only verificationの実測
 
@@ -415,21 +416,35 @@ compose時間はemulationの影響を受けるため、Cloud Runの実CPU上の�
 上の表は動物レキシコンと動物音を入れ替える前のimageの実測です。
 現在のassetsを含むimageでは再測定していません。
 
-### 未実施の範囲
+### 外部操作の状況
 
 production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker service accountのkeyによるID token取得方式です。
 方式の決定とWorker側の実装、契約testは完了しています。
 認証フローとsecret運用の詳細は[CLOUDFLARE.md](../../docs/deployment/CLOUDFLARE.md)を参照してください。
 
-次のremote操作は未実施です。
+次のremote操作は完了しています。
 
 - privateなArtifact Registryへのimage push
 - GCP projectでのCloud Run resource作成とdeploy実行
 - production用invoker service accountの作成とservice単位の `roles/run.invoker` 付与
 - invoker service account keyの発行とWorker secret登録
-- production Workerでの有効化varsの反映と実環境smoke
+- 本番D1へのZoovoice counter migration適用
+- 有効化varsを含むproduction Workerのdeploy
 
-これらを終えるまでproduction readyとして扱いません。
+実環境smokeで確認済みなのは次の範囲です。
+
+- 公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答
+- 公開 `/zoovoice` とZoovoice用JS assetの200配信
+- 実ブラウザでのUI表示とproduction Turnstile widgetの表示
+- 認証付きrequestでのprivate Cloud Runの `/animals` と実音声の `POST /compose` の200応答
+- 認証なしのCloud Run直接requestが403で拒否されること
+
+Cloud Runの `/healthz` は認証付きrequestでもGoogle側で404になるため、remote smokeの確認先には使いません。
+local containerでは同じpathが200を返します。
+
+Worker経由の実 `POST /api/zoovoice/compose` は未確認です。
+この確認にはproduction Turnstileの人間操作が必要であり、CAPTCHAは回避しません。
+この1件を終えるまで、公開経路全体を実地確認済みとしては扱いません。
 
 ## 検証
 

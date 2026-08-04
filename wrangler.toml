@@ -31,6 +31,11 @@ OPENAI_TTS_VOICE = "coral"
 OPENAI_TTS_RESPONSE_FORMAT = "wav"
 SEED_VC_DIFFUSION_STEPS = "8"
 SEED_VC_REFERENCE_MAX_SECONDS = "12"
+ZOOVOICE_ENABLED = "1"
+ZOOVOICE_ORIGIN_MODE = "cloud-run"
+ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice-kx3ku4k2fa-uc.a.run.app"
+ZOOVOICE_TURNSTILE_SITE_KEY = "0x4AAAAAAEGEa8LeZO8poIN_"
+ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME = "voice-lab.inakaegg.workers.dev"
 
 [observability]
 enabled = true

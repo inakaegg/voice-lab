@@ -15,7 +15,7 @@
 | Cloudflare Turnstile | Zoovoiceの検証tokenとclient IP | 自動化された大量利用の抑止 |
 | Google Cloud Run | Zoovoiceの録音音声とアニマル度 | 日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成 |
 
-最後の2行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。Zoovoiceは公開環境へdeployしていない。
+最後の2行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。公開環境の配備はこの値を設定している。
 
 ブラウザへOpenAI・RunPodのAPI keyを渡さない。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
 
@@ -44,9 +44,9 @@ Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの
 
 ## Zoovoiceのデータ境界
 
-Zoovoiceは `ZOOVOICE_ENABLED=1` の配備だけで公開routeとAPIを提供する。公開環境へはdeployしていない。この節は有効化した配備でのデータ境界を示す。
+Zoovoiceは `ZOOVOICE_ENABLED=1` の配備だけで公開routeとAPIを提供する。公開環境の配備はこの値を設定している。この節は有効化した配備でのデータ境界を示す。
 
-この節が示すASR、動物の自動連想、応答metadataはリポジトリの現在のコードに実装済みである。Cloud Runへのdeployと本番有効化は未実施である。機能仕様は [SPEC](../speech-translation/SPEC.md) を正とする。
+この節が示すASR、動物の自動連想、応答metadataはリポジトリの現在のコードに実装済みである。Cloud Runとproduction Workerへのdeployも完了しており、公開環境でZoovoiceは有効である。機能仕様は [SPEC](../speech-translation/SPEC.md) を正とする。
 
 ### 用語
 
@@ -63,7 +63,7 @@ compose用の録音とアニマル度は、ブラウザからCloudflare Worker�
 
 Workerは受け取った録音とアニマル度をGoogle Cloud Runへ一時送信する。Cloud Runは日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成を担当する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。
 
-productionのWorkerは、専用invoker service accountのkeyで署名したJWTをGoogleのtoken endpointで短期ID tokenへ交換し、そのtokenを付けてCloud Runを呼ぶ。ID tokenはisolate内のmemoryだけへ短期cacheし、KV・D1・R2へ保存しない。service account key、JWT、ID tokenは応答とlogへ含めない。この認証は実装済みであり、実keyの登録とCloud Runへの実deployは未実施の外部操作である。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す。
+productionのWorkerは、専用invoker service accountのkeyで署名したJWTをGoogleのtoken endpointで短期ID tokenへ交換し、そのtokenを付けてCloud Runを呼ぶ。ID tokenはisolate内のmemoryだけへ短期cacheし、KV・D1・R2へ保存しない。service account key、JWT、ID tokenは応答とlogへ含めない。この認証は実装済みであり、実keyのWorker secret登録とCloud Runへのdeployも完了している。deploy済みのCloud Runが認証なしのrequestを403で拒否することは、実環境で確認済みである。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す。
 
 WorkerはTurnstileをserver-sideで検証する。検証はcompose requestごとに行う。ブラウザは使ったtokenを成功・失敗の後にresetし、次のtokenを取得する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesとアニマル度の設定JSONだけである。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。
 
@@ -96,7 +96,7 @@ D1へ音声と入力本文を保存しない。保存するのはZoovoice共通�
 
 動物一覧はCloud Runを起動せず、Worker Static Assetsの静的JSONから返す。この経路では音声データを扱わない。
 
-Cloud Runのregionは `us-central1` とする。実際のCloud Run deployと有効化は別の外部操作gateであり、未実施である。有効化する前に本書と [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を確認する。
+Cloud Runのregionは `us-central1` とする。privateなCloud Run serviceへのdeployは完了している。公開範囲を変える前に本書と [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を確認する。
 
 ## 保持期間、削除と問い合わせ
 

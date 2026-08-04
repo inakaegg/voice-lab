@@ -46,9 +46,9 @@ SpeakLoopの中国語比較はRunPodのjob IDをブラウザへ返し、Worker�
 
 ## Zoovoice
 
-Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。公開環境へはdeployしていない。
+Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。GoサービスはprivateなCloud Runへdeploy済みである。公開Workerも有効化varsを含めてdeploy済みである。
 
-この節はリポジトリの現在のコードの構成を示す。日本語ASRと動物の自動連想はGoサービスへ実装済みである。Cloud Runへのdeployと本番有効化は未実施であり、外部操作gateとして扱う。機能仕様は [SPEC.md](../speech-translation/SPEC.md) を正とする。
+この節はリポジトリの現在のコードの構成を示す。日本語ASRと動物の自動連想はGoサービスへ実装済みである。Cloud Runとproduction Workerへのdeployは完了しており、有効化varsも `wrangler.toml` へ設定済みである。外部操作と実環境smokeの状況はこの節の末尾に示す。機能仕様は [SPEC.md](../speech-translation/SPEC.md) を正とする。
 
 ### 用語
 
@@ -57,13 +57,13 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 - 根拠語とは、その選択に使ったASR本文中の語を指す。
 - 連想metadataとは、選ばれた動物と根拠語と選択方式を指す。random fallbackではその理由も含む。
 
-Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` には `ZOOVOICE_ENABLED` を設定していない。
+Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` は `ZOOVOICE_ENABLED="1"` を設定している。
 
 Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。`direct` は動物名や鳴き声の直接言及、`pun` は動物名の語が別の語句の一部として現れる語呂合わせである。`conceptnet` は形態素候補と隣接する内容語の連接を使う日本語ConceptNetの1-hopである。どの段でも決まらない入力は `random_fallback` にする。
 
 連想と音声再生が参照する語彙は、リポジトリで追跡する生成物 `services/zoovoice/assets/animal-lexicon.json` を正とする。生成入力はConceptNet 5.7.0のassertions、採否を固定したAI判断の記録、採用音声のmanifestの3つとする。3つの入力のSHA-256は生成物のmetadataへ埋め込む。現在の対象は第1段階の27種である。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
 
-productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。実keyの発行、Cloud Runへの実deploy、本番有効化は未実施の外部操作である。
+productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。invoker service accountの作成と権限付与、key発行、Worker secretの登録も完了している。
 
 ```text
 Browser
@@ -89,7 +89,7 @@ imageへ入れる音源素材は、リポジトリで追跡する `services/zoov
 
 ASRモデル、ConceptNet index、必要な外部commandのいずれかが欠けた場合はエラーを返す。固定の動物へ黙って切り替えない。
 
-D1へ追加するのは `zoovoice_usage_counters` テーブルだけである。対応するmigrationは `migrations/0004_zoovoice_usage_counters.sql` であり、本番D1へは未適用である。データ境界は [PRIVACY.md](PRIVACY.md) を参照する。
+D1へ追加するのは `zoovoice_usage_counters` テーブルだけである。対応するmigrationは `migrations/0004_zoovoice_usage_counters.sql` であり、本番D1へ適用済みである。データ境界は [PRIVACY.md](PRIVACY.md) を参照する。
 
 ASR本文、根拠語、録音、生成音声は応答の生成に必要な間だけ扱う。これらの永続保存先は持たず、D1、R2、application logへ書かない。
 
@@ -116,18 +116,27 @@ Cloud RunへGit repositoryを接続する自動buildは使わない。container 
 
 Wrangler localからGoサービスまでの通しは、Playwrightのe2eで別途確認済みである。この確認はDocker imageではなくnative localのGoサービスを使い、Turnstileのtest keyを経由する。確認する経路は録音から日本語ASR、動物の直接連想、音声合成を経て再生とダウンロードまでである。この通しはtest本体13.1秒、run全体13.7秒で成功している。
 
-Cloud Run側の実際の反映はCloudflare Worker deployとは別の外部操作gateとして扱う。production WorkerのCloud Run認証は方式の決定と実装が完了しており、残るのは次のremote操作である。いずれも未実施である。
+Cloud Run側の反映はCloudflare Worker deployとは別の外部操作gateとして扱う。GCP project `mo-speech-501706` のus-central1へ、private Cloud Run service `zoovoice` をdeploy済みである。次のremote操作は完了している。
 
-- privateなArtifact Registryへのcontainer image実push
+- privateなArtifact Registryへのcontainer image push
 - GCP projectでのCloud Run resource作成とdeploy実行
 - invoker service accountの作成と対象serviceへの `roles/run.invoker` 付与
 - invoker service account keyの発行とWorker secret登録
 - production Turnstile widgetの作成
+- 有効化varsの `wrangler.toml` への追加
 - 本番D1へのZoovoice counter migration適用
-- 有効化varsのcommitとmain経由deploy
-- 実環境での最小smoke確認
+- 有効化varsを含むproduction Workerのdeploy
 
-これらを終えるまでproduction readyとして扱わない。
+実環境smokeで確認済みなのは次の範囲である。
+
+- 公開 `GET /api/zoovoice/config` が200を返し、有効な状態とTurnstile必須を示すこと
+- 公開 `GET /api/zoovoice/animals` が200で27種を返すこと
+- 公開 `/zoovoice` とZoovoice用JS assetが200で配信されること
+- 実ブラウザでのUI表示、production Turnstile widgetの表示、`Powered by Stability AI` の表示
+- private Cloud Runの `/animals` と実音声の `POST /compose` が認証付きrequestで200を返すこと
+- 認証なしのCloud Run直接requestが403で拒否されること
+
+Worker経由の実 `POST /api/zoovoice/compose` は未確認である。この経路の通過にはproduction Turnstileの人間操作が必要なためである。CAPTCHAは回避しないため、自動smokeの対象にしない。Worker側のID token交換とorigin requestは、fake endpointを使う契約testで固定している。この1件の人間確認を終えるまで、公開経路全体を実地確認済みとして扱わない。
 
 ## 将来の分割
 

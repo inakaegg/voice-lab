@@ -6,7 +6,7 @@
 
 Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフォリオの主機能とする。ローカルFastAPI、Cloudflare Worker、RunPod Serverlessの責任を分離し、秘密情報とGPU処理をブラウザへ置かない。この構成はproduction公開環境へ反映済みである。
 
-Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成までをGoogle Cloud Run上のGo APIへ委譲する。production公開はflagで止めており、有効化条件は [Zoovoice](#zoovoice) に定める。
+Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成までをGoogle Cloud Run上のGo APIへ委譲する。production公開は `ZOOVOICE_ENABLED` のflagで制御し、有効化条件は [Zoovoice](#zoovoice) に定める。
 
 ## 正式route
 
@@ -115,7 +115,7 @@ Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成
 
 Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
 
-この節の自動連想と1画面UIはリポジトリの現在のコードに実装済みである。Cloud Runへのdeployと本番有効化は未実施である。
+この節の自動連想と1画面UIはリポジトリの現在のコードに実装済みである。Cloud Runとproduction Workerへのdeployも完了しており、公開環境でZoovoiceは有効である。
 
 ### 用語
 
@@ -232,14 +232,17 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 
 ### productionの扱い
 
-- production配備のZoovoiceはまだ有効化していない。
+- production `wrangler.toml` は有効化varsを設定済みである。実際の値は `wrangler.toml` を正とする。
 - production Workerの認証は、専用invoker service accountのkeyによるID token取得方式とする。方式の決定と実装は完了しており、詳細は [CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする。
 - production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
-- 外部deployとproduction有効化は別のgateで扱う。対象はprivateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行、有効化varsのmain経由deployである。
+- 外部deployとproduction有効化は別のgateで扱う。privateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行は完了している。
 - 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - ASRモデルと連想indexを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - 実測はApple Silicon上のlinux/amd64 emulationで行っており、Cloud Runの実CPU上の処理時間は未確認である。
-- Cloud Runへの実deploy、privateなArtifact Registryへのpush、GCP resourceとIAMの作成、実keyのsecret登録と有効化はいずれも未実施である。これらを終えるまでproduction readyとして扱わない。
+- 本番D1へのcounter migration適用と、有効化varsを含むproduction Workerのdeployは完了している。
+- 実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答を確認した。公開 `/zoovoice` は実ブラウザでUIとproduction Turnstileの表示を確認した。
+- private Cloud Runへは、認証付きrequestで `/animals` と実音声の `POST /compose` の200応答を確認した。認証なしの直接requestは403だった。
+- Worker経由の実 `POST /api/zoovoice/compose` は未確認である。この確認にはproduction Turnstileの人間操作が必要であり、CAPTCHAは回避しない。この1件を終えるまで、公開経路全体を実地確認済みとして扱わない。
 
 ## 実行環境の責任
 
