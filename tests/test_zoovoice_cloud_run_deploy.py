@@ -352,6 +352,15 @@ def test_ci_builds_the_repository_owned_service_stage_without_runtime_contexts()
     assert "docker build --target service-builder" in workflow
 
 
+def test_ci_runs_the_chromium_only_zoovoice_portal_suite_once() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    portal_step = workflow.split("- name: Zoovoice portal tests", 1)[1]
+    portal_step = portal_step.split("- name:", 1)[0]
+    assert "if: matrix.browser == 'chromium'" in portal_step
+    assert "run: npm run test:e2e:portal-zoovoice" in portal_step
+
+
 def test_runtime_artifacts_are_readable_by_the_nonroot_user() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 

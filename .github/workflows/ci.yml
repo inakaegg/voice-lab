@@ -113,6 +113,7 @@ jobs:
           --project "${{ matrix.browser }}-mobile"
 
       - name: Zoovoice portal tests
+        if: matrix.browser == 'chromium'
         run: npm run test:e2e:portal-zoovoice
 
       - name: Upload Playwright failure artifacts
