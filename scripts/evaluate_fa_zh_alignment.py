@@ -105,6 +105,18 @@ def summarize(rows: list[dict[str, Any]], side: str) -> dict[str, Any]:
     }
 
 
+def summarize_all_sides(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    combined_rows = [
+        {"combined": row[side]}
+        for row in rows
+        for side in ("attempt", "reference")
+        if row.get(side)
+    ]
+    summary = summarize(combined_rows, "combined")
+    summary["cases"] = len(rows)
+    return summary
+
+
 def find_reference_audio(
     outputs_dir: Path,
     target_text: str,
@@ -208,8 +220,18 @@ def evaluate_cases(cases: list[dict[str, Any]], provider: FunAsrPracticeProvider
         "baseline_vad_agreement": baseline,
         "aligned_vad_agreement": aligned_rows,
         "summary": {
-            side: {"baseline": summarize(baseline, side), "aligned": summarize(aligned_rows, side)}
-            for side in ("attempt", "reference")
+            "attempt": {
+                "baseline": summarize(baseline, "attempt"),
+                "aligned": summarize(aligned_rows, "attempt"),
+            },
+            "reference": {
+                "baseline": summarize(baseline, "reference"),
+                "aligned": summarize(aligned_rows, "reference"),
+            },
+            "combined": {
+                "baseline": summarize_all_sides(baseline),
+                "aligned": summarize_all_sides(aligned_rows),
+            },
         },
     }
 

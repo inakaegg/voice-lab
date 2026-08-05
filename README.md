@@ -167,6 +167,12 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 依存ライブラリ、モデル、第三者実装にはそれぞれのライセンスと利用条件が適用されます。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
 
+## 設計解説
+
+比較再生の再生位置をどう決めているかと、その設計を選んだ理由を図解付きで公開しています。仕様の正本は [全体仕様](docs/speech-translation/SPEC.md) です。
+
+- [比較再生: 再生位置の設計判断と評価](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 想定している失敗モード、設計上の制約と理由、ASR・forced alignment・VADスナップ・LLMの役割分担、評価指標とその限界
+
 ## ドキュメント
 
 詳細文書の入口は [ドキュメント案内](docs/README.md) です。SpeakLoopの仕様、画面、実行経路、provider、公開運用という目的別に全文書を辿れます。

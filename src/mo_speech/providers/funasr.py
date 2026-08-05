@@ -160,6 +160,9 @@ class FunAsrPracticeProvider:
         value = payload if isinstance(payload, dict) else {}
         tokens = str(value.get("text") or "").split()
         timestamps = value.get("timestamp") if isinstance(value.get("timestamp"), list) else []
+        expected_count = len(transcription.words)
+        if len(tokens) != expected_count or len(timestamps) != expected_count:
+            raise ValueError("forced alignment token or timestamp count does not match ASR words")
         aligned_words = []
         for token, timestamp in zip(tokens, timestamps):
             if not isinstance(timestamp, (list, tuple)) or len(timestamp) < 2:
