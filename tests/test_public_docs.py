@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC_SENTENCE_COMMA_LIMIT = 3
 _INLINE_CODE = re.compile(r"`[^`]*`")
 _MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MARKDOWN_LINK_TARGET = re.compile(r"\[[^\]]*\]\(\s*([^)\s]+)")
 _BARE_URL = re.compile(r"https?://\S+")
 _NEW_BLOCK = re.compile(r"^(?:[-*+]\s|\d+\.\s)")
 
@@ -132,6 +133,33 @@ def test_public_docs_carry_an_update_date_near_the_top() -> None:
         if not any(date_line.match(line) for line in head_lines):
             missing.append(str(path.relative_to(ROOT)))
     assert not missing, "冒頭5行に更新日行がないdocs:\n" + "\n".join(missing)
+
+
+def iter_local_link_targets(markdown: str, base: Path):
+    """Markdown本文のlinkのうち、リポジトリ内を指す相対linkを(記述, 解決後path)で返す。"""
+    for target in _MARKDOWN_LINK_TARGET.findall(markdown):
+        path_part = target.split("#", 1)[0]
+        if not path_part or "://" in path_part or path_part.startswith("mailto:"):
+            continue
+        yield path_part, (base / path_part).resolve()
+
+
+def test_docs_index_is_the_entry_point_for_every_public_doc() -> None:
+    # docs/README.mdをdocs全体の入口として機械検査する。本文の文言ではなくlink先の網羅だけを固定する。
+    docs_root = ROOT / "docs"
+    index_path = docs_root / "README.md"
+    index = index_path.read_text(encoding="utf-8")
+    link_targets = list(iter_local_link_targets(index, index_path.parent))
+
+    broken = sorted(raw for raw, resolved in link_targets if not resolved.exists())
+    assert not broken, "docs/README.mdのlink先が存在しない:\n" + "\n".join(broken)
+
+    linked = {resolved for _, resolved in link_targets}
+    expected = {path.resolve() for path in docs_root.rglob("*.md")} - {index_path.resolve()}
+    missing = sorted(str(path.relative_to(ROOT)) for path in expected - linked)
+    assert not missing, "docs/README.mdから辿れないdocs:\n" + "\n".join(missing)
+
+    assert "docs/README.md" in read_text("README.md")
 
 
 def test_readme_presents_speakloop_without_research_branding() -> None:
