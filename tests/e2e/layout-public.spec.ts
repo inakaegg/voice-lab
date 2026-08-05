@@ -191,6 +191,54 @@ test("portal GitHub link reveals its video guidance on hover and keyboard focus"
   }
 });
 
+test("SpeakLoop GitHub link supports hover, keyboard focus, theme, and opening the repository", async ({ context, page }, testInfo) => {
+  await context.route("https://github.com/inakaegg/voice-lab", async (route) => {
+    await route.fulfill({ contentType: "text/html", body: "<title>Voice Lab repository</title>" });
+  });
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("mo-speech-theme")) localStorage.setItem("mo-speech-theme", "light");
+  });
+  await page.goto("/speakloop");
+  const link = page.getByRole("link", { name: "GitHubリポジトリ" });
+  const tooltip = page.locator("#speakloop-github-tooltip");
+  const marks = link.locator("img.portal-github-mark");
+
+  await expect(link).toHaveAttribute("href", "https://github.com/inakaegg/voice-lab");
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(marks).toHaveCount(2);
+  await expect(tooltip).toBeHidden();
+
+  if ((page.viewportSize()?.width || 0) > 820) {
+    await link.hover();
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toHaveText("実際の動作を動画で確認できます");
+  }
+
+  await link.focus();
+  await expect(link).toBeFocused();
+  await expect(tooltip).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+  await assertVisibleControlsInsideViewport(page);
+
+  const [popup] = await Promise.all([context.waitForEvent("page"), link.click()]);
+  await expect(popup).toHaveTitle("Voice Lab repository");
+  await popup.close();
+
+  if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {
+    const outputDir = "tmp/playwright/speakloop-github-link";
+    await mkdir(outputDir, { recursive: true });
+    await link.focus();
+    await page.screenshot({ path: `${outputDir}/${testInfo.project.name}-light-focus.png`, fullPage: true });
+    await page.evaluate(() => localStorage.setItem("mo-speech-theme", "dark"));
+    await page.reload();
+    await link.focus();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(tooltip).toBeVisible();
+    await page.screenshot({ path: `${outputDir}/${testInfo.project.name}-dark-focus.png`, fullPage: true });
+  }
+});
+
 test("public theme menu is keyboard reachable and persists dark mode", async ({ page }) => {
   await page.goto("/speakloop");
   const settings = page.getByLabel("配色設定");

@@ -1,21 +1,22 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-04
+更新日: 2026-08-05
 
 ## 構成
 
-Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopを配信する。UIはWorker Static Assets、認証・quota・API中継はWorker module、GPU推論はRunPod Serverlessが担当する。この構成はproduction公開環境へ反映済みである。
+Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopとZoovoiceを配信する。UIはWorker Static Assets、認証・quota・API中継はWorker moduleが担当する。SpeakLoopのGPU推論はRunPod Serverless、Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスが担当する。この構成はproduction公開環境へ反映済みである。
 
 ```text
 Browser
   -> Cloudflare Worker Static Assets
-       /, /speakloop
+       /, /speakloop, /zoovoice
   -> Cloudflare Worker module
-       Google OAuth / admin auth / quota / API gateway
+       Google OAuth / admin auth / quota / API gateway / Turnstile / Cloud Run ID token
        -> OpenAI API: native-language ASR / English practice ASR / translation / TTS
        -> RunPod Serverless: async dual-audio Chinese practice FunASR / Seed-VC
+       -> Google Cloud Run (private): Zoovoice Japanese ASR / animal association / synthesis
        -> KV: settings / short-lived jobs / fallback
-       -> D1: quota / audit / public sample metadata
+       -> D1: quota / audit / public sample metadata / Zoovoice usage counters
        -> R2: audio blobs
 ```
 
@@ -36,9 +37,10 @@ SpeakLoopの公開生成APIと管理画面は同じGoogle OAuthセッション�
 ## データ境界
 
 - KV: 設定、短期job snapshot、ready状態、binding不足時のfallback
-- D1: email hashを使うquota、監査イベント、公開サンプルmetadata
+- D1: email hashを使うquota、監査イベント、公開サンプルmetadata、Zoovoice利用counter
 - R2: 管理者が登録したsample音声のblob
 - RunPod: GPU jobの入力、途中progress、結果。長期保存の正にはしない
+- Cloud Run: Zoovoiceの録音、合成音声、連想metadata。応答の生成に必要な間だけ扱い、永続保存しない
 
 SpeakLoopの中国語比較はRunPodのjob IDをブラウザへ返し、WorkerまたはFastAPIがRunPod statusを都度中継する。Cloudflare側に練習音声やこのjob結果を履歴保存する必要はない。
 
@@ -46,7 +48,7 @@ SpeakLoopの中国語比較はRunPodのjob IDをブラウザへ返し、Worker�
 
 ## Zoovoice
 
-Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。GoサービスはprivateなCloud Runへdeploy済みである。公開Workerも有効化varsを含めてdeploy済みである。
+Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。GoサービスはprivateなCloud Runへdeploy済みである。公開Workerも有効化varsを含めてdeploy済みである。公開UIのβ版表示は本branchで追加した変更であり、production未反映である。merge後にWorker deployとdeploy後smokeを実施する。
 
 この節はリポジトリの現在のコードの構成を示す。日本語ASRと動物の自動連想はGoサービスへ実装済みである。Cloud Runとproduction Workerへのdeployは完了しており、有効化varsも `wrangler.toml` へ設定済みである。外部操作と実環境smokeの状況はこの節の末尾に示す。機能仕様は [SPEC.md](../speech-translation/SPEC.md) を正とする。
 

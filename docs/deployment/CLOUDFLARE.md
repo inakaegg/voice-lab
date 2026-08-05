@@ -1,10 +1,10 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-04
+更新日: 2026-08-05
 
 ## 目的
 
-スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置き、GPU推論だけをRunPod Serverlessへ送る。GPU PodでWebサーバーを常時起動しない。
+スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置く。SpeakLoopのGPU推論はprivateなRunPod Serverlessへ送り、GPU PodでWebサーバーを常時起動しない。Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスへ送る。
 
 公開Worker名は `voice-lab`、公開URLは `https://voice-lab.inakaegg.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
 
@@ -12,7 +12,7 @@
 
 この文書はproduction公開環境へ反映済みのCloudflareデモ構成を説明する。公開ポートフォリオの主機能はSpeakLoopとする。第三者が触って評価しやすいproduction公開デモとして整えるための改善順は [PUBLIC_DEMO_ROADMAP.md](PUBLIC_DEMO_ROADMAP.md) を参照する。
 
-データフロー、保存範囲、保持期間と削除処理は [PRIVACY.md](PRIVACY.md)、利用者向けの説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を参照する。公開画面では `/privacy` とSpeakLoopフッターから確認できる。
+データフロー、保存範囲、保持期間と削除処理は [PRIVACY.md](PRIVACY.md)、利用者向けの説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を参照する。公開画面では `/privacy` と、SpeakLoop・Zoovoiceのフッターから確認できる。
 
 ```text
 Browser
@@ -20,6 +20,7 @@ Browser
   -> Cloudflare Worker API gateway
   -> OpenAI API: 母語ASR、英語復唱ASR、翻訳、TTS、表示用テキスト加工
   -> private RunPod Serverless Job API: 中国語復唱FunASR、Seed-VC、warmup
+  -> private Google Cloud Run: Zoovoiceの日本語ASR、動物連想、音声合成
 ```
 
 ## 退役route
