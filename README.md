@@ -128,7 +128,7 @@ RunPod image buildとGPU smokeは費用・実行時間が大きいため、通�
 
 ## 公開デモ
 
-Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面、`/zoovoice` を動物鳴き声合成画面（β版）として配信します。現在の版はproduction公開環境へ反映済みです。
+Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面、`/zoovoice` を動物鳴き声合成画面（β版）として配信します。production公開環境にはmerge済みの版を反映済みで、上記routeは公開中です。本branchで追加したUI変更（Zoovoiceのβ表示・使用技術表示・SpeakLoopのGitHub導線）はproduction未反映です。merge後にdeployとdeploy後smokeを実施します。
 
 音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。個人情報や機密情報を含む音声は入力しないでください。詳しくは [プライバシーポリシー](docs/PRIVACY_POLICY.md) を確認してください。
 
