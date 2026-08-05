@@ -55,16 +55,27 @@ test("React layouts include responsive product and workflow structure", () => {
 });
 
 test("portal links to the GitHub repository with hover and focus help", () => {
-  assert.match(portal, /src="\/react\/github-invertocat-black\.svg"[\s\S]*src="\/react\/github-invertocat-white\.svg"/);
+  assert.match(portal, /<GitHubRepositoryLink tooltipId="portal-github-tooltip" \/>/);
+  assert.match(shared, /src="\/react\/github-invertocat-black\.svg"[\s\S]*src="\/react\/github-invertocat-white\.svg"/);
   assert.match(githubMarkBlack, /viewBox="0 0 98 96"[\s\S]*fill="black"/);
   assert.match(githubMarkWhite, /viewBox="0 0 98 96"[\s\S]*fill="white"/);
   assert.equal(createHash("sha256").update(githubMarkBlack).digest("hex"), "693d7abe6f899646cc2e96856723b45e95f71885a54910b2749f6decdf7e1ee1");
   assert.equal(createHash("sha256").update(githubMarkWhite).digest("hex"), "ccd84c89b1056345608fc3489357f8acc7397e49a3cdc2d418b6c8016911d47b");
-  assert.match(portal, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
-  assert.match(portal, /target="_blank"/);
-  assert.match(portal, /rel="noopener noreferrer"/);
-  assert.match(portal, /aria-describedby="portal-github-tooltip"/);
-  assert.match(portal, /id="portal-github-tooltip"[\s\S]*role="tooltip"[\s\S]*実際の動作を動画で確認できます/);
+  assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
+  assert.match(shared, /target="_blank"/);
+  assert.match(shared, /rel="noopener noreferrer"/);
+  assert.match(shared, /aria-describedby=\{tooltipId\}/);
+  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*実際の動作を動画で確認できます/);
+});
+
+test("SpeakLoop reuses the portal GitHub repository link", () => {
+  assert.match(shared, /export function GitHubRepositoryLink/);
+  assert.match(shared, /src="\/react\/github-invertocat-black\.svg"[\s\S]*src="\/react\/github-invertocat-white\.svg"/);
+  assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
+  assert.match(shared, /target="_blank"/);
+  assert.match(shared, /rel="noopener noreferrer"/);
+  assert.match(shared, /実際の動作を動画で確認できます/);
+  assert.match(speakloop, /<ProductHeader[\s\S]*githubLink/);
 });
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {

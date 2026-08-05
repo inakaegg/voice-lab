@@ -80,7 +80,8 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 
 ### Voice Labポータル
 
-- 上部はブランドと配色設定だけの短いheaderとし、設定を常に右上へ置く。
+- 上部はブランドと、配色設定の左に置く共通`GitHubRepositoryLink`だけの短いheaderとし、設定を常に右上へ置く。
+- `GitHubRepositoryLink`は公開リポジトリと動作動画確認用のlinkとする。
 - intro-copyの見出しと説明は維持し、その直後に `01 SpeakLoop` と `02 Zoovoice` を同格の製品行として番号順に表示する。
 - 各製品行は製品行の領域全体を対応routeへのlinkとする。2製品を囲む外側カード全体はlinkにしない。
 - Zoovoiceの製品行は、公開configの `enabled` が `true` のときだけ表示する。
@@ -92,6 +93,7 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 
 ### SpeakLoop
 
+- headerの配色設定の左へ、Voice Labポータルと共通の`GitHubRepositoryLink`を表示する。目的は公開リポジトリと動作動画の確認である。
 - 現在は日本語話者向けとし、公開UIの学習言語は `🇺🇸 English`、`🇨🇳 中文` の順で2つだけを表示する。初回の既定値と、旧保存値や未対応値のfallbackは `en-US` とする。現在対応中の保存値はそのまま復元する。
 - コンパクトな録音ボタンのマイクは、ボタン内に収まるoutline SVGで表示する。大きい録音ボタン向けの疑似要素を縮小流用して円外や操作文言へはみ出させない。
 - prompt未生成時は録音Stepを横長1枚で表示する。

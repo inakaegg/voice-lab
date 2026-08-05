@@ -2,7 +2,7 @@ import { ArrowUpRight, AudioWaveform, Mic2, PawPrint } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, TechStackNote, ThemeSettings } from "../shared/components";
+import { activateCompactLayout, GitHubRepositoryLink, TechStackNote, ThemeSettings } from "../shared/components";
 import { fetchZoovoiceConfig } from "../zoovoice/api";
 
 import "./styles.css";
@@ -44,18 +44,7 @@ function Portal({ zoovoiceEnabled }: { zoovoiceEnabled: boolean }) {
         <span>Voice Lab</span>
       </div>
       <div className="flex items-center gap-2">
-        <a
-          className="portal-github-link group"
-          href="https://github.com/inakaegg/voice-lab"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="GitHubリポジトリ"
-          aria-describedby="portal-github-tooltip"
-        >
-          <img className="portal-github-mark portal-github-mark-black" src="/react/github-invertocat-black.svg" width="98" height="96" alt="" aria-hidden="true" />
-          <img className="portal-github-mark portal-github-mark-white" src="/react/github-invertocat-white.svg" width="98" height="96" alt="" aria-hidden="true" />
-          <span id="portal-github-tooltip" role="tooltip" className="portal-github-tooltip">実際の動作を動画で確認できます</span>
-        </a>
+        <GitHubRepositoryLink tooltipId="portal-github-tooltip" />
         <ThemeSettings />
       </div>
     </header>

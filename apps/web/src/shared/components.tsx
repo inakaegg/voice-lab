@@ -12,10 +12,25 @@ export function activateCompactLayout(): void {
     : preference;
 }
 
-export function ProductHeader({ product, title, badge, back = true }: { product: string; title: string; badge?: string; back?: boolean }) {
+export function GitHubRepositoryLink({ tooltipId }: { tooltipId: string }) {
+  return <a
+    className="portal-github-link group"
+    href="https://github.com/inakaegg/voice-lab"
+    target="_blank"
+    rel="noopener noreferrer"
+    aria-label="GitHubリポジトリ"
+    aria-describedby={tooltipId}
+  >
+    <img className="portal-github-mark portal-github-mark-black" src="/react/github-invertocat-black.svg" width="98" height="96" alt="" aria-hidden="true" />
+    <img className="portal-github-mark portal-github-mark-white" src="/react/github-invertocat-white.svg" width="98" height="96" alt="" aria-hidden="true" />
+    <span id={tooltipId} role="tooltip" className="portal-github-tooltip">実際の動作を動画で確認できます</span>
+  </a>;
+}
+
+export function ProductHeader({ product, title, badge, back = true, githubLink = false }: { product: string; title: string; badge?: string; back?: boolean; githubLink?: boolean }) {
   return <header className="react-product-header">
     <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label="Voice Labへ戻る"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg></a>}<div><p className="react-eyebrow">{product}</p><h1>{title}{badge && <span className="ml-2 inline-block whitespace-nowrap rounded-full border border-[var(--react-border)] px-2 py-0.5 align-middle text-[0.62rem] font-bold tracking-[0.08em] text-[var(--react-muted)]">{badge}</span>}</h1></div></div>
-    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><ThemeSettings/></div>
+    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><div className="react-header-actions">{githubLink && <GitHubRepositoryLink tooltipId={`${product.toLowerCase()}-github-tooltip`} />}<ThemeSettings/></div></div>
   </header>;
 }
 

@@ -30,7 +30,7 @@ function CancelRecordingButton({ id }: { id: string }) {
 
 function SpeakLoop() {
   return <PageShell className="practice-shell react-practice-shell">
-    <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" />
+    <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" githubLink />
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>自分が言いたい文章だから、練習が続く。</h2><p>母国語で話すと、学習言語のお手本を生成します。聞いて、まねして、発音を比較できます。</p></div>
     </section>
