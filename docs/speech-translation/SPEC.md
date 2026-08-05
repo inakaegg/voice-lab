@@ -115,9 +115,9 @@ Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成
 
 Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
 
-Zoovoiceはβ版として公開する。公開UIは、ポータルの製品行とZoovoiceページのタイトル横へ `β版` を表示する。β版の間は、連想精度と音源の拡充を継続する。
+Zoovoiceはβ版として公開する。公開UIは、ポータルの製品行とZoovoiceページのタイトル横へ `β版` を表示する仕様とする。このβ版表示は本branchで追加した変更であり、production未反映である。merge後にWorker deployとdeploy後smokeを実施する。β版の間は、連想精度と音源の拡充を継続する。
 
-この節の自動連想と1画面UIはリポジトリの現在のコードに実装済みである。Cloud Runとproduction Workerへのdeployも完了しており、公開環境でZoovoiceは有効である。
+この節の自動連想と1画面UIはリポジトリの現在のコードに実装済みである。既存構成のCloud Runとproduction Workerへのdeployは完了しており、公開環境でZoovoiceのrouteは有効である。
 
 ### 用語
 

@@ -404,6 +404,18 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "本番未deploy" not in document, relative_path
         assert "production公開環境へ反映済み" in document, relative_path
 
+    for relative_path in (
+        "README.md",
+        "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
+        "docs/deployment/ARCHITECTURE.md",
+        "docs/speech-translation/SPEC.md",
+    ):
+        document = read_text(relative_path)
+        assert "β版" in document, relative_path
+        assert "production未反映" in document, relative_path
+        assert "merge後に" in document, relative_path
+        assert "deploy後smoke" in document, relative_path
+
     readme = read_text("README.md")
     assert "production公開環境にはmerge済みの版を反映済み" in readme
     assert "Zoovoiceのβ表示" in readme
