@@ -397,7 +397,6 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
     for relative_path in (
         "README.md",
         "docs/deployment/CLOUDFLARE.md",
-        "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/speech-translation/SPEC.md",
     ):
@@ -405,6 +404,18 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "production" in document, relative_path
         assert "本番未deploy" not in document, relative_path
         assert "production公開環境へ反映済み" in document, relative_path
+
+    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
+    assert "production公開環境にはmerge済みの版を反映済み" in roadmap
+    assert "本branchのUI変更" in roadmap
+    assert "Zoovoiceのβ表示" in roadmap
+    assert "使用技術表示" in roadmap
+    assert "SpeakLoopのGitHub導線" in roadmap
+    assert "production未反映" in roadmap
+    assert "merge後にdeployとdeploy後smokeを実施する" in roadmap
+    assert "Zoovoiceのproduction有効化とWorker deployは完了している" in roadmap
+    assert "Zoovoiceをproductionへ有効化" in roadmap
+    assert "公開route・公開Zoovoice API・Turnstile表示のsmokeを確認した" in roadmap
 
 
 def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> None:
