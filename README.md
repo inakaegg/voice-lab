@@ -117,9 +117,9 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 ## 設計解説
 
-比較再生の再生位置をどう決めているかを、図解付きで公開しています。仕様の正本は [全体仕様](docs/speech-translation/SPEC.md) です。
+比較再生の再生位置をどう決めているかと、その設計を選んだ理由を図解付きで公開しています。仕様の正本は [全体仕様](docs/speech-translation/SPEC.md) です。
 
-- [比較再生: 再生位置の設計と評価](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 想定している失敗モード、ASR・forced alignment・VADスナップ・LLMの役割分担、評価指標とその限界
+- [比較再生: 再生位置の設計判断と評価](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 想定している失敗モード、設計上の制約と理由、ASR・forced alignment・VADスナップ・LLMの役割分担、評価指標とその限界
 
 ## ドキュメント
 
