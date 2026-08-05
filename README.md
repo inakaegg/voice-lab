@@ -148,10 +148,11 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 ## ドキュメント
 
+詳細文書の入口は [ドキュメント案内](docs/README.md) です。SpeakLoopの仕様、画面、実行経路、provider、公開運用という目的別に全文書を辿れます。
+
+よく参照する文書:
+
 - [全体仕様](docs/speech-translation/SPEC.md)
 - [現在のデプロイ構成](docs/deployment/ARCHITECTURE.md)
-- [Cloudflareデモ構成](docs/deployment/CLOUDFLARE.md)
-- [RunPod構成](docs/deployment/RUNPOD.md)
-- [プライバシーポリシー](docs/PRIVACY_POLICY.md)
-- [実装上のデータ取扱い境界](docs/deployment/PRIVACY.md)
 - [既知の制限](docs/speech-translation/KNOWN_LIMITS.md)
+- [プライバシーポリシー](docs/PRIVACY_POLICY.md)
