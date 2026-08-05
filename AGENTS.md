@@ -4,7 +4,7 @@
 
 ## プロジェクトの目的
 
-- 発音練習Webアプリ「SpeakLoop」を中心とするVoice Labを開発する。Voice Labには動物鳴き声合成の「Zoovoice」も含む。
+- 発音練習Webアプリ「SpeakLoop」を中心とするVoice Labを開発する。Voice Labには動物鳴き声合成の「Zoovoice」（β版として公開中）も含む。
 - SpeakLoopは、母語の発話から学習言語（英語・中国語）のお手本文とお手本音声を生成し、復唱をtimestamp付きASRで比較・採点する。
 - Zoovoiceは、録音した日本語の発話から動物を1種連想し、その鳴き声を発話のすき間へ重ねる。日本語ASR・動物連想・音声合成はprivateなGoogle Cloud Run上のGoサービスで実行する。
 - GPU依存処理（中国語ASR・声質変換など）はprivateなRunPod Serverlessで実行し、公開経路はCloudflare Workerが担う。

@@ -12,9 +12,9 @@ export function activateCompactLayout(): void {
     : preference;
 }
 
-export function ProductHeader({ product, title, back = true }: { product: string; title: string; back?: boolean }) {
+export function ProductHeader({ product, title, badge, back = true }: { product: string; title: string; badge?: string; back?: boolean }) {
   return <header className="react-product-header">
-    <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label="Voice Labへ戻る"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg></a>}<div><p className="react-eyebrow">{product}</p><h1>{title}</h1></div></div>
+    <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label="Voice Labへ戻る"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg></a>}<div><p className="react-eyebrow">{product}</p><h1>{title}{badge && <span className="ml-2 inline-block whitespace-nowrap rounded-full border border-[var(--react-border)] px-2 py-0.5 align-middle text-[0.62rem] font-bold tracking-[0.08em] text-[var(--react-muted)]">{badge}</span>}</h1></div></div>
     <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><ThemeSettings/></div>
   </header>;
 }
@@ -84,6 +84,10 @@ export function PageShell({ children, className = "" }: { children: ReactNode; c
 
 export function PrivacyNotice() {
   return <footer className="react-workflow-privacy-note" data-public-privacy-notice><p className="public-privacy-notice">音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。個人情報や機密情報を含む音声は入力しないでください。<a href="/privacy">プライバシーポリシー</a></p></footer>;
+}
+
+export function TechStackNote({ items, className = "" }: { items: readonly string[]; className?: string }) {
+  return <p className={`mx-auto w-full max-w-6xl px-4 pb-2 pt-1 text-center text-[0.68rem] leading-5 text-muted-foreground ${className}`.trim()} data-tech-note>使用技術: {items.join(" · ")}</p>;
 }
 
 export function ToastViewport() {

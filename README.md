@@ -3,15 +3,15 @@
 [![CI](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml)
 [![Secret scan](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml)
 
-Voice Labは、発音練習のSpeakLoopと動物鳴き声合成のZoovoiceを持つ音声Webアプリです。
+Voice Labは、発音練習のSpeakLoopと動物鳴き声合成のZoovoice（β版）を持つ音声Webアプリです。
 
 中心機能のSpeakLoopは、母語で話した「言いたいこと」を、中国語または英語の発音練習へつなげます。録音、学習文と模範音声の生成、復唱、聞き比べまでを1つの流れで進められます。
 
-Zoovoiceは、録音した日本語の発話から動物を1種自動で連想し、その鳴き声を発話のすき間へ重ねた音声を返します。
+Zoovoiceは、録音した日本語の発話から動物を1種自動で連想し、その鳴き声を発話のすき間へ重ねた音声を返します。現在はβ版として公開しています。
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
-> **English:** Voice Lab is a voice web app with two features. SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Zoovoice transcribes a Japanese recording, associates it with one animal, and layers that animal's call into the pauses of your speech. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, a private RunPod Serverless GPU backend, and a private Go service on Google Cloud Run (whisper.cpp ASR / ConceptNet association / ffmpeg mixing). CI runs Python, Worker, Go, and browser tests plus E2E on every pull request.
+> **English:** Voice Lab is a voice web app with two features. SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Zoovoice (beta) transcribes a Japanese recording, associates it with one animal, and layers that animal's call into the pauses of your speech. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, a private RunPod Serverless GPU backend, and a private Go service on Google Cloud Run (whisper.cpp ASR / ConceptNet association / ffmpeg mixing). CI runs Python, Worker, Go, and browser tests plus E2E on every pull request.
 
 ## 画面
 
@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 任意の「自分の声」を使うと、同じ送信で最初に録音した本人の音声だけを参照し、模範音声を本人の声質に近づけたAI生成音声へ変換します。変換できない場合も通常のお手本音声で練習を続けられます。
 
-### Zoovoice — 動物鳴き声合成
+### Zoovoice — 動物鳴き声合成（β版）
 
 1. 日本語で自由に話して録音する
 2. 発話内容から動物を1種自動で連想する
@@ -128,7 +128,7 @@ RunPod image buildとGPU smokeは費用・実行時間が大きいため、通�
 
 ## 公開デモ
 
-Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面、`/zoovoice` を動物鳴き声合成画面として配信します。現在の版はproduction公開環境へ反映済みです。
+Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面、`/zoovoice` を動物鳴き声合成画面（β版）として配信します。現在の版はproduction公開環境へ反映済みです。
 
 音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。個人情報や機密情報を含む音声は入力しないでください。詳しくは [プライバシーポリシー](docs/PRIVACY_POLICY.md) を確認してください。
 

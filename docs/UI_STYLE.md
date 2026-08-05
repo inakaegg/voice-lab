@@ -1,6 +1,6 @@
 # 公開UIスタイル方針
 
-更新日: 2026-08-04
+更新日: 2026-08-05
 
 ## 対象と基準
 
@@ -55,7 +55,8 @@
 
 共通化の起点は [apps/web/src/shared/components.tsx](../apps/web/src/shared/components.tsx) と [styles.css](../src/mo_speech/web/styles.css) とする。
 
-- 再利用する共通部品: `ProductHeader`・`ThemeSettings`・intro・`SampleAudio`・work／flow／generate／result card・record control・notice／status・voice slot。
+- 再利用する共通部品: `ProductHeader`・`ThemeSettings`・intro・`SampleAudio`・work／flow／generate／result card・record control・notice／status・voice slot・`TechStackNote`。
+- 公開3画面（`/`・`/speakloop`・`/zoovoice`）は、画面下部の共通部品 `TechStackNote` で使用技術の一覧を小さく常時表示する。表示は本文より弱いmutedの1行とし、hover依存の表示にしない。共通注意文がある画面では、その直前へ置き注意文の最下部配置を保つ。
 - 同じ役割のボタン、入力、選択、アイコンは表現を揃える。揃える対象は高さ・幅ポリシー・文字・余白・focus・disabled・loadingである。
 - 呼び出し側の局所上書きで同じ部品の見た目を分岐させず、必要なら中央のvariantまたは共通部品を追加する。
 - アイコンは同一のoutline styleを使う。styleの内訳は `fill: none`、`stroke: currentColor`、round linecap／joinである。文字記号や黒い塗り潰しアイコンを代用しない。
@@ -83,6 +84,7 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 - intro-copyの見出しと説明は維持し、その直後に `01 SpeakLoop` と `02 Zoovoice` を同格の製品行として番号順に表示する。
 - 各製品行は製品行の領域全体を対応routeへのlinkとする。2製品を囲む外側カード全体はlinkにしない。
 - Zoovoiceの製品行は、公開configの `enabled` が `true` のときだけ表示する。
+- Zoovoiceの製品行には、製品名の横へ `β版` バッジを表示する。SpeakLoopには付けない。
 - `1440x900` と `1024x768` の初期状態では、2製品の説明とactionまでを1viewport内に収める。
 - `390x844` では縦スクロールを許容し、スクロール後に両製品へ到達できるようにする。
 - どの幅でも横overflow、固定高による切れ、操作不能を起こさない。
@@ -114,6 +116,7 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 
 この節は公開UIの契約とする。実装は現在のコードがこの契約へそろっている。実画面の確認結果は各変更の報告を正とし、本書を確認済みの根拠にはしない。
 
+- Zoovoiceはβ版として公開するため、ヘッダーのタイトル横へ `β版` バッジを表示する。バッジは既存tokenのmuted配色を使い、タイトルより弱くする。
 - 通常操作はorb型の録音操作・アニマル度スライダー・結果の再生／ダウンロードだけとする。調整可能な設定はアニマル度スライダーだけとする。
 - 通常の生成ボタンと録り直しボタンは置かない。録音の停止を送信の起点とする。
 - 手動停止または60秒の自動停止で確定した録音は、停止後すぐ1回だけ自動送信して生成する。1回の録音で自動送信するrequestは1回だけとする。

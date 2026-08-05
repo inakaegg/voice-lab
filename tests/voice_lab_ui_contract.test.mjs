@@ -20,6 +20,8 @@ const portalMain = await read("apps/web/src/portal/main.tsx");
 const zoovoiceMain = await read("apps/web/src/zoovoice/main.tsx");
 const zoovoiceOrb = await read("apps/web/src/zoovoice/record-orb.tsx");
 const zoovoiceTurnstile = await read("apps/web/src/zoovoice/turnstile-widget.tsx");
+const speakloopMain = await read("apps/web/src/speakloop/main.tsx");
+const sharedComponents = await read("apps/web/src/shared/components.tsx");
 
 test("Voice Lab is the application and package brand without renaming the Python namespace", () => {
   assert.equal(JSON.parse(pkgText).name, "voice-lab");
@@ -141,6 +143,27 @@ test("Zoovoice keeps Turnstile mounted and stops recording into automatic compos
   assert.doesNotMatch(zoovoiceMain, /録り直す/);
   assert.doesNotMatch(zoovoiceMain, /styles\.css|record-orb\.css|practice-record-orb/);
   assert.match(zoovoiceMain, />\s*Powered by Stability AI\s*</);
+});
+
+test("Zoovoice is labeled beta on the portal and its own page", () => {
+  assert.match(portalMain, /name:\s*"Zoovoice"[\s\S]{0,200}beta:\s*true/);
+  assert.doesNotMatch(portalMain, /name:\s*"SpeakLoop"[\s\S]{0,200}beta:\s*true/);
+  assert.match(portalMain, /β版/);
+  assert.match(zoovoiceMain, /badge="β版"/);
+  assert.match(sharedComponents, /badge\?:\s*string/);
+});
+
+test("public pages disclose the tech stack with a shared always-visible footnote", () => {
+  assert.match(sharedComponents, /export function TechStackNote/);
+  assert.match(sharedComponents, /data-tech-note/);
+  assert.match(sharedComponents, /使用技術/);
+  assert.match(portalMain, /TechStackNote/);
+  assert.match(portalMain, /"Google Cloud Run"/);
+  assert.match(zoovoiceMain, /TechStackNote/);
+  assert.match(zoovoiceMain, /"Google Cloud Run"/);
+  assert.match(zoovoiceMain, /"whisper\.cpp"/);
+  assert.match(speakloopMain, /TechStackNote/);
+  assert.match(speakloopMain, /"RunPod Serverless"/);
 });
 
 function cssColor(css, selector, property) {

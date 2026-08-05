@@ -1,5 +1,5 @@
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
+import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
 
 activateCompactLayout();
 
@@ -67,6 +67,7 @@ function SpeakLoop() {
       </div>
     </section>
     <div id="practice-progress" className="practice-progress" hidden><span id="practice-progress-fill"/></div><p id="practice-status" className="practice-status" role="status" aria-live="polite" hidden/><p id="practice-error" className="practice-error" hidden/>
+    <TechStackNote className="mt-auto" items={["React", "Cloudflare Workers", "OpenAI API", "RunPod Serverless", "FunASR", "Seed-VC"]} />
     <PrivacyNotice />
   </PageShell>;
 }

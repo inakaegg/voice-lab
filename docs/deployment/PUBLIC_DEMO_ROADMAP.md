@@ -4,7 +4,7 @@
 
 ## 現在地
 
-- Voice Labの公開ポートフォリオはSpeakLoopを中心とし、Zoovoiceを含む。
+- Voice Labの公開ポートフォリオはSpeakLoopを中心とし、β版のZoovoiceを含む。
 - Cloudflareの現在版はproduction公開環境へ反映済みである。公開routeは `/`・`/speakloop`・`/zoovoice`・`/privacy` とする。
 - 実装済みの機能: Google OAuth・機能別quota・入力上限・管理者認証・簡易監査ログ。
 - 利用者音声と生成音声はCloudflare版のVoice Lab履歴へ保存しない。
