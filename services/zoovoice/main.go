@@ -17,6 +17,9 @@ import (
 const defaultComposeTimeout = 85 * time.Second
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "association-eval" {
+		os.Exit(runAssociationEvalCLI(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	logger, closer := openServiceLogger(defaultLogPath())
 	defer closer.Close()
 
