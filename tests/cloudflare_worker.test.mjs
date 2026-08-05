@@ -3,6 +3,7 @@ import test from "node:test";
 
 import workerEntrypoint from "../cloudflare/src/index.ts";
 import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
+import { clearZoovoiceIdTokenCacheForTests } from "../cloudflare/zoovoice-gateway.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
@@ -15,18 +16,754 @@ test("Cloudflare worker routes only the current public app pages", async () => {
       return new Response("asset", { status: 200 });
     },
   };
+  env.ZOOVOICE_ENABLED = "1";
 
   await handleRequest(new Request("https://example.com/"), env);
   await handleRequest(new Request("https://example.com/speakloop"), env);
+  await handleRequest(new Request("https://example.com/zoovoice"), env);
   await handleRequest(new Request("https://example.com/privacy"), env);
   await handleRequest(new Request("https://example.com/privacy/"), env);
 
   assert.deepEqual(requestedPaths, [
     "/react/portal.html",
     "/react/speakloop.html",
+    "/react/zoovoice.html",
     "/react/privacy.html",
     "/react/privacy.html",
   ]);
+});
+
+test("Cloudflare worker hides Zoovoice pages while the feature is disabled", async () => {
+  const requestedPaths = [];
+  const env = fakeEnv(async () => {
+    throw new Error("disabled Zoovoice page must not call an external service");
+  });
+  env.ZOOVOICE_ENABLED = "0";
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("unexpected asset", { status: 200 });
+    },
+  };
+
+  for (const path of ["/zoovoice", "/zoovoice/", "/react/zoovoice.html"]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`), env);
+    assert.equal(response.status, 404, path);
+  }
+  assert.deepEqual(requestedPaths, []);
+});
+
+test("Cloudflare worker exposes only public Zoovoice gateway configuration", async () => {
+  const env = await zoovoiceEnv(async () => {
+    throw new Error("config must not call an external service");
+  });
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/config"), env);
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.deepEqual(JSON.parse(body), {
+    enabled: true,
+    turnstile_required: true,
+    turnstile_site_key: "1x00000000000000000000AA",
+    audio_max_bytes: 10_000_000,
+    origin_timeout_seconds: 90,
+  });
+  assert.doesNotMatch(body, /secret|private_key/i);
+});
+
+test("Cloudflare worker reports Zoovoice disabled when the flag is absent", async () => {
+  const env = await zoovoiceEnv(async () => {
+    throw new Error("config must not call an external service");
+  });
+  delete env.ZOOVOICE_ENABLED;
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/config"), env);
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).enabled, false);
+});
+
+test("Cloudflare worker does not call Zoovoice services while the feature is disabled", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    throw new Error("disabled feature must not call an external service");
+  });
+  env.ZOOVOICE_ENABLED = "0";
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "zoovoice_disabled");
+  assert.deepEqual(calls, []);
+});
+
+test("Cloudflare worker rejects oversized Zoovoice audio before external calls", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    throw new Error("oversized input must not call an external service");
+  });
+
+  const response = await handleRequest(
+    zoovoiceComposeRequest({ audio: new Uint8Array(10_000_001) }),
+    env,
+  );
+
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, "zoovoice_audio_too_large");
+  assert.deepEqual(calls, []);
+});
+
+test("Cloudflare worker rejects invalid Zoovoice Turnstile action before quota and origin", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1();
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    return json({ success: true, action: "different-action", hostname: "example.com" });
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "zoovoice_turnstile_failed");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row, null);
+});
+
+test("Cloudflare worker fails closed when the Zoovoice D1 budget is unavailable", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1({ error: new Error("D1 unavailable") });
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called when D1 is unavailable");
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "zoovoice_budget_unavailable");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+});
+
+test("Cloudflare worker blocks Zoovoice at the daily budget before the origin call", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1({
+    row: {
+      feature: "zoovoice",
+      usage_date: new Date().toISOString().slice(0, 10),
+      daily_count: 100,
+      usage_month: new Date().toISOString().slice(0, 7),
+      monthly_count: 100,
+    },
+  });
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called after quota rejection");
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error.code, "zoovoice_quota_exceeded");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row.daily_count, 100);
+});
+
+test("Cloudflare worker blocks Zoovoice at the monthly budget before the origin call", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1({
+    row: {
+      feature: "zoovoice",
+      usage_date: "2026-08-01",
+      daily_count: 1,
+      usage_month: new Date().toISOString().slice(0, 7),
+      monthly_count: 1_200,
+    },
+  });
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called after monthly quota rejection");
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error.code, "zoovoice_quota_exceeded");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row.monthly_count, 1_200);
+});
+
+test("Cloudflare worker allows an unauthenticated Zoovoice origin only for local Wrangler and a loopback HTTP origin", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true });
+    }
+    assert.equal(target, "http://127.0.0.1:8090/compose");
+    assert.equal(new Headers(init.headers).has("Authorization"), false);
+    return json(validZoovoiceOriginResponse());
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "http://127.0.0.1:8090/compose",
+  ]);
+});
+
+test("Cloudflare worker accepts incomplete Turnstile metadata only for the official local test credentials", async () => {
+  const localEnv = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "http://127.0.0.1:8090/compose") {
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  localEnv.ZOOVOICE_LOCAL_DEV = "1";
+  localEnv.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  localEnv.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(localEnv);
+
+  const localResponse = await handleRequest(zoovoiceComposeRequest({
+    url: "http://localhost:8787/api/zoovoice/compose",
+  }), localEnv);
+  assert.equal(localResponse.status, 200);
+
+  const nonLocalEnv = await zoovoiceEnv(async (url) => {
+    if (String(url).includes("siteverify")) return json({ success: true });
+    throw new Error("origin must not be called");
+  });
+  nonLocalEnv.ZOOVOICE_LOCAL_DEV = "1";
+  nonLocalEnv.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  nonLocalEnv.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(nonLocalEnv);
+
+  const nonLocalResponse = await handleRequest(zoovoiceComposeRequest({
+    url: "https://example.com/api/zoovoice/compose",
+  }), nonLocalEnv);
+  assert.equal(nonLocalResponse.status, 403);
+  assert.equal((await nonLocalResponse.json()).error.code, "zoovoice_turnstile_failed");
+});
+
+test("Cloudflare worker uses a supplied short-lived ID token only for local Cloud Run smoke", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "https://zoovoice.example.run.app/compose") {
+      assert.equal(new Headers(init.headers).get("Authorization"), "Bearer impersonated-id-token");
+      const form = await new Response(init.body).formData();
+      assert.equal(form.get("turnstile_token"), null);
+      assert.equal(form.get("settings"), JSON.stringify({
+        intensity: 40,
+      }));
+      assert.equal((await form.get("audio").arrayBuffer()).byteLength, 3);
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "cloud-run-smoke";
+  env.ZOOVOICE_GCP_ID_TOKEN = "impersonated-id-token";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker exchanges a signed JWT and authenticates a production Cloud Run request", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  const idToken = testIdToken({ exp: nowSeconds + 3_600 });
+  const calls = [];
+  const env = await productionZoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      assert.equal(init.method, "POST");
+      assert.equal(new Headers(init.headers).get("Content-Type"), "application/x-www-form-urlencoded");
+      const body = new URLSearchParams(String(init.body));
+      assert.equal(body.get("grant_type"), "urn:ietf:params:oauth:grant-type:jwt-bearer");
+      const assertion = body.get("assertion");
+      assert.equal(assertion.split(".").length, 3);
+      const [encodedHeader, encodedPayload, encodedSignature] = assertion.split(".");
+      assert.equal(await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        serviceAccount.__publicKey,
+        decodeBase64UrlBytes(encodedSignature),
+        new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+      ), true);
+      const claims = decodeJwtPart(encodedPayload);
+      assert.deepEqual(claims, {
+        iss: serviceAccount.client_email,
+        sub: serviceAccount.client_email,
+        aud: "https://oauth2.googleapis.com/token",
+        target_audience: "https://zoovoice.example.run.app",
+        iat: nowSeconds - 60,
+        exp: nowSeconds + 3_540,
+      });
+      return json({ id_token: idToken });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      assert.equal(new Headers(init.headers).get("Authorization"), `Bearer ${idToken}`);
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "https://example.com/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://oauth2.googleapis.com/token",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker caches an ID token until its 300 second refresh window", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  let nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  let tokenExchangeCount = 0;
+  const env = await productionZoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      tokenExchangeCount += 1;
+      return json({ id_token: testIdToken({ exp: nowSeconds + 3_600, nonce: tokenExchangeCount }) });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") return json(validZoovoiceOriginResponse());
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+  env.__ZOOVOICE_NOW = () => nowSeconds * 1_000;
+
+  for (let index = 0; index < 2; index += 1) {
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+    assert.equal(response.status, 200);
+  }
+  assert.equal(tokenExchangeCount, 1);
+
+  nowSeconds += 3_300;
+  const refreshed = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+  assert.equal(refreshed.status, 200);
+  assert.equal(tokenExchangeCount, 2);
+});
+
+test("Cloudflare worker retries a failed production token exchange without caching it", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  let tokenExchangeCount = 0;
+  const env = await productionZoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      tokenExchangeCount += 1;
+      if (tokenExchangeCount === 1) return json({ error: "temporarily_unavailable" }, { status: 503 });
+      return json({ id_token: testIdToken({ exp: nowSeconds + 3_600 }) });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") return json(validZoovoiceOriginResponse());
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+
+  const first = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+  const second = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+
+  assert.equal(first.status, 502);
+  assert.equal((await first.json()).error.code, "zoovoice_origin_auth_failed");
+  assert.equal(second.status, 200);
+  assert.equal(tokenExchangeCount, 2);
+});
+
+test("Cloudflare worker fails closed for invalid production origin authentication inputs", async () => {
+  const validServiceAccount = await testServiceAccountKey();
+  const cases = [
+    { name: "local dev flag", mutate: (env) => { env.ZOOVOICE_LOCAL_DEV = "1"; } },
+    { name: "loopback request", requestUrl: "http://127.0.0.1:8787/api/zoovoice/compose" },
+    { name: "non Cloud Run origin", mutate: (env) => { env.ZOOVOICE_CLOUD_RUN_URL = "https://example.com"; } },
+    { name: "origin path", mutate: (env) => { env.ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice.example.run.app/path"; } },
+    { name: "missing secret", mutate: (env) => { delete env.ZOOVOICE_GCP_SA_KEY; } },
+    { name: "invalid secret json", mutate: (env) => { env.ZOOVOICE_GCP_SA_KEY = "not-json"; } },
+    { name: "invalid private key", mutate: (env) => { env.ZOOVOICE_GCP_SA_KEY = JSON.stringify({ client_email: "invoker@example.invalid", private_key: "not-a-key" }); } },
+  ];
+
+  for (const item of cases) {
+    clearZoovoiceIdTokenCacheForTests();
+    const calls = [];
+    const env = await productionZoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: new URL(item.requestUrl || "https://example.com").hostname });
+      }
+      throw new Error("authentication failure must not reach Cloud Run");
+    }, { nowSeconds: 1_786_000_000, serviceAccount: validServiceAccount });
+    if (item.requestUrl) env.ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME = new URL(item.requestUrl).hostname;
+    item.mutate?.(env);
+
+    const response = await handleRequest(zoovoiceComposeRequest({
+      url: item.requestUrl || "https://example.com/api/zoovoice/compose",
+    }), env);
+    const body = await response.text();
+
+    assert.equal(response.status, 502, item.name);
+    assert.equal(JSON.parse(body).error.code, "zoovoice_origin_auth_failed", item.name);
+    assert.doesNotMatch(body, /PRIVATE KEY|not-a-key|invoker@example\.invalid/, item.name);
+    assert.equal(calls.some((target) => target.endsWith("/compose")), false, item.name);
+  }
+});
+
+test("Cloudflare worker fails closed for invalid token endpoint and ID token responses", async () => {
+  const serviceAccount = await testServiceAccountKey();
+  const nowSeconds = 1_786_000_000;
+  const cases = [
+    { name: "fetch exception", tokenResult: () => { throw new Error("network failed with secret material"); } },
+    { name: "non-2xx", tokenResult: () => json({ error: "invalid_grant" }, { status: 401 }) },
+    { name: "non-json", tokenResult: () => new Response("not-json", { status: 200 }) },
+    { name: "non-string token", tokenResult: () => json({ id_token: 123 }) },
+    { name: "invalid token payload", tokenResult: () => json({ id_token: "not.a-valid-payload.signature" }) },
+    { name: "missing exp", tokenResult: () => json({ id_token: testIdToken({}) }) },
+  ];
+
+  for (const item of cases) {
+    clearZoovoiceIdTokenCacheForTests();
+    let assertion = "";
+    const env = await productionZoovoiceEnv(async (url, init = {}) => {
+      const target = String(url);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      if (target === "https://oauth2.googleapis.com/token") {
+        assertion = new URLSearchParams(String(init.body)).get("assertion") || "";
+        return item.tokenResult();
+      }
+      throw new Error("invalid token response must not reach Cloud Run");
+    }, { nowSeconds, serviceAccount });
+
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+    const body = await response.text();
+    assert.equal(response.status, 502, item.name);
+    assert.equal(JSON.parse(body).error.code, "zoovoice_origin_auth_failed", item.name);
+    assert.equal(body.includes(assertion), false, item.name);
+    assert.equal(body.includes(serviceAccount.private_key), false, item.name);
+  }
+});
+
+test("Cloudflare worker never logs production service account or token material", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const serviceAccount = await testServiceAccountKey();
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...values) => logs.push(values.map(String).join(" "));
+  try {
+    const env = await productionZoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error(`upstream failure ${serviceAccount.private_key}`);
+    }, { nowSeconds: 1_786_000_000, serviceAccount });
+    env.ZOOVOICE_LOG_SAMPLE_RATE = "1";
+
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+
+    assert.equal(response.status, 502);
+    const combined = `${await response.text()}\n${logs.join("\n")}`;
+    assert.equal(combined.includes(serviceAccount.private_key), false);
+    assert.doesNotMatch(combined, /eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("Cloudflare worker rejects local Zoovoice modes on a production hostname before quota and origin", async () => {
+  for (const mode of ["local-origin", "cloud-run-smoke", "", "unexpected"]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error(`origin must not be called in mode ${mode}`);
+    }, { db });
+    env.ZOOVOICE_LOCAL_DEV = "1";
+    env.ZOOVOICE_ORIGIN_MODE = mode;
+    env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+    env.ZOOVOICE_GCP_ID_TOKEN = "must-not-be-used";
+
+    const response = await handleRequest(zoovoiceComposeRequest({
+      url: "https://example.com/api/zoovoice/compose",
+    }), env);
+
+    assert.equal(response.status, 502, `mode ${mode || "unset"}`);
+    assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+    assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker rejects unsafe local Zoovoice origins before quota and origin fetch", async () => {
+  for (const origin of [
+    "",
+    "http://192.0.2.1:8090",
+    "https://127.0.0.1:8090",
+    "http://127.0.0.1:8090/path",
+    "http://user:password@127.0.0.1:8090",
+    "http://127.0.0.1:8090?mode=unsafe",
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) return json({ success: true });
+      throw new Error("origin must not be called");
+    }, { db });
+    env.ZOOVOICE_LOCAL_DEV = "1";
+    env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+    env.ZOOVOICE_LOCAL_ORIGIN = origin;
+    useOfficialLocalTurnstileCredentials(env);
+
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+    assert.equal(response.status, 502, origin || "empty origin");
+    assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+    assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker never reaches Zoovoice origin when the local smoke token is missing", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1();
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called without a local smoke token");
+  }, { db });
+  delete env.ZOOVOICE_GCP_ID_TOKEN;
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row, null);
+});
+
+test("Cloudflare worker rejects invalid Cloud Run smoke origins before quota and origin fetch", async () => {
+  for (const origin of [
+    "",
+    "http://zoovoice.example.run.app",
+    "https://zoovoice.example.run.app/path",
+    "https://user:password@zoovoice.example.run.app",
+    "https://zoovoice.example.run.app?mode=unsafe",
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error("origin must not be called");
+    }, { db });
+    env.ZOOVOICE_CLOUD_RUN_URL = origin;
+
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+    assert.equal(response.status, 502, origin || "empty origin");
+    assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+    assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker aborts a slow Zoovoice origin within its internal timeout", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_ORIGIN_TIMEOUT_MS = "1";
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 504);
+  assert.equal((await response.json()).error.code, "zoovoice_origin_timeout");
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker rejects malformed successful responses from Zoovoice origin", async () => {
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      return json({ audio: { format: "mp3", base64: "" }, meta: null });
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+});
+
+test("Cloudflare worker accepts Zoovoice pun metadata with literal evidence", async () => {
+  const punPayload = validZoovoiceOriginResponse();
+  punPayload.meta.selected_animal = { id: "elephant", label_ja: "象" };
+  punPayload.meta.evidence_term = "ぞう";
+  punPayload.meta.selection_strategy = "pun";
+  punPayload.meta.insertions = [{ slot: "opening", species: "elephant", at_seconds: 0 }];
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "http://127.0.0.1:8090/compose") return json(punPayload);
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).meta, punPayload.meta);
+});
+
+test("Cloudflare worker accepts only intensity settings before Turnstile, budget, and origin", async () => {
+  for (const settings of [
+    {},
+    { intensity: 40.5 },
+    { intensity: -1 },
+    { intensity: 101 },
+    { intensity: 40, extra: true },
+    { intensity: 40, arrangement: { opening: "cat", gaps: null, ending: null } },
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      calls.push(String(url));
+      throw new Error("invalid settings must not call an external service");
+    }, { db });
+    const response = await handleRequest(zoovoiceComposeRequest({ settings }), env);
+    assert.equal(response.status, 400, JSON.stringify(settings));
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_settings");
+    assert.deepEqual(calls, []);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker validates every Zoovoice success metadata field", async () => {
+  const invalidPayloads = [
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "長".repeat(20_001) } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selected_animal: { id: "", label_ja: "猫" } } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: 3 } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selection_strategy: "heuristic" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, fallback_reason: "unknown" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "pun" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "random_fallback", fallback_reason: "no_direct_or_conceptnet_match" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, insertions: [{ slot: "middle", species: "cat", at_seconds: 1 }] } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, input_duration_seconds: "1" } },
+  ];
+  for (const payload of invalidPayloads) {
+    const env = await zoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      return json(payload);
+    });
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+  }
+});
+
+test("Cloudflare worker serves Zoovoice animals from a cacheable static asset", async () => {
+  const env = await zoovoiceEnv(async (url) => {
+    throw new Error(`animals must not call an external service: ${url}`);
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      assert.equal(new URL(request.url).pathname, "/react/zoovoice-animals.json");
+      return json({ animals: [{ id: "cat", label_ja: "猫", variants: 2 }] });
+    },
+  };
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/animals"), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    animals: [{ id: "cat", label_ja: "猫", variants: 2 }],
+  });
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=3600, s-maxage=86400");
 });
 
 test("Cloudflare playback padding stops before neighboring speech", () => {
@@ -2843,6 +3580,136 @@ function fakeR2() {
       store.delete(key);
     },
   };
+}
+
+async function zoovoiceEnv(fetchImpl, { db = fakeZoovoiceBudgetD1() } = {}) {
+  return {
+    __fetch: fetchImpl,
+    MO_SPEECH_DB: db,
+    ZOOVOICE_ENABLED: "1",
+    ZOOVOICE_LOCAL_DEV: "1",
+    ZOOVOICE_ORIGIN_MODE: "cloud-run-smoke",
+    ZOOVOICE_CLOUD_RUN_URL: "https://zoovoice.example.run.app",
+    ZOOVOICE_GCP_ID_TOKEN: "unit-test-id-token",
+    ZOOVOICE_TURNSTILE_SITE_KEY: "unit-test-site-key",
+    ZOOVOICE_TURNSTILE_SECRET_KEY: "unit-test-secret-key",
+    ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME: "example.com",
+    ZOOVOICE_DAILY_LIMIT: "100",
+    ZOOVOICE_MONTHLY_LIMIT: "1200",
+  };
+}
+
+async function productionZoovoiceEnv(fetchImpl, { nowSeconds, serviceAccount } = {}) {
+  const env = await zoovoiceEnv(fetchImpl);
+  env.ZOOVOICE_LOCAL_DEV = "0";
+  env.ZOOVOICE_ORIGIN_MODE = "cloud-run";
+  env.ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice.example.run.app/";
+  delete env.ZOOVOICE_GCP_ID_TOKEN;
+  env.ZOOVOICE_GCP_SA_KEY = JSON.stringify(serviceAccount || await testServiceAccountKey());
+  env.__ZOOVOICE_NOW = () => Number(nowSeconds) * 1_000;
+  return env;
+}
+
+async function testServiceAccountKey() {
+  const keyPair = await crypto.subtle.generateKey({
+    name: "RSASSA-PKCS1-v1_5",
+    modulusLength: 2_048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  }, true, ["sign", "verify"]);
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey));
+  const base64 = Buffer.from(pkcs8).toString("base64").match(/.{1,64}/g).join("\n");
+  return {
+    client_email: "zoovoice-invoker@example.invalid",
+    private_key: `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`,
+    __publicKey: keyPair.publicKey,
+  };
+}
+
+function testIdToken(payload) {
+  return `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.test-signature`;
+}
+
+function decodeJwtPart(value) {
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+}
+
+function decodeBase64UrlBytes(value) {
+  return new Uint8Array(Buffer.from(value, "base64url"));
+}
+
+function useOfficialLocalTurnstileCredentials(env) {
+  env.ZOOVOICE_TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
+  env.ZOOVOICE_TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA";
+}
+
+function zoovoiceComposeRequest({
+  audio = new Uint8Array([1, 2, 3]),
+  url = "http://127.0.0.1:8787/api/zoovoice/compose",
+  settings = { intensity: 40 },
+} = {}) {
+  const form = new FormData();
+  form.append("audio", new Blob([audio], { type: "audio/webm" }), "recording.webm");
+  form.append("settings", JSON.stringify(settings));
+  form.append("turnstile_token", "turnstile-response-token");
+  return new Request(url, { method: "POST", body: form });
+}
+
+function validZoovoiceOriginResponse() {
+  return {
+    audio: { format: "wav", base64: "UklGRg==" },
+    meta: {
+      transcript: "猫が窓辺で眠っています",
+      selected_animal: { id: "cat", label_ja: "猫" },
+      evidence_term: "猫",
+      selection_strategy: "direct",
+      fallback_reason: null,
+      insertions: [{ slot: "opening", species: "cat", at_seconds: 0 }],
+      input_duration_seconds: 1,
+      output_duration_seconds: 1.4,
+    },
+  };
+}
+
+function fakeZoovoiceBudgetD1({ row = null, error = null } = {}) {
+  const db = {
+    __row: row ? { ...row } : null,
+    prepare(sql) {
+      return {
+        bind(...args) {
+          return {
+            async first() {
+              if (error) throw error;
+              if (!String(sql).includes("zoovoice_usage_counters")) {
+                throw new Error(`unexpected Zoovoice D1 query: ${sql}`);
+              }
+              const [feature, usageDate, usageMonth, updatedAt, dailyLimit, monthlyLimit] = args;
+              const previous = db.__row;
+              const nextDaily = previous?.usage_date === usageDate
+                ? Number(previous.daily_count) + 1
+                : 1;
+              const nextMonthly = previous?.usage_month === usageMonth
+                ? Number(previous.monthly_count) + 1
+                : 1;
+              if (nextDaily > Number(dailyLimit) || nextMonthly > Number(monthlyLimit)) {
+                return null;
+              }
+              db.__row = {
+                feature,
+                usage_date: usageDate,
+                daily_count: nextDaily,
+                usage_month: usageMonth,
+                monthly_count: nextMonthly,
+                updated_at: updatedAt,
+              };
+              return { daily_count: nextDaily, monthly_count: nextMonthly };
+            },
+          };
+        },
+      };
+    },
+  };
+  return db;
 }
 
 function fakeD1() {

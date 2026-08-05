@@ -58,6 +58,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
     });
 
     if (path === "/api/public-session") return json({ google_login_required: false, google_login_configured: true, authenticated: false });
+    if (path === "/api/zoovoice/config") return json({ error: { code: "zoovoice_unavailable", message: "not available in FastAPI fixtures" } }, 503);
     if (path === "/api/public-access-settings") return json(accessSettings);
     if (path === "/api/public-sample-audios") {
       if (request.method() === "PUT") {

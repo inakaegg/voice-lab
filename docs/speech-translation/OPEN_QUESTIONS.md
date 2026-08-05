@@ -1,12 +1,12 @@
 # 未決定事項
 
-更新日: 2026-07-30
+更新日: 2026-08-02
 
 現在の実装仕様は [SPEC.md](SPEC.md) を正とする。この文書には、実装済みの過去の検討事項を残さず、判断が必要な事項だけを記録する。
 
 ## 公開境界と構成分離
 
-- production内では単一Workerを正とする。staging Workerは別resourceで配備し、必須Worker secretも登録済みである。Googleログインの実操作確認は未実施である。
+- remote stagingの残存resourceを削除するか、外部resourceとして維持するかは未決定である。検証経路はproductionとローカルWranglerを正本とするため、この判断は検証手順を変えない。
 
 ## 対応ブラウザ
 

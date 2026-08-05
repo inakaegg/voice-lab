@@ -287,13 +287,12 @@ def test_runpod_handler_audio_suffix_ignores_mime_parameters() -> None:
 
 
 def test_runpod_handler_generates_text_tts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runpod_handler, "_TEXT_TTS_PROVIDERS", {"fake": FakeTextTtsProvider()})
+    monkeypatch.setattr(runpod_handler, "_TEXT_TTS_PROVIDERS", {"openai": FakeTextTtsProvider()})
     event = {
         "input": {
             "operation_mode": "text_tts",
             "text": "こんにちは",
             "target_language": "ja-JP",
-            "tts_backend": "fake",
         }
     }
 
