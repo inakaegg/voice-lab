@@ -1,15 +1,11 @@
 ARG BASE_IMAGE=runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
 ARG PYTORCH_VERSION=2.8.0
 ARG PYTORCH_WHEEL_INDEX_URL=https://download.pytorch.org/whl/cu128
-ARG COMFYUI_VIBEVOICE_REPO=https://github.com/wildminder/ComfyUI-VibeVoice
-ARG COMFYUI_VIBEVOICE_REF=99a98031d79e07f279a7aa6d01ce89042e8bba26
 ARG SOURCE_REVISION=unknown
 ARG IMAGE_TAG=unknown
 FROM ${BASE_IMAGE}
 ARG PYTORCH_VERSION
 ARG PYTORCH_WHEEL_INDEX_URL
-ARG COMFYUI_VIBEVOICE_REPO
-ARG COMFYUI_VIBEVOICE_REF
 ARG SOURCE_REVISION
 ARG IMAGE_TAG
 
@@ -34,12 +30,7 @@ COPY src /app/src
 COPY scripts /app/scripts
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install ".[local,funasr,voice,vibevoice,deploy,openai]"
-
-RUN git clone "${COMFYUI_VIBEVOICE_REPO}" /app/ComfyUI-VibeVoice \
-    && cd /app/ComfyUI-VibeVoice \
-    && git checkout "${COMFYUI_VIBEVOICE_REF}" \
-    && python -m pip install -r requirements.txt
+    && python -m pip install ".[local,funasr,voice,deploy,openai]"
 
 RUN python -m pip install --force-reinstall "torch==${PYTORCH_VERSION}" "torchaudio==${PYTORCH_VERSION}" \
         --index-url "${PYTORCH_WHEEL_INDEX_URL}" \
@@ -65,39 +56,20 @@ ENV MO_PRELOAD_MODELS=0
 ENV MO_RUNPOD_PRELOAD_ON_START=1
 ENV MO_RUNPOD_PRELOAD_VOICE_CONVERSION_ON_START=0
 ENV MO_RUNPOD_PRELOAD_FUNASR_ON_START=0
-ENV MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_VIBEVOICE=1
 ENV MO_RUNPOD_RELEASE_VOICE_CONVERSION_BEFORE_FUNASR=1
 ENV MO_RUNPOD_RELEASE_FUNASR_BEFORE_VOICE_CONVERSION=1
-ENV MO_RUNPOD_RELEASE_FUNASR_BEFORE_VIBEVOICE=1
 ENV MO_AUDIO_HISTORY_ENABLED=0
 ENV OPENAI_ASR_MODEL=gpt-4o-transcribe
 ENV OPENAI_TRANSLATION_MODEL=gpt-5.6-terra
 ENV OPENAI_TTS_MODEL=gpt-4o-mini-tts
 ENV OPENAI_TTS_VOICE=coral
 ENV OPENAI_TTS_RESPONSE_FORMAT=wav
-ENV OPENAI_REALTIME_TRANSLATION_MODEL=gpt-realtime-translate
-ENV OPENAI_REALTIME_TRANSLATION_SAMPLE_RATE=24000
-ENV OPENAI_REALTIME_TRANSLATION_TIMEOUT_SECONDS=90
-ENV GOOGLE_TTS_TIMEOUT_SECONDS=30
-ENV MO_VIBEVOICE_DIRECTED_ASR_PROVIDER=openai
-ENV MO_VIBEVOICE_DIRECTED_OPENAI_ASR_MODEL=whisper-1
-ENV MO_VIBEVOICE_DIRECTED_ASR_LANGUAGE=auto
-ENV MO_VIBEVOICE_DIRECTED_VC_ENABLED=1
-ENV MO_VIBEVOICE_DIRECTED_VC_BACKEND=seed-vc
 
 ENV MODEL_CACHE_DIR=/runpod-volume/models
 ENV HF_HOME=/runpod-volume/huggingface
 ENV HF_HUB_CACHE=/runpod-volume/huggingface/hub
 ENV FASTER_WHISPER_CACHE_DIR=/runpod-volume/models/faster-whisper
 ENV SEED_VC_WORK_DIR=/runpod-volume/work/seed-vc
-ENV MO_VIBEVOICE_HOME=/runpod-volume/models/vibevoice/huggingface/hub
-ENV COMFYUI_VIBEVOICE_PATH=/app/ComfyUI-VibeVoice
-ENV MO_VIBEVOICE_CLI=/app/src/mo_speech/vibevoice_cli.py
-ENV MO_VIBEVOICE_TIMEOUT_SECONDS=1800
-ENV VIBEVOICE_MODEL_REPO=microsoft/VibeVoice-1.5B
-ENV VIBEVOICE_MODEL_REVISION=1904eae38036e9c780d28e27990c27748984eafe
-ENV VIBEVOICE_TOKENIZER_REPO=Qwen/Qwen2.5-1.5B
-ENV VIBEVOICE_TOKENIZER_REVISION=8faed761d45a263340a0528343f099c05c9a4323
 
 ENV FASTER_WHISPER_MODEL=mobiuslabsgmbh/faster-whisper-large-v3-turbo
 ENV FASTER_WHISPER_DEVICE=cuda
@@ -131,7 +103,6 @@ ENV SEED_VC_LENGTH_ADJUST=1.0
 ENV SEED_VC_INFERENCE_CFG_RATE=0.7
 
 RUN mkdir -p /runpod-volume/models /runpod-volume/huggingface/hub /runpod-volume/work/seed-vc
-RUN mkdir -p /runpod-volume/models/vibevoice/huggingface/hub
 
 EXPOSE 8000
 

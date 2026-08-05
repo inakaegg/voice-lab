@@ -7,13 +7,26 @@ Voice LabのSpeakLoopは、母語で話した「言いたいこと」を、中�
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
-> **English:** SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Built with React, Cloudflare Workers (auth / quota / API gateway), FastAPI, and a private RunPod Serverless GPU backend. CI runs Python, Worker, and browser tests plus E2E on every pull request.
+> **English:** SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, and a private RunPod Serverless GPU backend. CI runs Python, Worker, and browser tests plus E2E on every pull request.
 
 ## 画面
 
 | ポータル | SpeakLoop練習画面 |
 | --- | --- |
 | ![Voice Labポータル](docs/images/portal-1440.png) | ![SpeakLoop練習画面](docs/images/speakloop-1440.png) |
+
+
+## デモ動画
+
+スマートフォン実機での操作を収録した約2分のデモです。話した内容から「自分の声」によるお手本音声を生成し、練習結果を音声と文字で比較します。
+
+**英語**
+
+https://github.com/user-attachments/assets/018a157d-28b2-45fd-bac4-ab462f4cee9d
+
+**中国語**
+
+https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ## できること
 
@@ -45,7 +58,7 @@ flowchart LR
 
 ## ローカルセットアップ
 
-Python 3.11以上とNode.jsを使います。UI/APIとfake providerを動かす最小構成は次のとおりです。
+Python 3.11以上とNode.js 22.18以上を使います。UI/APIとfake providerを動かす最小構成は次のとおりです。
 
 ```sh
 python3 -m pip install -e ".[dev]"
@@ -86,6 +99,7 @@ gitleaks git --redact --log-opts='--all' .
 python3 -m pytest
 npm test
 npm run check:js
+npm run check:worker
 npm run check:web
 npm run test:e2e
 ```
@@ -107,11 +121,28 @@ Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面と
 
 詳細は [KNOWN_LIMITS.md](docs/speech-translation/KNOWN_LIMITS.md) を参照してください。
 
+## 開発体制
+
+個人開発です。実装にはAIコーディングエージェント（Claude Code、Codex）を利用しています。
+
+作者が行うこと:
+
+- 要件と仕様の決定、設計判断
+- 変更ごとのレビューと、指摘の取捨選択
+- 実データでの検証と、公開範囲・費用の判断
+
+エージェントが行うこと:
+
+- 設計案の提示、コードとテストの実装
+- 実装とは別contextでのレビュー
+
+品質は自動テスト、CI、secret scan、文書lint、別モデルによる相互レビューで担保します。運用ルールは [AGENTS.md](AGENTS.md) を参照してください。
+
 ## セキュリティとライセンス
 
 脆弱性の連絡方法は [SECURITY.md](SECURITY.md) を参照してください。公開Issueへ秘密情報や個人情報を投稿しないでください。
 
-Voice Lab本体にはオープンソースライセンスを付与していません。ソースコードの閲覧・評価を目的とするポートフォリオ公開を想定していますが、複製、改変、再配布などの許可は [LICENSE](LICENSE) に明記した範囲に限ります。
+Voice Lab本体にはオープンソースライセンスを付与していません。ソースコードの閲覧・評価を目的とするポートフォリオ公開を想定していますが、複製、改変、再配布などの許可は [LICENSE](LICENSE) に明記した範囲に限ります。評価・レビュー目的のcloneとローカル実行は、LICENSEの限定的な例外として許可しています。
 
 依存ライブラリ、モデル、第三者実装にはそれぞれのライセンスと利用条件が適用されます。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
 
@@ -123,10 +154,11 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 ## ドキュメント
 
+詳細文書の入口は [ドキュメント案内](docs/README.md) です。SpeakLoopの仕様、画面、実行経路、provider、公開運用という目的別に全文書を辿れます。
+
+よく参照する文書:
+
 - [全体仕様](docs/speech-translation/SPEC.md)
 - [現在のデプロイ構成](docs/deployment/ARCHITECTURE.md)
-- [Cloudflareデモ構成](docs/deployment/CLOUDFLARE.md)
-- [RunPod構成](docs/deployment/RUNPOD.md)
-- [プライバシーポリシー](docs/PRIVACY_POLICY.md)
-- [実装上のデータ取扱い境界](docs/deployment/PRIVACY.md)
 - [既知の制限](docs/speech-translation/KNOWN_LIMITS.md)
+- [プライバシーポリシー](docs/PRIVACY_POLICY.md)

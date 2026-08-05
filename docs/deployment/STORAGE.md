@@ -1,6 +1,6 @@
 # Cloudflare保存層の境界
 
-更新日: 2026-07-22
+更新日: 2026-07-30
 
 ## 目的
 
@@ -10,15 +10,14 @@
 
 | データ | 現在の保存先 | 状態 |
 | --- | --- | --- |
-| ユーザー設定、公開アクセス設定 | Workers KV | 実装済み |
+| 公開アクセス設定 | Workers KV | 実装済み |
 | 短期job snapshot、warmup ready | Workers KV | 実装済み。TTL付き |
 | ユーザー音声履歴 | Cloudflare公開版では保存しない | ローカルFastAPI版だけで利用 |
-| 研究用SkitVoice sample metadata/blob | D1 / R2（bindingなしではKV fallback） | dataは削除せず管理者経路だけで扱い、一般向けAPIから除外 |
 | quota使用数、簡易audit log | D1（bindingなしではKV fallback） | emailはSHA-256 hashとして保存。D1は48時間／90日を超えたデータを日次削除 |
 
-`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare Workerは入力・生成音声を履歴indexやblobとして書き込まない。対象は翻訳・VC・SpeakLoop・SkitVoice・TTSである。
+`MO_SPEECH_AUDIO_R2` bindingは、管理者が公開用として明示的に登録したサンプル音声だけに使う。Cloudflare WorkerはSpeakLoopとVCの入力・生成音声を履歴indexやblobとして書き込まない。
 
-既存SkitVoice sampleは由来・許諾・生成model・AI生成表示を確認できないため、一般向け `GET /api/public-sample-audios` から返さない。外部R2 objectはこのローカル変更で削除せず、管理者認証済みの同APIと管理画面だけで確認・管理する。これはdata削除完了を意味しない。
+過去の研究機能で登録したsampleは、一般向け `GET /api/public-sample-audios` から返らない。保持は保証せず、管理者のsample保存・削除操作でD1 rowとR2 objectごと削除され得る。
 
 ## R2 binding
 

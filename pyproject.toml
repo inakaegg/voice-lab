@@ -32,23 +32,6 @@ voice = [
   "qwen-tts==0.1.1",
   "seed-vc==0.4.3",
 ]
-vibevoice = [
-  "bitsandbytes",
-  "conformer",
-  "diffusers",
-  "einops",
-  "huggingface_hub",
-  "librosa",
-  "packaging",
-  "s3tokenizer",
-  "safetensors",
-  "soundfile",
-  "tokenizers",
-  "tqdm",
-]
-url-reference = [
-  "yt-dlp[curl-cffi]",
-]
 vc-compare = [
   "chatterbox-tts>=0.1.7",
 ]
@@ -74,6 +57,7 @@ mo_speech = [
   "web/*.js",
   "web/react/*.html",
   "web/react/*.ico",
+  "web/react/*.svg",
   "web/react/assets/*.css",
   "web/react/assets/*.js",
   "web/react/assets/*.md",

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from mo_speech.providers.fake import FakeTtsProvider
-from mo_speech.pipeline import PipelineProgress, TtsOutput
+from mo_speech.pipeline import OperationProgress, TtsOutput
 from mo_speech.providers.voice import (
     ChatterboxDirectVoiceConversionProvider,
     DEFAULT_SEED_VC_DIFFUSION_STEPS,
@@ -103,7 +103,7 @@ def test_qwen_voice_clone_provider_reports_model_progress(
 ) -> None:
     audio_path = tmp_path / "reference.wav"
     audio_path.write_bytes(b"reference audio")
-    progress: list[PipelineProgress] = []
+    progress: list[OperationProgress] = []
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         output_path = Path(command[command.index("--output") + 1])
@@ -128,7 +128,7 @@ def test_qwen_voice_clone_provider_reports_model_progress(
     )
 
     assert progress == [
-        PipelineProgress(stage="tts", label="音声生成", provider="Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+        OperationProgress(stage="tts", label="音声生成", provider="Qwen/Qwen3-TTS-12Hz-1.7B-Base")
     ]
 
 
@@ -319,7 +319,7 @@ def test_seed_vc_provider_reports_conversion_progress(
 ) -> None:
     reference_audio = tmp_path / "reference.wav"
     reference_audio.write_bytes(b"reference audio")
-    progress: list[PipelineProgress] = []
+    progress: list[OperationProgress] = []
 
     class CloneOnlyTtsProvider:
         name = "clone-only"
@@ -338,7 +338,7 @@ def test_seed_vc_provider_reports_conversion_progress(
             progress_callback=None,
         ) -> bytes:
             if progress_callback is not None:
-                progress_callback(PipelineProgress(stage="tts", label="音声生成", provider="source-model"))
+                progress_callback(OperationProgress(stage="tts", label="音声生成", provider="source-model"))
             return b"clone source wav"
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -370,9 +370,9 @@ def test_seed_vc_provider_reports_conversion_progress(
     )
 
     assert progress == [
-        PipelineProgress(stage="tts", label="音声生成", provider="source-model"),
-        PipelineProgress(stage="loading_model", label="Seed-VCモデル読込中", provider="Plachta/Seed-VC"),
-        PipelineProgress(stage="voice_conversion", label="声質変換", provider="Plachta/Seed-VC"),
+        OperationProgress(stage="tts", label="音声生成", provider="source-model"),
+        OperationProgress(stage="loading_model", label="Seed-VCモデル読込中", provider="Plachta/Seed-VC"),
+        OperationProgress(stage="voice_conversion", label="声質変換", provider="Plachta/Seed-VC"),
     ]
 
 

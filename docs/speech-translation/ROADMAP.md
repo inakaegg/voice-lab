@@ -1,6 +1,6 @@
 # SpeakLoop ロードマップ
 
-更新日: 2026-07-22
+更新日: 2026-07-29
 
 ## この文書の役割
 
@@ -50,40 +50,52 @@ LLM処理の失敗時に旧処理へ切り替える分岐は設けず、
 現在FastAPIとCloudflare Workerへ重複して実装されている受付と外部サービス呼び出しを統一する。
 結果の整形とエラー処理も同じ実装へ統一する。
 
-共通部分にはHonoを採用する。Honoは、Cloudflare Workersとローカルの
+共通部分にはHonoとTypeScriptを採用する。Honoは、Cloudflare Workersとローカルの
 JavaScript実行環境で同じAPI処理を動かすためのWebフレームワークとして使用する。
-
-ローカル版は`wrangler dev`で起動する。Workerコードは端末内の`workerd`で実行し、
-KVとDurable Objectsはローカルsimulationへ接続する。ローカルsimulationとは、
-本番と同じbinding APIを端末内で再現する実行環境を指す。
-
-ローカル版は`remote = true`や`wrangler dev --remote`を既定にせず、
-Cloudflareの本番リソースへ接続しない。公開版は同じHonoとWorkerコードを使用し、
-本番のKVとDurable Objectsへbindingする。
-
-比較条件、確定結果、同時pollの調停はjob単位のDurable Objectで行う。
-同じjob IDのLLM比較を直列に処理し、複数の結果確定を防ぐ。
-お手本ASR cacheはKVへ保存し、同じ音声への再ASRを避ける。
-
-ローカル専用のPython補助APIに残す処理は次のとおり。
-`yt-dlp`、`ffmpeg`、ローカルモデル、ローカルファイル保存である。
-Cloudflare Workerではこれらを実行せず、現在の実行環境の責任を維持する。
-
-1. Cloudflare Worker側のAPI処理をHonoへ移す。
-2. job単位のDurable Objectと、お手本ASR cache用のKVを分離する。
-3. ローカル版もHonoのAPI処理を入口として使用する。
-4. Pythonが必要な音声処理やローカルモデル処理だけを補助APIとして残す。
-5. HonoからPythonの補助APIを、ほかの外部サービスと同じ方法で呼び出す。
-6. 同じ入力に対する結果形式、エラー、ログ項目の一致を確認する。
-7. Cloudflare固有の分散挙動と同時requestをstaging環境で確認する。
-8. 確認後、FastAPIに重複して残る受付・制御処理を削除する。
-
-FastAPIを直ちに全廃するのではなく、Python依存処理を提供する役割へ縮小する。
+新規のWorkerコードはTypeScriptで書き、既存コードは段階的に移行する。
 
 統一の対象となる重複は次のとおり。
 ピンイン生成・RunPod jobのpolling・お手本ASRキャッシュ・OpenCC簡体字正規化・音声base64変換である。
-最初に着手するのはお手本ASRキャッシュとする。
-影響範囲が他より閉じており、契約とテストの移行手順をここで確立できるためである。
+
+統一は次の段階へ分けて進める。各段階の完了時点で、ローカル版と公開版の両方が動く状態を保つ。
+
+### 第1段階: TypeScript基盤とお手本ASRキャッシュ
+
+Cloudflare WorkerへTypeScriptの入口とHonoを導入する。
+未移行の処理は既存実装へ委譲し、外から見た挙動を変えない。
+お手本ASRキャッシュを共通TypeScriptモジュールへ抽出し、
+キー形式とTTLの契約をテストで固定する。
+最初にお手本ASRキャッシュを選ぶのは、影響範囲が他より閉じており、
+契約とテストの移行手順をここで確立できるためである。
+
+### 第2段階: 共有純関数の統一
+
+ピンイン生成・OpenCC簡体字正規化・音声base64変換を共通モジュールへ統一する。
+状態を持たない変換処理のため、移行リスクが小さい。
+
+### 後続段階（着手条件付き）
+
+次の変更は規模が大きく、解決する問題の実害を現時点で確認していないため保留とする。
+着手前に、対応する実害の確認を先に行う。
+
+- RunPod jobのpollingと結果確定の調停。同じjob IDの結果確定が同時pollで
+  競合する実例を観測してから、job単位のDurable Object導入を設計する。
+- ローカル版の入口を`wrangler dev`へ切り替える。KVなどのbindingは、
+  `wrangler dev`が標準提供するローカルsimulationを使う。
+  ローカル版は本番リソースへ接続しない。`wrangler dev --remote`も既定にしない。
+- Pythonが必要な処理だけをローカル補助APIへ残す。対象は`yt-dlp`、`ffmpeg`、
+  ローカルモデル、ローカルファイル保存である。
+  HonoからPythonの補助APIを、ほかの外部サービスと同じ方法で呼び出す。
+- 上記の確認後、FastAPIに重複して残る受付・制御処理を削除する。
+
+FastAPIを直ちに全廃するのではなく、Python依存処理を提供する役割へ縮小する方針は維持する。
+
+Phase 1では、Cloudflare Workerの入口へTypeScriptとHonoを導入した。
+未移行のrequestは既存handlerへ委譲し、scheduled handlerも既存の保持期限処理を使う。
+`GET /api/runtime` はHonoへ移し、status・headers・bodyの互換を契約テストで固定した。
+お手本ASRキャッシュは共通TSモジュールへ抽出した。
+KVキー・TTL・空ASR拒否・KVなしfallbackの契約は変更していない。
+FastAPI側の統一とDurable Objectの導入は、後続Phaseで行う。
 
 ## 今後の変更: 公開文書の整理
 

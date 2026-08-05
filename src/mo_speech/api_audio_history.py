@@ -8,7 +8,6 @@ from tempfile import TemporaryDirectory
 
 from .api_serializers import text_preview
 from .audio_history import AudioHistoryEntry, AudioHistoryStore
-from .pipeline import PipelineResult
 
 LOGGER = logging.getLogger("mo_speech")
 AUDIO_HISTORY_WAV_SAMPLE_RATE = 24000
@@ -175,28 +174,6 @@ def prepare_audio_history_wav(
             "original_audio_suffix": input_suffix,
         },
     )
-
-
-def history_text_metadata_from_pipeline_result(result: PipelineResult) -> dict[str, str]:
-    transformed = text_preview(result.transformed_text)
-    translated = text_preview(result.translated_text)
-    transcript = text_preview(result.transcript)
-    tts_text = result.transformed_text or result.translated_text
-    return {
-        "text_preview": transformed or translated or transcript,
-        "tts_text": tts_text,
-        "transcript_preview": transcript,
-        "translated_text_preview": translated,
-        "transformed_text_preview": transformed,
-    }
-
-
-def history_text_metadata_from_recording_result(result: PipelineResult) -> dict[str, str]:
-    transcript = text_preview(result.transcript)
-    return {
-        "text_preview": transcript,
-        "transcript_preview": transcript,
-    }
 
 
 def metadata_text_preview(metadata: dict[str, object]) -> str:

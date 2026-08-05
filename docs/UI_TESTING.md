@@ -1,6 +1,6 @@
 # UIテスト方針
 
-更新日: 2026-07-22
+更新日: 2026-07-30
 
 ## 目的
 
@@ -12,14 +12,8 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 
 - `/`
 - `/speakloop`
-- `/skitvoice`
 - `/admin`
 - `/speakloop/admin`
-- `/skitvoice/admin`
-
-管理者専用の実験routeも、共通ブランド、横overflow、主要操作の到達性を検査する。
-
-- `/fun`
 
 基準viewport:
 
@@ -27,23 +21,23 @@ Voice Labのレイアウト回帰はPlaywrightで自動検査し、美観と情�
 - intermediate: `1024x768`
 - mobile: `390x844`
 
+各viewportをChromium、WebKit、Firefoxで検査する。Firefoxのmobile projectは`isMobile`を使わず、viewportと`hasTouch`を指定する。
+
 共通検査:
 
 - `scrollWidth <= clientWidth`
 - visibleな主要controlがviewport左右からはみ出さない
 - h1と主要actionが表示され、keyboard focusできる
 - 公開3画面のLight／Dark／Systemと設定menu
-- ポータルのSpeakLoop主導線が初期viewport内にあり、SkitVoice製品導線がない
+- ポータルのSpeakLoop主導線が初期viewport内にある
 - SpeakLoopのprompt表示前後の列構成
-- 公開 `/skitvoice` が認証前後と直接URLで同じ非生成案内を維持し、生成フォームとsampleを表示しない
-- `/skitvoice/admin` の台本・生成・参照音声の順とbreakpoint
 - 管理画面のsection順、フォーム幅、長い履歴、empty／error
 
 ## 実行環境
 
 通常のE2Eはfake providerのローカルFastAPIを新規portで起動する。既存serverを再利用しない。依存させない対象はGPU・RunPod・OpenAI・OAuth・本番データである。管理画面が読む設定・サンプル・履歴・runtime APIはPlaywright fixtureで固定する。
 
-Cloudflareの管理password認証はWorker単体テストを正とし、通常CIへ本番passwordを持ち込まない。公開環境smokeは秘密情報を保護した手動workflowとして分ける。
+CloudflareのGoogle OAuth管理境界はWorker単体テストを正とし、通常CIへ本番credentialを持ち込まない。公開環境smokeは秘密情報を保護した手動workflowとして分ける。
 
 ## screenshotとbaseline
 
@@ -57,6 +51,12 @@ Cloudflareの管理password認証はWorker単体テストを正とし、通常CI
 npm run test:e2e
 ```
 
+開発中にChromiumだけを実行する場合は、次のproject指定を使う。
+
+```bash
+npx playwright test --project "chromium-*"
+```
+
 合格画面を目視確認するための画像は、任意実行の次のコマンドで`tmp/playwright/visual-review/`へ保存する。pixel差分の合否判定には使わず、PC／スマホの情報階層と美観を直接確認する。
 
 ```bash
@@ -66,5 +66,5 @@ npm run test:e2e:visual
 初回またはbrowser revision更新時は次を実行する。
 
 ```bash
-npx playwright install chromium
+npx playwright install chromium webkit firefox
 ```

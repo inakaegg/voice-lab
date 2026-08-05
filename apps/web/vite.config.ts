@@ -26,7 +26,7 @@ export default defineConfig({
         portal: resolve(rootDir, "portal.html"),
         privacy: resolve(rootDir, "privacy.html"),
         speakloop: resolve(rootDir, "speakloop.html"),
-        skitvoice: resolve(rootDir, "skitvoice.html"),
+        zoovoice: resolve(rootDir, "zoovoice.html"),
       },
       output: {
         entryFileNames: "assets/[name].js",

@@ -4,20 +4,25 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:web": "vite build --config apps/web/vite.config.ts && node scripts/ensure_frontend_license_notices.mjs",
+    "build:web": "node scripts/sync_zoovoice_animals.mjs && vite build --config apps/web/vite.config.ts && node scripts/ensure_frontend_license_notices.mjs",
     "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
     "verify:web-styles": "node scripts/verify_web_style_boundaries.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:zoovoice": "playwright test --config playwright.zoovoice.config.ts",
+    "test:e2e:portal-zoovoice": "playwright test --config playwright.zoovoice.config.ts tests/e2e/portal-zoovoice.spec.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:visual": "PLAYWRIGHT_VISUAL_REVIEW=1 playwright test tests/e2e/visual-review.spec.ts",
-    "test": "node --test tests/*.mjs",
-    "test:worker": "node --test tests/*.mjs",
+    "dev:zoovoice": "bash scripts/run_zoovoice_local_cloudflare.sh local",
+    "dev:zoovoice:cloud-run": "bash scripts/run_zoovoice_local_cloudflare.sh cloud-run",
+    "test": "node --test tests/*.mjs tests/*.mts",
+    "test:worker": "node --test tests/*.mjs tests/*.mts",
     "check:js": "node --check cloudflare/worker.mjs && node --check src/mo_speech/web/*.js",
+    "check:worker": "tsc -p cloudflare/tsconfig.json --noEmit && wrangler deploy --dry-run --outdir tmp/wrangler-dry-run",
     "check:web": "npm run typecheck:web && npm run build:web && npm run verify:web-styles"
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "lucide-react": "^1.27.0",
+    "lucide-react": "^1.28.0",
     "opencc-js": "^1.4.1",
     "pinyin-pro": "^3.28.2",
     "react": "^19.2.8",
@@ -25,13 +30,16 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.0",
+    "@cloudflare/workers-types": "^5.20260731.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.1.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "hono": "^4.12.31",
     "tailwindcss": "^4.3.2",
     "typescript": "^7.0.2",
-    "vite": "^8.1.5"
+    "vite": "^8.2.0",
+    "wrangler": "^4.116.0"
   }
 }

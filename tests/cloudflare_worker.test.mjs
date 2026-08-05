@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import workerEntrypoint from "../cloudflare/src/index.ts";
 import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
+import { clearZoovoiceIdTokenCacheForTests } from "../cloudflare/zoovoice-gateway.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
@@ -14,20 +16,754 @@ test("Cloudflare worker routes only the current public app pages", async () => {
       return new Response("asset", { status: 200 });
     },
   };
+  env.ZOOVOICE_ENABLED = "1";
 
   await handleRequest(new Request("https://example.com/"), env);
   await handleRequest(new Request("https://example.com/speakloop"), env);
-  await handleRequest(new Request("https://example.com/skitvoice"), env);
+  await handleRequest(new Request("https://example.com/zoovoice"), env);
   await handleRequest(new Request("https://example.com/privacy"), env);
   await handleRequest(new Request("https://example.com/privacy/"), env);
 
   assert.deepEqual(requestedPaths, [
     "/react/portal.html",
     "/react/speakloop.html",
-    "/react/skitvoice.html",
+    "/react/zoovoice.html",
     "/react/privacy.html",
     "/react/privacy.html",
   ]);
+});
+
+test("Cloudflare worker hides Zoovoice pages while the feature is disabled", async () => {
+  const requestedPaths = [];
+  const env = fakeEnv(async () => {
+    throw new Error("disabled Zoovoice page must not call an external service");
+  });
+  env.ZOOVOICE_ENABLED = "0";
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("unexpected asset", { status: 200 });
+    },
+  };
+
+  for (const path of ["/zoovoice", "/zoovoice/", "/react/zoovoice.html"]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`), env);
+    assert.equal(response.status, 404, path);
+  }
+  assert.deepEqual(requestedPaths, []);
+});
+
+test("Cloudflare worker exposes only public Zoovoice gateway configuration", async () => {
+  const env = await zoovoiceEnv(async () => {
+    throw new Error("config must not call an external service");
+  });
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/config"), env);
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.deepEqual(JSON.parse(body), {
+    enabled: true,
+    turnstile_required: true,
+    turnstile_site_key: "1x00000000000000000000AA",
+    audio_max_bytes: 10_000_000,
+    origin_timeout_seconds: 90,
+  });
+  assert.doesNotMatch(body, /secret|private_key/i);
+});
+
+test("Cloudflare worker reports Zoovoice disabled when the flag is absent", async () => {
+  const env = await zoovoiceEnv(async () => {
+    throw new Error("config must not call an external service");
+  });
+  delete env.ZOOVOICE_ENABLED;
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/config"), env);
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).enabled, false);
+});
+
+test("Cloudflare worker does not call Zoovoice services while the feature is disabled", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    throw new Error("disabled feature must not call an external service");
+  });
+  env.ZOOVOICE_ENABLED = "0";
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "zoovoice_disabled");
+  assert.deepEqual(calls, []);
+});
+
+test("Cloudflare worker rejects oversized Zoovoice audio before external calls", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    throw new Error("oversized input must not call an external service");
+  });
+
+  const response = await handleRequest(
+    zoovoiceComposeRequest({ audio: new Uint8Array(10_000_001) }),
+    env,
+  );
+
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, "zoovoice_audio_too_large");
+  assert.deepEqual(calls, []);
+});
+
+test("Cloudflare worker rejects invalid Zoovoice Turnstile action before quota and origin", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1();
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    return json({ success: true, action: "different-action", hostname: "example.com" });
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "zoovoice_turnstile_failed");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row, null);
+});
+
+test("Cloudflare worker fails closed when the Zoovoice D1 budget is unavailable", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1({ error: new Error("D1 unavailable") });
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called when D1 is unavailable");
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "zoovoice_budget_unavailable");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+});
+
+test("Cloudflare worker blocks Zoovoice at the daily budget before the origin call", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1({
+    row: {
+      feature: "zoovoice",
+      usage_date: new Date().toISOString().slice(0, 10),
+      daily_count: 100,
+      usage_month: new Date().toISOString().slice(0, 7),
+      monthly_count: 100,
+    },
+  });
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called after quota rejection");
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error.code, "zoovoice_quota_exceeded");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row.daily_count, 100);
+});
+
+test("Cloudflare worker blocks Zoovoice at the monthly budget before the origin call", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1({
+    row: {
+      feature: "zoovoice",
+      usage_date: "2026-08-01",
+      daily_count: 1,
+      usage_month: new Date().toISOString().slice(0, 7),
+      monthly_count: 1_200,
+    },
+  });
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called after monthly quota rejection");
+  }, { db });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error.code, "zoovoice_quota_exceeded");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row.monthly_count, 1_200);
+});
+
+test("Cloudflare worker allows an unauthenticated Zoovoice origin only for local Wrangler and a loopback HTTP origin", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true });
+    }
+    assert.equal(target, "http://127.0.0.1:8090/compose");
+    assert.equal(new Headers(init.headers).has("Authorization"), false);
+    return json(validZoovoiceOriginResponse());
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "http://127.0.0.1:8090/compose",
+  ]);
+});
+
+test("Cloudflare worker accepts incomplete Turnstile metadata only for the official local test credentials", async () => {
+  const localEnv = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "http://127.0.0.1:8090/compose") {
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  localEnv.ZOOVOICE_LOCAL_DEV = "1";
+  localEnv.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  localEnv.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(localEnv);
+
+  const localResponse = await handleRequest(zoovoiceComposeRequest({
+    url: "http://localhost:8787/api/zoovoice/compose",
+  }), localEnv);
+  assert.equal(localResponse.status, 200);
+
+  const nonLocalEnv = await zoovoiceEnv(async (url) => {
+    if (String(url).includes("siteverify")) return json({ success: true });
+    throw new Error("origin must not be called");
+  });
+  nonLocalEnv.ZOOVOICE_LOCAL_DEV = "1";
+  nonLocalEnv.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  nonLocalEnv.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(nonLocalEnv);
+
+  const nonLocalResponse = await handleRequest(zoovoiceComposeRequest({
+    url: "https://example.com/api/zoovoice/compose",
+  }), nonLocalEnv);
+  assert.equal(nonLocalResponse.status, 403);
+  assert.equal((await nonLocalResponse.json()).error.code, "zoovoice_turnstile_failed");
+});
+
+test("Cloudflare worker uses a supplied short-lived ID token only for local Cloud Run smoke", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "https://zoovoice.example.run.app/compose") {
+      assert.equal(new Headers(init.headers).get("Authorization"), "Bearer impersonated-id-token");
+      const form = await new Response(init.body).formData();
+      assert.equal(form.get("turnstile_token"), null);
+      assert.equal(form.get("settings"), JSON.stringify({
+        intensity: 40,
+      }));
+      assert.equal((await form.get("audio").arrayBuffer()).byteLength, 3);
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "cloud-run-smoke";
+  env.ZOOVOICE_GCP_ID_TOKEN = "impersonated-id-token";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker exchanges a signed JWT and authenticates a production Cloud Run request", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  const idToken = testIdToken({ exp: nowSeconds + 3_600 });
+  const calls = [];
+  const env = await productionZoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      assert.equal(init.method, "POST");
+      assert.equal(new Headers(init.headers).get("Content-Type"), "application/x-www-form-urlencoded");
+      const body = new URLSearchParams(String(init.body));
+      assert.equal(body.get("grant_type"), "urn:ietf:params:oauth:grant-type:jwt-bearer");
+      const assertion = body.get("assertion");
+      assert.equal(assertion.split(".").length, 3);
+      const [encodedHeader, encodedPayload, encodedSignature] = assertion.split(".");
+      assert.equal(await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        serviceAccount.__publicKey,
+        decodeBase64UrlBytes(encodedSignature),
+        new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+      ), true);
+      const claims = decodeJwtPart(encodedPayload);
+      assert.deepEqual(claims, {
+        iss: serviceAccount.client_email,
+        sub: serviceAccount.client_email,
+        aud: "https://oauth2.googleapis.com/token",
+        target_audience: "https://zoovoice.example.run.app",
+        iat: nowSeconds - 60,
+        exp: nowSeconds + 3_540,
+      });
+      return json({ id_token: idToken });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      assert.equal(new Headers(init.headers).get("Authorization"), `Bearer ${idToken}`);
+      return json(validZoovoiceOriginResponse());
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "https://example.com/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://oauth2.googleapis.com/token",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker caches an ID token until its 300 second refresh window", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  let nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  let tokenExchangeCount = 0;
+  const env = await productionZoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      tokenExchangeCount += 1;
+      return json({ id_token: testIdToken({ exp: nowSeconds + 3_600, nonce: tokenExchangeCount }) });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") return json(validZoovoiceOriginResponse());
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+  env.__ZOOVOICE_NOW = () => nowSeconds * 1_000;
+
+  for (let index = 0; index < 2; index += 1) {
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+    assert.equal(response.status, 200);
+  }
+  assert.equal(tokenExchangeCount, 1);
+
+  nowSeconds += 3_300;
+  const refreshed = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+  assert.equal(refreshed.status, 200);
+  assert.equal(tokenExchangeCount, 2);
+});
+
+test("Cloudflare worker retries a failed production token exchange without caching it", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const nowSeconds = 1_786_000_000;
+  const serviceAccount = await testServiceAccountKey();
+  let tokenExchangeCount = 0;
+  const env = await productionZoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://oauth2.googleapis.com/token") {
+      tokenExchangeCount += 1;
+      if (tokenExchangeCount === 1) return json({ error: "temporarily_unavailable" }, { status: 503 });
+      return json({ id_token: testIdToken({ exp: nowSeconds + 3_600 }) });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") return json(validZoovoiceOriginResponse());
+    throw new Error(`unexpected fetch: ${target}`);
+  }, { nowSeconds, serviceAccount });
+
+  const first = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+  const second = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+
+  assert.equal(first.status, 502);
+  assert.equal((await first.json()).error.code, "zoovoice_origin_auth_failed");
+  assert.equal(second.status, 200);
+  assert.equal(tokenExchangeCount, 2);
+});
+
+test("Cloudflare worker fails closed for invalid production origin authentication inputs", async () => {
+  const validServiceAccount = await testServiceAccountKey();
+  const cases = [
+    { name: "local dev flag", mutate: (env) => { env.ZOOVOICE_LOCAL_DEV = "1"; } },
+    { name: "loopback request", requestUrl: "http://127.0.0.1:8787/api/zoovoice/compose" },
+    { name: "non Cloud Run origin", mutate: (env) => { env.ZOOVOICE_CLOUD_RUN_URL = "https://example.com"; } },
+    { name: "origin path", mutate: (env) => { env.ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice.example.run.app/path"; } },
+    { name: "missing secret", mutate: (env) => { delete env.ZOOVOICE_GCP_SA_KEY; } },
+    { name: "invalid secret json", mutate: (env) => { env.ZOOVOICE_GCP_SA_KEY = "not-json"; } },
+    { name: "invalid private key", mutate: (env) => { env.ZOOVOICE_GCP_SA_KEY = JSON.stringify({ client_email: "invoker@example.invalid", private_key: "not-a-key" }); } },
+  ];
+
+  for (const item of cases) {
+    clearZoovoiceIdTokenCacheForTests();
+    const calls = [];
+    const env = await productionZoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: new URL(item.requestUrl || "https://example.com").hostname });
+      }
+      throw new Error("authentication failure must not reach Cloud Run");
+    }, { nowSeconds: 1_786_000_000, serviceAccount: validServiceAccount });
+    if (item.requestUrl) env.ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME = new URL(item.requestUrl).hostname;
+    item.mutate?.(env);
+
+    const response = await handleRequest(zoovoiceComposeRequest({
+      url: item.requestUrl || "https://example.com/api/zoovoice/compose",
+    }), env);
+    const body = await response.text();
+
+    assert.equal(response.status, 502, item.name);
+    assert.equal(JSON.parse(body).error.code, "zoovoice_origin_auth_failed", item.name);
+    assert.doesNotMatch(body, /PRIVATE KEY|not-a-key|invoker@example\.invalid/, item.name);
+    assert.equal(calls.some((target) => target.endsWith("/compose")), false, item.name);
+  }
+});
+
+test("Cloudflare worker fails closed for invalid token endpoint and ID token responses", async () => {
+  const serviceAccount = await testServiceAccountKey();
+  const nowSeconds = 1_786_000_000;
+  const cases = [
+    { name: "fetch exception", tokenResult: () => { throw new Error("network failed with secret material"); } },
+    { name: "non-2xx", tokenResult: () => json({ error: "invalid_grant" }, { status: 401 }) },
+    { name: "non-json", tokenResult: () => new Response("not-json", { status: 200 }) },
+    { name: "non-string token", tokenResult: () => json({ id_token: 123 }) },
+    { name: "invalid token payload", tokenResult: () => json({ id_token: "not.a-valid-payload.signature" }) },
+    { name: "missing exp", tokenResult: () => json({ id_token: testIdToken({}) }) },
+  ];
+
+  for (const item of cases) {
+    clearZoovoiceIdTokenCacheForTests();
+    let assertion = "";
+    const env = await productionZoovoiceEnv(async (url, init = {}) => {
+      const target = String(url);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      if (target === "https://oauth2.googleapis.com/token") {
+        assertion = new URLSearchParams(String(init.body)).get("assertion") || "";
+        return item.tokenResult();
+      }
+      throw new Error("invalid token response must not reach Cloud Run");
+    }, { nowSeconds, serviceAccount });
+
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+    const body = await response.text();
+    assert.equal(response.status, 502, item.name);
+    assert.equal(JSON.parse(body).error.code, "zoovoice_origin_auth_failed", item.name);
+    assert.equal(body.includes(assertion), false, item.name);
+    assert.equal(body.includes(serviceAccount.private_key), false, item.name);
+  }
+});
+
+test("Cloudflare worker never logs production service account or token material", async () => {
+  clearZoovoiceIdTokenCacheForTests();
+  const serviceAccount = await testServiceAccountKey();
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...values) => logs.push(values.map(String).join(" "));
+  try {
+    const env = await productionZoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error(`upstream failure ${serviceAccount.private_key}`);
+    }, { nowSeconds: 1_786_000_000, serviceAccount });
+    env.ZOOVOICE_LOG_SAMPLE_RATE = "1";
+
+    const response = await handleRequest(zoovoiceComposeRequest({ url: "https://example.com/api/zoovoice/compose" }), env);
+
+    assert.equal(response.status, 502);
+    const combined = `${await response.text()}\n${logs.join("\n")}`;
+    assert.equal(combined.includes(serviceAccount.private_key), false);
+    assert.doesNotMatch(combined, /eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("Cloudflare worker rejects local Zoovoice modes on a production hostname before quota and origin", async () => {
+  for (const mode of ["local-origin", "cloud-run-smoke", "", "unexpected"]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error(`origin must not be called in mode ${mode}`);
+    }, { db });
+    env.ZOOVOICE_LOCAL_DEV = "1";
+    env.ZOOVOICE_ORIGIN_MODE = mode;
+    env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+    env.ZOOVOICE_GCP_ID_TOKEN = "must-not-be-used";
+
+    const response = await handleRequest(zoovoiceComposeRequest({
+      url: "https://example.com/api/zoovoice/compose",
+    }), env);
+
+    assert.equal(response.status, 502, `mode ${mode || "unset"}`);
+    assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+    assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker rejects unsafe local Zoovoice origins before quota and origin fetch", async () => {
+  for (const origin of [
+    "",
+    "http://192.0.2.1:8090",
+    "https://127.0.0.1:8090",
+    "http://127.0.0.1:8090/path",
+    "http://user:password@127.0.0.1:8090",
+    "http://127.0.0.1:8090?mode=unsafe",
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) return json({ success: true });
+      throw new Error("origin must not be called");
+    }, { db });
+    env.ZOOVOICE_LOCAL_DEV = "1";
+    env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+    env.ZOOVOICE_LOCAL_ORIGIN = origin;
+    useOfficialLocalTurnstileCredentials(env);
+
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+    assert.equal(response.status, 502, origin || "empty origin");
+    assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+    assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker never reaches Zoovoice origin when the local smoke token is missing", async () => {
+  const calls = [];
+  const db = fakeZoovoiceBudgetD1();
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    throw new Error("origin must not be called without a local smoke token");
+  }, { db });
+  delete env.ZOOVOICE_GCP_ID_TOKEN;
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+  assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+  assert.equal(db.__row, null);
+});
+
+test("Cloudflare worker rejects invalid Cloud Run smoke origins before quota and origin fetch", async () => {
+  for (const origin of [
+    "",
+    "http://zoovoice.example.run.app",
+    "https://zoovoice.example.run.app/path",
+    "https://user:password@zoovoice.example.run.app",
+    "https://zoovoice.example.run.app?mode=unsafe",
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      const target = String(url);
+      calls.push(target);
+      if (target.includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      throw new Error("origin must not be called");
+    }, { db });
+    env.ZOOVOICE_CLOUD_RUN_URL = origin;
+
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+    assert.equal(response.status, 502, origin || "empty origin");
+    assert.equal((await response.json()).error.code, "zoovoice_origin_auth_failed");
+    assert.deepEqual(calls, ["https://challenges.cloudflare.com/turnstile/v0/siteverify"]);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker aborts a slow Zoovoice origin within its internal timeout", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url, init = {}) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_ORIGIN_TIMEOUT_MS = "1";
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 504);
+  assert.equal((await response.json()).error.code, "zoovoice_origin_timeout");
+  assert.deepEqual(calls, [
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    "https://zoovoice.example.run.app/compose",
+  ]);
+});
+
+test("Cloudflare worker rejects malformed successful responses from Zoovoice origin", async () => {
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) {
+      return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+    }
+    if (target === "https://zoovoice.example.run.app/compose") {
+      return json({ audio: { format: "mp3", base64: "" }, meta: null });
+    }
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+
+  const response = await handleRequest(zoovoiceComposeRequest(), env);
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+});
+
+test("Cloudflare worker accepts Zoovoice pun metadata with literal evidence", async () => {
+  const punPayload = validZoovoiceOriginResponse();
+  punPayload.meta.selected_animal = { id: "elephant", label_ja: "象" };
+  punPayload.meta.evidence_term = "ぞう";
+  punPayload.meta.selection_strategy = "pun";
+  punPayload.meta.insertions = [{ slot: "opening", species: "elephant", at_seconds: 0 }];
+  const env = await zoovoiceEnv(async (url) => {
+    const target = String(url);
+    if (target.includes("siteverify")) return json({ success: true });
+    if (target === "http://127.0.0.1:8090/compose") return json(punPayload);
+    throw new Error(`unexpected fetch: ${target}`);
+  });
+  env.ZOOVOICE_LOCAL_DEV = "1";
+  env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+  env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+  useOfficialLocalTurnstileCredentials(env);
+
+  const response = await handleRequest(zoovoiceComposeRequest({
+    url: "http://127.0.0.1:8787/api/zoovoice/compose",
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).meta, punPayload.meta);
+});
+
+test("Cloudflare worker accepts only intensity settings before Turnstile, budget, and origin", async () => {
+  for (const settings of [
+    {},
+    { intensity: 40.5 },
+    { intensity: -1 },
+    { intensity: 101 },
+    { intensity: 40, extra: true },
+    { intensity: 40, arrangement: { opening: "cat", gaps: null, ending: null } },
+  ]) {
+    const calls = [];
+    const db = fakeZoovoiceBudgetD1();
+    const env = await zoovoiceEnv(async (url) => {
+      calls.push(String(url));
+      throw new Error("invalid settings must not call an external service");
+    }, { db });
+    const response = await handleRequest(zoovoiceComposeRequest({ settings }), env);
+    assert.equal(response.status, 400, JSON.stringify(settings));
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_settings");
+    assert.deepEqual(calls, []);
+    assert.equal(db.__row, null);
+  }
+});
+
+test("Cloudflare worker validates every Zoovoice success metadata field", async () => {
+  const invalidPayloads = [
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "長".repeat(20_001) } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selected_animal: { id: "", label_ja: "猫" } } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: 3 } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selection_strategy: "heuristic" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, fallback_reason: "unknown" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "pun" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "random_fallback", fallback_reason: "no_direct_or_conceptnet_match" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, insertions: [{ slot: "middle", species: "cat", at_seconds: 1 }] } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, input_duration_seconds: "1" } },
+  ];
+  for (const payload of invalidPayloads) {
+    const env = await zoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      return json(payload);
+    });
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+  }
+});
+
+test("Cloudflare worker serves Zoovoice animals from a cacheable static asset", async () => {
+  const env = await zoovoiceEnv(async (url) => {
+    throw new Error(`animals must not call an external service: ${url}`);
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      assert.equal(new URL(request.url).pathname, "/react/zoovoice-animals.json");
+      return json({ animals: [{ id: "cat", label_ja: "猫", variants: 2 }] });
+    },
+  };
+
+  const response = await handleRequest(new Request("https://example.com/api/zoovoice/animals"), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    animals: [{ id: "cat", label_ja: "猫", variants: 2 }],
+  });
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=3600, s-maxage=86400");
 });
 
 test("Cloudflare playback padding stops before neighboring speech", () => {
@@ -93,30 +829,6 @@ test("Cloudflare worker expires old KV audit fallback data without deleting tota
   assert.equal(await kv.get("public-usage:speakloop:hash:total"), "8");
 });
 
-test("Cloudflare worker exposes fun only to an allowlisted Google account", async () => {
-  const requestedPaths = [];
-  const env = adminAuthEnv(async () => {
-    throw new Error("unexpected fetch");
-  });
-  env.ASSETS = {
-    async fetch(request) {
-      requestedPaths.push(new URL(request.url).pathname);
-      return new Response("asset", { status: 200 });
-    },
-  };
-
-  const blocked = await handleRequest(new Request("https://example.com/fun"), env);
-  const cookie = await adminCookie(env);
-  const allowed = await handleRequest(new Request("https://example.com/fun", { headers: { cookie } }), env);
-  const directAsset = await handleRequest(new Request("https://example.com/static/user.html", { headers: { cookie } }), env);
-
-  assert.equal(blocked.status, 302);
-  assert.equal(blocked.headers.get("location"), "/auth/google/login?next=%2Ffun");
-  assert.equal(allowed.status, 200);
-  assert.equal(directAsset.status, 404);
-  assert.deepEqual(requestedPaths, ["/user.html"]);
-});
-
 test("Cloudflare worker returns 404 for retired application routes", async () => {
   const env = fakeEnv(async () => {
     throw new Error("unexpected fetch");
@@ -124,7 +836,11 @@ test("Cloudflare worker returns 404 for retired application routes", async () =>
   env.ASSETS = { fetch: async () => new Response("unexpected asset", { status: 200 }) };
 
   for (const path of [
+    "/fun",
+    "/fun/",
     "/user",
+    "/skitvoice",
+    "/skitvoice/admin",
     "/vibevoice",
     "/vibevoice/simple",
     "/vibevoice/admin",
@@ -134,11 +850,55 @@ test("Cloudflare worker returns 404 for retired application routes", async () =>
     "/vibevoice_simple.html",
     "/seed_vc.html",
     "/static/user.html",
+    "/static/app_user.js",
+    "/static/app_realtime.js",
     "/static/vibevoice_simple.html",
     "/static/seed_vc.html",
   ]) {
     const response = await handleRequest(new Request(`https://example.com${path}`), env);
     assert.equal(response.status, 404, path);
+  }
+});
+
+test("Cloudflare worker serves the current public sample admin asset", async () => {
+  const requestedPaths = [];
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.ASSETS = {
+    async fetch(request) {
+      requestedPaths.push(new URL(request.url).pathname);
+      return new Response("asset", { status: 200 });
+    },
+  };
+
+  const response = await handleRequest(
+    new Request("https://example.com/static/app_public_sample_audio_admin.js"),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(requestedPaths, ["/app_public_sample_audio_admin.js"]);
+});
+
+test("Cloudflare worker returns 404 for retired legacy translation APIs", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+
+  for (const [method, path] of [
+    ["GET", "/api/user-settings"],
+    ["PUT", "/api/user-settings"],
+    ["POST", "/api/user-display-text"],
+    ["POST", "/api/user-text-output"],
+    ["POST", "/api/user-joke-output"],
+    ["POST", "/api/translate-speech"],
+    ["POST", "/api/translate-speech-jobs"],
+    ["GET", "/api/translate-speech-jobs/retired"],
+    ["POST", "/api/openai-realtime-translation-session"],
+  ]) {
+    const response = await handleRequest(new Request(`https://example.com${path}`, { method }), env);
+    assert.equal(response.status, 404, `${method} ${path}`);
   }
 });
 
@@ -161,72 +921,11 @@ test("Cloudflare worker protects directly addressed admin HTML assets", async ()
   });
   env.ASSETS = { fetch: async () => new Response("asset") };
 
-  for (const path of ["/static/index.html", "/static/practice_admin.html", "/static/vibevoice.html"]) {
+  for (const path of ["/static/index.html", "/static/practice_admin.html"]) {
     const response = await handleRequest(new Request(`https://example.com${path}`), env);
     assert.equal(response.status, 302, path);
     assert.equal(response.headers.get("location"), `/auth/google/login?next=${encodeURIComponent(path)}`);
   }
-});
-
-test("Cloudflare worker protects every VibeVoice API with the common admin boundary", async () => {
-  const env = adminAuthEnv(async () => json({}));
-  const anonymousRequests = [
-    new Request("https://example.com/api/vibevoice/status"),
-    new Request("https://example.com/api/vibevoice/reference-audio-from-url", { method: "POST" }),
-    new Request("https://example.com/api/vibevoice/scripts", { method: "POST" }),
-    new Request("https://example.com/api/vibevoice/jobs", { method: "POST" }),
-    new Request("https://example.com/api/vibevoice/jobs/job-1"),
-    new Request("https://example.com/api/vibevoice/jobs/job-1/cancel", { method: "POST" }),
-  ];
-
-  for (const request of anonymousRequests) {
-    const response = await handleRequest(request, env);
-    assert.equal(response.status, 401, new URL(request.url).pathname);
-  }
-
-  const regularEnv = adminAuthEnv(async () => json({}), {
-    adminGoogleEmails: "admin@example.com",
-    googleEmail: "person@example.com",
-  });
-  const regularCookie = await publicCookie(regularEnv, "/skitvoice");
-  const regularResponse = await handleRequest(
-    new Request("https://example.com/api/vibevoice/status", { headers: { cookie: regularCookie } }),
-    regularEnv,
-  );
-  assert.equal(regularResponse.status, 403);
-
-  const adminCookieValue = await adminCookie(env, "/skitvoice/admin");
-  const adminResponse = await handleRequest(
-    new Request("https://example.com/api/vibevoice/status", { headers: { cookie: adminCookieValue } }),
-    env,
-  );
-  assert.equal(adminResponse.status, 200);
-});
-
-test("Cloudflare worker hides research features and SkitVoice samples from non-admin payloads", async () => {
-  const sample = {
-    title: "unverified sample",
-    filename: "sample.wav",
-    audio_mime_type: "audio/wav",
-    audio_base64: btoa("sample-bytes"),
-  };
-  const env = adminAuthEnv(async () => json({}));
-  env.PUBLIC_SAMPLE_AUDIOS_JSON = JSON.stringify({ features: { skitvoice: { samples: { "ja-JP": sample } } } });
-
-  const publicSession = await (await handleRequest(new Request("https://example.com/api/public-session"), env)).json();
-  const publicSamples = await (await handleRequest(new Request("https://example.com/api/public-sample-audios"), env)).json();
-  assert.deepEqual(Object.keys(publicSession.features), ["speakloop"]);
-  assert.equal(publicSamples.features.skitvoice, null);
-
-  const cookie = await adminCookie(env);
-  const adminSession = await (await handleRequest(
-    new Request("https://example.com/api/public-session", { headers: { cookie } }), env,
-  )).json();
-  const adminSamples = await (await handleRequest(
-    new Request("https://example.com/api/public-sample-audios", { headers: { cookie } }), env,
-  )).json();
-  assert.ok(adminSession.features.skitvoice);
-  assert.equal(adminSamples.features.skitvoice.samples["ja-JP"].title, "unverified sample");
 });
 
 test("Cloudflare worker protects admin pages with an allowlisted Google session", async () => {
@@ -241,17 +940,17 @@ test("Cloudflare worker protects admin pages with an allowlisted Google session"
     },
   };
 
-  const blocked = await handleRequest(new Request("https://example.com/skitvoice/admin"), env);
-  const cookie = await adminCookie(env, "/skitvoice/admin");
-  const allowed = await handleRequest(new Request("https://example.com/skitvoice/admin", { headers: { cookie } }), env);
+  const blocked = await handleRequest(new Request("https://example.com/speakloop/admin"), env);
+  const cookie = await adminCookie(env, "/speakloop/admin");
+  const allowed = await handleRequest(new Request("https://example.com/speakloop/admin", { headers: { cookie } }), env);
 
   assert.equal(blocked.status, 302);
-  assert.equal(blocked.headers.get("location"), "/auth/google/login?next=%2Fskitvoice%2Fadmin");
+  assert.equal(blocked.headers.get("location"), "/auth/google/login?next=%2Fspeakloop%2Fadmin");
   assert.match(cookie, /mo_public_session=/);
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /Secure/);
   assert.equal(allowed.status, 200);
-  assert.deepEqual(requestedPaths, ["/vibevoice.html"]);
+  assert.deepEqual(requestedPaths, ["/practice_admin.html"]);
 });
 
 test("Cloudflare worker protects admin APIs with the same allowlisted Google session", async () => {
@@ -261,18 +960,11 @@ test("Cloudflare worker protects admin APIs with the same allowlisted Google ses
   const cookie = await adminCookie(env);
 
   const blockedSettings = await handleRequest(
-    new Request("https://example.com/api/user-settings", {
-      method: "PUT",
-      body: JSON.stringify({ theme: "blue" }),
-    }),
+    new Request("https://example.com/api/public-access-settings"),
     env,
   );
   const allowedSettings = await handleRequest(
-    new Request("https://example.com/api/user-settings", {
-      method: "PUT",
-      headers: { cookie },
-      body: JSON.stringify({ theme: "blue" }),
-    }),
+    new Request("https://example.com/api/public-access-settings", { headers: { cookie } }),
     env,
   );
   const blockedHistory = await handleRequest(new Request("https://example.com/api/audio-history"), env);
@@ -554,110 +1246,13 @@ test("Cloudflare worker returns a full audit log page when no limit is requested
   assert.equal(payload.events.length, 4);
 });
 
-test("Cloudflare worker refuses VibeVoice when admin authentication is not configured", async () => {
-  const env = publicAuthEnv(async () => {
-    throw new Error("unexpected fetch");
-  }, { kv: fakeKv() });
-
-  const form = new FormData();
-  form.append("script", "1 Hello");
-  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
-  const response = await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", body: form }), env);
-
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { detail: "admin authentication is not configured" });
-});
-
-test("Cloudflare worker lets a Google admin use fun generation APIs without consuming quota", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      fun: { daily_limit: 0, total_limit: 0, text_max_chars: 5, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  const env = adminAuthEnv(async (url) => {
-    calls.push(url);
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env);
-
-  const allowed = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const oversized = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは！", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const practiceForm = new FormData();
-  practiceForm.append("audio", new Blob(["native"], { type: "audio/webm" }), "native.webm");
-  practiceForm.append("target_language", "en-US");
-  const publicFeatureUsesSameGoogleSession = await handleRequest(
-    new Request("https://example.com/api/practice/prompts", {
-      method: "POST",
-      headers: { cookie },
-      body: practiceForm,
-    }),
-    env,
-  );
-
-  assert.equal(allowed.status, 200);
-  assert.equal(oversized.status, 413);
-  assert.deepEqual(await oversized.json(), { detail: "text is too large" });
-  assert.notEqual(publicFeatureUsesSameGoogleSession.status, 401);
-  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-  const funExemption = audit.find((event) => event.action === "public_quota_exempt" && event.feature === "fun");
-  assert.equal(funExemption.email, undefined);
-  assert.equal(funExemption.email_hash, await publicIdentityHashForTest("admin@example.com"));
-});
-
-test("Cloudflare worker always protects fun generation APIs with Google admin auth", async () => {
-  const env = adminAuthEnv(async (url) => {
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
-  const viewerCookie = await publicCookie(env, "/fun");
-  const requestBody = JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" });
-
-  const unauthenticated = await handleRequest(new Request("https://example.com/api/user-text-output", {
-    method: "POST",
-    body: requestBody,
-  }), env);
-  const forbidden = await handleRequest(new Request("https://example.com/api/user-text-output", {
-    method: "POST",
-    headers: { cookie: viewerCookie },
-    body: requestBody,
-  }), env);
-
-  assert.equal(unauthenticated.status, 401);
-  assert.deepEqual(await unauthenticated.json(), { detail: "Google admin login is required" });
-  assert.equal(forbidden.status, 403);
-  assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" });
-});
-
-test("Cloudflare worker always protects fun voice conversion jobs with Google admin auth", async () => {
+test("Cloudflare worker always protects admin voice conversion jobs with Google auth", async () => {
   const calls = [];
   const env = adminAuthEnv(async (url) => {
     calls.push(url);
     throw new Error(`unexpected url: ${url}`);
   }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
-  const viewerCookie = await publicCookie(env, "/fun");
+  const viewerCookie = await publicCookie(env, "/admin");
   const request = (cookie = "") => {
     const form = new FormData();
     form.append("source_audio", new Blob(["source"], { type: "audio/wav" }), "source.wav");
@@ -679,150 +1274,27 @@ test("Cloudflare worker always protects fun voice conversion jobs with Google ad
   assert.equal(calls.some((url) => url.endsWith("/run")), false);
 });
 
-test("Cloudflare worker protects fun job status endpoints with Google admin auth", async () => {
+test("Cloudflare worker protects voice conversion job status with Google admin auth", async () => {
   const calls = [];
   const env = adminAuthEnv(async (url) => {
     calls.push(url);
     throw new Error(`unexpected url: ${url}`);
   }, { kv: fakeKv(), googleEmail: "viewer@example.com", adminGoogleEmails: "admin@example.com" });
-  const viewerCookie = await publicCookie(env, "/fun");
+  const viewerCookie = await publicCookie(env, "/admin");
 
-  for (const path of [
-    "/api/translate-speech-jobs/job-translation",
-    "/api/voice-conversion-jobs/job-vc",
-  ]) {
-    const unauthenticated = await handleRequest(new Request(`https://example.com${path}`), env);
-    const forbidden = await handleRequest(
-      new Request(`https://example.com${path}`, { headers: { cookie: viewerCookie } }),
-      env,
-    );
+  const path = "/api/voice-conversion-jobs/job-vc";
+  const unauthenticated = await handleRequest(new Request(`https://example.com${path}`), env);
+  const forbidden = await handleRequest(
+    new Request(`https://example.com${path}`, { headers: { cookie: viewerCookie } }),
+    env,
+  );
 
-    assert.equal(unauthenticated.status, 401, path);
-    assert.deepEqual(await unauthenticated.json(), { detail: "admin authentication required" }, path);
-    assert.equal(forbidden.status, 403, path);
-    assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" }, path);
-  }
+  assert.equal(unauthenticated.status, 401, path);
+  assert.deepEqual(await unauthenticated.json(), { detail: "admin authentication required" }, path);
+  assert.equal(forbidden.status, 403, path);
+  assert.deepEqual(await forbidden.json(), { detail: "admin access is forbidden" }, path);
 
   assert.deepEqual(calls, []);
-});
-
-test("Cloudflare worker blocks a normal Google user before SkitVoice quota or RunPod", async () => {
-  const kv = fakeKv();
-  const today = new Date().toISOString().slice(0, 10);
-  await kv.put(`public-usage:skitvoice:viewer@example.com:${today}`, "1");
-  await kv.put("public-usage:skitvoice:viewer@example.com:total", "1");
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      skitvoice: { daily_limit: 2, total_limit: 2, script_max_chars: 80, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  const env = publicAuthEnv(async (url, init) => {
-    calls.push({ url, init });
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "viewer@example.com", email_verified: true });
-    }
-    if (url.endsWith("/run")) {
-      return json({ id: "quota-job", status: "IN_QUEUE" });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv, adminGoogleEmails: "admin@example.com" });
-  const cookie = await publicCookie(env);
-
-  const request = () => {
-    const form = new FormData();
-    form.append("script", "1 Hello");
-    form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
-    return new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form });
-  };
-  const first = await handleRequest(request(), env);
-  const second = await handleRequest(request(), env);
-
-  assert.equal(first.status, 403);
-  assert.equal(second.status, 403);
-  assert.deepEqual(await second.json(), { detail: "admin access is forbidden" });
-  assert.equal(calls.filter((call) => call.url.endsWith("/run")).length, 0);
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-  assert.deepEqual(audit.map((event) => event.action), ["google_login_success"]);
-  assert.equal(await kv.get(`public-usage:skitvoice:viewer@example.com:${today}`), "1");
-  assert.equal(await kv.get("public-usage:skitvoice:viewer@example.com:total"), "1");
-});
-
-test("Cloudflare worker does not write D1 SkitVoice quota for a normal Google user", async () => {
-  const kv = fakeKv();
-  const db = fakeD1();
-  await kv.put("public-access-settings", JSON.stringify({ google_login_required: true, features: { skitvoice: { daily_limit: 1, total_limit: 1, script_max_chars: 80, audio_max_bytes: 1000 } } }));
-  const env = publicAuthEnv(async (url) => {
-    if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
-    if (url.endsWith("/run")) return json({ id: "quota-job", status: "IN_QUEUE" });
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv, db, adminGoogleEmails: "admin@example.com" });
-  const cookie = await publicCookie(env);
-  const request = () => {
-    const form = new FormData();
-    form.append("script", "1 Hello");
-    form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
-    return new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form });
-  };
-
-  assert.equal((await handleRequest(request(), env)).status, 403);
-  assert.equal((await handleRequest(request(), env)).status, 403);
-  assert.equal(db.__tables.daily.size, 0);
-  assert.deepEqual(db.__tables.audit.map((event) => event.action), ["google_login_success"]);
-  assert.equal(await kv.get("public-audit-log"), null);
-});
-
-test("Cloudflare worker exempts configured admin Google emails from public quota", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      fun: { daily_limit: 0, total_limit: 0, text_max_chars: 80, audio_max_bytes: 1000 },
-    },
-  }));
-  const env = publicAuthEnv(async (url) => {
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "owner@example.com", email_verified: true });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv, adminGoogleEmails: "owner@example.com" });
-  const cookie = await publicCookie(env);
-
-  const first = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const second = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "こんにちは", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-
-  assert.equal(first.status, 200);
-  assert.equal(second.status, 200);
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-  assert.deepEqual(
-    audit.map((event) => event.action),
-    ["google_login_success", "public_quota_exempt", "public_quota_exempt"],
-  );
 });
 
 test("Cloudflare worker lets a Google admin edit public access limits", async () => {
@@ -865,63 +1337,7 @@ test("Cloudflare worker lets a Google admin edit public access limits", async ()
   assert.equal(fetched.features.speakloop.total_limit, 90);
   assert.equal(fetched.features.speakloop.audio_max_bytes, 1234);
   assert.equal(fetched.features.speakloop.text_max_chars, 321);
-});
-
-test("Cloudflare worker applies saved public admin emails before quota checks", async () => {
-  const kv = fakeKv();
-  const calls = [];
-  const env = publicAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init?.body) });
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "Owner@Example.COM", email_verified: true });
-    }
-    if (url.endsWith("/run")) {
-      return json({ id: "admin-vv-job", status: "IN_QUEUE" });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv, adminGoogleEmails: "owner@example.com" });
-  const adminSession = await adminCookie(env);
-
-  const updated = await handleRequest(
-    new Request("https://example.com/api/public-access-settings", {
-      method: "PUT",
-      headers: { cookie: adminSession },
-      body: JSON.stringify({
-        google_login_required: true,
-        admin_google_emails: ["owner@example.com"],
-        features: {
-          skitvoice: { daily_limit: 0, total_limit: 0, script_max_chars: 100, audio_max_bytes: 1000 },
-        },
-      }),
-    }),
-    env,
-  );
-  const publicSession = await publicCookie(env, "/skitvoice");
-  const form = new FormData();
-  form.append("script", "1 こんにちは");
-  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
-
-  const created = await handleRequest(
-    new Request("https://example.com/api/vibevoice/jobs", {
-      method: "POST",
-      headers: { cookie: publicSession },
-      body: form,
-    }),
-    env,
-  );
-  const audit = JSON.parse(await kv.get("public-audit-log"));
-  const runCall = calls.find((call) => call.url.endsWith("/run"));
-
-  assert.equal(updated.status, 200);
-  assert.equal(created.status, 200);
-  assert.ok(runCall);
-  assert.deepEqual(
-    audit.map((event) => event.action),
-    ["google_login_success", "public_access_settings_updated", "google_login_success", "public_quota_exempt"],
-  );
+  assert.equal("fun" in fetched.features, false);
 });
 
 test("Cloudflare worker lets admins publish sample audios for public pages", async () => {
@@ -938,7 +1354,6 @@ test("Cloudflare worker lets admins publish sample audios for public pages", asy
         audio_mime_type: "audio/mpeg",
         audio_base64: Buffer.from([1, 2, 3, 4]).toString("base64"),
       },
-      skitvoice: null,
     },
   };
   const cookie = await adminCookie(env);
@@ -984,7 +1399,6 @@ test("Cloudflare worker lets admins publish sample audios for public pages", asy
   assert.equal(payload.features.speakloop.title, "SpeakLoop demo");
   assert.equal(payload.features.speakloop.audio_mime_type, "audio/mpeg");
   assert.equal(payload.features.speakloop.size_bytes, 4);
-  assert.equal(payload.features.skitvoice, null);
   assert.equal(blockedDelete.status, 401);
   assert.equal(deleted.status, 200);
   assert.equal((await deleted.json()).features.speakloop, null);
@@ -995,340 +1409,43 @@ test("Cloudflare worker lets admins publish sample audios for public pages", asy
   assert.equal(audit.at(-1).feature, "speakloop");
 });
 
-test("Cloudflare worker stores Japanese Chinese and English SkitVoice samples in D1 and R2", async () => {
+test("Cloudflare worker stores Japanese Chinese and English speakloop samples in D1 and R2", async () => {
   const kv = fakeKv();
   const db = fakeD1();
   const r2 = fakeR2();
   const env = adminAuthEnv(async () => { throw new Error("unexpected fetch"); }, { kv, db, r2 });
   const cookie = await adminCookie(env);
   const sample = (language) => ({ title: language, description: `${language} sample`, filename: `${language}.wav`, audio_mime_type: "audio/wav", audio_base64: Buffer.from(language).toString("base64") });
-  const body = { features: { skitvoice: { samples: { "ja-JP": sample("ja-JP"), "zh-CN": sample("zh-CN"), "en-US": sample("en-US") } } } };
+  const body = { features: { speakloop: { samples: { "ja-JP": sample("ja-JP"), "zh-CN": sample("zh-CN"), "en-US": sample("en-US") } } } };
 
   const saved = await handleRequest(new Request("https://example.com/api/public-sample-audios", { method: "PUT", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify(body) }), env);
   const payload = await saved.json();
 
   assert.equal(saved.status, 200);
-  assert.equal(payload.features.skitvoice.samples["ja-JP"].title, "ja-JP");
-  assert.equal(payload.features.skitvoice.samples["zh-CN"].title, "zh-CN");
-  assert.equal(payload.features.skitvoice.samples["en-US"].title, "en-US");
+  assert.equal(payload.features.speakloop.samples["ja-JP"].title, "ja-JP");
+  assert.equal(payload.features.speakloop.samples["zh-CN"].title, "zh-CN");
+  assert.equal(payload.features.speakloop.samples["en-US"].title, "en-US");
   assert.equal(db.__tables.samples.size, 3);
   assert.equal(r2.__store.size, 3);
   assert.equal(await kv.get("public-sample-audios"), null);
 
-  const deleted = await handleRequest(new Request("https://example.com/api/public-sample-audios/skitvoice?language=zh-CN", { method: "DELETE", headers: { cookie } }), env);
-  assert.equal((await deleted.json()).features.skitvoice.samples["zh-CN"], null);
+  const deleted = await handleRequest(new Request("https://example.com/api/public-sample-audios/speakloop?language=zh-CN", { method: "DELETE", headers: { cookie } }), env);
+  assert.equal((await deleted.json()).features.speakloop.samples["zh-CN"] ?? null, null);
   assert.equal(db.__tables.samples.size, 2);
   assert.equal(r2.__store.size, 2);
 });
 
 test("Cloudflare worker does not recurse while migrating an empty legacy sample document", async () => {
   const kv = fakeKv();
-  await kv.put("public-sample-audios", JSON.stringify({ features: { speakloop: null, skitvoice: null, fun: null, voice_conversion: null } }));
+  await kv.put("public-sample-audios", JSON.stringify({ features: { speakloop: null, fun: null, voice_conversion: null } }));
   const env = fakeEnv(async () => { throw new Error("unexpected fetch"); }, { kv, db: fakeD1(), r2: fakeR2() });
 
   const response = await handleRequest(new Request("https://example.com/api/public-sample-audios"), env);
 
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).features.skitvoice, null);
-});
-
-test("Cloudflare worker rejects oversized admin input before calling an external API", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      fun: { daily_limit: 1, total_limit: 1, text_max_chars: 5, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  const env = adminAuthEnv(async (url) => {
-    calls.push(url);
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "viewer@example.com", email_verified: true });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env);
-
-  const tooLong = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "これは長すぎる", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-  const valid = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { cookie },
-      body: JSON.stringify({ translated_text: "短い", target_language: "ja-JP" }),
-    }),
-    env,
-  );
-
-  assert.equal(tooLong.status, 413);
-  assert.deepEqual(await tooLong.json(), { detail: "text is too large" });
-  assert.equal(valid.status, 200);
-  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/audio/speech").length, 1);
-});
-
-test("Cloudflare worker lets an admin run and inspect a SkitVoice research job", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      skitvoice: { daily_limit: 2, total_limit: 2, script_max_chars: 100, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  let statusCalls = 0;
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init.body) });
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "viewer@example.com", email_verified: true });
-    }
-    if (url.endsWith("/run")) {
-      return json({ id: "vv-job", status: "IN_QUEUE" });
-    }
-    if (url.endsWith("/health")) {
-      return json({ workers: { initializing: 1, idle: 0, running: 0 } });
-    }
-    if (url.endsWith("/status/vv-job")) {
-      statusCalls += 1;
-      if (statusCalls === 1) {
-        return json({
-          id: "vv-job",
-          status: "IN_PROGRESS",
-          delayTime: 1234,
-          output: {
-            stage: "loading_vibevoice_model",
-            label: "VibeVoice Largeモデルを読み込んでいます",
-            provider: "RunPod Serverless",
-            model: "vibevoice-large-aoi-pinned",
-            detail: "初回起動時は数分かかる場合があります。",
-          },
-        });
-      }
-      return json({
-        id: "vv-job",
-        status: "COMPLETED",
-        output: {
-          audio_mime_type: "audio/mpeg",
-          audio_base64: Buffer.from([4, 5, 6]).toString("base64"),
-          normalized_script: "Speaker 1: こんにちは",
-        },
-      });
-    }
-    if (url.endsWith("/cancel/vv-job")) {
-      return json({ id: "vv-job", status: "CANCELLED", error: "cancelled" });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env, "/skitvoice/admin");
-  const form = new FormData();
-  form.append("script", "1 こんにちは");
-  form.append("model_id", "vibevoice-large-aoi-pinned");
-  form.append("cfg_scale", "1.2");
-  form.append("directed_line_mode", "true");
-  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
-
-  const created = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }), env)
-  ).json();
-  const running = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job", { headers: { cookie } }), env)
-  ).json();
-  const completed = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job", { headers: { cookie } }), env)
-  ).json();
-  const cancelled = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs/vv-job/cancel", { method: "POST", headers: { cookie } }), env)
-  ).json();
-  const runCall = calls.find((call) => call.url.endsWith("/run"));
-
-  assert.equal(created.job_id, "vv-job");
-  assert.equal(created.status, "queued");
-  assert.equal(created.current_stage.stage, "initializing");
-  assert.match(created.current_stage.label, /GPUワーカー/);
-  assert.equal(running.status, "running");
-  assert.equal(running.current_stage.stage, "loading_vibevoice_model");
-  assert.equal(running.current_stage.model, "vibevoice-large-aoi-pinned");
-  assert.match(running.current_stage.detail, /初回起動/);
-  assert.equal(running.metrics.delay_time_ms, 1234);
-  assert.equal(completed.status, "succeeded");
-  assert.equal(completed.result.normalized_script, "Speaker 1: こんにちは");
-  assert.equal(cancelled.status, "failed");
-  assert.equal(runCall.body.input.operation_mode, "vibevoice");
-  assert.equal("policy" in runCall.body, false);
-  assert.equal(runCall.body.input.script, "1 こんにちは");
-  assert.equal(runCall.body.input.generation.model_id, "vibevoice-large-aoi-pinned");
-  assert.equal(runCall.body.input.generation.cfg_scale, 1.2);
-  assert.equal(runCall.body.input.voices[0].speaker, 1);
-  assert.equal(runCall.body.input.voices[0].audio_mime_type, "audio/wav");
-  assert.equal(runCall.body.input.voices[0].audio_base64, Buffer.from("voice").toString("base64"));
-});
-
-test("Cloudflare worker translates SkitVoice script before RunPod generation", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      skitvoice: { daily_limit: 2, total_limit: 2, script_max_chars: 100, audio_max_bytes: 1000 },
-    },
-  }));
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init.body) });
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "viewer@example.com", email_verified: true });
-    }
-    if (url === "https://api.openai.com/v1/responses") {
-      return json({ output_text: JSON.stringify({ source_language: "ja-JP", script: "1 Hello.\n2 How are you?" }) });
-    }
-    if (url.endsWith("/run")) {
-      return json({ id: "vv-job", status: "IN_QUEUE" });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  env.OPENAI_VIBEVOICE_SCRIPT_TRANSLATION_MODEL = "test-vv-translation-model";
-  const cookie = await adminCookie(env, "/skitvoice/admin");
-  const form = new FormData();
-  form.append("script", "1 こんにちは\n2 元気ですか");
-  form.append("output_language", "en-US");
-  form.append("translate_script", "true");
-  form.append("model_id", "vibevoice-large-aoi-pinned");
-  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
-
-  const created = await (
-    await handleRequest(new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }), env)
-  ).json();
-  const openAiCall = calls.find((call) => call.url === "https://api.openai.com/v1/responses");
-  const runCall = calls.find((call) => call.url.endsWith("/run"));
-
-  assert.equal(created.job_id, "vv-job");
-  assert.equal(openAiCall.body.model, "test-vv-translation-model");
-  assert.match(openAiCall.body.instructions, /Preserve speaker tags/);
-  assert.equal(runCall.body.input.script, "1 Hello.\n2 How are you?");
-  assert.deepEqual(runCall.body.input.script_translation, {
-    requested: true,
-    enabled: true,
-    output_language: "en-US",
-    source_language: "ja-JP",
-    source_script: "1 こんにちは\n2 元気ですか",
-    translated_script: "1 Hello.\n2 How are you?",
-    model: "test-vv-translation-model",
-    provider: "openai-responses",
-  });
-});
-
-test("Cloudflare worker generates a five-line two-speaker SkitVoice script without consuming generation quota", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: { skitvoice: { daily_limit: 2, total_limit: 2 } },
-  }));
-  let scriptGenerationInput = "";
-  const env = adminAuthEnv(async (url, init = {}) => {
-    if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") return json({ email: "viewer@example.com", email_verified: true });
-    if (url === "https://api.openai.com/v1/responses") {
-      scriptGenerationInput = parseJsonBody(init.body).input;
-      return json({ output_text: "1 こんにちは\n2 久しぶりです\n1 元気でしたか\n2 元気です\n1 また話しましょう" });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env, "/skitvoice/admin");
-
-  const response = await handleRequest(new Request("https://example.com/api/vibevoice/scripts", {
-    method: "POST",
-    headers: { cookie, "content-type": "application/json" },
-    body: JSON.stringify({ seed_script: "1 AIについて話そう\n2 いいですね" }),
-  }), env);
-
-  assert.equal(response.status, 200);
-  assert.match(scriptGenerationInput, /AIについて話そう/);
-  assert.equal((await response.json()).script.split("\n").length, 5);
-  assert.equal(await kv.get("public-quota:skitvoice:viewer@example.com"), null);
-});
-
-test("Cloudflare worker rejects SkitVoice URL references before RunPod", async () => {
-  const kv = fakeKv();
-  await kv.put("public-access-settings", JSON.stringify({
-    google_login_required: true,
-    features: {
-      skitvoice: {
-        daily_limit: 2,
-        total_limit: 2,
-        script_max_chars: 100,
-        audio_max_bytes: 1000,
-      },
-    },
-  }));
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init.body) });
-    if (url === "https://oauth2.googleapis.com/token") {
-      return json({ access_token: "google-access-token" });
-    }
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return json({ email: "viewer@example.com", email_verified: true });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv });
-  const cookie = await adminCookie(env, "/skitvoice/admin");
-  const form = new FormData();
-  form.append("script", "1 こんにちは");
-  form.append("voice_url_1", "https://youtu.be/zDZvAmCJJaY?t=2129");
-  form.append("voice_url_duration_1", "6");
-
-  const response = await handleRequest(
-    new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
-    env,
-  );
-
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), {
-    detail: "URL reference audio is not available on the Cloudflare public demo. Upload or record reference audio instead.",
-  });
-  assert.equal(calls.some((call) => call.url.endsWith("/run")), false);
-});
-
-test("Cloudflare worker does not expose URL reference audio extraction", async () => {
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init.body) });
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
-  const form = new FormData();
-  form.append("url", "https://youtu.be/zDZvAmCJJaY?t=2129");
-  form.append("duration_seconds", "5");
-  const cookie = await adminCookie(env, "/skitvoice/admin");
-  const response = await handleRequest(
-    new Request("https://example.com/api/vibevoice/reference-audio-from-url", {
-      method: "POST",
-      headers: { cookie },
-      body: form,
-    }),
-    env,
-  );
   const payload = await response.json();
-
-  assert.equal(response.status, 501);
-  assert.deepEqual(payload, { detail: "URL reference audio extraction is only available in the local FastAPI app" });
-  assert.equal(calls.some((call) => call.url.endsWith("/runsync")), false);
+  assert.equal(payload.features.speakloop, null);
+  assert.equal("fun" in payload.features, false);
 });
 
 test("Cloudflare worker reports admin auth setup errors on protected routes", async () => {
@@ -1343,73 +1460,6 @@ test("Cloudflare worker reports admin auth setup errors on protected routes", as
   assert.match(await page.text(), /ADMIN_GOOGLE_EMAILS/);
   assert.equal(api.status, 503);
   assert.deepEqual(await api.json(), { detail: "admin authentication is not configured" });
-});
-
-test("Cloudflare worker translates speech with OpenAI and stores a completed job", async () => {
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: parseJsonBody(init.body) });
-    if (url === "https://api.openai.com/v1/audio/transcriptions") {
-      return json({ text: "Halo Jepang" });
-    }
-    if (url === "https://api.openai.com/v1/responses") {
-      if (calls.filter((call) => call.url === url).length === 1) {
-        return json({
-          output_text: JSON.stringify({
-            source_language: "id-ID",
-            target_language: "ja-JP",
-            translated_text: "こんにちは日本",
-          }),
-        });
-      }
-      return json({ output_text: "こんにちは日本" });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  }, { kv: fakeKv() });
-  const form = new FormData();
-  form.append("audio", new Blob(["webm"], { type: "audio/webm;codecs=opus" }), "recording.webm");
-  form.append("source_language", "auto");
-  form.append("target_language", "user-auto");
-  form.append("voice_mode", "default");
-  form.append("text_transform", "user_effects");
-  form.append("text_transform_options", JSON.stringify({ variation: true }));
-  const adminCookieValue = await adminCookie(env);
-
-  const response = await handleRequest(
-    new Request("https://example.com/api/translate-speech-jobs", { method: "POST", headers: { cookie: adminCookieValue }, body: form }),
-    env,
-  );
-  const payload = await response.json();
-  const polled = await (
-    await handleRequest(
-      new Request(`https://example.com/api/translate-speech-jobs/${payload.job_id}`, { headers: { cookie: adminCookieValue } }),
-      env,
-    )
-  ).json();
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-
-  assert.equal(response.status, 200);
-  assert.match(payload.job_id, /^cf-/);
-  assert.equal(payload.status, "succeeded");
-  assert.equal(payload.result.transcript, "Halo Jepang");
-  assert.equal(payload.result.translated_text, "こんにちは日本");
-  assert.equal(payload.result.transformed_text, "こんにちは日本");
-  assert.equal(payload.result.target_language, "ja-JP");
-  assert.equal(payload.result.audio_base64, Buffer.from([7, 8, 9]).toString("base64"));
-  assert.deepEqual(polled, payload);
-  assert.equal(calls[0].url, "https://api.openai.com/v1/audio/transcriptions");
-  assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
-  assert.equal(calls[2].url, "https://api.openai.com/v1/responses");
-  assert.equal(calls[3].url, "https://api.openai.com/v1/audio/speech");
-  assert.equal(history.settings.enabled, false);
-  assert.equal(history.recordings.length, 0);
-  assert.equal(history.outputs.length, 0);
-  assert.equal(calls[0].init.body.get("response_format"), "json");
 });
 
 test("Cloudflare worker creates a pronunciation practice prompt", async () => {
@@ -3079,11 +3129,6 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   form.append("voice_backend", "seed-vc");
   form.append("source_audio", new Blob(["source"], { type: "audio/webm;codecs=opus" }), "source.webm");
   form.append("reference_audio", new Blob(["reference"], { type: "audio/webm;codecs=opus" }), "reference.webm");
-  form.append("audio_effect_audio", new Blob(["moo"], { type: "audio/mpeg" }), "cow.mp3");
-  form.append("audio_effect_enabled", "true");
-  form.append("audio_effect_insert_mode", "silence_or_tail");
-  form.append("audio_effect_max_insertions", "2");
-  form.append("audio_effect_min_silence_ms", "450");
 
   const response = await handleRequest(
     new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie: await adminCookie(env) }, body: form }),
@@ -3096,11 +3141,7 @@ test("Cloudflare worker strips audio MIME parameters for voice conversion files"
   assert.equal(calls[0].body.input.operation_mode, "voice_conversion");
   assert.equal(calls[0].body.input.source_audio_mime_type, "audio/webm");
   assert.equal(calls[0].body.input.reference_audio_mime_type, "audio/webm");
-  assert.equal(calls[0].body.input.audio_effect_audio_mime_type, "audio/mpeg");
-  assert.equal(calls[0].body.input.audio_effect_audio_base64, Buffer.from("moo").toString("base64"));
-  assert.equal(calls[0].body.input.audio_effect_insert_mode, "silence_or_tail");
-  assert.equal(calls[0].body.input.audio_effect_max_insertions, 2);
-  assert.equal(calls[0].body.input.audio_effect_min_silence_ms, 450);
+  assert.equal("audio_effect_audio_base64" in calls[0].body.input, false);
 });
 
 test("Cloudflare worker does not save voice conversion source audio", async () => {
@@ -3159,240 +3200,6 @@ test("Cloudflare worker maps completed RunPod voice conversion status to local j
   assert.deepEqual(history.outputs, []);
 });
 
-test("Cloudflare worker creates user text output with OpenAI text transform and TTS", async () => {
-  const calls = [];
-  const env = adminAuthEnv(async (url, init) => {
-    calls.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
-    if (url === "https://api.openai.com/v1/responses") {
-      return json({ output_text: "めっちゃこんにちは" });
-    }
-    if (url === "https://api.openai.com/v1/audio/speech") {
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }
-    throw new Error(`unexpected url: ${url}`);
-  });
-
-  const cookie = await adminCookie(env);
-  const response = await handleRequest(
-    new Request("https://example.com/api/user-text-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify({
-        transcript: "Halo",
-        translated_text: "こんにちは",
-        target_language: "ja-JP",
-        text_transform_options: { osaka_dialect: true },
-      }),
-    }),
-    env,
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(payload.transformed_text, "めっちゃこんにちは");
-  assert.equal(payload.audio_mime_type, "audio/wav");
-  assert.equal(payload.audio_base64, Buffer.from([1, 2, 3]).toString("base64"));
-  assert.equal(calls[0].body.model, "gpt-5.6-terra");
-  assert.equal(calls[1].body.response_format, "wav");
-});
-
-test("Cloudflare worker persists user settings in KV and generates joke variations", async () => {
-  const calls = [];
-  const env = adminAuthEnv(
-    async (url, init) => {
-      calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: JSON.stringify({ variants: [["A1"], ["B1"]] }) });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv() },
-  );
-
-  const adminCookieValue = await adminCookie(env);
-  const saveResponse = await handleRequest(
-    new Request("https://example.com/api/user-settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", cookie: adminCookieValue },
-      body: JSON.stringify({
-        target_language: "ja-JP",
-        joke_texts: ["A", "B"],
-        joke_position: "after",
-        joke_selection: "rotation",
-        joke_variation_count: 1,
-        effect_audios: [
-          {
-            id: "cow",
-            name: "cow.wav",
-            audio_mime_type: "audio/wav",
-            audio_base64: Buffer.from("moo").toString("base64"),
-          },
-        ],
-        effect_selection: "random",
-        effect_insert_mode: "tail",
-        effect_max_insertions: 2,
-        effect_min_silence_ms: 450,
-        theme: "pop",
-      }),
-    }),
-    env,
-  );
-  const saved = await saveResponse.json();
-  const getResponse = await handleRequest(new Request("https://example.com/api/user-settings"), env);
-  const loaded = await getResponse.json();
-
-  assert.equal(saveResponse.status, 200);
-  assert.deepEqual(saved.joke_variants, ["A1", "B1"]);
-  assert.deepEqual(saved.joke_pool, ["A", "B", "A1", "B1"]);
-  assert.equal(saved.effect_audios[0].id, "cow");
-  assert.equal(saved.effect_selection, "random");
-  assert.equal(saved.effect_insert_mode, "tail");
-  assert.equal(saved.effect_max_insertions, 2);
-  assert.equal(saved.effect_min_silence_ms, 450);
-  assert.equal(saved.theme, "pop");
-  assert.deepEqual(loaded.joke_pool, saved.joke_pool);
-  assert.deepEqual(loaded.effect_audios, saved.effect_audios);
-  assert.equal(calls[0].url, "https://api.openai.com/v1/responses");
-});
-
-test("Cloudflare worker does not save joke TTS output", async () => {
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: "Lucu sekali." });
-      }
-      if (url === "https://api.openai.com/v1/audio/speech") {
-        return new Response(new Uint8Array([4, 5, 6]), { status: 200 });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv() },
-  );
-  const cookie = await adminCookie(env);
-
-  const jokeResponse = await handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify({ text: "これは冗談です。", target_language: "id-ID" }),
-    }),
-    env,
-  );
-  const adminCookieValue = await adminCookie(env);
-  const historyResponse = await handleRequest(
-    new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }),
-    env,
-  );
-  const history = await historyResponse.json();
-  assert.equal(jokeResponse.status, 200);
-  assert.equal(history.settings.enabled, false);
-  assert.equal(history.recordings.length, 0);
-  assert.equal(history.outputs.length, 0);
-});
-
-test("Cloudflare worker does not store generated audio in R2 history", async () => {
-  const r2 = fakeR2();
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: "R2 sample." });
-      }
-      if (url === "https://api.openai.com/v1/audio/speech") {
-        return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv(), r2 },
-  );
-
-  await handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "R2 test", target_language: "en-US" }),
-    }),
-    env,
-  );
-  const adminCookieValue = await adminCookie(env);
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-  assert.equal(history.settings.metadata_store, "none");
-  assert.equal(history.settings.blob_store, "none");
-  assert.deepEqual(history.outputs, []);
-  assert.equal(r2.__store.size, 0);
-});
-
-test("Cloudflare worker leaves both KV and R2 audio history unused", async () => {
-  const kv = fakeKv();
-  const r2 = fakeR2();
-  let speechCount = 0;
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") {
-        return json({ output_text: `sample-${speechCount}` });
-      }
-      if (url === "https://api.openai.com/v1/audio/speech") {
-        speechCount += 1;
-        return new Response(new Uint8Array([speechCount]), { status: 200 });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv },
-  );
-  const create = () => handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "migration test", target_language: "en-US" }),
-    }),
-    env,
-  );
-
-  await create();
-  env.MO_SPEECH_AUDIO_R2 = r2;
-  await create();
-
-  const adminCookieValue = await adminCookie(env);
-  const history = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-  assert.deepEqual(history.outputs, []);
-  assert.equal(r2.__store.size, 0);
-});
-
-test("Cloudflare worker exposes no R2 history when its binding changes", async () => {
-  const r2 = fakeR2();
-  const env = adminAuthEnv(
-    async (url) => {
-      if (url === "https://api.openai.com/v1/responses") return json({ output_text: "temporary" });
-      if (url === "https://api.openai.com/v1/audio/speech") return new Response(new Uint8Array([10]), { status: 200 });
-      throw new Error(`unexpected url: ${url}`);
-    },
-    { kv: fakeKv(), r2 },
-  );
-  await handleRequest(
-    new Request("https://example.com/api/user-joke-output", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "binding test", target_language: "en-US" }),
-    }),
-    env,
-  );
-  const adminCookieValue = await adminCookie(env);
-  const before = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-  env.MO_SPEECH_AUDIO_R2 = null;
-  const after = await (
-    await handleRequest(new Request("https://example.com/api/audio-history", { headers: { cookie: adminCookieValue } }), env)
-  ).json();
-
-  assert.deepEqual(before.outputs, []);
-  assert.deepEqual(after.outputs, []);
-  assert.equal(r2.__store.size, 0);
-});
-
 test("Cloudflare worker reports audio history as disabled", async () => {
   const env = adminAuthEnv(async () => json({ ok: true }), { kv: fakeKv() });
   const adminCookieValue = await adminCookie(env);
@@ -3420,37 +3227,22 @@ test("Cloudflare worker reports audio history as disabled", async () => {
 test("Cloudflare worker reports RunPod runtime availability and warm health", async () => {
   const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
 
-  const response = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const response = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const payload = await response.json();
-  const openai = payload.translation_backends.find((backend) => backend.id === "openai");
-  const runpod = payload.translation_backends.find((backend) => backend.id === "runpod_serverless");
   const seedVc = payload.voice_conversion_backends[0];
 
-  assert.equal(openai.available, true);
-  assert.equal(openai.providers.asr, "openai-asr-gpt-4o-transcribe");
-  assert.equal(openai.settings.request_mode, "completed_job");
-  assert.equal(runpod.available, false);
-  assert.equal(runpod.settings.health.warm, true);
+  assert.equal("translation_backends" in payload, false);
+  assert.equal(payload.providers.asr, "openai-asr-gpt-4o-transcribe");
+  assert.equal(payload.providers.translation, "openai-translation-gpt-5.6-terra");
+  assert.deepEqual(payload.supported_voice_modes, ["default"]);
   assert.equal(seedVc.available, true);
   assert.equal(seedVc.settings.seed_vc.model_resident, false);
   assert.equal(seedVc.settings.warmup.ready, false);
-  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, false);
   assert.equal(seedVc.settings.health.warm, true);
   assert.deepEqual(payload.ui_capabilities, {
     practice_developer_settings: false,
     practice_history_preview: false,
   });
-});
-
-test("Cloudflare worker only enables user-page warmup when explicitly opted in", async () => {
-  const env = fakeEnv(async () => json({ workers: [{ state: "IDLE" }] }));
-  env.RUNPOD_AUTO_WARMUP_ON_USER_LOAD = "1";
-
-  const response = await handleRequest(new Request("https://example.com/api/runtime"), env);
-  const payload = await response.json();
-  const seedVc = payload.voice_conversion_backends[0];
-
-  assert.equal(seedVc.settings.warmup.auto_on_user_page_load, true);
 });
 
 test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", async () => {
@@ -3489,7 +3281,7 @@ test("Cloudflare worker marks Seed-VC ready only after warmup job succeeds", asy
   const warmupJob = await warmupResponse.json();
   const statusResponse = await handleRequest(new Request("https://example.com/api/warmup/warm-job", { headers: { cookie: adminCookieValue } }), env);
   const statusJob = await statusResponse.json();
-  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtimeResponse = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const runtime = await runtimeResponse.json();
   const seedVc = runtime.voice_conversion_backends[0];
 
@@ -3529,7 +3321,7 @@ test("Cloudflare worker stores Seed-VC ready state when warmup run completes imm
     env,
   );
   const warmupJob = await warmupResponse.json();
-  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtimeResponse = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const runtime = await runtimeResponse.json();
   const seedVc = runtime.voice_conversion_backends[0];
 
@@ -3570,7 +3362,7 @@ test("Cloudflare worker stores Seed-VC ready state when voice conversion run com
     env,
   );
   const vcJob = await vcResponse.json();
-  const runtimeResponse = await handleRequest(new Request("https://example.com/api/runtime"), env);
+  const runtimeResponse = await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), env, {});
   const runtime = await runtimeResponse.json();
   const seedVc = runtime.voice_conversion_backends[0];
 
@@ -3588,13 +3380,14 @@ test("Cloudflare worker does not echo RunPod raw payloads from failure responses
     }
     throw new Error(`unexpected url: ${url}`);
   });
-  const cookie = await adminCookie(env, "/skitvoice/admin");
+  const cookie = await adminCookie(env, "/speakloop/admin");
   const form = new FormData();
-  form.append("script", `Speaker 1: ${marker}`);
-  form.append("voice_file_1", new Blob([marker], { type: "audio/wav" }), "voice.wav");
+  form.append("voice_backend", "seed-vc");
+  form.append("source_audio", new Blob([marker], { type: "audio/wav" }), "source.wav");
+  form.append("reference_audio", new Blob([marker], { type: "audio/wav" }), "reference.wav");
 
   const response = await handleRequest(
-    new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie }, body: form }),
     env,
   );
   const body = await response.text();
@@ -3614,18 +3407,19 @@ test("Cloudflare worker submits RunPod jobs without an application policy overri
     throw new Error(`unexpected external request: ${url}`);
   });
   delete env.RUNPOD_OPERATION_POLICIES_JSON;
-  const cookie = await adminCookie(env, "/skitvoice/admin");
+  const cookie = await adminCookie(env, "/speakloop/admin");
   const form = new FormData();
-  form.append("script", "Speaker 1: simple request");
-  form.append("voice_file_1", new Blob(["voice"], { type: "audio/wav" }), "voice.wav");
+  form.append("voice_backend", "seed-vc");
+  form.append("source_audio", new Blob(["voice"], { type: "audio/wav" }), "source.wav");
+  form.append("reference_audio", new Blob(["voice"], { type: "audio/wav" }), "reference.wav");
 
   const response = await handleRequest(
-    new Request("https://example.com/api/vibevoice/jobs", { method: "POST", headers: { cookie }, body: form }),
+    new Request("https://example.com/api/voice-conversion-jobs", { method: "POST", headers: { cookie }, body: form }),
     env,
   );
 
   assert.equal(response.status, 200);
-  assert.equal(submittedPayload.input.operation_mode, "vibevoice");
+  assert.equal(submittedPayload.input.operation_mode, "voice_conversion");
   assert.equal("policy" in submittedPayload, false);
 });
 
@@ -3654,8 +3448,8 @@ test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async ()
   const adminCookieValue = await adminCookie(firstEnv);
 
   await handleRequest(new Request("https://example.com/api/warmup/warm-job", { headers: { cookie: adminCookieValue } }), firstEnv);
-  const firstRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), firstEnv)).json();
-  const secondRuntime = await (await handleRequest(new Request("https://example.com/api/runtime"), secondEnv)).json();
+  const firstRuntime = await (await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), firstEnv, {})).json();
+  const secondRuntime = await (await workerEntrypoint.fetch(new Request("https://example.com/api/runtime"), secondEnv, {})).json();
 
   assert.equal(firstRuntime.voice_conversion_backends[0].settings.warmup.ready, true);
   assert.equal(secondRuntime.voice_conversion_backends[0].settings.warmup.ready, false);
@@ -3667,10 +3461,8 @@ function fakeEnv(fetchImpl, options = {}) {
     RUNPOD_ENDPOINT_ID: "endpoint",
     RUNPOD_API_KEY: "runpod-secret",
     RUNPOD_API_BASE_URL: "https://api.runpod.ai/v2",
-    RUNPOD_SERVERLESS_TRANSLATION_BACKEND: "openai",
     OPENAI_API_KEY: "openai-secret",
     OPENAI_TRANSLATION_MODEL: "gpt-5.6-terra",
-    OPENAI_TEXT_TRANSFORM_MODEL: "gpt-5.6-terra",
     OPENAI_TEXT_DISPLAY_MODEL: "gpt-5.6-terra",
     OPENAI_TTS_MODEL: "gpt-4o-mini-tts",
     OPENAI_TTS_VOICE: "coral",
@@ -3788,6 +3580,136 @@ function fakeR2() {
       store.delete(key);
     },
   };
+}
+
+async function zoovoiceEnv(fetchImpl, { db = fakeZoovoiceBudgetD1() } = {}) {
+  return {
+    __fetch: fetchImpl,
+    MO_SPEECH_DB: db,
+    ZOOVOICE_ENABLED: "1",
+    ZOOVOICE_LOCAL_DEV: "1",
+    ZOOVOICE_ORIGIN_MODE: "cloud-run-smoke",
+    ZOOVOICE_CLOUD_RUN_URL: "https://zoovoice.example.run.app",
+    ZOOVOICE_GCP_ID_TOKEN: "unit-test-id-token",
+    ZOOVOICE_TURNSTILE_SITE_KEY: "unit-test-site-key",
+    ZOOVOICE_TURNSTILE_SECRET_KEY: "unit-test-secret-key",
+    ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME: "example.com",
+    ZOOVOICE_DAILY_LIMIT: "100",
+    ZOOVOICE_MONTHLY_LIMIT: "1200",
+  };
+}
+
+async function productionZoovoiceEnv(fetchImpl, { nowSeconds, serviceAccount } = {}) {
+  const env = await zoovoiceEnv(fetchImpl);
+  env.ZOOVOICE_LOCAL_DEV = "0";
+  env.ZOOVOICE_ORIGIN_MODE = "cloud-run";
+  env.ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice.example.run.app/";
+  delete env.ZOOVOICE_GCP_ID_TOKEN;
+  env.ZOOVOICE_GCP_SA_KEY = JSON.stringify(serviceAccount || await testServiceAccountKey());
+  env.__ZOOVOICE_NOW = () => Number(nowSeconds) * 1_000;
+  return env;
+}
+
+async function testServiceAccountKey() {
+  const keyPair = await crypto.subtle.generateKey({
+    name: "RSASSA-PKCS1-v1_5",
+    modulusLength: 2_048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: "SHA-256",
+  }, true, ["sign", "verify"]);
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey));
+  const base64 = Buffer.from(pkcs8).toString("base64").match(/.{1,64}/g).join("\n");
+  return {
+    client_email: "zoovoice-invoker@example.invalid",
+    private_key: `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`,
+    __publicKey: keyPair.publicKey,
+  };
+}
+
+function testIdToken(payload) {
+  return `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.test-signature`;
+}
+
+function decodeJwtPart(value) {
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+}
+
+function decodeBase64UrlBytes(value) {
+  return new Uint8Array(Buffer.from(value, "base64url"));
+}
+
+function useOfficialLocalTurnstileCredentials(env) {
+  env.ZOOVOICE_TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
+  env.ZOOVOICE_TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA";
+}
+
+function zoovoiceComposeRequest({
+  audio = new Uint8Array([1, 2, 3]),
+  url = "http://127.0.0.1:8787/api/zoovoice/compose",
+  settings = { intensity: 40 },
+} = {}) {
+  const form = new FormData();
+  form.append("audio", new Blob([audio], { type: "audio/webm" }), "recording.webm");
+  form.append("settings", JSON.stringify(settings));
+  form.append("turnstile_token", "turnstile-response-token");
+  return new Request(url, { method: "POST", body: form });
+}
+
+function validZoovoiceOriginResponse() {
+  return {
+    audio: { format: "wav", base64: "UklGRg==" },
+    meta: {
+      transcript: "猫が窓辺で眠っています",
+      selected_animal: { id: "cat", label_ja: "猫" },
+      evidence_term: "猫",
+      selection_strategy: "direct",
+      fallback_reason: null,
+      insertions: [{ slot: "opening", species: "cat", at_seconds: 0 }],
+      input_duration_seconds: 1,
+      output_duration_seconds: 1.4,
+    },
+  };
+}
+
+function fakeZoovoiceBudgetD1({ row = null, error = null } = {}) {
+  const db = {
+    __row: row ? { ...row } : null,
+    prepare(sql) {
+      return {
+        bind(...args) {
+          return {
+            async first() {
+              if (error) throw error;
+              if (!String(sql).includes("zoovoice_usage_counters")) {
+                throw new Error(`unexpected Zoovoice D1 query: ${sql}`);
+              }
+              const [feature, usageDate, usageMonth, updatedAt, dailyLimit, monthlyLimit] = args;
+              const previous = db.__row;
+              const nextDaily = previous?.usage_date === usageDate
+                ? Number(previous.daily_count) + 1
+                : 1;
+              const nextMonthly = previous?.usage_month === usageMonth
+                ? Number(previous.monthly_count) + 1
+                : 1;
+              if (nextDaily > Number(dailyLimit) || nextMonthly > Number(monthlyLimit)) {
+                return null;
+              }
+              db.__row = {
+                feature,
+                usage_date: usageDate,
+                daily_count: nextDaily,
+                usage_month: usageMonth,
+                monthly_count: nextMonthly,
+                updated_at: updatedAt,
+              };
+              return { daily_count: nextDaily, monthly_count: nextMonthly };
+            },
+          };
+        },
+      };
+    },
+  };
+  return db;
 }
 
 function fakeD1() {
@@ -3915,3 +3837,75 @@ function fakeD1Statement(db, sql, args) {
     },
   };
 }
+
+test("Cloudflare worker serves robots.txt and sitemap.xml for the public origin", async () => {
+  const env = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  env.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+  // 生成API向けのログイン必須設定はページ閲覧を制限しないため、クロール許可を変えない。
+  env.PUBLIC_GOOGLE_AUTH_REQUIRED = "1";
+  env.ASSETS = {
+    fetch: async () => {
+      throw new Error("robots.txt and sitemap.xml must not fall through to assets");
+    },
+  };
+
+  const robots = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/robots.txt"), env);
+  assert.equal(robots.status, 200);
+  assert.match(robots.headers.get("Content-Type"), /text\/plain/);
+  const robotsBody = await robots.text();
+  assert.match(robotsBody, /^User-agent: \*$/m);
+  for (const path of ["/admin", "/speakloop/admin", "/api/", "/auth/"]) {
+    assert.ok(robotsBody.includes(`Disallow: ${path}`), `robots.txt disallows ${path}`);
+  }
+  assert.equal(robotsBody.includes("Disallow: /fun"), false);
+  assert.ok(robotsBody.includes("Sitemap: https://voice-lab.inakaegg.workers.dev/sitemap.xml"));
+
+  const sitemap = await handleRequest(new Request("https://voice-lab.inakaegg.workers.dev/sitemap.xml"), env);
+  assert.equal(sitemap.status, 200);
+  assert.match(sitemap.headers.get("Content-Type"), /application\/xml/);
+  const sitemapBody = await sitemap.text();
+  for (const loc of [
+    "https://voice-lab.inakaegg.workers.dev/",
+    "https://voice-lab.inakaegg.workers.dev/speakloop",
+    "https://voice-lab.inakaegg.workers.dev/privacy",
+  ]) {
+    assert.ok(sitemapBody.includes(`<loc>${loc}</loc>`), `sitemap lists ${loc}`);
+  }
+  assert.doesNotMatch(sitemapBody, /skitvoice/);
+});
+
+test("Cloudflare worker blocks crawlers on non-canonical deployments", async () => {
+  const assets = {
+    fetch: async () => {
+      throw new Error("robots.txt and sitemap.xml must not fall through to assets");
+    },
+  };
+
+  const stagingEnv = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  stagingEnv.PUBLIC_GOOGLE_AUTH_REQUIRED = "1";
+  stagingEnv.ASSETS = assets;
+
+  const robots = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/robots.txt"), stagingEnv);
+  assert.equal(robots.status, 200);
+  const robotsBody = await robots.text();
+  assert.match(robotsBody, /^Disallow: \/$/m);
+  assert.doesNotMatch(robotsBody, /Sitemap:/);
+
+  const sitemap = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/sitemap.xml"), stagingEnv);
+  assert.equal(sitemap.status, 404);
+
+  const mismatchedEnv = fakeEnv(async () => {
+    throw new Error("unexpected fetch");
+  });
+  mismatchedEnv.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev";
+  mismatchedEnv.ASSETS = assets;
+
+  const mismatchedRobots = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/robots.txt"), mismatchedEnv);
+  assert.match(await mismatchedRobots.text(), /^Disallow: \/$/m);
+  const mismatchedSitemap = await handleRequest(new Request("https://voice-lab-staging.inakaegg.workers.dev/sitemap.xml"), mismatchedEnv);
+  assert.equal(mismatchedSitemap.status, 404);
+});

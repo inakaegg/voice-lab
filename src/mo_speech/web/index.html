@@ -13,104 +13,113 @@
         <div class="admin-title-group">
           <p class="eyebrow">VOICE LAB · ADMIN</p>
           <h1>Voice Lab 管理</h1>
-          <p class="admin-lead">音声翻訳・読み上げ・VCの検証と、公開デモの設定をまとめて管理します。</p>
+          <p class="admin-lead">読み上げとVCの検証、公開デモの運用設定をまとめて管理します。</p>
           <nav class="admin-nav" aria-label="管理画面">
             <a href="/admin" aria-current="page">総合管理</a>
             <a href="/speakloop/admin">SpeakLoop</a>
-            <a href="/skitvoice/admin">SkitVoice</a>
-            <a href="/fun">実験画面</a>
             <a href="/">公開画面</a>
           </nav>
         </div>
         <div class="status" id="status" role="status" aria-live="polite">待機中</div>
       </header>
 
-      <section class="workspace" aria-label="音声翻訳フォーム">
-        <form id="translation-form" class="control-panel">
+      <section class="workspace" aria-label="音声処理ワークベンチ">
+        <form id="audio-workbench-form" class="control-panel">
           <details class="admin-config-group">
             <summary>
               <span>公開・運用設定</span>
-              <small>RunPod準備、公開制限、サンプル音声</small>
+              <small>RunPod準備、公開制限、サンプル音声、利用者</small>
             </summary>
             <div class="admin-config-grid">
-          <fieldset id="runpod-warmup-panel" class="suffix-panel">
-            <legend>RunPod手動準備</legend>
-            <p class="route-hint">
-              デモ前にSeed-VC workerを起動し、モデルロードを前倒しします。押すとRunPod jobが作成され、起動中とidle timeout中は課金対象になり得ます。
-            </p>
-            <div class="warmup-admin-row">
-              <button type="button" id="runpod-warmup-button" class="secondary-button">RunPodを準備</button>
-              <p id="runpod-warmup-status" class="route-hint warmup-admin-status" data-state="unknown">未確認</p>
-            </div>
-          </fieldset>
+              <fieldset id="runpod-warmup-panel" class="suffix-panel">
+                <legend>RunPod手動準備</legend>
+                <p class="route-hint">
+                  デモ前にSeed-VC workerを起動し、モデルロードを前倒しします。起動中とidle timeout中は課金対象になり得ます。
+                </p>
+                <div class="warmup-admin-row">
+                  <button type="button" id="runpod-warmup-button" class="secondary-button">RunPodを準備</button>
+                  <p id="runpod-warmup-status" class="route-hint warmup-admin-status" data-state="unknown">未確認</p>
+                </div>
+              </fieldset>
 
-          <fieldset id="public-access-panel" class="suffix-panel public-access-admin" data-public-access-settings data-public-access-features="fun,voice_conversion">
-            <legend>公開制限</legend>
-            <div class="public-access-header">
-              <p class="route-hint">Googleログインと、従来の変換デモ/Seed-VCの使用回数・入力上限を設定します。</p>
-              <button type="button" class="secondary-button" data-public-access-save>保存</button>
-            </div>
-            <label class="public-access-toggle">
-              <input type="checkbox" data-public-setting="google_login_required" />
-              <span>公開生成APIはGoogleログインを必須にする</span>
-            </label>
-            <label class="public-access-field public-access-wide">
-              <span>管理画面を許可するGoogleメール</span>
-              <textarea data-public-setting="admin_google_emails" rows="2" placeholder="owner@example.com, admin@example.com"></textarea>
-            </label>
-            <div class="public-access-feature" data-public-feature="fun">
-              <h3>へんな変換/翻訳/TTS</h3>
-              <label>日次回数 <input type="number" min="-1" step="1" data-public-feature-setting="daily_limit" /></label>
-              <label>累計回数 <input type="number" min="-1" step="1" data-public-feature-setting="total_limit" /></label>
-              <label>録音最大byte <input type="number" min="0" step="1000" data-public-feature-setting="audio_max_bytes" /></label>
-              <label>テキスト最大文字数 <input type="number" min="0" step="10" data-public-feature-setting="text_max_chars" /></label>
-            </div>
-            <div class="public-access-feature" data-public-feature="voice_conversion">
-              <h3>Seed-VC</h3>
-              <label>日次回数 <input type="number" min="-1" step="1" data-public-feature-setting="daily_limit" /></label>
-              <label>累計回数 <input type="number" min="-1" step="1" data-public-feature-setting="total_limit" /></label>
-              <label>音声最大byte <input type="number" min="0" step="1000" data-public-feature-setting="audio_max_bytes" /></label>
-            </div>
-            <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
-            <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
-          </fieldset>
+              <fieldset
+                id="public-access-panel"
+                class="suffix-panel public-access-admin"
+                data-public-access-settings
+                data-public-access-features="voice_conversion"
+              >
+                <legend>公開制限</legend>
+                <div class="public-access-header">
+                  <p class="route-hint">SpeakLoopの自分の声機能に対する認証と使用上限を設定します。</p>
+                  <button type="button" class="secondary-button" data-public-access-save>保存</button>
+                </div>
+                <label class="public-access-toggle">
+                  <input type="checkbox" data-public-setting="google_login_required" />
+                  <span>公開生成APIはGoogleログインを必須にする</span>
+                </label>
+                <label class="public-access-field public-access-wide">
+                  <span>管理画面を許可するGoogleメール</span>
+                  <textarea data-public-setting="admin_google_emails" rows="2" placeholder="owner@example.com, admin@example.com"></textarea>
+                </label>
+                <div class="public-access-feature" data-public-feature="voice_conversion">
+                  <h3>自分の声（Seed-VC）</h3>
+                  <label>日次回数 <input type="number" min="-1" step="1" data-public-feature-setting="daily_limit" /></label>
+                  <label>累計回数 <input type="number" min="-1" step="1" data-public-feature-setting="total_limit" /></label>
+                  <label>音声最大byte <input type="number" min="0" step="1000" data-public-feature-setting="audio_max_bytes" /></label>
+                </div>
+                <p class="public-access-note">`-1` は回数制限なし、`0` は管理者以外をブロックします。入力上限超過は回数を消費しません。</p>
+                <p class="public-access-status" data-public-access-status role="status" aria-live="polite"></p>
+              </fieldset>
 
-          <fieldset id="public-samples-panel" class="suffix-panel public-samples-admin" data-public-samples-admin data-public-samples-features="fun,voice_conversion">
-            <legend>公開サンプル音声</legend>
-            <div class="public-access-header">
-              <p class="route-hint">各ユーザー画面に表示する出力例を登録します。</p>
-              <div class="public-samples-header-actions"><p class="public-access-status public-samples-header-status" data-public-samples-status role="status" aria-live="polite"></p><button type="button" class="secondary-button" data-public-samples-save>保存</button></div>
-            </div>
-            <div class="public-sample-admin-feature" data-public-sample-admin-feature="fun">
-              <h3>へんな変換/翻訳/TTS</h3>
-              <label>タイトル <input type="text" data-public-sample-title maxlength="80" /></label>
-              <label class="public-access-wide">説明 <textarea data-public-sample-description rows="2" maxlength="300"></textarea></label>
-              <label>音声ファイル <input type="file" accept="audio/*" data-public-sample-file /></label>
-              <button type="button" class="secondary-button public-sample-delete-button" data-public-sample-delete>保存済みを削除</button>
-              <audio data-public-sample-preview controls preload="metadata" hidden></audio>
-              <p class="public-access-note public-sample-details" data-public-sample-details>未設定</p>
-            </div>
-            <div class="public-sample-admin-feature" data-public-sample-admin-feature="voice_conversion">
-              <h3>Seed-VC</h3>
-              <label>タイトル <input type="text" data-public-sample-title maxlength="80" /></label>
-              <label class="public-access-wide">説明 <textarea data-public-sample-description rows="2" maxlength="300"></textarea></label>
-              <label>音声ファイル <input type="file" accept="audio/*" data-public-sample-file /></label>
-              <button type="button" class="secondary-button public-sample-delete-button" data-public-sample-delete>保存済みを削除</button>
-              <audio data-public-sample-preview controls preload="metadata" hidden></audio>
-              <p class="public-access-note public-sample-details" data-public-sample-details>未設定</p>
-            </div>
-            <p class="public-access-note">公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。</p>
-          </fieldset>
+              <fieldset
+                id="public-samples-panel"
+                class="suffix-panel public-samples-admin"
+                data-public-samples-admin
+                data-public-samples-features="voice_conversion"
+              >
+                <legend>公開サンプル音声</legend>
+                <div class="public-access-header">
+                  <p class="route-hint">自分の声機能に表示する出力例を登録します。</p>
+                  <div class="public-samples-header-actions">
+                    <p
+                      class="public-access-status public-samples-header-status"
+                      data-public-samples-status
+                      role="status"
+                      aria-live="polite"
+                    ></p>
+                    <button type="button" class="secondary-button" data-public-samples-save>保存</button>
+                  </div>
+                </div>
+                <div class="public-sample-admin-feature" data-public-sample-admin-feature="voice_conversion">
+                  <h3>自分の声（Seed-VC）</h3>
+                  <label>タイトル <input type="text" data-public-sample-title maxlength="80" /></label>
+                  <label class="public-access-wide">
+                    説明
+                    <textarea data-public-sample-description rows="2" maxlength="300"></textarea>
+                  </label>
+                  <label>音声ファイル <input type="file" accept="audio/*" data-public-sample-file /></label>
+                  <button type="button" class="secondary-button public-sample-delete-button" data-public-sample-delete>
+                    保存済みを削除
+                  </button>
+                  <audio data-public-sample-preview controls preload="metadata" hidden></audio>
+                  <p class="public-access-note public-sample-details" data-public-sample-details>未設定</p>
+                </div>
+                <p class="public-access-note">
+                  公開ページにそのまま表示されます。権利確認済みの短い音声だけを登録してください。
+                </p>
+              </fieldset>
 
-          <fieldset id="public-users-panel" class="suffix-panel public-access-admin" data-public-users>
-            <legend>ログイン利用者</legend>
-            <div class="public-access-header">
-              <p class="route-hint">Googleログインしたアカウントと日時を確認します。この機能より前のログインは表示できません。</p>
-              <button type="button" class="secondary-button" data-public-users-reload>再読み込み</button>
-            </div>
-            <ul class="public-users-list" data-public-users-body></ul>
-            <p class="public-access-status" data-public-users-status role="status" aria-live="polite">公開・運用設定を開くと読み込みます。</p>
-          </fieldset>
+              <fieldset id="public-users-panel" class="suffix-panel public-access-admin" data-public-users>
+                <legend>ログイン利用者</legend>
+                <div class="public-access-header">
+                  <p class="route-hint">Googleログインしたアカウントと日時を確認します。</p>
+                  <button type="button" class="secondary-button" data-public-users-reload>再読み込み</button>
+                </div>
+                <ul class="public-users-list" data-public-users-body></ul>
+                <p class="public-access-status" data-public-users-status role="status" aria-live="polite">
+                  公開・運用設定を開くと読み込みます。
+                </p>
+              </fieldset>
             </div>
           </details>
 
@@ -122,76 +131,32 @@
           <div class="field-row">
             <label for="operation_mode">実行内容</label>
             <select id="operation_mode" name="operation_mode">
-              <option value="translation">音声翻訳</option>
               <option value="text_tts">テキスト読み上げ</option>
               <option value="voice_conversion">VC比較</option>
             </select>
           </div>
 
-          <div class="field-row translation-only" id="translation-backend-row">
-            <label for="translation_backend">翻訳方式</label>
-            <select id="translation_backend" name="translation_backend">
-              <option value="openai">音声翻訳（OpenAI API）</option>
-              <option value="openai_realtime">音声翻訳（OpenAI Realtime）</option>
-              <option value="openai_realtime_stream">音声翻訳（OpenAI Realtime streaming）</option>
-              <option value="qwen">音声翻訳（Qwen/local）</option>
-              <option value="runpod_serverless">音声翻訳（RunPod Serverless）</option>
-            </select>
-          </div>
-
-          <div class="field-row translation-only translation-batch-only" id="source-language-row">
-            <label for="source_language">入力言語</label>
-            <select id="source_language" name="source_language">
-              <option value="auto">自動判定</option>
-              <option value="id-ID">インドネシア語</option>
-              <option value="ja-JP">日本語</option>
-              <option value="zh-CN">中国語（普通話）</option>
-              <option value="en-US">英語</option>
-            </select>
-          </div>
-
-          <div class="field-row translation-only">
-            <label for="target_language">出力言語</label>
-            <select id="target_language" name="target_language">
-              <option value="id-ID">インドネシア語</option>
-              <option value="ja-JP">日本語</option>
-              <option value="zh-CN">中国語（普通話）</option>
-              <option value="en-US">英語</option>
-            </select>
-          </div>
-          <p id="route-hint" class="route-hint translation-only"></p>
-
-          <div class="field-row translation-only translation-batch-only">
-            <label for="voice_processing">声質変換</label>
-            <select id="voice_processing" name="voice_processing">
-              <option value="seed-vc">Seed-VCで入力音声に寄せる</option>
-              <option value="none">なし</option>
-            </select>
-          </div>
-          <p id="voice-mode-hint" class="route-hint translation-only translation-batch-only"></p>
-
-          <div class="field-row text-tts-only" hidden>
+          <div class="field-row text-tts-only">
             <label for="tts_text">読み上げテキスト</label>
             <textarea id="tts_text" name="tts_text" rows="5" placeholder="読み上げたいテキストを入力"></textarea>
           </div>
 
-          <div class="field-row text-tts-only" hidden>
+          <div class="field-row text-tts-only">
             <label for="tts_text_file">テキストファイル</label>
             <input id="tts_text_file" name="tts_text_file" type="file" accept=".txt,.md,.csv,.json,.srt,.vtt,text/*" />
           </div>
-          <p id="tts-text-file-hint" class="route-hint text-tts-only" hidden>
+          <p id="tts-text-file-hint" class="route-hint text-tts-only">
             ファイル内容を読み上げテキスト欄へ読み込みます。
           </p>
 
-          <div class="field-row text-tts-only" hidden>
+          <div class="field-row text-tts-only">
             <label for="tts_backend">TTS方式</label>
             <select id="tts_backend" name="tts_backend">
-              <option value="google_translate">Google Translate TTS endpoint</option>
               <option value="openai">OpenAI TTS API</option>
             </select>
           </div>
 
-          <div class="field-row text-tts-only" hidden>
+          <div class="field-row text-tts-only">
             <label for="tts_target_language">読み上げ言語</label>
             <select id="tts_target_language" name="tts_target_language">
               <option value="auto">自動判定</option>
@@ -201,7 +166,7 @@
               <option value="en-US">英語</option>
             </select>
           </div>
-          <p id="tts-backend-hint" class="route-hint text-tts-only" hidden></p>
+          <p id="tts-backend-hint" class="route-hint text-tts-only"></p>
 
           <div class="field-row vc-only" hidden>
             <label for="voice_backend">VC backend</label>
@@ -211,13 +176,13 @@
           </div>
           <p id="voice-backend-hint" class="route-hint vc-only" hidden></p>
 
-          <div class="field-row audio-input-only recorded-audio-only">
-            <label id="audio-label" for="audio">入力音声ファイル</label>
+          <div class="field-row vc-only" hidden>
+            <label id="audio-label" for="audio">変換元音声ファイル</label>
             <input id="audio" name="audio" type="file" accept="audio/*" />
           </div>
-          <p id="audio-selection-status" class="selection-status audio-input-only recorded-audio-only">入力音声なし</p>
-          <p id="source-audio-hint" class="route-hint audio-input-only recorded-audio-only">
-            録音またはファイル選択で入力音声を指定します。
+          <p id="audio-selection-status" class="selection-status vc-only" hidden>変換元音声なし</p>
+          <p id="source-audio-hint" class="route-hint vc-only" hidden>
+            録音またはファイル選択で変換元音声を指定します。
           </p>
 
           <div class="field-row vc-only" hidden>
@@ -226,7 +191,7 @@
           </div>
           <p id="reference-audio-selection-status" class="selection-status vc-only" hidden>VC参照音声なし</p>
 
-          <div class="field-row audio-input-only">
+          <div class="field-row vc-only" hidden>
             <label for="audio_device">マイク</label>
             <select id="audio_device" name="audio_device">
               <option value="">既定のマイク</option>
@@ -234,216 +199,91 @@
             <button type="button" id="audio-device-refresh" class="secondary-button">マイク一覧を更新</button>
           </div>
 
-          <div class="recording-controls audio-input-only recorded-audio-only">
+          <div class="recording-controls vc-only" hidden>
             <button type="button" id="record-button">録音</button>
             <button type="button" id="stop-button" disabled>停止</button>
             <span id="recording-label">録音なし</span>
           </div>
-          <div class="input-level-row audio-input-only">
+          <div class="input-level-row vc-only" hidden>
             <label for="input-level">入力レベル</label>
             <meter id="input-level" min="0" max="1" low="0.05" high="0.5" optimum="0.75" value="0"></meter>
           </div>
-          <p id="recording-details" class="recording-details audio-input-only recorded-audio-only">入力音声なし</p>
-          <audio id="input-audio" class="input-audio audio-input-only recorded-audio-only" controls hidden></audio>
+          <p id="recording-details" class="recording-details vc-only" hidden>変換元音声なし</p>
+          <audio id="input-audio" class="input-audio vc-only" controls hidden></audio>
 
-          <details class="admin-advanced-group">
+          <details class="admin-advanced-group vc-only" hidden>
             <summary>
-              <span>詳細設定</span>
-              <small>末尾付加、ユーザー画面、Seed-VC</small>
+              <span>Seed-VC詳細設定</span>
+              <small>品質、参照音声、長さ</small>
             </summary>
             <div class="admin-advanced-content">
-          <fieldset id="realtime-streaming-panel" class="suffix-panel realtime-streaming-only" hidden>
-            <legend>Realtime streaming</legend>
-            <p class="streaming-note">
-              接続開始後に話すと、翻訳音声を逐次再生します。終了時は同じボタンで接続停止します。
-            </p>
-          </fieldset>
-
-          <fieldset class="suffix-panel translation-only translation-batch-only">
-            <legend>末尾付加</legend>
-            <label class="checkbox-row">
-              <input id="enable_suffix" type="checkbox" />
-              有効にする
-            </label>
-            <div class="field-row">
-              <label for="suffix">付加文字列</label>
-              <input id="suffix" name="suffix" type="text" value="モー" />
-            </div>
-            <div class="field-row">
-              <label for="suffix_unit">単位</label>
-              <select id="suffix_unit" name="suffix_unit">
-                <option value="text">全体末尾</option>
-                <option value="sentence">文ごと</option>
-              </select>
-            </div>
-          </fieldset>
-
-          <fieldset id="user-settings-panel" class="suffix-panel">
-            <legend>ユーザー画面設定</legend>
-            <div class="field-row">
-              <p class="route-hint">ユーザー画面の録音は入力言語を自動判定し、入力が日本語ならインドネシア語、それ以外なら日本語へ自動切替します。</p>
-            </div>
-            <div class="field-row">
-              <label for="user_joke_text">ジョークモードの候補テキスト</label>
-              <textarea
-                id="user_joke_text"
-                name="user_joke_text"
-                rows="5"
-                placeholder="1行に1件ずつ、ジョークON時に音声だけで追加する文"
-              ></textarea>
-              <p class="route-hint">ジョークは出力テキストには表示せず、本文音声の前後に音声だけ追加します。</p>
-            </div>
-            <div class="field-row">
-              <label for="user_joke_position">追加位置</label>
-              <select id="user_joke_position" name="user_joke_position">
-                <option value="after">出力音声の後</option>
-                <option value="before">出力音声の前</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="user_joke_selection">ジョーク選択</label>
-              <select id="user_joke_selection" name="user_joke_selection">
-                <option value="rotation">ローテーション</option>
-                <option value="random">ランダム</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="user_joke_variation_count">LLMバリエーション数</label>
-              <input id="user_joke_variation_count" name="user_joke_variation_count" type="number" min="0" max="5" value="0" />
-              <p class="route-hint">保存時に元ジョークごとに生成します。ユーザーの変換中には生成しません。</p>
-            </div>
-            <div class="field-row">
-              <p class="joke-preview-title">生成済みバリエーション</p>
-              <ol id="user_joke_variants_preview" class="joke-preview-list"></ol>
-              <p id="user_joke_variants_empty" class="route-hint">まだ生成されていません。</p>
-            </div>
-            <div class="field-row">
-              <p class="joke-preview-title">実際に使うジョーク候補</p>
-              <ol id="user_joke_pool_preview" class="joke-preview-list"></ol>
-              <p id="user_joke_pool_empty" class="route-hint">候補がありません。</p>
-            </div>
-            <div class="field-row">
-              <label for="user_effect_audio_files">効果音ファイル</label>
-              <input id="user_effect_audio_files" name="user_effect_audio_files" type="file" accept="audio/*" multiple />
-              <p class="route-hint">インドネシア語以外の出力時、ジョークONならVC後の音声へこの効果音を挿入します。</p>
-              <ol id="user_effect_audio_preview" class="joke-preview-list"></ol>
-              <p id="user_effect_audio_empty" class="route-hint">効果音ファイルがありません。</p>
-            </div>
-            <div class="field-row">
-              <label for="user_effect_selection">効果音選択</label>
-              <select id="user_effect_selection" name="user_effect_selection">
-                <option value="rotation">ローテーション</option>
-                <option value="random">ランダム</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="user_effect_insert_mode">効果音挿入</label>
-              <select id="user_effect_insert_mode" name="user_effect_insert_mode">
-                <option value="silence_or_tail">無音部分、なければ末尾</option>
-                <option value="tail">末尾のみ</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="user_effect_max_insertions">最大挿入回数</label>
-              <input id="user_effect_max_insertions" name="user_effect_max_insertions" type="number" min="1" max="5" value="1" />
-            </div>
-            <div class="field-row">
-              <label for="user_effect_min_silence_ms">無音判定の最小ms</label>
-              <input id="user_effect_min_silence_ms" name="user_effect_min_silence_ms" type="number" min="100" max="2000" value="300" />
-            </div>
-            <div class="field-row">
-              <label for="user_theme">ユーザー画面テーマ</label>
-              <select id="user_theme" name="user_theme">
-                <option value="blue">青</option>
-                <option value="pop">ポップ</option>
-                <option value="mint">ミント</option>
-              </select>
-            </div>
-            <button type="button" id="user-settings-save" class="secondary-button">ユーザー画面設定を保存</button>
-            <p id="user-settings-status" class="route-hint" role="status" aria-live="polite"></p>
-          </fieldset>
-
-          <fieldset id="seed-vc-settings" class="suffix-panel" hidden>
-            <legend>Seed-VC詳細設定</legend>
-            <div class="field-row">
-              <label for="seed_vc_preset">プリセット</label>
-              <select id="seed_vc_preset" name="seed_vc_preset">
-                <option value="fast">高速確認</option>
-                <option value="reasonable">リーズナブル</option>
-                <option value="quality" selected>品質優先</option>
-                <option value="best">最高品質検証</option>
-                <option value="custom">カスタム</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="seed_vc_diffusion_steps">diffusion steps</label>
-              <input
-                id="seed_vc_diffusion_steps"
-                name="seed_vc_diffusion_steps"
-                type="number"
-                min="1"
-                max="80"
-                step="1"
-                value="30"
-              />
-            </div>
-            <div class="field-row">
-              <label for="seed_vc_reference_max_seconds">参照音声の上限秒数</label>
-              <input
-                id="seed_vc_reference_max_seconds"
-                name="seed_vc_reference_max_seconds"
-                type="number"
-                min="0.5"
-                max="30"
-                step="0.5"
-                value="10"
-              />
-            </div>
-            <label class="checkbox-row">
-              <input
-                id="seed_vc_reference_auto_select"
-                name="seed_vc_reference_auto_select"
-                type="checkbox"
-              />
-              参照音声の発話区間を自動選択
-            </label>
-            <button type="button" id="seed-vc-reference-preview-button" class="secondary-button">
-              参照音声を確認
-            </button>
-            <div class="field-row">
-              <label for="seed_vc_length_adjust">length adjust</label>
-              <input
-                id="seed_vc_length_adjust"
-                name="seed_vc_length_adjust"
-                type="number"
-                min="0.25"
-                max="4"
-                step="0.05"
-                value="1.0"
-              />
-            </div>
-            <div class="field-row">
-              <label for="seed_vc_inference_cfg_rate">inference cfg rate</label>
-              <input
-                id="seed_vc_inference_cfg_rate"
-                name="seed_vc_inference_cfg_rate"
-                type="number"
-                min="0"
-                max="2"
-                step="0.05"
-                value="0.7"
-              />
-            </div>
-            <p class="route-hint">通常は品質優先、速度を見たい時は高速確認、最終比較では最高品質検証を使う。</p>
-          </fieldset>
+              <fieldset id="seed-vc-settings" class="suffix-panel">
+                <legend>Seed-VC設定</legend>
+                <div class="field-row">
+                  <label for="seed_vc_preset">プリセット</label>
+                  <select id="seed_vc_preset" name="seed_vc_preset">
+                    <option value="fast">高速確認</option>
+                    <option value="reasonable">リーズナブル</option>
+                    <option value="quality" selected>品質優先</option>
+                    <option value="best">最高品質検証</option>
+                    <option value="custom">カスタム</option>
+                  </select>
+                </div>
+                <div class="field-row">
+                  <label for="seed_vc_diffusion_steps">diffusion steps</label>
+                  <input id="seed_vc_diffusion_steps" name="seed_vc_diffusion_steps" type="number" min="1" max="80" step="1" value="30" />
+                </div>
+                <div class="field-row">
+                  <label for="seed_vc_reference_max_seconds">参照音声の上限秒数</label>
+                  <input
+                    id="seed_vc_reference_max_seconds"
+                    name="seed_vc_reference_max_seconds"
+                    type="number"
+                    min="0.5"
+                    max="30"
+                    step="0.5"
+                    value="10"
+                  />
+                </div>
+                <label class="checkbox-row">
+                  <input id="seed_vc_reference_auto_select" name="seed_vc_reference_auto_select" type="checkbox" />
+                  参照音声の発話区間を自動選択
+                </label>
+                <button type="button" id="seed-vc-reference-preview-button" class="secondary-button">参照音声を確認</button>
+                <div class="field-row">
+                  <label for="seed_vc_length_adjust">length adjust</label>
+                  <input
+                    id="seed_vc_length_adjust"
+                    name="seed_vc_length_adjust"
+                    type="number"
+                    min="0.25"
+                    max="4"
+                    step="0.05"
+                    value="1.0"
+                  />
+                </div>
+                <div class="field-row">
+                  <label for="seed_vc_inference_cfg_rate">inference cfg rate</label>
+                  <input
+                    id="seed_vc_inference_cfg_rate"
+                    name="seed_vc_inference_cfg_rate"
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.05"
+                    value="0.7"
+                  />
+                </div>
+                <p class="route-hint">通常は品質優先、速度確認では高速確認、最終比較では最高品質検証を使います。</p>
+              </fieldset>
             </div>
           </details>
 
-          <button type="submit" id="submit-button">変換</button>
+          <button type="submit" id="submit-button">読み上げる</button>
           <p id="error-message" class="error-message" hidden></p>
         </form>
 
-        <section class="result-panel" aria-label="変換結果">
+        <section class="result-panel" aria-label="音声処理結果">
           <section id="processing-panel" class="processing-panel" aria-label="処理状況" hidden>
             <h2>処理状況</h2>
             <p id="processing-current">待機中</p>
@@ -463,39 +303,10 @@
             </div>
             <dl id="reference-preview-timings" class="timings"></dl>
           </section>
-          <div id="text-result-section" class="result-grid translation-only">
-            <article>
-              <h2>文字起こし</h2>
-              <p id="transcript" class="result-text empty">未実行</p>
-              <div class="result-actions">
-                <button type="button" class="secondary-button text-result-action" data-result-source="transcript">
-                  読み上げに使う
-                </button>
-              </div>
-            </article>
-            <article>
-              <h2>翻訳</h2>
-              <p id="translated-text" class="result-text empty">未実行</p>
-              <div class="result-actions">
-                <button type="button" class="secondary-button text-result-action" data-result-source="translated">
-                  読み上げに使う
-                </button>
-              </div>
-            </article>
-            <article>
-              <h2>加工後</h2>
-              <p id="transformed-text" class="result-text empty">未実行</p>
-              <div class="result-actions">
-                <button type="button" class="secondary-button text-result-action" data-result-source="transformed">
-                  読み上げに使う
-                </button>
-              </div>
-            </article>
-          </div>
           <h2 id="output-audio-heading">出力音声</h2>
           <audio id="output-audio" controls></audio>
           <div class="result-actions output-actions">
-            <button type="button" id="use-output-as-input" class="secondary-button" disabled>入力に使う</button>
+            <button type="button" id="use-output-as-input" class="secondary-button" disabled>VC入力に使う</button>
             <button type="button" id="use-output-as-reference" class="secondary-button" disabled>VC参照に使う</button>
           </div>
           <dl id="timings" class="timings"></dl>
@@ -526,12 +337,10 @@
     <script src="/static/app_config.js" defer></script>
     <script src="/static/app_state.js" defer></script>
     <script src="/static/app_audio.js" defer></script>
-    <script src="/static/app_realtime.js" defer></script>
     <script src="/static/app_sample_audio_controls.js" defer></script>
     <script src="/static/app_history.js" defer></script>
     <script src="/static/app_seed_vc.js" defer></script>
     <script src="/static/app.js" defer></script>
-    <script src="/static/app_admin_settings.js" defer></script>
     <script src="/static/app_public_access_settings.js" defer></script>
     <script src="/static/app_public_sample_audio_admin.js" defer></script>
     <script src="/static/app_public_users.js" defer></script>

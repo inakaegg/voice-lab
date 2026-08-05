@@ -30,13 +30,15 @@ def _optional_int_env(name: str) -> int | None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a RunPod Serverless speech, practice-ASR, text-TTS, or voice-conversion smoke request.")
+    parser = argparse.ArgumentParser(
+        description="Run a RunPod Serverless practice-ASR, text-TTS, voice-conversion, warmup, or diagnostics smoke request."
+    )
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"))
     parser.add_argument(
         "--operation-mode",
-        choices=("translation", "practice_asr", "text_tts", "voice_conversion", "warmup", "diagnostics", "vibevoice"),
-        default="translation",
+        choices=("practice_asr", "text_tts", "voice_conversion", "warmup", "diagnostics"),
+        default="diagnostics",
     )
     parser.add_argument("--request-mode", choices=("sync", "async"), default=os.getenv("RUNPOD_SMOKE_REQUEST_MODE", "sync"))
     parser.add_argument("--audio")
@@ -44,23 +46,13 @@ def main() -> int:
     parser.add_argument("--reference-audio")
     parser.add_argument("--text", default=os.getenv("RUNPOD_SMOKE_TEXT"))
     parser.add_argument("--target-text", default=os.getenv("RUNPOD_SMOKE_TARGET_TEXT"))
-    parser.add_argument("--script", default=os.getenv("RUNPOD_SMOKE_SCRIPT"))
-    parser.add_argument("--script-file")
-    parser.add_argument("--voice-audio", action="append", default=[])
-    parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "google_translate"))
-    parser.add_argument("--translation-backend", default=os.getenv("RUNPOD_SMOKE_TRANSLATION_BACKEND", "openai"))
-    parser.add_argument("--source-language", default=os.getenv("RUNPOD_SMOKE_SOURCE_LANGUAGE", "id-ID"))
+    parser.add_argument("--tts-backend", default=os.getenv("RUNPOD_SMOKE_TTS_BACKEND", "openai"))
     parser.add_argument("--target-language", default=os.getenv("RUNPOD_SMOKE_TARGET_LANGUAGE", "ja-JP"))
-    parser.add_argument("--voice-mode", default=os.getenv("RUNPOD_SMOKE_VOICE_MODE", "convert"))
     parser.add_argument("--voice-backend", default=os.getenv("RUNPOD_SMOKE_VOICE_BACKEND", "seed-vc"))
     parser.add_argument("--seed-vc-diffusion-steps", type=int)
     parser.add_argument("--seed-vc-reference-max-seconds", type=float)
     parser.add_argument("--seed-vc-length-adjust", type=float)
     parser.add_argument("--seed-vc-inference-cfg-rate", type=float)
-    parser.add_argument("--text-transform", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM"))
-    parser.add_argument("--text-transform-suffix", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM_SUFFIX"))
-    parser.add_argument("--text-transform-unit", default=os.getenv("RUNPOD_SMOKE_TEXT_TRANSFORM_UNIT", "text"))
-    parser.add_argument("--preload-translation", action="store_true", default=os.getenv("RUNPOD_SMOKE_PRELOAD_TRANSLATION") == "1")
     parser.add_argument(
         "--preload-voice-conversion",
         action="store_true",
@@ -74,54 +66,6 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--http-timeout", type=int, default=int(os.getenv("RUNPOD_SMOKE_HTTP_TIMEOUT_SECONDS", "120")))
     parser.add_argument("--poll-interval", type=float, default=float(os.getenv("RUNPOD_SMOKE_POLL_INTERVAL_SECONDS", "1.0")))
-    parser.add_argument("--vibevoice-model-id", default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_MODEL_ID", "vibevoice-1.5b-pinned"))
-    parser.add_argument("--vibevoice-cfg-scale", type=float, default=_optional_float_env("RUNPOD_SMOKE_VIBEVOICE_CFG_SCALE"))
-    parser.add_argument("--vibevoice-inference-steps", type=int, default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_INFERENCE_STEPS", "2")))
-    parser.add_argument("--vibevoice-seed", type=int, default=int(os.getenv("RUNPOD_SMOKE_VIBEVOICE_SEED", "42")))
-    parser.add_argument(
-        "--vibevoice-no-sample",
-        action="store_true",
-        default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_NO_SAMPLE") == "1",
-    )
-    parser.add_argument("--vibevoice-temperature", type=float, default=_optional_float_env("RUNPOD_SMOKE_VIBEVOICE_TEMPERATURE"))
-    parser.add_argument("--vibevoice-top-p", type=float, default=_optional_float_env("RUNPOD_SMOKE_VIBEVOICE_TOP_P"))
-    parser.add_argument("--vibevoice-top-k", type=int, default=_optional_int_env("RUNPOD_SMOKE_VIBEVOICE_TOP_K"))
-    parser.add_argument(
-        "--vibevoice-max-voice-seconds",
-        type=float,
-        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_MAX_VOICE_SECONDS", "3")),
-    )
-    parser.add_argument("--vibevoice-line-by-line", action="store_true")
-    parser.add_argument(
-        "--vibevoice-directed-line-mode",
-        action="store_true",
-        default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_LINE_MODE") == "1",
-    )
-    parser.add_argument(
-        "--vibevoice-directed-retry-low-score",
-        action="store_true",
-        default=os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_LOW_SCORE") == "1",
-    )
-    parser.add_argument(
-        "--vibevoice-directed-retry-score-threshold",
-        type=float,
-        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_SCORE_THRESHOLD", "0.65")),
-    )
-    parser.add_argument(
-        "--vibevoice-directed-retry-max-lines",
-        type=int,
-        default=_optional_int_env("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_LINES"),
-    )
-    parser.add_argument(
-        "--vibevoice-directed-retry-max-multiplier",
-        type=float,
-        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_DIRECTED_RETRY_MAX_MULTIPLIER", "1")),
-    )
-    parser.add_argument(
-        "--vibevoice-line-gap",
-        type=float,
-        default=float(os.getenv("RUNPOD_SMOKE_VIBEVOICE_LINE_GAP", "1")),
-    )
     parser.add_argument("--print-audio-base64", action="store_true")
     args = parser.parse_args()
 
@@ -135,10 +79,6 @@ def main() -> int:
     elif args.operation_mode == "warmup":
         input_payload = {
             "operation_mode": "warmup",
-            "translation_backend": args.translation_backend,
-            "preload_translation": args.preload_translation or not (
-                args.preload_voice_conversion or args.preload_practice_asr
-            ),
             "preload_voice_conversion": args.preload_voice_conversion,
             "preload_practice_asr": args.preload_practice_asr,
         }
@@ -151,47 +91,9 @@ def main() -> int:
             "target_language": args.target_language,
             "tts_backend": args.tts_backend,
         }
-    elif args.operation_mode == "vibevoice":
-        script_text = Path(args.script_file).read_text(encoding="utf-8") if args.script_file else args.script
-        if not script_text:
-            raise SystemExit("--script or --script-file is required for vibevoice")
-        voice_specs = args.voice_audio or ([args.reference_audio] if args.reference_audio else [])
-        if not voice_specs:
-            raise SystemExit("--voice-audio is required for vibevoice")
-        voices = [_vibevoice_voice_payload(spec, index) for index, spec in enumerate(voice_specs, start=1)]
-        generation_payload: dict[str, Any] = {
-            "model_id": args.vibevoice_model_id,
-            "inference_steps": args.vibevoice_inference_steps,
-            "seed": args.vibevoice_seed,
-            "max_voice_seconds": args.vibevoice_max_voice_seconds,
-            "line_by_line": args.vibevoice_line_by_line,
-            "directed_line_mode": args.vibevoice_directed_line_mode,
-            "directed_retry_low_score": args.vibevoice_directed_retry_low_score,
-            "directed_retry_score_threshold": args.vibevoice_directed_retry_score_threshold,
-            "directed_retry_max_multiplier": args.vibevoice_directed_retry_max_multiplier,
-            "line_gap": args.vibevoice_line_gap,
-        }
-        if args.vibevoice_directed_retry_max_lines is not None:
-            generation_payload["directed_retry_max_lines"] = args.vibevoice_directed_retry_max_lines
-        if args.vibevoice_cfg_scale is not None:
-            generation_payload["cfg_scale"] = args.vibevoice_cfg_scale
-        if args.vibevoice_no_sample:
-            generation_payload["do_sample"] = False
-        if args.vibevoice_temperature is not None:
-            generation_payload["temperature"] = args.vibevoice_temperature
-        if args.vibevoice_top_p is not None:
-            generation_payload["top_p"] = args.vibevoice_top_p
-        if args.vibevoice_top_k is not None:
-            generation_payload["top_k"] = args.vibevoice_top_k
-        input_payload = {
-            "operation_mode": "vibevoice",
-            "script": script_text,
-            "voices": voices,
-            "generation": generation_payload,
-        }
     else:
         if not args.audio:
-            raise SystemExit("--audio is required for translation, practice_asr, and voice_conversion")
+            raise SystemExit("--audio is required for practice_asr and voice_conversion")
         audio_path = Path(args.audio)
         mime_type = "audio/webm" if audio_path.suffix.lower() == ".webm" else (mimetypes.guess_type(audio_path.name)[0] or "audio/wav")
 
@@ -207,16 +109,6 @@ def main() -> int:
             "reference_audio_base64": base64.b64encode(reference_audio_path.read_bytes()).decode("ascii"),
             "reference_audio_mime_type": reference_mime_type,
             "voice_backend": args.voice_backend,
-        }
-    elif args.operation_mode == "translation":
-        input_payload = {
-            "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
-            "audio_mime_type": mime_type,
-            "translation_backend": args.translation_backend,
-            "source_language": args.source_language,
-            "target_language": args.target_language,
-            "voice_mode": args.voice_mode,
-            "text_transform_unit": args.text_transform_unit,
         }
     elif args.operation_mode == "practice_asr":
         input_payload = {
@@ -242,11 +134,6 @@ def main() -> int:
         input_payload["seed_vc_length_adjust"] = args.seed_vc_length_adjust
     if args.seed_vc_inference_cfg_rate is not None:
         input_payload["seed_vc_inference_cfg_rate"] = args.seed_vc_inference_cfg_rate
-    if args.text_transform:
-        input_payload["text_transform"] = args.text_transform
-    if args.text_transform_suffix:
-        input_payload["text_transform_suffix"] = args.text_transform_suffix
-
     payload: dict[str, Any] = {"input": input_payload}
 
     try:
@@ -344,24 +231,6 @@ def _json_request(
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
-
-
-def _vibevoice_voice_payload(spec: str, fallback_speaker: int) -> dict[str, Any]:
-    speaker = fallback_speaker
-    path_text = spec
-    if ":" in spec:
-        maybe_speaker, maybe_path = spec.split(":", 1)
-        if maybe_speaker.isdigit():
-            speaker = int(maybe_speaker)
-            path_text = maybe_path
-    audio_path = Path(path_text)
-    mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
-    return {
-        "speaker": speaker,
-        "filename": audio_path.name,
-        "audio_mime_type": mime_type,
-        "audio_base64": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
-    }
 
 
 def _monotonic_seconds() -> float:

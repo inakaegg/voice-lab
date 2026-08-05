@@ -8,16 +8,16 @@ from zipfile import ZipFile
 REQUIRED_WEB_ASSETS = {
     "mo_speech/web/react/app-styles.html",
     "mo_speech/web/react/favicon.ico",
+    "mo_speech/web/react/github-invertocat-black.svg",
+    "mo_speech/web/react/github-invertocat-white.svg",
     "mo_speech/web/react/portal.html",
     "mo_speech/web/react/speakloop.html",
-    "mo_speech/web/react/skitvoice.html",
     "mo_speech/web/react/assets/app.css",
     "mo_speech/web/react/assets/portal.css",
     "mo_speech/web/react/assets/components.js",
     "mo_speech/web/react/assets/licenses.md",
     "mo_speech/web/react/assets/portal.js",
     "mo_speech/web/react/assets/speakloop.js",
-    "mo_speech/web/react/assets/skitvoice.js",
 }
 
 

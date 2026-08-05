@@ -10,6 +10,7 @@ const {
   shouldStopAudioSegment,
   buildPracticeDiffCells,
   compactPracticeDiffCells,
+  groupPracticeDiffCellsByPhrase,
 } = globalThis.voiceLabPracticePlayback;
 
 const completeModel = {
@@ -303,6 +304,60 @@ test("compacting keeps same-type mismatches separate across LLM phrase boundarie
   });
 
   assert.deepEqual(compacted, cells);
+});
+
+test("diff cells are grouped by the existing comparison playback phrases", () => {
+  const cells = compactPracticeDiffCells(
+    buildPracticeDiffCells("你好吗你今天去哪里", "你好坏色今天去哪里"),
+    {
+      targetText: "你好吗你今天去哪里",
+      alignment: {
+        phrases: [
+          { index: 0, target_text: "你好吗？" },
+          { index: 1, target_text: "你今天去哪里？" },
+        ],
+      },
+    },
+  );
+
+  const groups = groupPracticeDiffCellsByPhrase(cells, {
+    targetText: "你好吗你今天去哪里",
+    alignment: {
+      phrases: [
+        { index: 0, target_text: "你好吗？" },
+        { index: 1, target_text: "你今天去哪里？" },
+      ],
+    },
+  });
+
+  assert.deepEqual(groups.map((group) => ({
+    phraseIndex: group.phraseIndex,
+    heard: group.cells.map((cell) => cell.heard).join(""),
+  })), [
+    { phraseIndex: 0, heard: "你好坏" },
+    { phraseIndex: 1, heard: "色今天去哪里" },
+  ]);
+});
+
+test("diff cells use code-point offsets for supplementary CJK phrase boundaries", () => {
+  const targetText = "𠀀好世界";
+  const alignment = {
+    phrases: [
+      { index: 0, target_text: "𠀀好" },
+      { index: 1, target_text: "世界" },
+    ],
+  };
+  const cells = compactPracticeDiffCells(
+    buildPracticeDiffCells(targetText, targetText),
+    { targetText, alignment },
+  );
+
+  const groups = groupPracticeDiffCellsByPhrase(cells, { targetText, alignment });
+
+  assert.deepEqual(groups.map((group) => group.cells.map((cell) => cell.heard).join("")), [
+    "𠀀好",
+    "世界",
+  ]);
 });
 
 test("a real logged mismatch (可能 heard as 刚刚) compacts to one readable cell end to end", () => {

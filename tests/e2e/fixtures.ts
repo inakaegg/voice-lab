@@ -16,10 +16,8 @@ const accessSettings = {
   google_login_required: false,
   admin_google_emails: ["portfolio-owner@example.com"],
   features: {
-    fun: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, text_max_chars: 500 },
     voice_conversion: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000 },
     speakloop: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, text_max_chars: 500 },
-    skitvoice: { daily_limit: 10, total_limit: 100, audio_max_bytes: 8_000_000, script_max_chars: 2_000 },
   },
 };
 
@@ -48,7 +46,7 @@ function silentWav(seconds = 3): Buffer {
 
 export async function installUiApiFixtures(page: Page, options: UiFixtureOptions = {}) {
   let publicSamples: Record<string, unknown> = {
-    features: { fun: null, voice_conversion: null, speakloop: null, skitvoice: { samples: {} } },
+    features: { voice_conversion: null, speakloop: null },
   };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -60,6 +58,7 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
     });
 
     if (path === "/api/public-session") return json({ google_login_required: false, google_login_configured: true, authenticated: false });
+    if (path === "/api/zoovoice/config") return json({ error: { code: "zoovoice_unavailable", message: "not available in FastAPI fixtures" } }, 503);
     if (path === "/api/public-access-settings") return json(accessSettings);
     if (path === "/api/public-sample-audios") {
       if (request.method() === "PUT") {
@@ -234,7 +233,6 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
       }
       return json({ recordings: [], outputs: [], settings: { enabled: false } });
     }
-    if (path === "/api/user-settings") return json({ theme: "blue", joke_text: "", joke_pool: [], effect_audio_files: [] });
     if (path === "/api/runtime") {
       const local = options.practiceUiMode !== "cloudflare";
       return json({
@@ -248,7 +246,6 @@ export async function installUiApiFixtures(page: Page, options: UiFixtureOptions
         },
       });
     }
-    if (path === "/api/vibevoice/status") return json({ available: true, backends: { local: { available: true }, runpod_serverless: { available: false } } });
     return route.continue();
   });
 }

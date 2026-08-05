@@ -27,17 +27,41 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: services/zoovoice/go.mod
+          cache-dependency-path: services/zoovoice/go.mod
+
       - name: Install Python dependencies
         run: python3 -m pip install -e ".[dev]"
 
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
       - name: Python tests
         run: python3 -m pytest
 
+      - name: Zoovoice Go checks
+        working-directory: services/zoovoice
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build the Zoovoice service stage
+        run: docker build --target service-builder --file services/zoovoice/Dockerfile --tag zoovoice-service:ci .
+
       - name: Worker and browser tests
         run: npm test
+
+      - name: Worker typecheck and dry-run bundle
+        run: npm run check:worker
 
       - name: React typecheck and production build
         run: npm run check:web
@@ -56,6 +80,9 @@ jobs:
   ui-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      matrix:
+        browser: [chromium, webkit, firefox]
 
     steps:
       - uses: actions/checkout@v7
@@ -75,17 +102,37 @@ jobs:
           python3 -m pip install -e .
           npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Responsive UI layout tests
-        run: npm run test:e2e
+        run: >-
+          npx playwright test
+          --project "${{ matrix.browser }}-desktop"
+          --project "${{ matrix.browser }}-intermediate"
+          --project "${{ matrix.browser }}-mobile"
+
+      - name: Zoovoice portal tests
+        if: matrix.browser == 'chromium'
+        run: npm run test:e2e:portal-zoovoice
 
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-ui-failure
+          name: playwright-ui-failure-${{ matrix.browser }}
           path: tmp/playwright/
           if-no-files-found: ignore
           retention-days: 7
+
+  ui-e2e-required:
+    name: ui-e2e
+    needs: ui-e2e
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require every browser E2E job
+        env:
+          UI_E2E_RESULT: ${{ needs.ui-e2e.result }}
+        run: test "$UI_E2E_RESULT" = "success"

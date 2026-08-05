@@ -18,10 +18,6 @@ on:
         description: "Docker image tag. Empty uses runpod-<short-sha>."
         required: false
         default: ""
-      comfyui_vibevoice_ref:
-        description: "ComfyUI-VibeVoice git ref"
-        required: true
-        default: "99a98031d79e07f279a7aa6d01ce89042e8bba26"
       base_image:
         description: "Docker base image"
         required: true
@@ -98,7 +94,6 @@ jobs:
           tags: ${{ steps.image.outputs.image }}
           build-args: |
             BASE_IMAGE=${{ inputs.base_image }}
-            COMFYUI_VIBEVOICE_REF=${{ inputs.comfyui_vibevoice_ref }}
             SOURCE_REVISION=${{ github.sha }}
             IMAGE_TAG=${{ steps.image.outputs.image }}
           cache-from: type=gha
