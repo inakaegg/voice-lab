@@ -2780,10 +2780,12 @@ button.practice-diff-cell:focus-visible {
 }
 .react-public-body .react-back-link svg { height: 18px; width: 18px; }
 .react-public-body .react-back-link:hover { background: #fff; border-color: rgba(31, 38, 50, 0.24); transform: translateX(-1px); }
-.react-public-body .react-header-tools { align-items: center; display: flex; gap: 8px; justify-content: flex-end; }
+.react-public-body .react-header-tools,
+.react-public-body .react-header-actions { align-items: center; display: flex; gap: 8px; justify-content: flex-end; }
 .react-public-body .react-auth-panel { box-shadow: none; font-size: 12px; padding: 6px 10px; }
 
 .react-public-body .react-back-link:focus-visible,
+.react-public-body .portal-github-link:focus-visible,
 .react-public-body .react-theme-settings summary:focus-visible,
 .react-public-body button:focus-visible,
 .react-public-body select:focus-visible,
@@ -3033,7 +3035,7 @@ button.practice-diff-cell:focus-visible {
   .react-public-body .react-product-heading h1 { font-size: clamp(1.02rem, 5.2vw, 1.3rem); }
   .react-public-body .react-back-link { height: 40px; width: 40px; }
   .react-public-body .react-header-tools { display: contents; }
-  .react-public-body .react-theme-settings { grid-column: 2; grid-row: 1; justify-self: end; }
+  .react-public-body .react-header-actions { grid-column: 2; grid-row: 1; justify-self: end; }
   .react-public-body .react-theme-settings summary { height: 40px; width: 40px; }
   .react-public-body .react-auth-panel { font-size: 11px; grid-column: 1 / -1; grid-row: 2; padding: 6px 8px; }
   .react-public-body[data-layout="compact"] .react-intro-grid,
@@ -3095,6 +3097,58 @@ button.practice-diff-cell:focus-visible {
   }
 }
 
+/* Shared GitHub repository link */
+.react-public-body .portal-github-link {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--react-border);
+  border-radius: 50%;
+  color: var(--react-ink);
+  display: flex;
+  height: 36px;
+  justify-content: center;
+  position: relative;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  width: 36px;
+}
+.react-public-body .portal-github-link:hover {
+  background: #fff;
+  border-color: rgba(31, 38, 50, 0.26);
+  transform: translateY(-1px);
+}
+.react-public-body .portal-github-mark { display: block; height: 19px; width: auto; }
+.react-public-body .portal-github-mark-white { display: none; }
+.react-public-body .portal-github-tooltip {
+  background: var(--react-ink);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(20, 26, 38, 0.2);
+  color: var(--background);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.45;
+  max-width: calc(100vw - 2.5rem);
+  opacity: 0;
+  padding: 0.5rem 0.7rem;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.6rem);
+  transform: translateY(-3px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 40;
+}
+.react-public-body .portal-github-link:hover .portal-github-tooltip,
+.react-public-body .portal-github-link:focus-visible .portal-github-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+@media (max-width: 820px) {
+  .react-public-body .portal-github-link { height: 40px; width: 40px; }
+}
+
 /* Theme settings */
 .react-public-body .react-theme-settings { position: relative; }
 .react-public-body .react-theme-settings summary {
@@ -3146,6 +3200,7 @@ html[data-theme="dark"] .react-public-body.practice-body {
 html[data-theme="dark"] .react-public-body .react-product-header { border-color: var(--react-border); }
 html[data-theme="dark"] .react-public-body .react-back-link,
 html[data-theme="dark"] .react-public-body .react-auth-panel,
+html[data-theme="dark"] .react-public-body .portal-github-link,
 html[data-theme="dark"] .react-public-body .react-theme-settings summary,
 html[data-theme="dark"] .react-public-body .react-sample-card,
 html[data-theme="dark"] .react-public-body .practice-current-language,
@@ -3155,6 +3210,8 @@ html[data-theme="dark"] .react-public-body .practice-history-preview,
 html[data-theme="dark"] .react-public-body .react-flow-card,
 html[data-theme="dark"] .react-public-body .react-work-card,
 html[data-theme="dark"] .react-public-body .react-result-card { background: var(--react-paper); border-color: var(--react-border); color: var(--react-ink); }
+html[data-theme="dark"] .react-public-body .portal-github-mark-black { display: none; }
+html[data-theme="dark"] .react-public-body .portal-github-mark-white { display: block; }
 html[data-theme="dark"] .react-public-body .practice-comparison-note[data-mode="partial_phrase"] { color: var(--react-muted); }
 html[data-theme="dark"] .react-public-body .react-generate-card { background: linear-gradient(180deg, rgba(46, 37, 34, 0.98), rgba(25, 31, 42, 0.96)); border-color: var(--react-border); color: var(--react-ink); }
 html[data-theme="dark"] .react-public-body .react-theme-menu { background: #1b2230; border-color: var(--react-border); }

@@ -1,16 +1,19 @@
-# SpeakLoop公開デモ・ポートフォリオ
+# Voice Lab公開デモ・ポートフォリオ
 
-更新日: 2026-07-30
+更新日: 2026-08-05
 
 ## 現在地
 
-- Voice Labの公開ポートフォリオはSpeakLoopを中心とする。
-- Cloudflareの現在版はproduction公開環境へ反映済みで、`/`、`/speakloop`、`/privacy`を公開している。
+- Voice Labの公開ポートフォリオはSpeakLoopを中心とし、β版のZoovoiceを含む。
+- Cloudflareのproduction公開環境にはmerge済みの版を反映済みである。公開routeは `/`・`/speakloop`・`/zoovoice`・`/privacy` とする。
+- 本branchのUI変更（Zoovoiceのβ表示・使用技術表示・SpeakLoopのGitHub導線）はproduction未反映である。merge後にdeployとdeploy後smokeを実施する。
 - 実装済みの機能: Google OAuth・機能別quota・入力上限・管理者認証・簡易監査ログ。
 - 利用者音声と生成音声はCloudflare版のVoice Lab履歴へ保存しない。
 - quota・監査情報はD1、短期jobとfallbackはKVを使い、平文emailを含む旧quota keyは削除済み。
 - 中国語ASRと任意の声質変換はprivateなRunPod Serverlessへ分離している。
-- Python／Node CI、React production build、Playwright 3ブラウザ×3 viewport E2Eを実装済み。
+- Zoovoiceの日本語ASR・動物連想・音声合成は、privateなGoogle Cloud Run上のGoサービスで実行する。WorkerはTurnstile検証とGoogle IAM認証付きの中継を担当する。
+- Zoovoiceのproduction有効化とWorker deployは完了している。Worker経由の実composeはproduction Turnstileの人間操作が必要なため未確認である。
+- Python／Node CI、React production build、Playwright 3ブラウザ×3 viewport E2Eを実装済み。Zoovoice E2EはChromiumに限定して実行する。
 - Gitleaksはcommit前、push前、全branchへのpush・pull requestで独立して実行する。
 - GitHub repositoryはpublicである。Secret scanning、Push Protection、Private vulnerability reportingを有効にしている。
 - Docker HubのRunPod image repositoryはprivateで、認証済みcold startを確認済み。
@@ -18,7 +21,7 @@
 
 ## 公開判断
 
-CloudflareのSpeakLoopデモとGitHub repositoryは公開を継続する。外部状態の確認項目は[運用チェックリスト](PUBLICATION_CHECKLIST.md)を正とする。release前には全履歴GitleaksとGitHub security設定を再確認する。
+CloudflareのVoice Labデモ（SpeakLoop・Zoovoice）とGitHub repositoryは公開を継続する。外部状態の確認項目は[運用チェックリスト](PUBLICATION_CHECKLIST.md)を正とする。release前には全履歴GitleaksとGitHub security設定を再確認する。
 
 Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオとして閲覧可能にする方針を維持する。第三者コンポーネントにはそれぞれのライセンスが適用されるため、本体の権利表示と混同しない。
 
@@ -33,6 +36,7 @@ Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオ�
 7. GitHub repositoryをpublicにし、security設定と`main`のbranch protectionを有効にした。
 8. READMEへPC・スマートフォンの代表スクリーンショットを追加した。
 9. staging Workerをproductionと別resourceへ配備した。
+10. Zoovoiceをproductionへ有効化し、公開route・公開Zoovoice API・Turnstile表示のsmokeを確認した。private Cloud Runへの認証付きrequestと認証なしrequestの拒否も確認した。
 
 ## 公開運用で継続すること
 

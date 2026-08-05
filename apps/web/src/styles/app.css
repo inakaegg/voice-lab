@@ -619,6 +619,11 @@ html[data-theme="dark"] .react-output-samples .react-sample-card h2 {
   width: 100%;
 }
 
+/* 下部グループ内では注意文のauto marginを使わず、直前の使用技術行と一体で最下部へ置く。 */
+.react-public-body[data-layout="compact"] [data-tech-note] + .react-workflow-privacy-note {
+  margin-top: 0;
+}
+
 .voice-lab-admin-body .public-sample-file-button {
   align-items: center;
   background: #edf1f6;

@@ -2,7 +2,7 @@ import { ArrowUpRight, AudioWaveform, Mic2, PawPrint } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, ThemeSettings } from "../shared/components";
+import { activateCompactLayout, GitHubRepositoryLink, TechStackNote, ThemeSettings } from "../shared/components";
 import { fetchZoovoiceConfig } from "../zoovoice/api";
 
 import "./styles.css";
@@ -19,6 +19,7 @@ const products = [
     href: "/speakloop",
     icon: Mic2,
     tone: "portal-product-link-speak",
+    beta: false,
   },
   {
     number: "02",
@@ -29,6 +30,7 @@ const products = [
     href: "/zoovoice",
     icon: PawPrint,
     tone: "portal-product-link-zoovoice",
+    beta: true,
   },
 ] as const;
 
@@ -42,18 +44,7 @@ function Portal({ zoovoiceEnabled }: { zoovoiceEnabled: boolean }) {
         <span>Voice Lab</span>
       </div>
       <div className="flex items-center gap-2">
-        <a
-          className="portal-github-link group"
-          href="https://github.com/inakaegg/voice-lab"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="GitHubリポジトリ"
-          aria-describedby="portal-github-tooltip"
-        >
-          <img className="portal-github-mark portal-github-mark-black" src="/react/github-invertocat-black.svg" width="98" height="96" alt="" aria-hidden="true" />
-          <img className="portal-github-mark portal-github-mark-white" src="/react/github-invertocat-white.svg" width="98" height="96" alt="" aria-hidden="true" />
-          <span id="portal-github-tooltip" role="tooltip" className="portal-github-tooltip">実際の動作を動画で確認できます</span>
-        </a>
+        <GitHubRepositoryLink tooltipId="portal-github-tooltip" />
         <ThemeSettings />
       </div>
     </header>
@@ -72,14 +63,14 @@ function Portal({ zoovoiceEnabled }: { zoovoiceEnabled: boolean }) {
       <nav className="min-w-0" aria-label="アプリを選ぶ" data-zoovoice-state={zoovoiceEnabled ? "shown" : "hidden"}>
         <Card className="gap-0 overflow-hidden rounded-[1.75rem] border-border/75 bg-card/85 py-0 shadow-[0_28px_80px_rgba(31,38,50,0.11)] backdrop-blur-xl dark:shadow-[0_28px_80px_rgba(0,0,0,0.28)]">
           <CardContent className="p-0">
-            {visibleProducts.map(({ number, name, title, description, action, href, icon: Icon, tone }) => <a
+            {visibleProducts.map(({ number, name, title, description, action, href, icon: Icon, tone, beta }) => <a
               className={`portal-product-link group relative grid min-h-[10.2rem] min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_2.5rem] items-center gap-3 px-[1.125rem] py-5 text-foreground no-underline transition-colors duration-200 before:absolute before:inset-y-5 before:left-0 before:w-1 before:rounded-r-full before:bg-[var(--product-accent)] hover:bg-muted/45 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/45 motion-reduce:transition-none sm:min-h-[10.6rem] sm:grid-cols-[3rem_minmax(0,1fr)_2.75rem] sm:gap-4 sm:px-6 sm:py-6 ${tone}`}
               href={href}
               key={href}
             >
               <span className="flex size-11 items-center justify-center rounded-2xl bg-[var(--product-soft)] text-[var(--product-accent)] sm:size-12" aria-hidden="true"><Icon className="size-5 sm:size-[1.35rem]" strokeWidth={1.8} /></span>
               <span className="min-w-0">
-                <span className="mb-1.5 flex items-center gap-2 text-[0.7rem] font-bold uppercase tracking-[0.14em] text-muted-foreground"><span>{number}</span><span aria-hidden="true">·</span><span>{name}</span></span>
+                <span className="mb-1.5 flex items-center gap-2 text-[0.7rem] font-bold uppercase tracking-[0.14em] text-muted-foreground"><span>{number}</span><span aria-hidden="true">·</span><span>{name}</span>{beta && <span className="rounded-full border border-current/45 px-1.5 py-px text-[0.6rem] font-bold normal-case tracking-[0.08em] text-[var(--product-accent)]">β版</span>}</span>
                 <h2 className="m-0 break-keep text-[1.25rem] font-bold leading-tight tracking-[-0.035em] sm:text-[1.45rem]">{name === "SpeakLoop" ? <>言いたいことで<wbr />発音練習</> : title}</h2>
                 <span className="mt-2 block text-[0.82rem] leading-[1.65] text-muted-foreground sm:text-[0.9rem]">{description}</span>
                 <span className="mt-2.5 inline-flex items-center gap-1 text-[0.78rem] font-bold text-[var(--product-accent)] sm:text-[0.82rem]">{action}<ArrowUpRight className="size-3.5" aria-hidden="true" /></span>
@@ -90,6 +81,10 @@ function Portal({ zoovoiceEnabled }: { zoovoiceEnabled: boolean }) {
         </Card>
       </nav>
     </section>
+
+    <footer className="relative z-10 shrink-0">
+      <TechStackNote items={["React", "TypeScript", "Cloudflare Workers", "OpenAI API", "RunPod Serverless", "Go", "Google Cloud Run"]} />
+    </footer>
   </main>;
 }
 

@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
+import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
 import {
   composeRecording,
   fetchZoovoiceConfig,
@@ -321,7 +321,7 @@ function Zoovoice() {
   const isProcessing = state.phase === "processing";
 
   return <PageShell className="zoovoice-shell max-w-[1120px]">
-    <ProductHeader product="zoovoice" title="声から動物を連想する" />
+    <ProductHeader product="zoovoice" title="声から動物を連想する" badge="β版" />
     <section className="mb-3 flex flex-col gap-1.5 border-l-[3px] border-[var(--react-ink)] pl-4 sm:mb-4 sm:flex-row sm:items-end sm:justify-between sm:gap-5">
       <div>
         <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-[var(--react-muted)]">Record · Associate · Play</p>
@@ -414,11 +414,12 @@ function Zoovoice() {
         </CardContent>
       </Card>
     </main>
-    <div className="mx-auto flex w-full max-w-6xl justify-center px-4 pb-2 text-center text-xs font-semibold text-muted-foreground">
+    <div className="mx-auto mt-auto flex w-full max-w-6xl justify-center px-4 pb-2 text-center text-xs font-semibold text-muted-foreground">
       <a className="rounded-md px-2 py-1 underline decoration-border underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href="https://stability.ai/" rel="noreferrer" target="_blank">
         Powered by Stability AI
       </a>
     </div>
+    <TechStackNote items={["React", "Cloudflare Workers", "Cloudflare Turnstile", "Go", "Google Cloud Run", "whisper.cpp", "ConceptNet", "ffmpeg"]} />
     <PrivacyNotice />
   </PageShell>;
 }
