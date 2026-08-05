@@ -1,13 +1,17 @@
-# Voice Lab — SpeakLoop
+# Voice Lab
 
 [![CI](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml)
 [![Secret scan](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml)
 
-Voice LabのSpeakLoopは、母語で話した「言いたいこと」を、中国語または英語の発音練習へつなげるWebアプリです。録音、学習文と模範音声の生成、復唱、聞き比べまでを1つの流れで進められます。
+Voice Labは、発音練習のSpeakLoopと動物鳴き声合成のZoovoiceを持つ音声Webアプリです。
+
+中心機能のSpeakLoopは、母語で話した「言いたいこと」を、中国語または英語の発音練習へつなげます。録音、学習文と模範音声の生成、復唱、聞き比べまでを1つの流れで進められます。
+
+Zoovoiceは、録音した日本語の発話から動物を1種自動で連想し、その鳴き声を発話のすき間へ重ねた音声を返します。
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
-> **English:** SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, and a private RunPod Serverless GPU backend. CI runs Python, Worker, and browser tests plus E2E on every pull request.
+> **English:** Voice Lab is a voice web app with two features. SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Zoovoice transcribes a Japanese recording, associates it with one animal, and layers that animal's call into the pauses of your speech. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, a private RunPod Serverless GPU backend, and a private Go service on Google Cloud Run (whisper.cpp ASR / ConceptNet association / ffmpeg mixing). CI runs Python, Worker, Go, and browser tests plus E2E on every pull request.
 
 ## 画面
 
@@ -30,6 +34,8 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ## できること
 
+### SpeakLoop — 発音練習
+
 1. 母語で言いたい内容を録音する
 2. 学習言語の文と模範音声を生成する
 3. その文を発音して録音する
@@ -39,13 +45,22 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 任意の「自分の声」を使うと、同じ送信で最初に録音した本人の音声だけを参照し、模範音声を本人の声質に近づけたAI生成音声へ変換します。変換できない場合も通常のお手本音声で練習を続けられます。
 
+### Zoovoice — 動物鳴き声合成
+
+1. 日本語で自由に話して録音する
+2. 発話内容から動物を1種自動で連想する
+3. 鳴き声を発話のすき間へ重ねた音声を再生・ダウンロードする
+
+日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はConceptNet由来の動物レキシコンを使います。同梱する鳴き声にはStable Audioで生成した音源を含みます。
+
 ## 構成
 
 ```mermaid
 flowchart LR
-    Browser[Browser\nSpeakLoop] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
+    Browser[Browser\nSpeakLoop / Zoovoice] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
     Worker --> OpenAI[OpenAI API\nASR / Translation / TTS]
     Worker --> RunPod[Private RunPod Serverless\nChinese ASR / Voice Conversion]
+    Worker --> CloudRun[Private Google Cloud Run\nZoovoice Go Service\nJapanese ASR / Animal Association / Mixing]
     Worker --> KV[Workers KV\nSettings / Short-lived Jobs / Fallback]
     Worker --> D1[D1\nQuota / Audit]
 ```
@@ -53,6 +68,8 @@ flowchart LR
 - ブラウザへOpenAIやRunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
 - 公開版はGoogleログイン、機能別quota、入力上限、簡易監査ログをCloudflare Workerで処理します。
 - 中国語の発音比較と任意の声質変換は、privateなRunPod Serverlessへ必要な音声だけを一時送信します。
+- Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービス（whisper.cpp・ConceptNet・ffmpeg）が担当し、WorkerがGoogle IAM認証付きで中継します。
+- ZoovoiceはCloudflare Turnstileで自動アクセスを抑止し、共通の利用上限をD1で管理します。
 - Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しません。
 - GPU課金が必要な確認と、fake modelで検証できるrequest・job・error処理を分離しています。
 
@@ -81,6 +98,8 @@ cp .env.example .env
 
 モデル、生成音声、API key、`.env` はgit管理しません。声質変換の依存とモデル配置は [VOICE_CLONE.md](docs/speech-translation/VOICE_CLONE.md) を参照してください。
 
+ZoovoiceのローカルUIとAPIはFastAPIを使わず、Wrangler localのWorkerとGoサービスで確認します。手順は [services/zoovoice/README.md](services/zoovoice/README.md) を参照してください。
+
 ## 検証
 
 各worktreeでGitleaksのGit hookを有効にします。
@@ -102,19 +121,21 @@ npm run check:js
 npm run check:worker
 npm run check:web
 npm run test:e2e
+cd services/zoovoice && go vet ./... && go test ./...
 ```
 
 RunPod image buildとGPU smokeは費用・実行時間が大きいため、通常CIには含めません。モデル非依存テストが通った後、必要な場合だけ最小入力で手動実行します。
 
 ## 公開デモ
 
-Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面として配信します。現在の版はproduction公開環境へ反映済みです。
+Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面、`/zoovoice` を動物鳴き声合成画面として配信します。現在の版はproduction公開環境へ反映済みです。
 
 音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。個人情報や機密情報を含む音声は入力しないでください。詳しくは [プライバシーポリシー](docs/PRIVACY_POLICY.md) を確認してください。
 
 ## 既知の制限
 
 - RunPod Serverlessはcold start、queue、GPU利用料金の影響を受けます。
+- ZoovoiceのCloud Run合成は、cold startとASR・合成の処理時間の影響を受けます。
 - ASR結果とフレーズ位置は変動します。要因は言語、発音、録音品質、providerの出力です。
 - D1/KV bindingがないローカル・preview環境ではfallbackを使うため、productionと保存先が異なります。
 - Safari、Firefox、スマートフォン実機の録音形式は継続確認が必要です。
