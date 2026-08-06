@@ -80,10 +80,71 @@ class StaticEmbeddingModel:
         return np.stack(vectors).astype(np.float32, copy=False)
 
 
+# 動物と無関係な日本語文。各動物の「どの入力でも高く出る」度合いを測る基準に使う。
+BACKGROUND_SENTENCES: tuple[str, ...] = (
+    "今日は朝から会議が続いている",
+    "駅前の書店で新しい雑誌を買った",
+    "この資料は明日までに提出する必要がある",
+    "週末は部屋の掃除をするつもりだ",
+    "新しいアプリの使い方がよく分からない",
+    "電車が遅れて約束の時間に間に合わなかった",
+    "コーヒーを飲みながら本を読んでいた",
+    "来月から料金が値上がりするらしい",
+    "友人と映画を見に行く約束をした",
+    "パソコンの調子が悪くて作業が進まない",
+    "昨日は久しぶりによく眠れた",
+    "この道は工事中で通れない",
+    "彼はいつも丁寧に説明してくれる",
+    "写真の整理に時間がかかっている",
+    "予定より早く仕事が終わった",
+    "天気予報では明日は雨だそうだ",
+)
+
+
 def normalized_rows(matrix: np.ndarray) -> np.ndarray:
     matrix = np.asarray(matrix, dtype=np.float32)
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     return np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms > 0)
+
+
+def compute_animal_bias(
+    model: Any, profile_embeddings: np.ndarray, background: Sequence[str] | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """各動物が背景文へ返す類似度の平均と標準偏差を測る。
+
+    どの入力でも高い類似度を返す動物ほど平均が大きくなる。この平均を差し引くと、
+    入力とほぼ無関係に上位へ来る動物を抑えられる。
+    """
+    sentences = list(background) if background is not None else list(BACKGROUND_SENTENCES)
+    if not sentences:
+        raise ValueError("background sentences must not be empty")
+    profiles = normalized_rows(profile_embeddings)
+    scores = normalized_rows(np.asarray(model.encode(sentences), dtype=np.float32)) @ profiles.T
+    bias_mean = scores.mean(axis=0)
+    deviation = scores.std(axis=0)
+    median_deviation = float(np.median(deviation))
+    deviation_floor = median_deviation if median_deviation > 1e-6 else 1.0
+    bias_std = np.maximum(deviation, deviation_floor).astype(np.float32)
+    return bias_mean.astype(np.float32), bias_std
+
+
+def score_animals_for_text(
+    model: Any,
+    text: str,
+    profile_embeddings: np.ndarray,
+    bias: tuple[np.ndarray, np.ndarray] | None = None,
+) -> np.ndarray:
+    """入力文をそのまま埋め込み、各動物profileとの類似度を返す。
+
+    語ごとに埋め込んで平均する方式と違い、助詞や文脈を保ったまま比較する。
+    """
+    profiles = normalized_rows(profile_embeddings)
+    query = normalized_rows(np.asarray(model.encode([text]), dtype=np.float32))
+    scores = (query @ profiles.T)[0]
+    if bias is None:
+        return scores
+    bias_mean, bias_std = bias
+    return (scores - bias_mean) / bias_std
 
 
 def rank_animal_candidates(
@@ -216,10 +277,20 @@ def profile_candidate_results(
     profile_embeddings: np.ndarray,
     threshold: float,
     seed: int,
+    query_mode: str = "terms",
+    background: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """候補Dの選定結果を作る。
+
+    query_mode が "sentence" のとき、抽出語の平均ではなく入力文をそのまま埋め込む。
+    background を与えると、動物ごとの出やすさの偏りを補正する。
+    """
+    if query_mode not in {"terms", "sentence"}:
+        raise ValueError(f"query_mode must be 'terms' or 'sentence': {query_mode}")
     baseline_by_id = {item["id"]: item for item in baseline}
     fixtures_by_id = {item["id"]: item for item in fixtures}
     profiles = normalized_rows(profile_embeddings)
+    bias = compute_animal_bias(model, profile_embeddings, background) if background else None
     animal_ids = [animal["id"] for animal in animals]
     animal_by_id = {animal["id"]: animal for animal in animals}
     results: list[dict[str, Any]] = []
@@ -249,16 +320,29 @@ def profile_candidate_results(
             results.append(result)
             continue
         terms = [term for term in item.get("embedding_terms", item.get("terms", [])) if term.strip()]
-        vector = model.encode(terms).mean(axis=0, keepdims=True) if terms else np.zeros((1, profiles.shape[1]))
-        scores = normalized_rows(vector) @ profiles.T
-        best_index = int(np.argmax(scores[0])) if len(animals) else -1
-        best_score = float(scores[0, best_index]) if best_index >= 0 else -math.inf
+        text = item.get("input", "")
+        if query_mode == "sentence" and text.strip():
+            scores_row = score_animals_for_text(model, text, profile_embeddings, bias)
+            evidence = text
+        else:
+            vector = (
+                model.encode(terms).mean(axis=0, keepdims=True)
+                if terms
+                else np.zeros((1, profiles.shape[1]))
+            )
+            scores_row = (normalized_rows(vector) @ profiles.T)[0]
+            if bias is not None:
+                bias_mean, bias_std = bias
+                scores_row = (scores_row - bias_mean) / bias_std
+            evidence = terms[0] if terms else ""
+        best_index = int(np.argmax(scores_row)) if len(animals) else -1
+        best_score = float(scores_row[best_index]) if best_index >= 0 else -math.inf
         if best_index >= 0 and best_score >= threshold:
             animal = animals[best_index]
             result["selection"] = {
                 "species": animal["id"],
                 "label_ja": animal["label_ja"],
-                "evidence_term": terms[0] if terms else "",
+                "evidence_term": evidence,
                 "strategy": "embedding_profile",
                 "score": {"total": best_score, "contributions": []},
             }
@@ -514,13 +598,30 @@ def associate_text(args: argparse.Namespace) -> None:
     model = StaticEmbeddingModel(args.model, provenance.get("truncate_dim"))
     animals = read_json(args.precomputed / "animal_profiles.json")
     profiles = np.load(args.precomputed / "animal_profile_embeddings.npy")
-    candidates = rank_animal_candidates(
-        extracted.get("embedding_terms", []), model, animals, profiles, args.top_k
-    )
+    if args.query_mode == "sentence":
+        bias = None if args.no_debias else compute_animal_bias(model, profiles)
+        scores = score_animals_for_text(model, text, profiles, bias)
+        order = np.argsort(-scores)[: args.top_k]
+        candidates = [
+            {
+                "rank": rank_index,
+                "id": animals[index]["id"],
+                "label_ja": animals[index]["label_ja"],
+                "similarity": float(scores[index]),
+                "evidence_term": text,
+            }
+            for rank_index, index in enumerate(order, start=1)
+        ]
+    else:
+        candidates = rank_animal_candidates(
+            extracted.get("embedding_terms", []), model, animals, profiles, args.top_k
+        )
     selected = candidates[0]
     output = {
         "input": text,
         "method": "embedding",
+        "query_mode": args.query_mode,
+        "debiased": args.query_mode == "sentence" and not args.no_debias,
         "model": {
             key: provenance.get(key)
             for key in ("model_id", "revision", "license", "truncate_dim")
@@ -682,16 +783,19 @@ def run_pilot(args: argparse.Namespace) -> None:
             )
         d_grid = []
         tuning_baseline = [item for item in baseline if item["id"] in development_ids]
+        background = None if args.no_debias else list(BACKGROUND_SENTENCES)
         for threshold in thresholds:
             results = profile_candidate_results(
                 tuning_extracted, tuning_baseline, tuning_fixtures, model,
                 animals, profile_embeddings, threshold, args.seed,
+                query_mode=args.query_mode, background=background,
             )
             d_grid.append(((threshold, 0), results))
         (d_threshold, _), _ = choose_result(d_grid, semantic_field="semantic_ok")
         chosen["D"] = (d_threshold, 0)
     final_results["D"] = profile_candidate_results(
-        extracted, baseline, selected_fixtures, model, animals, profile_embeddings, d_threshold, args.seed
+        extracted, baseline, selected_fixtures, model, animals, profile_embeddings,
+        d_threshold, args.seed, query_mode=args.query_mode, background=background,
     )
     write_json(output / "candidate_D.json", final_results["D"])
     progress.emit(
@@ -740,6 +844,17 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--top-ks", default="1,3,5")
     run_parser.add_argument("--truncate-dim", type=int, default=256)
     run_parser.add_argument("--seed", type=int, default=7)
+    run_parser.add_argument(
+        "--query-mode",
+        choices=("sentence", "terms"),
+        default="sentence",
+        help="候補Dのクエリ構成。sentenceは入力文をそのまま埋め込む",
+    )
+    run_parser.add_argument(
+        "--no-debias",
+        action="store_true",
+        help="動物ごとの出やすさの偏り補正を無効にする",
+    )
     run_parser.set_defaults(handler=run_pilot)
     associate_parser = commands.add_parser(
         "associate", help="associate one text with animals using a selected local method"
@@ -759,6 +874,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="number of ranked embedding animal candidates to return",
     )
     associate_parser.add_argument("--seed", type=int, default=7)
+    associate_parser.add_argument(
+        "--query-mode",
+        choices=("sentence", "terms"),
+        default="sentence",
+        help="sentenceは入力文をそのまま埋め込む。termsは抽出語の平均を使う旧方式",
+    )
+    associate_parser.add_argument(
+        "--no-debias",
+        action="store_true",
+        help="動物ごとの出やすさの偏り補正を無効にする",
+    )
     associate_parser.add_argument("--output", type=Path, default=Path("-"))
     associate_parser.set_defaults(handler=associate_text)
     return parser

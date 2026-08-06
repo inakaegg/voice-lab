@@ -149,6 +149,8 @@ class PilotTest(unittest.TestCase):
                     str(precomputed),
                     "--top-k",
                     "2",
+                    "--query-mode",
+                    "terms",
                 ]
             )
             output = io.StringIO()
@@ -175,9 +177,82 @@ class PilotTest(unittest.TestCase):
 
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["method"], "embedding")
+            self.assertEqual(payload["query_mode"], "terms")
             self.assertEqual(payload["selected_animal"], {"id": "cow", "label_ja": "牛"})
             self.assertEqual([item["id"] for item in payload["candidates"]], ["cow", "cat"])
             self.assertEqual(payload["association"]["strategy"], "embedding_profile")
+
+    def test_associate_embedding_defaults_to_sentence_query(self):
+        """既定では入力文をそのまま埋め込み、偏り補正を適用する。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            precomputed = root / "precomputed"
+            precomputed.mkdir()
+            model_directory = root / "model"
+            model_directory.mkdir()
+            (model_directory / "model.safetensors").write_bytes(b"weights")
+            (model_directory / "tokenizer.json").write_text("{}", encoding="utf-8")
+            (precomputed / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "model_id": "example/model",
+                        "revision": "fixed",
+                        "license": "MIT",
+                        "truncate_dim": 2,
+                        "files": [
+                            pilot.file_record(model_directory / "model.safetensors"),
+                            pilot.file_record(model_directory / "tokenizer.json"),
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (precomputed / "animal_profiles.json").write_text(
+                json.dumps([{"id": "hub", "label_ja": "ハブ動物"}, {"id": "owl", "label_ja": "フクロウ"}]),
+                encoding="utf-8",
+            )
+            np.save(
+                precomputed / "animal_profile_embeddings.npy",
+                np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+            )
+            # 背景文はすべてハブ動物側へ寄せ、入力文だけがフクロウ寄りになるようにする。
+            vectors = {sentence: [1.0, 0.0] for sentence in pilot.BACKGROUND_SENTENCES}
+            vectors["夜の森を歩いた"] = [0.8, 0.6]
+            vectors["夜"] = [1.0, 0.0]
+            args = pilot.build_parser().parse_args(
+                [
+                    "associate",
+                    "--method",
+                    "embedding",
+                    "--text",
+                    "夜の森を歩いた",
+                    "--go-binary",
+                    str(root / "zoovoice"),
+                    "--model",
+                    str(model_directory),
+                    "--precomputed",
+                    str(precomputed),
+                    "--top-k",
+                    "2",
+                ]
+            )
+            output = io.StringIO()
+            with (
+                mock.patch.object(
+                    pilot,
+                    "go_result_for_text",
+                    return_value=({"terms": ["夜"], "embedding_terms": ["夜"]}, None),
+                ),
+                mock.patch.object(pilot, "StaticEmbeddingModel", return_value=FakeModel(vectors)),
+                contextlib.redirect_stdout(output),
+            ):
+                pilot.associate_text(args)
+
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["query_mode"], "sentence")
+            self.assertTrue(payload["debiased"])
+            self.assertEqual(payload["selected_animal"]["id"], "owl")
+            self.assertEqual(payload["association"]["evidence_term"], "夜の森を歩いた")
 
     def test_associate_conceptnet_outputs_current_selection(self):
         args = pilot.build_parser().parse_args(
@@ -288,6 +363,118 @@ class PilotTest(unittest.TestCase):
         self.assertEqual(results[1]["selection"]["species"], "owl")
         self.assertEqual(results[1]["selection"]["strategy"], "embedding_profile")
         self.assertTrue(results[1]["semantic_ok"])
+
+    def test_compute_animal_bias_measures_hub_animals_from_background(self):
+        """背景文にも高く出る動物ほど大きい偏り値を返す。"""
+        model = FakeModel(
+            {
+                "背景1": [1.0, 0.0],
+                "背景2": [1.0, 0.0],
+            }
+        )
+        profiles = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+        bias_mean, bias_std = pilot.compute_animal_bias(model, profiles, ["背景1", "背景2"])
+
+        self.assertEqual(bias_mean.shape, (2,))
+        self.assertGreater(float(bias_mean[0]), float(bias_mean[1]))
+        self.assertTrue(np.all(bias_std > 0))
+
+    def test_compute_animal_bias_uses_median_deviation_as_floor(self):
+        background = [f"背景{index}" for index in range(16)]
+        model = FakeModel(
+            {
+                sentence: ([1.0, 0.0, 0.0] if index < 8 else [0.8, 0.6, 0.0])
+                for index, sentence in enumerate(background)
+            }
+        )
+        profiles = np.eye(3, dtype=np.float32)
+        scores = pilot.normalized_rows(model.encode(background)) @ profiles.T
+        raw_std = scores.std(axis=0)
+
+        _, bias_std = pilot.compute_animal_bias(model, profiles, background)
+
+        np.testing.assert_allclose(bias_std, np.maximum(raw_std, np.median(raw_std)))
+        self.assertGreater(float(bias_std[2]), float(raw_std[2]))
+
+    def test_score_animals_for_text_demotes_hub_animal(self):
+        """どの入力でも高く出る動物は、偏り補正で1位から外れる。"""
+        model = FakeModel(
+            {
+                "森で鳥が鳴いていた": [0.8, 0.6],
+                "背景1": [1.0, 0.0],
+                "背景2": [1.0, 0.0],
+            }
+        )
+        animals = [{"id": "hub", "label_ja": "ハブ動物"}, {"id": "owl", "label_ja": "フクロウ"}]
+        profiles = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        bias = pilot.compute_animal_bias(model, profiles, ["背景1", "背景2"])
+
+        raw = pilot.score_animals_for_text(model, "森で鳥が鳴いていた", profiles, bias=None)
+        debiased = pilot.score_animals_for_text(model, "森で鳥が鳴いていた", profiles, bias=bias)
+
+        self.assertEqual(animals[int(np.argmax(raw))]["id"], "hub")
+        self.assertEqual(animals[int(np.argmax(debiased))]["id"], "owl")
+
+    def test_profile_candidate_uses_sentence_and_bias_when_provided(self):
+        """語平均では選べない動物を、文全体と偏り補正で選べる。"""
+        model = FakeModel(
+            {
+                "夜の森": [0.0, 1.0],
+                "夜": [1.0, 0.0],
+                "森": [1.0, 0.0],
+                "背景1": [1.0, 0.0],
+                "背景2": [1.0, 0.0],
+            }
+        )
+        extracted = [
+            {
+                "id": "semantic",
+                "role": "development",
+                "kind": "conceptnet",
+                "input": "夜の森",
+                "terms": ["夜", "森"],
+                "embedding_terms": ["夜", "森"],
+            }
+        ]
+        baseline = [
+            {
+                "id": "semantic",
+                "role": "development",
+                "kind": "conceptnet",
+                "input": "夜の森",
+                "candidate": "A",
+                "selection": {
+                    "species": "cat",
+                    "label_ja": "猫",
+                    "evidence_term": "夜",
+                    "strategy": "conceptnet",
+                },
+            }
+        ]
+        fixtures = [{"id": "semantic", "acceptable_animals": ["owl"], "expected_strategy": ["conceptnet"]}]
+        animals = [{"id": "cat", "label_ja": "猫"}, {"id": "owl", "label_ja": "フクロウ"}]
+        profiles = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+        by_terms = pilot.profile_candidate_results(
+            extracted, baseline, fixtures, model, animals, profiles, threshold=0.5, seed=7
+        )
+        by_sentence = pilot.profile_candidate_results(
+            extracted,
+            baseline,
+            fixtures,
+            model,
+            animals,
+            profiles,
+            threshold=0.5,
+            seed=7,
+            query_mode="sentence",
+            background=["背景1", "背景2"],
+        )
+
+        self.assertEqual(by_terms[0]["selection"]["species"], "cat")
+        self.assertEqual(by_sentence[0]["selection"]["species"], "owl")
+        self.assertEqual(by_sentence[0]["selection"]["strategy"], "embedding_profile")
 
     def test_metrics_use_all_inputs_as_denominator(self):
         results = [
