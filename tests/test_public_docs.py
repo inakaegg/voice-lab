@@ -221,9 +221,9 @@ def test_comparison_playback_docs_match_timestamp_implementation() -> None:
     assert "この計算はVADや無音検出を入力に取らない" in spec
     assert "隣接する認識単位の時刻が選択範囲と重なる場合" in spec
     assert "無音だけへ延長する" not in spec
-    assert "通常は漢字1文字" in explainer
+    assert "漢字1文字" in explainer
     assert "開始時刻は最寄りの発話島の開始との距離" in explainer
-    assert "以下の表は `combined` の値" in explainer
+    assert "復唱側とお手本側を合算した集計" in explainer
     assert "59.6%（68/114）" in explainer
     assert "87.7%（100/114）" in explainer
     assert "フレーズ境界を±0.35秒以内" not in explainer
