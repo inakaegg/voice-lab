@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-05
+更新日: 2026-08-07
 
 ## 構成
 
@@ -61,7 +61,7 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` は `ZOOVOICE_ENABLED="1"` を設定している。
 
-Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。`direct` は動物名や鳴き声の直接言及、`pun` は動物名の語が別の語句の一部として現れる語呂合わせである。`conceptnet` は形態素候補と隣接する内容語の連接を使う日本語ConceptNetの1-hopである。どの段でも決まらない入力は `random_fallback` にする。
+Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。`direct` は動物名や鳴き声の直接言及、`pun` は動物名の語が別の語句の一部として現れる語呂合わせである。`conceptnet` は品詞で絞った形態素候補と隣接する2名詞の複合形を使う。日本語ConceptNetの1-hopで動物を選び、どの段でも決まらない入力は `random_fallback` にする。
 
 連想と音声再生が参照する語彙は、リポジトリで追跡する生成物 `services/zoovoice/assets/animal-lexicon.json` を正とする。生成入力はConceptNet 5.7.0のassertions、採否を固定したAI判断の記録、採用音声のmanifestの3つとする。3つの入力のSHA-256は生成物のmetadataへ埋め込む。現在の対象は第1段階の27種である。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
 

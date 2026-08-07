@@ -419,15 +419,18 @@ func tokenizeAssociationTerms(transcript string) []associationTerm {
 }
 
 func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript string) []associationTerm {
-	tokens := jaTokenizer.Tokenize(transcript)
+	tokens := jaTokenizer.Analyze(transcript, tokenizer.Search)
 	type contentToken struct {
 		position int
 		end      int
 		forms    []string
+		emit     bool
+		noun     bool
 	}
 	content := make([]contentToken, 0, len(tokens))
 	for _, token := range tokens {
-		if token.Class == tokenizer.DUMMY || token.Surface == "" || excludedPartOfSpeech(token.POS()) {
+		emit, noun := associationTokenDisposition(token)
+		if !emit && !noun {
 			continue
 		}
 		forms := []string{token.Surface}
@@ -435,12 +438,14 @@ func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript s
 			forms = append(forms, base)
 		}
 		if reading, ok := token.Reading(); ok && reading != "" && reading != "*" {
-			forms = append(forms, reading)
+			forms = append(forms, katakanaToHiragana(reading))
 		}
 		content = append(content, contentToken{
 			position: token.Position,
 			end:      token.Position + len(token.Surface),
 			forms:    uniqueStrings(forms),
+			emit:     emit,
+			noun:     noun,
 		})
 	}
 
@@ -454,38 +459,153 @@ func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript s
 		seen[text] = true
 		terms = append(terms, associationTerm{Text: text, Position: position})
 	}
+	for _, term := range repeatedOnomatopoeiaTerms(tokens) {
+		add(term.Text, term.Position)
+	}
 	for index, token := range content {
-		for _, form := range token.forms {
-			add(form, token.position)
+		if token.emit {
+			for _, form := range token.forms {
+				add(form, token.position)
+			}
 		}
-		for length := 2; length <= 3 && index+length <= len(content); length++ {
-			var compound strings.Builder
-			contiguous := true
-			for offset := 0; offset < length; offset++ {
-				if offset > 0 && content[index+offset-1].end != content[index+offset].position {
-					contiguous = false
-					break
-				}
-				compound.WriteString(content[index+offset].forms[0])
-			}
-			if contiguous {
-				add(compound.String(), token.position)
-			}
+		if index+1 < len(content) && token.emit && token.noun && content[index+1].noun &&
+			token.end == content[index+1].position {
+			add(token.forms[0]+content[index+1].forms[0], token.position)
 		}
 	}
 	return terms
 }
 
-func excludedPartOfSpeech(pos []string) bool {
+func associationTokenDisposition(token tokenizer.Token) (emit bool, noun bool) {
+	if token.Class == tokenizer.DUMMY || token.Surface == "" || token.Surface == "ー" {
+		return false, false
+	}
+	pos := token.POS()
 	if len(pos) == 0 {
-		return true
+		return false, false
+	}
+	if token.Class == tokenizer.UNKNOWN {
+		switch pos[0] {
+		case "記号", "フィラー":
+			return false, false
+		default:
+			return true, acceptedAssociationNounPOS(pos)
+		}
 	}
 	switch pos[0] {
-	case "助詞", "助動詞", "記号", "フィラー", "その他":
+	case "名詞":
+		if associationPOSContains(pos, "非自立", "代名詞") {
+			return false, false
+		}
+		if len(pos) >= 2 && pos[1] == "接尾" {
+			return false, true
+		}
+		accepted := acceptedAssociationNounPOS(pos)
+		return accepted, accepted
+	case "動詞", "形容詞":
+		return !associationPOSContains(pos, "非自立", "接尾"), false
+	case "感動詞":
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+func acceptedAssociationNounPOS(pos []string) bool {
+	if len(pos) < 2 || associationPOSContains(pos, "非自立", "接尾", "代名詞") {
+		return false
+	}
+	switch pos[1] {
+	case "一般", "固有名詞", "サ変接続", "サ変語幹":
 		return true
 	default:
 		return false
 	}
+}
+
+func associationPOSContains(pos []string, excluded ...string) bool {
+	for _, value := range pos {
+		for _, candidate := range excluded {
+			if value == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func repeatedOnomatopoeiaTerms(tokens []tokenizer.Token) []associationTerm {
+	terms := make([]associationTerm, 0, 1)
+	for start := 0; start < len(tokens); {
+		if !onomatopoeiaFragment(tokens[start]) {
+			start++
+			continue
+		}
+		position := tokens[start].Position
+		end := position
+		var surface strings.Builder
+		hasUnknown := false
+		hasSpecialParticle := false
+		index := start
+		for ; index < len(tokens); index++ {
+			token := tokens[index]
+			if !onomatopoeiaFragment(token) || token.Position != end {
+				break
+			}
+			surface.WriteString(token.Surface)
+			end = token.Position + len(token.Surface)
+			hasUnknown = hasUnknown || token.Class == tokenizer.UNKNOWN
+			pos := token.POS()
+			hasSpecialParticle = hasSpecialParticle ||
+				(len(pos) >= 2 && pos[0] == "助詞" && pos[1] == "特殊")
+		}
+		text := surface.String()
+		if hasUnknown && hasSpecialParticle && repeatedKana(text) {
+			terms = append(terms, associationTerm{Text: text, Position: position})
+		}
+		start = index
+	}
+	return terms
+}
+
+func onomatopoeiaFragment(token tokenizer.Token) bool {
+	if token.Class == tokenizer.DUMMY || token.Surface == "" {
+		return false
+	}
+	pos := token.POS()
+	isSpecialParticle := len(pos) >= 2 && pos[0] == "助詞" && pos[1] == "特殊"
+	if token.Class != tokenizer.UNKNOWN && !isSpecialParticle {
+		return false
+	}
+	for _, character := range token.Surface {
+		if character != 'ー' && !unicode.In(character, unicode.Hiragana, unicode.Katakana) {
+			return false
+		}
+	}
+	return true
+}
+
+func repeatedKana(text string) bool {
+	characters := []rune(text)
+	if len(characters) < 4 || len(characters)%2 != 0 {
+		return false
+	}
+	half := len(characters) / 2
+	for index := 0; index < half; index++ {
+		if characters[index] != characters[index+half] {
+			return false
+		}
+	}
+	return true
+}
+
+func katakanaToHiragana(text string) string {
+	return strings.Map(func(character rune) rune {
+		if character >= 'ァ' && character <= 'ヶ' {
+			return character - ('ァ' - 'ぁ')
+		}
+		return character
+	}, text)
 }
 
 func uniqueStrings(values []string) []string {
