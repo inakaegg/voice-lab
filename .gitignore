@@ -26,3 +26,4 @@ build/
 .runpod.env
 .dev.vars
 .wrangler/
+_ai_output/
