@@ -82,7 +82,9 @@ def test_dependabot_automerge_workflow_uses_pinned_metadata_and_safe_merge() -> 
         "dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98"
         in workflow
     )
-    assert "gh pr merge --auto --squash" in workflow
+    # squash mergeはbranchとmainの繋がりをgit graphから消し、取り込み済み判定を壊す。
+    assert "gh pr merge --auto --merge" in workflow
+    assert "--squash" not in workflow
     assert 'gh pr checks --required --watch --fail-fast "$PR_URL"' in workflow
     assert workflow.index("gh pr checks --required") < workflow.index(
         "gh pr merge --auto"
