@@ -36,7 +36,7 @@
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "hono": "^4.12.31",
+    "hono": "^4.12.34",
     "tailwindcss": "^4.3.2",
     "typescript": "^7.0.2",
     "vite": "^8.2.0",
