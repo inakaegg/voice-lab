@@ -1,6 +1,6 @@
 # Voice Lab ドキュメント案内
 
-更新日: 2026-08-05
+更新日: 2026-08-08
 
 Voice LabのSpeakLoopを理解し、変更し、運用するための文書案内です。フォルダ構成ではなく作業目的から辿れるように並べています。ルートREADMEは製品紹介とセットアップ、この案内は詳細文書への入口という役割で分けています。
 
@@ -17,6 +17,7 @@ Voice LabのSpeakLoopを理解し、変更し、運用するための文書案�
 
 - [SpeakLoop仕様](speech-translation/SPEC.md) — 現在の実装仕様の正。分かることは正式route、録音と言語、復唱ASR、採点方式です。
 - [比較再生のケーススタディ](speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — お手本音声と復唱音声を比べて聞く機能の解説。現在の設計、その設計を選んだ理由、評価で分かる範囲の限界が分かります。仕様の正はSPEC.mdです。
+- [Zoovoice連想改善のケーススタディ](speech-translation/ZOOVOICE_ASSOCIATION_CASE_STUDY.md) — 動物連想の改善記録。抽出改善の内容、WordNetとEmbeddingの実測比較、採否の判断が分かります。仕様の正はSPEC.mdです。
 - [ロードマップ](speech-translation/ROADMAP.md) — 今後の改善方針。製品の方向と改善順の候補が分かります。現在の挙動の根拠には使いません。
 - [既知の制限](speech-translation/KNOWN_LIMITS.md) — 現時点で分かっている制限。外部依存、声質変換の品質、ブラウザ差、応答速度が対象です。
 - [未決定事項](speech-translation/OPEN_QUESTIONS.md) — まだ判断していない論点。保留している理由と、判断に必要な検証が分かります。
