@@ -1,14 +1,14 @@
 # 公開UIスタイル方針
 
-更新日: 2026-07-30
+更新日: 2026-08-05
 
 ## 対象と基準
 
-この文書は、Voice Labの公開ポータルとSpeakLoop、管理2画面に適用する。
+この文書は、Voice Labの公開ポータルとSpeakLoop、Zoovoice、管理2画面に適用する。
 
 - `/` のVoice Labポータルを視覚基準にする。
 - 暖かいニュートラル背景、控えめな影、明快な見出しを維持する。少数のアクセント色と十分な余白も維持する。
-- 公開ポータルとSpeakLoopは青を主accentにする。共通の管理操作とfocusも青を使う。
+- SpeakLoopは青、Zoovoiceはamberを製品accentにする。共通の管理操作とfocusは青を使う。
 - 録音ボタンは待機中から赤系で識別し、録音中はより強い赤、波形、`REC`表示を組み合わせる。エラーと削除は録音色より暗い赤と明示的な文言で区別する。
 - SaaSダッシュボード風のカード乱用や、機能と関係のない装飾を避ける。
 - React公開UIは、route単位でTailwind CSS v4とshadcn/uiへ段階移行する。移行済みrouteでは旧`styles.css`を同時に読み込まず、1画面内に2つのスタイル方式を混在させない。
@@ -55,7 +55,8 @@
 
 共通化の起点は [apps/web/src/shared/components.tsx](../apps/web/src/shared/components.tsx) と [styles.css](../src/mo_speech/web/styles.css) とする。
 
-- 再利用する共通部品: `ProductHeader`・`ThemeSettings`・intro・`SampleAudio`・work／flow／generate／result card・record control・notice／status・voice slot。
+- 再利用する共通部品: `ProductHeader`・`ThemeSettings`・intro・`SampleAudio`・work／flow／generate／result card・record control・notice／status・voice slot・`TechStackNote`。
+- 公開3画面（`/`・`/speakloop`・`/zoovoice`）は、画面下部の共通部品 `TechStackNote` で使用技術の一覧を小さく常時表示する。表示は本文より弱いmutedの1行とし、hover依存の表示にしない。共通注意文がある画面では、その直前へ置き注意文の最下部配置を保つ。
 - 同じ役割のボタン、入力、選択、アイコンは表現を揃える。揃える対象は高さ・幅ポリシー・文字・余白・focus・disabled・loadingである。
 - 呼び出し側の局所上書きで同じ部品の見た目を分岐させず、必要なら中央のvariantまたは共通部品を追加する。
 - アイコンは同一のoutline styleを使う。styleの内訳は `fill: none`、`stroke: currentColor`、round linecap／joinである。文字記号や黒い塗り潰しアイコンを代用しない。
@@ -79,15 +80,20 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 
 ### Voice Labポータル
 
-- 上部はブランドと配色設定だけの短いheaderとし、設定を常に右上へ置く。
-- intro-copyの見出しと説明は維持し、その直後にSpeakLoopだけを主製品・主actionとして表示する。
-- `1440x900`、`1024x768`、`390x844`の初期状態では、原則としてSpeakLoopの価値とactionまでを1viewport内に収める。
-- 文字拡大や長文で収まらない場合はスクロールを許容し、固定高による切れや操作不能を起こさない。
+- 上部はブランドと、配色設定の左に置く共通`GitHubRepositoryLink`だけの短いheaderとし、設定を常に右上へ置く。
+- `GitHubRepositoryLink`は公開リポジトリと動作動画確認用のlinkとする。
+- intro-copyの見出しと説明は維持し、その直後に `01 SpeakLoop` と `02 Zoovoice` を同格の製品行として番号順に表示する。
+- 各製品行は製品行の領域全体を対応routeへのlinkとする。2製品を囲む外側カード全体はlinkにしない。
+- Zoovoiceの製品行は、公開configの `enabled` が `true` のときだけ表示する。
+- Zoovoiceの製品行には、製品名の横へ `β版` バッジを表示する。SpeakLoopには付けない。
+- `1440x900` と `1024x768` の初期状態では、2製品の説明とactionまでを1viewport内に収める。
+- `390x844` では縦スクロールを許容し、スクロール後に両製品へ到達できるようにする。
+- どの幅でも横overflow、固定高による切れ、操作不能を起こさない。
 - モバイルでは見出しを読める大きさのまま段階的に縮め、カードの装飾余白と二重paddingを先に減らす。
-- カード全体を曖昧なclick targetにせず、各製品の説明と明示的なlink actionをセマンティックに構成する。
 
 ### SpeakLoop
 
+- headerの配色設定の左へ、Voice Labポータルと共通の`GitHubRepositoryLink`を表示する。目的は公開リポジトリと動作動画の確認である。
 - 現在は日本語話者向けとし、公開UIの学習言語は `🇺🇸 English`、`🇨🇳 中文` の順で2つだけを表示する。初回の既定値と、旧保存値や未対応値のfallbackは `en-US` とする。現在対応中の保存値はそのまま復元する。
 - コンパクトな録音ボタンのマイクは、ボタン内に収まるoutline SVGで表示する。大きい録音ボタン向けの疑似要素を縮小流用して円外や操作文言へはみ出させない。
 - prompt未生成時は録音Stepを横長1枚で表示する。
@@ -108,6 +114,29 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 - 「聞こえた言葉」の差分は単語・文字の脱落だけを `_` で示し、ASRが付けなかった句読点や記号は発音誤りとして表示しない。差分リンクは対応するフレーズ区間がある場合だけ操作可能にし、クリック時はそのフレーズの先頭からお手本と復唱を比較再生する。
 - 非同期更新で録音対象、結果、本文、スクロール位置を不用意に動かさない。
 
+### Zoovoice
+
+この節は公開UIの契約とする。実装は現在のコードがこの契約へそろっている。実画面の確認結果は各変更の報告を正とし、本書を確認済みの根拠にはしない。
+
+- Zoovoiceはβ版として公開するため、ヘッダーのタイトル横へ `β版` バッジを表示する。バッジは既存tokenのmuted配色を使い、タイトルより弱くする。
+- 通常操作はorb型の録音操作・アニマル度スライダー・結果の再生／ダウンロードだけとする。調整可能な設定はアニマル度スライダーだけとする。
+- 通常の生成ボタンと録り直しボタンは置かない。録音の停止を送信の起点とする。
+- 手動停止または60秒の自動停止で確定した録音は、停止後すぐ1回だけ自動送信して生成する。1回の録音で自動送信するrequestは1回だけとする。
+- 録音中だけorbの近くに取消ボタン（X）を表示する。取消した音声は送信しない。
+- 500ms未満の録音は送信しない。短すぎたことを伝えて待機状態へ戻す。
+- Turnstileのscriptとwidgetは、config取得後のページ表示時から読み込む。調整可能な設定ではなく、生成前に完了させる検証として扱う。
+- 停止後にTurnstileが未完了の場合はtoken待ちを明示し、orbを無効にする。tokenはcomposeごとに検証し、成功・失敗の後は次のtokenへresetする。
+- 追加送信は、retry可能な失敗の後に利用者が「もう一度生成」を押した場合だけとする。retry不能な失敗ではこのボタンを表示しない。
+- アニマル度は録音開始時の値を初回生成に使う。retry可能なerrorの後の「もう一度生成」には現在の値を使う。
+- 生成成功時は結果音声の自動再生を試みる。利用者は結果を再生・ダウンロードできる。
+- 手動の動物選択、preset、feel lucky、冒頭・間・末尾の調整controlは公開UIへ出さない。
+- 結果には選ばれた動物、根拠語、選択方式、ASRテキストを表示する。
+- 選択方式は4段の順に `動物名・鳴き声の直接言及`、`語呂合わせ`、`言葉の意味のつながり`、`ランダム選択` と表示する。
+- 根拠語がない場合は「該当なし」と示し、空欄にしない。
+- 処理中・token待ち・取消直後・短すぎた録音・Turnstile失敗・エラー・ランダムfallbackの状態を明示する。ランダムfallbackでは根拠語がないことを短く示す。
+- `1440x900` と `1024x768` は、初期状態と結果表示中の両方で主要領域を1viewport内に収める。対象は録音・アニマル度・Turnstile検証・結果の4領域とする。
+- `390x844` は1列の縦スクロールを許容する。どの幅でも横方向のoverflowを起こさない。
+
 ## レスポンシブ契約
 
 - `820px以下`: 1列にする。設定はヘッダー右上、authは必要時だけ次段に置く。
@@ -127,6 +156,19 @@ SpeakLoop:
 - 結果
 - 保存済み結果
 - error
+
+Zoovoice:
+
+- idle
+- recording（取消ボタン表示中）
+- 取消直後（送信しない）
+- 500ms未満で送信しなかった直後
+- token待ち（orb無効）
+- 生成中
+- 生成成功（自動再生）
+- ランダムfallback
+- retry可能なerror（「もう一度生成」表示）
+- retry不能なerror
 
 共通:
 
@@ -175,6 +217,9 @@ hidden要素のための空列を残さない。非同期表示の出入りで�
 - `/speakloop`
 - `/admin`
 - `/speakloop/admin`
+- `/zoovoice`（`ZOOVOICE_ENABLED=1` を渡したWrangler localで確認する）
+
+Zoovoiceの確認にはFastAPIを使わない。Worker localのroute、config API、Turnstile test keyを通した画面で確認する。
 
 基準幅:
 

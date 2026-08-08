@@ -1,6 +1,6 @@
 # 公開デモのデータ取扱い境界
 
-更新日: 2026-07-30
+更新日: 2026-08-04
 
 この文書は実装上のデータフローと保存境界を固定する技術文書である。利用者向けの案内は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とし、公開画面の `/privacy` から同じ内容を確認できるようにする。
 
@@ -12,6 +12,10 @@
 | Google OAuth | OAuth認証に必要な情報 | 公開生成APIと管理画面のログイン |
 | OpenAI | 対象機能の入力音声またはテキスト | ASR、翻訳、テキスト加工、TTS |
 | RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声 | FunASR、Seed-VC |
+| Cloudflare Turnstile | Zoovoiceの検証tokenとclient IP | 自動化された大量利用の抑止 |
+| Google Cloud Run | Zoovoiceの録音音声とアニマル度 | 日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成 |
+
+最後の2行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。公開環境の配備はこの値を設定している。
 
 ブラウザへOpenAI・RunPodのAPI keyを渡さない。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
 
@@ -37,6 +41,62 @@
 RunPod requestは入力音声base64と台本をapplication logやerrorへ含めない。cancel、failure、timeout、malformed responseでもraw payloadを文字列化しない。これはVoice Lab application logの契約であり、RunPod platform側のjob input/result/log保持を削除する保証ではない。
 
 Voice LabはRunPod requestへoperation別の独自policyを付けず、RunPodの既定でjobを実行する。Cloudflare公開版は音声をVoice Labの履歴へ保存しない。RunPod側の一時処理・保持は同社のサービス条件に従うため、Voice Labが保持ゼロを保証する表現はしない。これは外部送信の説明事項であり、operation別policyの設定を公開停止条件にはしない。
+
+## Zoovoiceのデータ境界
+
+Zoovoiceは `ZOOVOICE_ENABLED=1` の配備だけで公開routeとAPIを提供する。公開環境の配備はこの値を設定している。この節は有効化した配備でのデータ境界を示す。
+
+この節が示すASR、動物の自動連想、応答metadataはリポジトリの現在のコードに実装済みである。Cloud Runとproduction Workerへのdeployも完了しており、公開環境でZoovoiceは有効である。機能仕様は [SPEC](../speech-translation/SPEC.md) を正とする。
+
+### 用語
+
+- アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
+- 動物の自動連想とは、ASR本文から動物1種を自動で選ぶ処理を指す。
+- 根拠語とは、その選択に使ったASR本文中の語を指す。
+- 連想metadataとは、選ばれた動物と根拠語と選択方式を指す。random fallbackではその理由も含む。
+
+### 送信経路と処理
+
+`/zoovoice` のページは、config取得後のページ表示時からTurnstileのscriptとwidgetをCloudflareから読み込む。録音しない訪問でも、この読み込みでブラウザからCloudflareへの接触が起きる。
+
+compose用の録音とアニマル度は、ブラウザからCloudflare Workerへ送る。送信は録音の手動停止または60秒の自動停止の直後に、自動で1回だけ行う。録音中に取消した音声と500ms未満の録音はWorkerへ送らない。追加の送信は、retry可能な失敗の後に利用者が「もう一度生成」を押した場合だけ発生する。
+
+Workerは受け取った録音とアニマル度をGoogle Cloud Runへ一時送信する。Cloud Runは日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成を担当する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。
+
+productionのWorkerは、専用invoker service accountのkeyで署名したJWTをGoogleのtoken endpointで短期ID tokenへ交換し、そのtokenを付けてCloud Runを呼ぶ。ID tokenはisolate内のmemoryだけへ短期cacheし、KV・D1・R2へ保存しない。service account key、JWT、ID tokenは応答とlogへ含めない。この認証は実装済みであり、実keyのWorker secret登録とCloud Runへのdeployも完了している。deploy済みのCloud Runが認証なしのrequestを403で拒否することは、実環境で確認済みである。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す。
+
+WorkerはTurnstileをserver-sideで検証する。検証はcompose requestごとに行う。ブラウザは使ったtokenを成功・失敗の後にresetし、次のtokenを取得する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesとアニマル度の設定JSONだけである。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。
+
+入力上限と利用上限は合成前に判定する。音声ファイルは10MB以下、設定JSONは64KB以下とする。利用上限はUTC日次100件、UTC月次1,200件とする。この上限は利用者ごとではなく、Zoovoice全体の合計へ適用する。
+
+次のいずれかに当たる場合、WorkerはCloud Runを呼ばない。
+
+- Turnstileの検証に失敗した
+- Cloud Run向けID tokenを取得できなかった
+- D1へ到達できない、またはcounterを更新できなかった
+- 日次または月次の上限を超えた
+
+ASR本文、根拠語、録音、生成音声は応答の生成に必要な間だけ扱う。これらをapplication log、D1、R2、Voice Labの履歴へ書かない。合成応答は、ASR本文と連想metadataを送信元と同じブラウザへ返す。
+
+合成requestの処理でGo APIのサービスログへ記録するのは、次の項目である。
+
+- 処理段階と状態、失敗時のエラーコード
+- 各段階の経過時間
+- HTTPのmethodとpath、応答status
+- 選んだ種IDと選択方式
+- 入力と出力のbyte数、アニマル度の値
+- 入力音声と出力音声の長さ、発話の合計時間
+- 無音判定の最小秒数、無音区間数、挿入数
+
+このほか、プロセスの起動時には待受port、利用可能な動物数、timeoutの設定秒数を記録する。起動に失敗した理由も記録する。
+
+いずれの項目も音声や本文の内容そのものを含まない。録音と生成音声の内容、ASR本文、根拠語はサービスログへ書かない。
+
+D1へ音声と入力本文を保存しない。保存するのはZoovoice共通の日次・月次counterと更新時刻だけである。Cloudflare公開版は入力音声と生成音声をVoice Labの履歴として保存しない。ただしCloudflareとGoogleの側で起こる一時処理やlog保持がゼロだとは保証しない。
+
+動物一覧はCloud Runを起動せず、Worker Static Assetsの静的JSONから返す。この経路では音声データを扱わない。
+
+Cloud Runのregionは `us-central1` とする。privateなCloud Run serviceへのdeployは完了している。公開範囲を変える前に本書と [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を確認する。
 
 ## 保持期間、削除と問い合わせ
 

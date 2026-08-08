@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [portal, speakloop, privacy, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, privacyHtml] = await Promise.all([
+const [portal, speakloop, privacy, shared, styles, worker, pkg, viteConfig, portalHtml, speakloopHtml, privacyHtml, githubMarkBlack, githubMarkWhite] = await Promise.all([
   read("apps/web/src/portal/main.tsx"), read("apps/web/src/speakloop/main.tsx"),
   read("apps/web/src/privacy/main.tsx"),
   read("apps/web/src/shared/components.tsx"),
   read("src/mo_speech/web/styles.css"),
   read("cloudflare/worker.mjs"), read("package.json"), read("apps/web/vite.config.ts"),
   read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/privacy.html"),
+  read("apps/web/public/github-invertocat-black.svg"), read("apps/web/public/github-invertocat-white.svg"),
 ]);
 
 test("public portal, SpeakLoop, and privacy policy are React TypeScript entries", () => {
@@ -50,6 +52,30 @@ test("React layouts include responsive product and workflow structure", () => {
   assert.match(speakloop, /react-practice-flow/);
   assert.doesNotMatch(speakloop, /<SampleAudio/);
   assert.doesNotMatch(speakloop, /音声履歴を保存/);
+});
+
+test("portal links to the GitHub repository with hover and focus help", () => {
+  assert.match(portal, /<GitHubRepositoryLink tooltipId="portal-github-tooltip" \/>/);
+  assert.match(shared, /src="\/react\/github-invertocat-black\.svg"[\s\S]*src="\/react\/github-invertocat-white\.svg"/);
+  assert.match(githubMarkBlack, /viewBox="0 0 98 96"[\s\S]*fill="black"/);
+  assert.match(githubMarkWhite, /viewBox="0 0 98 96"[\s\S]*fill="white"/);
+  assert.equal(createHash("sha256").update(githubMarkBlack).digest("hex"), "693d7abe6f899646cc2e96856723b45e95f71885a54910b2749f6decdf7e1ee1");
+  assert.equal(createHash("sha256").update(githubMarkWhite).digest("hex"), "ccd84c89b1056345608fc3489357f8acc7397e49a3cdc2d418b6c8016911d47b");
+  assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
+  assert.match(shared, /target="_blank"/);
+  assert.match(shared, /rel="noopener noreferrer"/);
+  assert.match(shared, /aria-describedby=\{tooltipId\}/);
+  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*実際の動作を動画で確認できます/);
+});
+
+test("SpeakLoop reuses the portal GitHub repository link", () => {
+  assert.match(shared, /export function GitHubRepositoryLink/);
+  assert.match(shared, /src="\/react\/github-invertocat-black\.svg"[\s\S]*src="\/react\/github-invertocat-white\.svg"/);
+  assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
+  assert.match(shared, /target="_blank"/);
+  assert.match(shared, /rel="noopener noreferrer"/);
+  assert.match(shared, /実際の動作を動画で確認できます/);
+  assert.match(speakloop, /<ProductHeader[\s\S]*githubLink/);
 });
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {

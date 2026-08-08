@@ -1,5 +1,5 @@
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader } from "../shared/components";
+import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
 
 activateCompactLayout();
 
@@ -30,7 +30,7 @@ function CancelRecordingButton({ id }: { id: string }) {
 
 function SpeakLoop() {
   return <PageShell className="practice-shell react-practice-shell">
-    <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" />
+    <ProductHeader product="SpeakLoop" title="言いたいことで発音練習" githubLink />
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>自分が言いたい文章だから、練習が続く。</h2><p>母国語で話すと、学習言語のお手本を生成します。聞いて、まねして、発音を比較できます。</p></div>
     </section>
@@ -67,6 +67,7 @@ function SpeakLoop() {
       </div>
     </section>
     <div id="practice-progress" className="practice-progress" hidden><span id="practice-progress-fill"/></div><p id="practice-status" className="practice-status" role="status" aria-live="polite" hidden/><p id="practice-error" className="practice-error" hidden/>
+    <TechStackNote className="mt-auto" items={["React", "Cloudflare Workers", "OpenAI API", "RunPod Serverless", "FunASR", "Seed-VC"]} />
     <PrivacyNotice />
   </PageShell>;
 }

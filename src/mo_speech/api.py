@@ -9,11 +9,13 @@ import re
 import shutil
 import unicodedata
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from threading import Lock
 from time import perf_counter
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -88,6 +90,7 @@ from .text_display import create_user_display_text
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
 LOGGER = logging.getLogger("mo_speech")
+JST = ZoneInfo("Asia/Tokyo")
 _HAN_CODEPOINT_RANGES = (
     (0x3400, 0x4DBF),
     (0x4E00, 0x9FFF),
@@ -2198,7 +2201,7 @@ def create_app(
     async def create_text_to_speech_job(
         text: Annotated[str, Form()],
         target_language: Annotated[str, Form()],
-        tts_backend: Annotated[str, Form()] = "google_translate",
+        tts_backend: Annotated[str, Form()] = "openai",
     ) -> dict[str, object]:
         try:
             return text_tts_job_store.start(text=text, target_language=target_language, tts_backend=tts_backend)

@@ -523,13 +523,6 @@ function syncTtsBackendAvailability() {
       ? textTtsBackends
       : [
           {
-            id: "google_translate",
-            label: "Google Translate TTS endpoint",
-            available: true,
-            reason: "",
-            settings: { supported_target_languages: ["id-ID", "ja-JP", "zh-CN", "en-US"] },
-          },
-          {
             id: "openai",
             label: "OpenAI TTS API",
             available: false,
@@ -555,10 +548,12 @@ function syncTtsBackendAvailability() {
     ttsBackendSelect.value = currentValue;
   } else if (availableBackends.length > 0) {
     ttsBackendSelect.value = availableBackends[0].id;
+  } else if (fallbackBackends.length > 0) {
+    ttsBackendSelect.value = fallbackBackends[0].id;
   }
 
   const backend = fallbackBackends.find((item) => item.id === ttsBackendSelect.value);
-  const supportedLanguages = backend?.settings?.supported_target_languages || ["id-ID", "ja-JP", "zh-CN", "en-US"];
+  const supportedLanguages = backend?.settings?.supported_target_languages || ["auto", ...openAiTargetLanguages];
   const previousLanguage = ttsTargetLanguageSelect.value;
   ttsTargetLanguageSelect.replaceChildren(
     ...supportedLanguages.map((language) => new Option(languageLabels[language] || language, language)),
@@ -573,9 +568,7 @@ function syncTtsBackendAvailability() {
   const selected = selectedTtsBackendOption();
   ttsBackendHint.textContent = selected?.disabled
     ? selected.dataset.reason || ""
-    : ttsBackendSelect.value === "google_translate"
-      ? "読み上げ言語を明示して音声を生成します。"
-      : "OpenAI TTS APIで読み上げ音声を生成します。";
+    : "OpenAI TTS APIで読み上げ音声を生成します。";
 }
 
 function syncVoiceBackendHint() {

@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC_SENTENCE_COMMA_LIMIT = 3
 _INLINE_CODE = re.compile(r"`[^`]*`")
 _MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MARKDOWN_LINK_TARGET = re.compile(r"\[[^\]]*\]\(\s*([^)\s]+)")
 _BARE_URL = re.compile(r"https?://\S+")
 _NEW_BLOCK = re.compile(r"^(?:[-*+]\s|\d+\.\s)")
 
@@ -134,6 +135,33 @@ def test_public_docs_carry_an_update_date_near_the_top() -> None:
     assert not missing, "冒頭5行に更新日行がないdocs:\n" + "\n".join(missing)
 
 
+def iter_local_link_targets(markdown: str, base: Path):
+    """Markdown本文のlinkのうち、リポジトリ内を指す相対linkを(記述, 解決後path)で返す。"""
+    for target in _MARKDOWN_LINK_TARGET.findall(markdown):
+        path_part = target.split("#", 1)[0]
+        if not path_part or "://" in path_part or path_part.startswith("mailto:"):
+            continue
+        yield path_part, (base / path_part).resolve()
+
+
+def test_docs_index_is_the_entry_point_for_every_public_doc() -> None:
+    # docs/README.mdをdocs全体の入口として機械検査する。本文の文言ではなくlink先の網羅だけを固定する。
+    docs_root = ROOT / "docs"
+    index_path = docs_root / "README.md"
+    index = index_path.read_text(encoding="utf-8")
+    link_targets = list(iter_local_link_targets(index, index_path.parent))
+
+    broken = sorted(raw for raw, resolved in link_targets if not resolved.exists())
+    assert not broken, "docs/README.mdのlink先が存在しない:\n" + "\n".join(broken)
+
+    linked = {resolved for _, resolved in link_targets}
+    expected = {path.resolve() for path in docs_root.rglob("*.md")} - {index_path.resolve()}
+    missing = sorted(str(path.relative_to(ROOT)) for path in expected - linked)
+    assert not missing, "docs/README.mdから辿れないdocs:\n" + "\n".join(missing)
+
+    assert "docs/README.md" in read_text("README.md")
+
+
 def test_readme_presents_speakloop_without_research_branding() -> None:
     readme = read_text("README.md")
 
@@ -179,6 +207,30 @@ def test_current_spec_limits_own_voice_to_the_same_recording_request() -> None:
     assert "タブ音声" in spec
     assert "利用条件" in spec
     assert "プライバシー" in spec
+
+
+def test_comparison_playback_docs_match_timestamp_implementation() -> None:
+    spec = read_text("docs/speech-translation/SPEC.md")
+    explainer = read_text("docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md")
+    implementation = read_text("src/mo_speech/practice_llm.py")
+
+    assert "VADスナップはフレーズ境界を入力に取らない" in spec
+    assert "重なりが最大の1つの島だけ" in spec
+    assert "余白を含む再生区間" in spec
+    assert "余分なtokenを切り捨てて対応付けることはしない" in spec
+    assert "この計算はVADや無音検出を入力に取らない" in spec
+    assert "隣接する認識単位の時刻が選択範囲と重なる場合" in spec
+    assert "無音だけへ延長する" not in spec
+    assert "漢字1文字" in explainer
+    assert "開始時刻は最寄りの発話島の開始との距離" in explainer
+    assert "復唱側とお手本側を合算した集計" in explainer
+    assert "59.6%（68/114）" in explainer
+    assert "87.7%（100/114）" in explainer
+    assert "フレーズ境界を±0.35秒以内" not in explainer
+    assert "このスクリプトが比較するのは2つの構成" in explainer
+    assert "| スナップだけ足す |" not in explainer
+    assert "| fa-zhだけ |" not in explainer
+    assert "無音側だけへ延長" not in implementation
 
 
 def test_normal_ci_workflow_covers_python_node_and_static_checks() -> None:
@@ -316,8 +368,11 @@ def test_frontend_build_emits_and_packages_bundled_dependency_licenses() -> None
     assert "ensure_frontend_license_notices.mjs" in package_json
     assert '"web/react/assets/*.md"' in pyproject
     assert '"web/react/*.ico"' in pyproject
+    assert '"web/react/*.svg"' in pyproject
     assert '"mo_speech/web/react/assets/licenses.md"' in wheel_verifier
     assert '"mo_speech/web/react/favicon.ico"' in wheel_verifier
+    assert '"mo_speech/web/react/github-invertocat-black.svg"' in wheel_verifier
+    assert '"mo_speech/web/react/github-invertocat-white.svg"' in wheel_verifier
     assert "opencc-js - 1.4.1 (MIT AND Apache-2.0)" in generated_licenses
     assert "opencc-data" in generated_licenses
     assert "Apache License" in generated_licenses
@@ -364,9 +419,7 @@ def test_public_summaries_focus_on_speakloop_while_technical_boundaries_remain()
 
 def test_current_state_docs_match_the_deployed_production_boundary() -> None:
     for relative_path in (
-        "README.md",
         "docs/deployment/CLOUDFLARE.md",
-        "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/speech-translation/SPEC.md",
     ):
@@ -374,6 +427,38 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "production" in document, relative_path
         assert "本番未deploy" not in document, relative_path
         assert "production公開環境へ反映済み" in document, relative_path
+
+    for relative_path in (
+        "README.md",
+        "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
+        "docs/deployment/ARCHITECTURE.md",
+        "docs/speech-translation/SPEC.md",
+    ):
+        document = read_text(relative_path)
+        assert "β版" in document, relative_path
+        assert "production未反映" in document, relative_path
+        assert "merge後に" in document, relative_path
+        assert "deploy後smoke" in document, relative_path
+
+    readme = read_text("README.md")
+    assert "production公開環境にはmerge済みの版を反映済み" in readme
+    assert "Zoovoiceのβ表示" in readme
+    assert "使用技術表示" in readme
+    assert "SpeakLoopのGitHub導線" in readme
+    assert "production未反映" in readme
+    assert "merge後にdeployとdeploy後smokeを実施します" in readme
+
+    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
+    assert "production公開環境にはmerge済みの版を反映済み" in roadmap
+    assert "本branchのUI変更" in roadmap
+    assert "Zoovoiceのβ表示" in roadmap
+    assert "使用技術表示" in roadmap
+    assert "SpeakLoopのGitHub導線" in roadmap
+    assert "production未反映" in roadmap
+    assert "merge後にdeployとdeploy後smokeを実施する" in roadmap
+    assert "Zoovoiceのproduction有効化とWorker deployは完了している" in roadmap
+    assert "Zoovoiceをproductionへ有効化" in roadmap
+    assert "公開route・公開Zoovoice API・Turnstile表示のsmokeを確認した" in roadmap
 
 
 def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> None:

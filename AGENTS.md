@@ -4,8 +4,9 @@
 
 ## プロジェクトの目的
 
-- 発音練習Webアプリ「SpeakLoop」を中心とするVoice Labを開発する。
+- 発音練習Webアプリ「SpeakLoop」を中心とするVoice Labを開発する。Voice Labには動物鳴き声合成の「Zoovoice」（β版として公開中）も含む。
 - SpeakLoopは、母語の発話から学習言語（英語・中国語）のお手本文とお手本音声を生成し、復唱をtimestamp付きASRで比較・採点する。
+- Zoovoiceは、録音した日本語の発話から動物を1種連想し、その鳴き声を発話のすき間へ重ねる。日本語ASR・動物連想・音声合成はprivateなGoogle Cloud Run上のGoサービスで実行する。
 - GPU依存処理（中国語ASR・声質変換など）はprivateなRunPod Serverlessで実行し、公開経路はCloudflare Workerが担う。
 - 初期に実装した音声→音声翻訳と実験画面は削除済みである。SpeakLoopが使うASR・翻訳・TTSのproviderは共有部品として維持する。
 - 大きいモデルを扱うため、モデル本体とキャッシュをリポジトリ外の保存先に分離する。
@@ -107,12 +108,14 @@ npm test
 npm run check:js
 npm run check:worker
 npm run check:web
+cd services/zoovoice && go vet ./... && go test ./...
 ```
 
 - Pythonの全単体・APIテストは `python3 -m pytest` を正とする。
 - Cloudflare WorkerとWeb静的検査は `npm test` と `npm run check:js` を正とする。
 - Cloudflare Workerの型検査とdry-run bundleは `npm run check:worker` を正とする。
 - React公開画面の型検査とproduction buildは `npm run check:web` を正とする。
+- Zoovoice Goサービスの静的検査とテストは `services/zoovoice/` で `go vet ./...` と `go test ./...` を実行する。
 - 新しいworktreeでは先に `npm ci` を実行する。未実行だと `npm run check:web` が同梱ライセンスの生成でファイル不在エラーになり、原因が分かりにくい。
 - RunPod Docker buildとGPU smokeは通常CIへ入れず、ローカル検証通過後に手動workflowで実行する。
 - UI変更は上記に加え、可能なら実ブラウザでデスクトップ幅とモバイル幅を確認する。実行できない場合は未確認範囲として報告する。

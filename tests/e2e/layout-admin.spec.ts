@@ -35,6 +35,15 @@ for (const route of adminRoutes) {
   });
 }
 
+test("admin identifies OpenAI when text TTS is not configured", async ({ page }) => {
+  await page.goto("/admin");
+  const backendSelect = page.locator("#tts_backend");
+  await expect(backendSelect).toBeDisabled();
+  await expect(backendSelect).toHaveValue("openai");
+  await expect(backendSelect.locator("option")).toHaveText("OpenAI TTS API（未設定）");
+  await expect(page.locator("#tts-backend-hint")).toHaveText("OPENAI_API_KEY が設定されていません。");
+});
+
 test("admin loads the public user list only after operations settings open", async ({ page }, testInfo) => {
   let publicUserRequests = 0;
   await page.route("**/api/public-users*", async (route) => {

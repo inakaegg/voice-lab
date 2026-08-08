@@ -100,7 +100,7 @@ def _handle_text_tts(payload: dict[str, object], handler_started: float) -> dict
     if text.strip() == "":
         raise ValueError("text is required")
     target_language = str(payload.get("target_language", "ja-JP"))
-    tts_backend = str(payload.get("tts_backend", "google_translate"))
+    tts_backend = str(payload.get("tts_backend", "openai"))
 
     provider, providers_load_ms = _text_tts_provider(tts_backend)
     started = perf_counter()
