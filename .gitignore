@@ -27,3 +27,6 @@ build/
 .dev.vars
 .wrangler/
 _ai_output/
+
+.concept-watch/*
+!.concept-watch/concept-watch.conf
