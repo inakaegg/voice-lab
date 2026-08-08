@@ -43,10 +43,19 @@ func loadRuntimeDependencies(
 	if err != nil {
 		return nil, err
 	}
-	associator, err := newAssociationEngine(lexiconPath, store)
+	engine, err := newAssociationEngine(lexiconPath, store)
 	if err != nil {
 		store.Close()
 		return nil, err
+	}
+	associator := animalAssociator(engine)
+	embedding, err := embeddingAssociatorFromEnv(runner)
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+	if embedding != nil {
+		associator = &embeddingFallbackAssociator{primary: engine, embedding: embedding}
 	}
 	return &runtimeDependencies{
 		transcriber: activeTranscriber,

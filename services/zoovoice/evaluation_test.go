@@ -4,7 +4,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,16 +11,6 @@ import (
 
 	"github.com/inakaegg/voice-lab/services/zoovoice/internal/conceptindex"
 )
-
-type associationFixture struct {
-	ID                 string   `json:"id"`
-	Role               string   `json:"role"`
-	Kind               string   `json:"kind"`
-	Input              string   `json:"input"`
-	ExpectedStrategies []string `json:"expected_strategy"`
-	AcceptableAnimals  []string `json:"acceptable_animals"`
-	ExpectedEvidence   *string  `json:"expected_evidence,omitempty"`
-}
 
 func TestPortableAssociationEvaluation(t *testing.T) {
 	store := buildPortableEvaluationIndex(t)
@@ -62,10 +51,23 @@ func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, strictCon
 	}
 	fixtures := loadAssociationFixtures(t)
 	animals := fullFixtureAnimals(t)
+	results, err := evaluateAssociationFixtures(
+		context.Background(),
+		engine,
+		fixtures,
+		animals,
+		candidateA,
+		nil,
+		7,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	counts := map[string]int{}
-	for _, fixture := range fixtures {
-		selection, selectionErr := engine.Select(context.Background(), fixture.Input, animals, rand.New(rand.NewSource(7)))
+	for index, fixture := range fixtures {
+		result := results[index]
+		selection, selectionErr := result.selectionAndError()
 		contractOK := associationFixtureContractMatches(fixture, selection, selectionErr)
 		if (strictConceptNet || fixture.Kind != "conceptnet") && !contractOK {
 			t.Errorf(
@@ -131,29 +133,6 @@ func runAssociationEvaluation(t *testing.T, store *conceptindex.Store, strictCon
 			t.Errorf("%s = %d, want >= %d (all counts: %#v)", key, counts[key], minimum, counts)
 		}
 	}
-}
-
-func associationFixtureContractMatches(
-	fixture associationFixture,
-	selection AnimalSelection,
-	selectionErr error,
-) bool {
-	if containsString(fixture.ExpectedStrategies, "error") {
-		return selectionErr != nil
-	}
-	if selectionErr != nil || !containsString(fixture.ExpectedStrategies, string(selection.Strategy)) {
-		return false
-	}
-	if len(fixture.AcceptableAnimals) > 0 && !containsString(fixture.AcceptableAnimals, selection.Species) {
-		return false
-	}
-	if fixture.ExpectedEvidence != nil && selection.EvidenceTerm != *fixture.ExpectedEvidence {
-		return false
-	}
-	if selection.Strategy == strategyRandom {
-		return selection.EvidenceTerm == "" && selection.FallbackReason == fallbackNoMatch
-	}
-	return selection.EvidenceTerm != "" && selection.FallbackReason == ""
 }
 
 func buildPortableEvaluationIndex(t *testing.T) *conceptindex.Store {

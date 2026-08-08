@@ -29,11 +29,25 @@ const (
 )
 
 type AnimalSelection struct {
-	Species        string
-	LabelJA        string
-	EvidenceTerm   string
-	Strategy       SelectionStrategy
-	FallbackReason string
+	Species        string            `json:"species"`
+	LabelJA        string            `json:"label_ja"`
+	EvidenceTerm   string            `json:"evidence_term,omitempty"`
+	Strategy       SelectionStrategy `json:"strategy"`
+	FallbackReason string            `json:"fallback_reason,omitempty"`
+	Score          *SelectionScore   `json:"score,omitempty"`
+}
+
+type SelectionScore struct {
+	Total         float64             `json:"total"`
+	Contributions []ScoreContribution `json:"contributions"`
+}
+
+type ScoreContribution struct {
+	Concept    string  `json:"concept"`
+	Relation   string  `json:"relation"`
+	Weight     float64 `json:"weight"`
+	Multiplier float64 `json:"multiplier"`
+	Weighted   float64 `json:"weighted"`
 }
 
 type animalAssociator interface {
@@ -51,8 +65,9 @@ type associationEngine struct {
 }
 
 type associationTerm struct {
-	Text     string
-	Position int
+	Text              string
+	Position          int
+	EmbeddingEligible bool
 }
 
 type transcriptTokenSpan struct {
@@ -92,6 +107,17 @@ func (engine *associationEngine) Select(
 	animals []availableAnimal,
 	rng *rand.Rand,
 ) (AnimalSelection, error) {
+	return engine.selectWithExpansions(ctx, transcript, animals, rng, nil, false)
+}
+
+func (engine *associationEngine) selectWithExpansions(
+	ctx context.Context,
+	transcript string,
+	animals []availableAnimal,
+	rng *rand.Rand,
+	expansions []string,
+	onlyOnFallback bool,
+) (AnimalSelection, error) {
 	transcript = strings.TrimSpace(transcript)
 	if transcript == "" {
 		return AnimalSelection{}, &APIError{
@@ -116,22 +142,33 @@ func (engine *associationEngine) Select(
 		return literal, nil
 	}
 
-	queryTerms := make([]string, 0, len(terms))
-	positions := make(map[string]int, len(terms))
+	queryTerms := make([]string, 0, len(terms)+len(expansions))
+	positions := make(map[string]int, len(terms)+len(expansions))
 	for _, term := range terms {
 		queryTerms = append(queryTerms, term.Text)
 		positions[term.Text] = term.Position
 	}
-	edges, err := engine.store.Candidates(ctx, queryTerms)
-	if err != nil {
-		return AnimalSelection{}, &APIError{
-			Status:  500,
-			Code:    "association_failed",
-			Message: "動物を選べませんでした。",
-			Err:     err,
+	if onlyOnFallback {
+		if concept, ok, err := engine.selectConcept(ctx, queryTerms, positions, available); err != nil {
+			return AnimalSelection{}, err
+		} else if ok {
+			return concept, nil
 		}
 	}
-	if concept, ok := selectConceptCandidate(edges, positions, available); ok {
+	for index, expansion := range uniqueStrings(expansions) {
+		expansion = strings.TrimSpace(expansion)
+		if expansion == "" {
+			continue
+		}
+		if _, exists := positions[expansion]; exists {
+			continue
+		}
+		queryTerms = append(queryTerms, expansion)
+		positions[expansion] = len(transcript) + index + 1
+	}
+	if concept, ok, err := engine.selectConcept(ctx, queryTerms, positions, available); err != nil {
+		return AnimalSelection{}, err
+	} else if ok {
 		return concept, nil
 	}
 
@@ -142,6 +179,25 @@ func (engine *associationEngine) Select(
 		Strategy:       strategyRandom,
 		FallbackReason: fallbackNoMatch,
 	}, nil
+}
+
+func (engine *associationEngine) selectConcept(
+	ctx context.Context,
+	queryTerms []string,
+	positions map[string]int,
+	available map[string]availableAnimal,
+) (AnimalSelection, bool, error) {
+	edges, err := engine.store.Candidates(ctx, queryTerms)
+	if err != nil {
+		return AnimalSelection{}, false, &APIError{
+			Status:  500,
+			Code:    "association_failed",
+			Message: "動物を選べませんでした。",
+			Err:     err,
+		}
+	}
+	selection, ok := selectConceptCandidate(edges, positions, available)
+	return selection, ok, nil
 }
 
 func (engine *associationEngine) selectLiteral(
@@ -419,73 +475,220 @@ func tokenizeAssociationTerms(transcript string) []associationTerm {
 }
 
 func tokenizeAssociationTermsWith(jaTokenizer *tokenizer.Tokenizer, transcript string) []associationTerm {
-	tokens := jaTokenizer.Tokenize(transcript)
+	tokens := jaTokenizer.Analyze(transcript, tokenizer.Search)
 	type contentToken struct {
 		position int
 		end      int
-		forms    []string
+		forms    []associationForm
+		emit     bool
+		noun     bool
 	}
 	content := make([]contentToken, 0, len(tokens))
 	for _, token := range tokens {
-		if token.Class == tokenizer.DUMMY || token.Surface == "" || excludedPartOfSpeech(token.POS()) {
+		emit, noun := associationTokenDisposition(token)
+		if !emit && !noun {
 			continue
 		}
-		forms := []string{token.Surface}
+		forms := []associationForm{{Text: token.Surface, EmbeddingEligible: true}}
 		if base, ok := token.BaseForm(); ok && base != "" && base != "*" {
-			forms = append(forms, base)
+			forms = append(forms, associationForm{Text: base, EmbeddingEligible: true})
 		}
 		if reading, ok := token.Reading(); ok && reading != "" && reading != "*" {
-			forms = append(forms, reading)
+			// ConceptNetはカタカナ・ひらがな両表記で概念を持つため、読みは両方を照会語にする。
+			forms = append(forms, associationForm{Text: reading})
+			forms = append(forms, associationForm{Text: katakanaToHiragana(reading)})
 		}
 		content = append(content, contentToken{
 			position: token.Position,
 			end:      token.Position + len(token.Surface),
-			forms:    uniqueStrings(forms),
+			forms:    uniqueAssociationForms(forms),
+			emit:     emit,
+			noun:     noun,
 		})
 	}
 
 	terms := make([]associationTerm, 0, len(content)*6)
-	seen := make(map[string]bool)
-	add := func(text string, position int) {
+	seen := make(map[string]int)
+	add := func(text string, position int, embeddingEligible bool) {
 		text = strings.TrimSpace(text)
-		if text == "" || seen[text] {
+		if text == "" {
 			return
 		}
-		seen[text] = true
-		terms = append(terms, associationTerm{Text: text, Position: position})
+		if existing, ok := seen[text]; ok {
+			terms[existing].EmbeddingEligible = terms[existing].EmbeddingEligible || embeddingEligible
+			return
+		}
+		seen[text] = len(terms)
+		terms = append(terms, associationTerm{
+			Text: text, Position: position, EmbeddingEligible: embeddingEligible,
+		})
+	}
+	for _, term := range repeatedOnomatopoeiaTerms(tokens) {
+		add(term.Text, term.Position, true)
 	}
 	for index, token := range content {
-		for _, form := range token.forms {
-			add(form, token.position)
+		if token.emit {
+			for _, form := range token.forms {
+				add(form.Text, token.position, form.EmbeddingEligible)
+			}
 		}
-		for length := 2; length <= 3 && index+length <= len(content); length++ {
-			var compound strings.Builder
-			contiguous := true
-			for offset := 0; offset < length; offset++ {
-				if offset > 0 && content[index+offset-1].end != content[index+offset].position {
-					contiguous = false
-					break
-				}
-				compound.WriteString(content[index+offset].forms[0])
-			}
-			if contiguous {
-				add(compound.String(), token.position)
-			}
+		if index+1 < len(content) && token.emit && token.noun && content[index+1].noun &&
+			token.end == content[index+1].position {
+			add(token.forms[0].Text+content[index+1].forms[0].Text, token.position, true)
 		}
 	}
 	return terms
 }
 
-func excludedPartOfSpeech(pos []string) bool {
+type associationForm struct {
+	Text              string
+	EmbeddingEligible bool
+}
+
+func uniqueAssociationForms(values []associationForm) []associationForm {
+	result := make([]associationForm, 0, len(values))
+	positions := make(map[string]int, len(values))
+	for _, value := range values {
+		if existing, ok := positions[value.Text]; ok {
+			result[existing].EmbeddingEligible = result[existing].EmbeddingEligible || value.EmbeddingEligible
+			continue
+		}
+		positions[value.Text] = len(result)
+		result = append(result, value)
+	}
+	return result
+}
+
+func associationTokenDisposition(token tokenizer.Token) (emit bool, noun bool) {
+	if token.Class == tokenizer.DUMMY || token.Surface == "" || token.Surface == "ー" {
+		return false, false
+	}
+	pos := token.POS()
 	if len(pos) == 0 {
-		return true
+		return false, false
+	}
+	if token.Class == tokenizer.UNKNOWN {
+		switch pos[0] {
+		case "記号", "フィラー":
+			return false, false
+		default:
+			return true, acceptedAssociationNounPOS(pos)
+		}
 	}
 	switch pos[0] {
-	case "助詞", "助動詞", "記号", "フィラー", "その他":
+	case "名詞":
+		if associationPOSContains(pos, "非自立", "代名詞") {
+			return false, false
+		}
+		if len(pos) >= 2 && pos[1] == "接尾" {
+			return false, true
+		}
+		accepted := acceptedAssociationNounPOS(pos)
+		return accepted, accepted
+	case "動詞", "形容詞":
+		return !associationPOSContains(pos, "非自立", "接尾"), false
+	case "感動詞":
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+func acceptedAssociationNounPOS(pos []string) bool {
+	if len(pos) < 2 || associationPOSContains(pos, "非自立", "接尾", "代名詞") {
+		return false
+	}
+	switch pos[1] {
+	case "一般", "固有名詞", "サ変接続", "サ変語幹":
 		return true
 	default:
 		return false
 	}
+}
+
+func associationPOSContains(pos []string, excluded ...string) bool {
+	for _, value := range pos {
+		for _, candidate := range excluded {
+			if value == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func repeatedOnomatopoeiaTerms(tokens []tokenizer.Token) []associationTerm {
+	terms := make([]associationTerm, 0, 1)
+	for start := 0; start < len(tokens); {
+		if !onomatopoeiaFragment(tokens[start]) {
+			start++
+			continue
+		}
+		position := tokens[start].Position
+		end := position
+		var surface strings.Builder
+		hasUnknown := false
+		hasSpecialParticle := false
+		index := start
+		for ; index < len(tokens); index++ {
+			token := tokens[index]
+			if !onomatopoeiaFragment(token) || token.Position != end {
+				break
+			}
+			surface.WriteString(token.Surface)
+			end = token.Position + len(token.Surface)
+			hasUnknown = hasUnknown || token.Class == tokenizer.UNKNOWN
+			pos := token.POS()
+			hasSpecialParticle = hasSpecialParticle ||
+				(len(pos) >= 2 && pos[0] == "助詞" && pos[1] == "特殊")
+		}
+		text := surface.String()
+		if hasUnknown && hasSpecialParticle && repeatedKana(text) {
+			terms = append(terms, associationTerm{Text: text, Position: position})
+		}
+		start = index
+	}
+	return terms
+}
+
+func onomatopoeiaFragment(token tokenizer.Token) bool {
+	if token.Class == tokenizer.DUMMY || token.Surface == "" {
+		return false
+	}
+	pos := token.POS()
+	isSpecialParticle := len(pos) >= 2 && pos[0] == "助詞" && pos[1] == "特殊"
+	if token.Class != tokenizer.UNKNOWN && !isSpecialParticle {
+		return false
+	}
+	for _, character := range token.Surface {
+		if character != 'ー' && !unicode.In(character, unicode.Hiragana, unicode.Katakana) {
+			return false
+		}
+	}
+	return true
+}
+
+func repeatedKana(text string) bool {
+	characters := []rune(text)
+	if len(characters) < 4 || len(characters)%2 != 0 {
+		return false
+	}
+	half := len(characters) / 2
+	for index := 0; index < half; index++ {
+		if characters[index] != characters[index+half] {
+			return false
+		}
+	}
+	return true
+}
+
+func katakanaToHiragana(text string) string {
+	return strings.Map(func(character rune) rune {
+		if character >= 'ァ' && character <= 'ヶ' {
+			return character - ('ァ' - 'ぁ')
+		}
+		return character
+	}, text)
 }
 
 func uniqueStrings(values []string) []string {
@@ -509,6 +712,7 @@ func selectConceptCandidate(
 		score            float64
 		evidence         string
 		evidencePosition int
+		contributions    []ScoreContribution
 	}
 	scores := make(map[string]animalScore)
 	for _, edge := range edges {
@@ -519,7 +723,12 @@ func selectConceptCandidate(
 			continue
 		}
 		score := scores[animal.ID]
-		score.score += edge.Weight * multiplier
+		weighted := edge.Weight * multiplier
+		score.score += weighted
+		score.contributions = append(score.contributions, ScoreContribution{
+			Concept: edge.Concept, Relation: edge.Relation, Weight: edge.Weight,
+			Multiplier: multiplier, Weighted: weighted,
+		})
 		if score.evidence == "" || position < score.evidencePosition ||
 			(position == score.evidencePosition && edge.Concept < score.evidence) {
 			score.evidence = edge.Concept
@@ -546,11 +755,20 @@ func selectConceptCandidate(
 	})
 	winnerID := ids[0]
 	winner := scores[winnerID]
+	sort.Slice(winner.contributions, func(i, j int) bool {
+		if winner.contributions[i].Concept != winner.contributions[j].Concept {
+			return winner.contributions[i].Concept < winner.contributions[j].Concept
+		}
+		return winner.contributions[i].Relation < winner.contributions[j].Relation
+	})
 	animal := available[winnerID]
 	return AnimalSelection{
 		Species:      winnerID,
 		LabelJA:      animal.LabelJA,
 		EvidenceTerm: winner.evidence,
 		Strategy:     strategyConceptNet,
+		Score: &SelectionScore{
+			Total: winner.score, Contributions: winner.contributions,
+		},
 	}, true
 }

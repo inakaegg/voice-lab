@@ -1,6 +1,6 @@
 # Zoovoice 音声合成サービス
 
-更新日: 2026-08-04
+更新日: 2026-08-08
 
 Zoovoice は録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話の無音区間へ重ねるデモです。
 このディレクトリには Go 製の API と生成済みの動物レキシコン、鳴き声素材、索引生成ツールを置いています。
@@ -74,9 +74,20 @@ npm run dev:zoovoice:cloud-run
 | `ZOOVOICE_ASR_THREADS` | `2` | whisper.cpp へ渡すスレッド数 |
 | `ZOOVOICE_TIMEOUT_SECONDS` | `85` | ASRとffmpegを含む1リクエストの上限秒数 |
 | `ZOOVOICE_LOG_PATH` | リポジトリ直下の `logs/zoovoice.log` | JST時刻と経過時間を含むサービスログ |
+| `ZOOVOICE_EMBEDDING_PYTHON` | なし（任意） | embedding runner用venvのpython |
+| `ZOOVOICE_EMBEDDING_RUNNER` | なし（任意） | `tools/embedding_runner/runner.py` のパス |
+| `ZOOVOICE_EMBEDDING_MODEL_DIR` | なし（任意） | ruri-v3-70m ONNXモデルのディレクトリ |
+| `ZOOVOICE_EMBEDDING_ARTIFACTS_DIR` | なし（任意） | 偏り補正などのembedding成果物ディレクトリ |
+| `ZOOVOICE_EMBEDDING_THREADS` | `2` | embedding runnerへ渡すスレッド数 |
 
 必須の3つは起動時に検査します。
 ファイルが無い場合や連想indexのmetadataが想定と違う場合は起動に失敗します。
+
+### Embedding fallback（任意）
+
+`ZOOVOICE_EMBEDDING_` の4変数（`PYTHON`・`RUNNER`・`MODEL_DIR`・`ARTIFACTS_DIR`）をそろえて設定すると、辞書連想が候補を出せなかったときだけ意味ベクトル連想を試します。
+未設定なら現行どおりランダム選択へ落ちます。一部だけの設定は設定ミスとして起動に失敗します。
+runnerの失敗はリクエスト失敗にせず、ランダム選択を維持します。
 固定の動物へ黙って切り替える動作は持ちません。
 
 連想indexのmetadataは、読み込んだ `assets/animal-lexicon.json` のSHA-256とも照合します。
@@ -153,8 +164,8 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 | --- | --- |
 | `transcript` | 日本語ASRの認識本文 |
 | `selected_animal` | 自動で選んだ動物の種IDと日本語ラベル |
-| `evidence_term` | 選択に使った根拠語。`direct`・`pun` では一致したレキシコンの語、`conceptnet` では概念語、random fallbackでは `null` |
-| `selection_strategy` | `direct`・`pun`・`conceptnet`・`random_fallback` のいずれか |
+| `evidence_term` | 選択に使った根拠語。`direct`・`pun` では一致したレキシコンの語、`conceptnet` では概念語、`embedding_profile` ではASR本文全体、random fallbackでは `null` |
+| `selection_strategy` | `direct`・`pun`・`conceptnet`・`random_fallback` のいずれか。embedding fallback有効時は `embedding_profile` も返る |
 | `fallback_reason` | random fallbackのときだけ `no_association_match`。それ以外は `null` |
 | `insertions` | 挿入した鳴き声の位置。`species` は全件同じ動物 |
 
@@ -174,8 +185,15 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 3. 動物名の語の一致のうち、別の語句と重なる語呂合わせは `pun` に分類する。「うしろ」の牛、「ぞうきん」の象のような連続token列との一致も意図的に対象にする。
 4. 鳴き声オノマトペの一致は、前後の音の文脈を要求せず `direct` とする。
 5. 一致が複数ある場合は `direct` を `pun` より優先し、同方式では最も前に現れたものを選ぶ。
-6. `direct` と `pun` で決まらなければ、表層形・基本形・読みと隣接する内容語だけの2〜3語連接を候補語にする。連想indexで候補語の1-hop edgeを引き、関係別の重み付き合計が最大の動物を `conceptnet` として選ぶ。
+6. `direct` と `pun` で決まらなければ、Kagome v2のIPA辞書でConceptNet候補を作る。
+   - 名詞・動詞・形容詞などの内容語を残し、助詞や代名詞などを除く。
+   - 表層形と基本形に加え、ひらがなへ変換した読みも候補にする。
+   - 隣り合う名詞2語は1回だけ結合する。3語以上や非名詞の連接は作らない。
+   - 連想indexで1-hop edgeを引き、関係別の重み付き合計が最大の動物を `conceptnet` として選ぶ。
 7. どの段でも決まらない場合だけ、利用できる動物からrandomで1種を選ぶ。
+
+[Embedding fallback](#embedding-fallback任意)を設定した配備では、7のrandomの前に意味ベクトル連想を1回だけ試します。
+成功すれば `embedding_profile` として選び、失敗すればrandomへ落ちます。
 
 動物名とオノマトペの定義は生成物の `assets/animal-lexicon.json` を正とします。
 選ばれる対象は、音源を持ち `/animals` に載る動物だけです。
