@@ -162,6 +162,9 @@ curl -X POST http://127.0.0.1:8090/compose \
 成功時は合成済み WAV を base64 で返します。
 発話部分が合計0.5秒未満の場合は `422` の `speech_too_short` で拒否します。
 ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` を返します。
+連想に使うAPIの一時的な失敗（接続不可・混雑・上流の障害）は `503` の `association_unavailable` を返します。
+このコードは画面側の再試行対象なので、利用者は同じ録音のまま送り直せます。
+認証の誤りや解釈できない応答など、送り直しても直らない失敗は `502` の `association_failed` を返します。
 
 ```json
 {
@@ -249,14 +252,19 @@ ASR本文と連想の理由は応答とプロセスのメモリ内だけで扱�
 
 ## 素材の準備
 
-`tools/prepare_assets.sh` は集めた素材を実行時の形式へ規格化します。
 実録音を新しく集めるところからやり直す場合は、リポジトリ直下の3つのスクリプトを順に使います。
+2番目の出力先は、3番目へ渡す素材ディレクトリの下の `real-recordings/` にします。
 
 ```sh
-python3 scripts/fetch_animal_recordings.py <queries.json> <repo-outside>/candidates
-python3 scripts/build_real_recordings.py <selection.json> <repo-outside>/real-recordings
-python3 scripts/select_animal_sounds.py
+python3 scripts/fetch_animal_recordings.py <queries.json> <素材ディレクトリ>/candidates
+python3 scripts/build_real_recordings.py <selection.json> <素材ディレクトリ>/real-recordings
+python3 scripts/select_animal_sounds.py <素材ディレクトリ>
 ```
+
+1番目は候補を集めて `candidates.json` に取得時のSHA-256を記録します。
+2番目は選んだ候補を実行時の形式（24kHz・mono・16-bit PCM WAV）へ規格化します。
+記録したSHA-256と中身が食い違う候補があれば、そこで止まります。
+3番目は各系統から優先順位で選び、`<素材ディレクトリ>/final` に `ZOOVOICE_SOUNDS_DIR` の中身を作ります。
 
 いずれも取得条件を伴う素材準備用なので CI では実行しません。
 

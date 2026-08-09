@@ -62,6 +62,16 @@ Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを
 
 Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想はLLM（既定 `gpt-5.6-luna`）へ一本化しており、ASR本文と音源カタログの候補一覧を渡して1種を必ず選ばせる。辞書やConceptNetによる連想経路と、当てずっぽうのrandom選択は持たない。
 
+#### 連想に使う有料APIの費用と依存
+
+自動連想は外部の有料APIに依存する。合成1回につきOpenAIのResponses APIを1回だけ呼ぶ。送るのはASR本文と候補一覧である。候補一覧は音源を持つ動物のidと日本語名だけで、46種のとき約1,800文字である。受け取るのは動物id1つと60文字以内の理由なので、1回あたりの出力はごく短い。単価はOpenAIの公開価格に従うため、この文書には固定値を書かない。実測が要る場合は同じ入力で1回呼び、応答のusageを記録する。
+
+月あたりの上限は利用counterで決まる。既定は1日100回、1か月1,200回である。`ZOOVOICE_DAILY_LIMIT` と `ZOOVOICE_MONTHLY_LIMIT` で変えられる。したがって連想APIの月間呼び出し回数は月次上限を超えない。
+
+依存のリスクは3つある。第1に、このAPIが落ちると合成そのものが成立しない。辞書による代替経路を持たないためである。第2に、応答が遅いとCloud Runの処理時間がそのまま伸びる。第3に、価格改定や提供終了はこちらで制御できない。
+
+代替案は検討済みである。辞書と意味ベクトルによる連想は品質が足りず廃止した。比較の実測は [ZOOVOICE_ASSOCIATION_CASE_STUDY.md](../speech-translation/ZOOVOICE_ASSOCIATION_CASE_STUDY.md) を正とする。一時的な失敗は `association_unavailable` として返し、利用者は同じ録音のまま再試行できる。認証の誤りなど作り直しても直らない失敗は `association_failed` として返す。
+
 連想の候補と音声再生が参照する動物一覧は、音源manifest（`ZOOVOICE_SOUNDS_DIR` が指すディレクトリの `manifest.json`、image内では `/app/sounds/manifest.json`）を正とする。音源を持つ動物だけが候補になる。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
 
 productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。invoker service accountの作成と権限付与、key発行、Worker secretの登録も完了している。
@@ -70,8 +80,8 @@ productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invo
 Browser
   -> Cloudflare Worker Static Assets
        /zoovoice
-       /react/zoovoice-animals.json: 動物一覧
   -> Cloudflare Worker module
+       /api/zoovoice/animals: 動物一覧（Cloud Runの /animals を中継）
        Turnstile検証 / 利用上限 / Cloud Run向けID token
        -> Cloudflare Turnstile: token検証
        -> Google Cloud Run: 録音とアニマル度を一時送信
