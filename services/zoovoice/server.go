@@ -91,6 +91,7 @@ func (api *httpAPI) compose(writer http.ResponseWriter, request *http.Request) {
 			"selection_strategy":      result.SelectionStrategy,
 			"fallback_reason":         result.FallbackReason,
 			"insertions":              result.Insertions,
+			"sound_credits":           result.SoundCredits,
 			"input_duration_seconds":  result.InputDurationSeconds,
 			"output_duration_seconds": result.OutputDurationSeconds,
 		},

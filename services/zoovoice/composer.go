@@ -27,6 +27,7 @@ type ComposeResult struct {
 	SelectionStrategy     SelectionStrategy
 	FallbackReason        *string
 	Insertions            []ResolvedInsertion
+	SoundCredits          []soundCredit
 	InputDurationSeconds  float64
 	OutputDurationSeconds float64
 }
@@ -327,6 +328,10 @@ func (c *composer) Compose(
 		logProgress(c.logger, started, "compose", "complete", "output_seconds=%.3f", outputDuration)
 	}
 
+	insertionPaths := make([]string, 0, len(insertions))
+	for _, insertion := range insertions {
+		insertionPaths = append(insertionPaths, insertion.AssetPath)
+	}
 	logProgress(c.logger, started, "request", "complete", "output_bytes=%d", len(outputAudio))
 	return ComposeResult{
 		AudioBase64:           base64.StdEncoding.EncodeToString(outputAudio),
@@ -336,6 +341,7 @@ func (c *composer) Compose(
 		SelectionStrategy:     selection.Strategy,
 		FallbackReason:        optionalString(selection.FallbackReason),
 		Insertions:            insertions,
+		SoundCredits:          c.catalog.creditsForPaths(insertionPaths),
 		InputDurationSeconds:  roundSeconds(inputDuration),
 		OutputDurationSeconds: roundSeconds(outputDuration),
 	}, nil

@@ -20,16 +20,22 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "association-eval" {
 		os.Exit(runAssociationEvalCLI(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "preview" {
+		os.Exit(runPreviewCLI(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	logger, closer := openServiceLogger(defaultLogPath())
 	defer closer.Close()
 
 	assetsRoot := defaultAssetsRoot()
-	catalog, err := loadCatalog(
-		filepath.Join(assetsRoot, "animal-lexicon.json"),
-		assetsRoot,
-	)
+	catalog, err := loadRuntimeCatalog(assetsRoot)
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
+	}
+	if len(catalog.UnusedSoundAnimals) > 0 {
+		logger.Printf(
+			"zoovoice sounds manifest has %d animals without lexicon entries (not selectable)",
+			len(catalog.UnusedSoundAnimals),
+		)
 	}
 	runtimeDependencies, err := loadRuntimeDependencies(
 		execCommandRunner{},
@@ -89,6 +95,24 @@ func serverPort() int {
 		return integerFromEnv("ZOOVOICE_PORT", 8090)
 	}
 	return integerFromEnv("PORT", 8090)
+}
+
+// loadRuntimeCatalog はサーバとCLIが共通で使うカタログ読み込み。
+// ZOOVOICE_SOUNDS_DIR が指す manifest付きディレクトリを優先し、
+// 未設定なら従来の assets/animal-sounds/ を使う。どちらもクレジット付き。
+func loadRuntimeCatalog(assetsRoot string) (*assetCatalog, error) {
+	lexiconPath := filepath.Join(assetsRoot, "animal-lexicon.json")
+	if soundsDir := os.Getenv("ZOOVOICE_SOUNDS_DIR"); soundsDir != "" {
+		return loadSoundsCatalog(lexiconPath, soundsDir)
+	}
+	catalog, err := loadCatalog(lexiconPath, assetsRoot)
+	if err != nil {
+		return nil, err
+	}
+	if err := attachLegacyCredits(catalog, filepath.Join(assetsRoot, "animal-sounds", "manifest.json")); err != nil {
+		return nil, err
+	}
+	return catalog, nil
 }
 
 func defaultAssetsRoot() string {

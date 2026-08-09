@@ -66,6 +66,7 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 		EvidenceTerm:          stringPointer("犬"),
 		SelectionStrategy:     strategyDirect,
 		Insertions:            []ResolvedInsertion{{Slot: "opening", Species: "dog", AtSeconds: 0}},
+		SoundCredits:          []soundCredit{{License: "CC0 1.0", Creator: "someone", SourceURL: "https://example.com/dog"}},
 		InputDurationSeconds:  2,
 		OutputDurationSeconds: 2.3,
 	}}
@@ -94,12 +95,16 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 			SelectionStrategy     SelectionStrategy   `json:"selection_strategy"`
 			FallbackReason        *string             `json:"fallback_reason"`
 			Insertions            []ResolvedInsertion `json:"insertions"`
+			SoundCredits          []soundCredit       `json:"sound_credits"`
 			InputDurationSeconds  float64             `json:"input_duration_seconds"`
 			OutputDurationSeconds float64             `json:"output_duration_seconds"`
 		} `json:"meta"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
+	}
+	if len(payload.Meta.SoundCredits) != 1 || payload.Meta.SoundCredits[0].License != "CC0 1.0" {
+		t.Fatalf("sound credits = %#v", payload.Meta.SoundCredits)
 	}
 	if payload.Audio.Format != "wav" || payload.Audio.Base64 != base64.StdEncoding.EncodeToString(audio) {
 		t.Fatalf("audio = %#v", payload.Audio)
