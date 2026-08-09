@@ -63,9 +63,9 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 		AudioBase64:           base64.StdEncoding.EncodeToString(audio),
 		Transcript:            "犬が公園を走っています",
 		SelectedAnimal:        SelectedAnimal{ID: "dog", LabelJA: "犬"},
-		EvidenceTerm:          stringPointer("犬"),
-		SelectionStrategy:     strategyDirect,
+		AssociationReason:     "犬が出てくるため",
 		Insertions:            []ResolvedInsertion{{Slot: "opening", Species: "dog", AtSeconds: 0}},
+		SoundCredits:          []soundCredit{{License: "CC0 1.0", Creator: "someone", SourceURL: "https://example.com/dog"}},
 		InputDurationSeconds:  2,
 		OutputDurationSeconds: 2.3,
 	}}
@@ -90,16 +90,18 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 		Meta struct {
 			Transcript            string              `json:"transcript"`
 			SelectedAnimal        SelectedAnimal      `json:"selected_animal"`
-			EvidenceTerm          *string             `json:"evidence_term"`
-			SelectionStrategy     SelectionStrategy   `json:"selection_strategy"`
-			FallbackReason        *string             `json:"fallback_reason"`
+			AssociationReason     string              `json:"association_reason"`
 			Insertions            []ResolvedInsertion `json:"insertions"`
+			SoundCredits          []soundCredit       `json:"sound_credits"`
 			InputDurationSeconds  float64             `json:"input_duration_seconds"`
 			OutputDurationSeconds float64             `json:"output_duration_seconds"`
 		} `json:"meta"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
+	}
+	if len(payload.Meta.SoundCredits) != 1 || payload.Meta.SoundCredits[0].License != "CC0 1.0" {
+		t.Fatalf("sound credits = %#v", payload.Meta.SoundCredits)
 	}
 	if payload.Audio.Format != "wav" || payload.Audio.Base64 != base64.StdEncoding.EncodeToString(audio) {
 		t.Fatalf("audio = %#v", payload.Audio)
@@ -108,9 +110,8 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 		t.Fatalf("meta = %#v", payload.Meta)
 	}
 	if payload.Meta.Transcript != "犬が公園を走っています" ||
-		payload.Meta.SelectedAnimal.ID != "dog" || payload.Meta.EvidenceTerm == nil ||
-		*payload.Meta.EvidenceTerm != "犬" || payload.Meta.SelectionStrategy != strategyDirect ||
-		payload.Meta.FallbackReason != nil {
+		payload.Meta.SelectedAnimal.ID != "dog" ||
+		payload.Meta.AssociationReason != "犬が出てくるため" {
 		t.Fatalf("association meta = %#v", payload.Meta)
 	}
 }
@@ -199,16 +200,13 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := loadCatalog("assets/animal-lexicon.json", "assets")
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalog := fixtureCatalog(t)
 	composer := newComposer(
 		catalog,
 		execCommandRunner{},
 		fixedTranscriber{transcript: "鶏が朝に鳴いています"},
 		fixedAssociator{selection: AnimalSelection{
-			Species: "rooster", LabelJA: "鶏", EvidenceTerm: "鶏", Strategy: strategyDirect,
+			Species: "rooster", LabelJA: "鶏", Reason: "朝の鳴き声といえば鶏", Strategy: strategyLLM,
 		}},
 		rand.New(rand.NewSource(11)),
 		30*time.Second,

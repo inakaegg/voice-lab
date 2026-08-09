@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ type trackingExecRunner struct {
 }
 
 func (runner trackingExecRunner) Run(ctx context.Context, name string, args ...string) (commandOutput, error) {
-	if name == "ffmpeg" && containsString(args, "16000") && strings.HasSuffix(args[len(args)-1], "asr.wav") {
+	if name == "ffmpeg" && slices.Contains(args, "16000") && strings.HasSuffix(args[len(args)-1], "asr.wav") {
 		*runner.events = append(*runner.events, "asr_audio")
 	}
 	return execCommandRunner{}.Run(ctx, name, args...)
@@ -50,18 +51,17 @@ type fixedAssociator struct {
 	err       error
 }
 
-type associatorFunc func(context.Context, string, []availableAnimal, *rand.Rand) (AnimalSelection, error)
+type associatorFunc func(context.Context, string, []availableAnimal) (AnimalSelection, error)
 
 func (function associatorFunc) Select(
 	ctx context.Context,
 	transcript string,
 	animals []availableAnimal,
-	rng *rand.Rand,
 ) (AnimalSelection, error) {
-	return function(ctx, transcript, animals, rng)
+	return function(ctx, transcript, animals)
 }
 
-func (associator fixedAssociator) Select(context.Context, string, []availableAnimal, *rand.Rand) (AnimalSelection, error) {
+func (associator fixedAssociator) Select(context.Context, string, []availableAnimal) (AnimalSelection, error) {
 	if associator.events != nil {
 		*associator.events = append(*associator.events, "associate")
 	}
@@ -83,11 +83,11 @@ func TestComposerPipelineConvertsASRThenTranscribesAssociatesAndMixes(t *testing
 	}
 	events := []string{}
 	composer := newComposer(
-		repositoryCatalog(t),
+		fixtureCatalog(t),
 		trackingExecRunner{events: &events},
 		fixedTranscriber{events: &events, transcript: "犬が公園を走っています"},
 		fixedAssociator{events: &events, selection: AnimalSelection{
-			Species: "dog", LabelJA: "犬", EvidenceTerm: "犬", Strategy: strategyDirect,
+			Species: "dog", LabelJA: "犬", Reason: "犬が出てくるため", Strategy: strategyLLM,
 		}},
 		rand.New(rand.NewSource(1)),
 		30*time.Second,
@@ -101,7 +101,7 @@ func TestComposerPipelineConvertsASRThenTranscribesAssociatesAndMixes(t *testing
 		t.Fatalf("pipeline events = %v", events)
 	}
 	if result.Transcript != "犬が公園を走っています" || result.SelectedAnimal.ID != "dog" ||
-		result.EvidenceTerm == nil || *result.EvidenceTerm != "犬" || result.SelectionStrategy != strategyDirect {
+		result.AssociationReason != "犬が出てくるため" {
 		t.Fatalf("result = %#v", result)
 	}
 	if len(result.Insertions) == 0 {
@@ -109,20 +109,20 @@ func TestComposerPipelineConvertsASRThenTranscribesAssociatesAndMixes(t *testing
 	}
 }
 
-func TestComposerLogsNeverContainTranscriptOrEvidence(t *testing.T) {
+func TestComposerLogsNeverContainTranscriptOrReason(t *testing.T) {
 	input, err := os.ReadFile("testdata/compose-input.wav")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
 	secretTranscript := "秘密の猫"
-	secretEvidence := "秘密"
+	secretReason := "秘密の理由"
 	composer := newComposer(
-		repositoryCatalog(t),
+		fixtureCatalog(t),
 		execCommandRunner{},
 		fixedTranscriber{transcript: secretTranscript},
 		fixedAssociator{selection: AnimalSelection{
-			Species: "cat", LabelJA: "猫", EvidenceTerm: secretEvidence, Strategy: strategyConceptNet,
+			Species: "cat", LabelJA: "猫", Reason: secretReason, Strategy: strategyLLM,
 		}},
 		rand.New(rand.NewSource(1)),
 		30*time.Second,
@@ -131,7 +131,7 @@ func TestComposerLogsNeverContainTranscriptOrEvidence(t *testing.T) {
 	if _, err := composer.Compose(context.Background(), input, ComposeSettings{Intensity: 50}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(logs.String(), secretTranscript) || strings.Contains(logs.String(), secretEvidence) {
+	if strings.Contains(logs.String(), secretTranscript) || strings.Contains(logs.String(), secretReason) {
 		t.Fatalf("private ASR data leaked to logs: %s", logs.String())
 	}
 }
@@ -182,7 +182,7 @@ func TestComposerLogsNeverContainPrivateTextOnFailureTimeoutOrCancel(t *testing.
 		{
 			name:        "timeout",
 			transcriber: fixedTranscriber{transcript: secretTranscript},
-			associator: associatorFunc(func(ctx context.Context, _ string, _ []availableAnimal, _ *rand.Rand) (AnimalSelection, error) {
+			associator: associatorFunc(func(ctx context.Context, _ string, _ []availableAnimal) (AnimalSelection, error) {
 				<-ctx.Done()
 				return AnimalSelection{}, fmt.Errorf("%s: %w", secretEvidence, ctx.Err())
 			}),
@@ -208,14 +208,14 @@ func TestComposerLogsNeverContainPrivateTextOnFailureTimeoutOrCancel(t *testing.
 			defer cancel()
 			associator := test.associator
 			if test.name == "client cancel" {
-				associator = associatorFunc(func(context.Context, string, []availableAnimal, *rand.Rand) (AnimalSelection, error) {
+				associator = associatorFunc(func(context.Context, string, []availableAnimal) (AnimalSelection, error) {
 					cancel()
 					return AnimalSelection{}, fmt.Errorf("%s: %w", secretEvidence, context.Canceled)
 				})
 			}
 			var logs bytes.Buffer
 			composer := newComposer(
-				repositoryCatalog(t),
+				fixtureCatalog(t),
 				execCommandRunner{},
 				test.transcriber,
 				associator,
@@ -233,15 +233,6 @@ func TestComposerLogsNeverContainPrivateTextOnFailureTimeoutOrCancel(t *testing.
 			}
 		})
 	}
-}
-
-func repositoryCatalog(t *testing.T) *assetCatalog {
-	t.Helper()
-	catalog, err := loadCatalog("assets/animal-lexicon.json", "assets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog
 }
 
 func (runner fixedCommandRunner) Run(

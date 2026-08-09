@@ -30,7 +30,8 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   await expect(page.getByRole("heading", { name: "話すだけで、ぴったりの動物を。" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /声から動物を連想する/ }).getByText("β版", { exact: true })).toBeVisible();
   await expect(page.locator("[data-tech-note]")).toContainText("Google Cloud Run");
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
+  await expect(page.getByText("不正利用防止の確認が完了しました。")).toHaveCount(0);
   await expect.poll(() => page.getByRole("button", { name: "録音する" }).evaluate((element) => ({
     background: getComputedStyle(element).backgroundColor,
     borderRadius: getComputedStyle(element).borderRadius,
@@ -43,7 +44,7 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   }
   await expect(page.locator("select")).toHaveCount(0);
   await expect(page.getByText("feel lucky?", { exact: true })).toHaveCount(0);
-  await page.locator("#zoovoice-intensity").fill("72");
+  await page.locator("#zoovoice-intensity").fill("75");
   await page.getByRole("button", { name: "録音する" }).click();
   await expect(page.getByText("REC", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "録音をキャンセル" })).toBeVisible();
@@ -56,13 +57,13 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   await captureIfRequested(page, testInfo, "processing-light");
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
 
-  assertMultipartField(composeBody, "settings", JSON.stringify({ intensity: 72 }));
+  assertMultipartField(composeBody, "settings", JSON.stringify({ intensity: 75 }));
   assertMultipartField(composeBody, "turnstile_token", "browser-turnstile-token-1");
   expect(composeBody).not.toContain("arrangement");
   await expect.poll(() => page.evaluate(() => Number((window as typeof window & { __zoovoicePlayAttempts?: number }).__zoovoicePlayAttempts || 0))).toBe(1);
   await expect(page.getByText("猫", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("猫が窓辺でゆっくり眠っています。とても長い日本語でも結果欄からはみ出しません。")).toBeVisible();
-  await expect(page.getByText("動物名・鳴き声の直接言及")).toBeVisible();
+  await expect(page.getByTestId("zoovoice-animal-figure")).toContainText("猫");
   await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
   await page.getByRole("button", { name: "結果を一時停止" }).click();
   await expect(page.getByRole("button", { name: "結果を再生" })).toBeVisible();
@@ -86,44 +87,75 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   }
 });
 
-test("zoovoice explains random fallback without inventing an evidence term", async ({ page }, testInfo) => {
-  await installZoovoiceApi(page, {
-    strategy: "random_fallback",
-    selectedAnimal: { id: "frog", label_ja: "カエル" },
-    evidenceTerm: null,
-    fallbackReason: "no_association_match",
-  });
+test("zoovoice counts up the elapsed seconds while composing", async ({ page }) => {
+  await installZoovoiceApi(page, { composeDelayMilliseconds: 3_000 });
   await page.goto("/zoovoice");
-  await recordOnce(page);
 
-  await expect(page.getByText("関連する動物が見つからなかったため、ランダムに選びました。")).toBeVisible();
-  await expect(page.getByText("該当なし", { exact: true })).toBeVisible();
-  await expect(page.getByText("ランダム選択", { exact: true })).toBeVisible();
-  await expect(page.getByText("カエル", { exact: true })).toBeVisible();
-  await captureIfRequested(page, testInfo, "fallback-light");
+  await page.getByRole("button", { name: "録音する" }).click();
+  await expect(page.getByText("REC", { exact: true })).toBeVisible();
+  await page.waitForTimeout(1_200);
+  await page.getByRole("button", { name: "録音を止める" }).click();
+
+  await expect(page.getByText("生成中", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("zoovoice-orb-time")).toHaveText("0:00");
+  await expect(page.getByTestId("zoovoice-orb-time")).toHaveText("0:02", { timeout: 4_000 });
+  await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
 });
 
-test("zoovoice labels playful literal association without a fallback warning", async ({ page }, testInfo) => {
+test("zoovoice shows the association reason for a far-fetched pick", async ({ page }, testInfo) => {
   await installZoovoiceApi(page, {
-    transcript: "ぞうきんを絞る",
-    strategy: "pun",
-    selectedAnimal: { id: "elephant", label_ja: "象" },
-    evidenceTerm: "ぞう",
+    transcript: "眠れない夜だった",
+    selectedAnimal: { id: "sheep", label_ja: "羊" },
+    associationReason: "眠れない夜は羊を数えるため",
   });
   await page.goto("/zoovoice");
   await recordOnce(page);
 
-  await expect(page.getByText("語呂合わせ", { exact: true })).toBeVisible();
-  await expect(page.getByText("ぞう", { exact: true })).toBeVisible();
+  await expect(page.getByText("眠れない夜は羊を数えるため", { exact: true })).toBeVisible();
+  await expect(page.getByText("羊", { exact: true }).first()).toBeVisible();
+  await captureIfRequested(page, testInfo, "reason-light");
+});
+
+test("zoovoice shows the sound credits with the modification notice", async ({ page }, testInfo) => {
+  await installZoovoiceApi(page, {
+    soundCredits: [
+      { license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" },
+      { license: "CC0 1.0" },
+    ],
+  });
+  await page.goto("/zoovoice");
+  await recordOnce(page);
+
+  const credits = page.getByTestId("zoovoice-sound-credits");
+  await expect(credits).toContainText("無音除去・トリム・音量調整を実施");
+  await expect(credits).toContainText("CC BY 4.0 / dobroide");
+  await expect(credits).toContainText("CC0 1.0");
+  await expect(credits.getByRole("link", { name: "出典" })).toHaveAttribute(
+    "href",
+    "https://freesound.org/people/dobroide/sounds/17353",
+  );
+  await assertNoHorizontalOverflow(page);
+  await captureIfRequested(page, testInfo, "sound-credits-light");
+});
+
+test("zoovoice shows the association reason for a literal mention", async ({ page }, testInfo) => {
+  await installZoovoiceApi(page, {
+    transcript: "ぞうきんを絞る",
+    selectedAnimal: { id: "elephant", label_ja: "象" },
+    associationReason: "「ぞうきん」の語呂合わせでゾウを連想",
+  });
+  await page.goto("/zoovoice");
+  await recordOnce(page);
+
+  await expect(page.getByText("「ぞうきん」の語呂合わせでゾウを連想", { exact: true })).toBeVisible();
   await expect(page.getByText("象", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("関連する動物が見つからなかったため、ランダムに選びました。")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await captureIfRequested(page, testInfo, "pun-success-light");
 
   await setTheme(page, "暗色");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByText("語呂合わせ", { exact: true })).toBeVisible();
+  await expect(page.getByText("「ぞうきん」の語呂合わせでゾウを連想", { exact: true })).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await captureIfRequested(page, testInfo, "pun-success-dark");
 });
@@ -177,13 +209,13 @@ test("zoovoice refreshes an expired Turnstile token before one automatic compose
   });
   await installTurnstileStub(page);
   await page.goto("/zoovoice");
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
 
   await page.evaluate(() => {
     const state = (window as typeof window & { __zoovoiceTurnstileTest: { expire: () => void } }).__zoovoiceTurnstileTest;
     state.expire();
   });
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
   await recordOnce(page);
   await expect.poll(() => composeBodies.length).toBe(1);
   assertMultipartField(composeBodies[0], "turnstile_token", "browser-turnstile-token-2");
@@ -195,7 +227,7 @@ test("zoovoice keeps the orb disabled while waiting for a Turnstile token", asyn
   await page.goto("/zoovoice");
   await recordOnce(page);
 
-  await expect(page.getByText("不正利用防止の確認を待っています。").last()).toBeVisible();
+  await expect(page.getByTestId("zoovoice-status")).toHaveText("不正利用防止の確認を待っています。");
   await expect(page.getByRole("button", { name: "録音する" })).toBeDisabled();
   await captureIfRequested(page, testInfo, "token-waiting-light");
   await setTheme(page, "暗色");
@@ -232,13 +264,13 @@ test("zoovoice retries a transient compose failure only after explicit retry", a
   await expect(page.getByRole("button", { name: "もう一度生成" })).toBeVisible();
   await page.waitForTimeout(250);
   expect(composeBodies).toHaveLength(1);
-  await page.locator("#zoovoice-intensity").fill("88");
+  await page.locator("#zoovoice-intensity").fill("100");
   await page.getByRole("button", { name: "もう一度生成" }).click();
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
   expect(composeBodies).toHaveLength(2);
   assertMultipartField(composeBodies[0], "turnstile_token", "browser-turnstile-token-1");
   assertMultipartField(composeBodies[1], "turnstile_token", "browser-turnstile-token-2");
-  assertMultipartField(composeBodies[1], "settings", JSON.stringify({ intensity: 88 }));
+  assertMultipartField(composeBodies[1], "settings", JSON.stringify({ intensity: 100 }));
 });
 
 test("zoovoice keeps manual playback available when autoplay is rejected", async ({ page }) => {
@@ -458,7 +490,6 @@ test("zoovoice keeps initial and recorded Turnstile states in one desktop viewpo
 
     await recordOnce(page);
     await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
-    await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
     await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
     await assertWorkspaceInsideViewport(page, viewport.height);
     await assertVisibleControlsInsideViewport(page);
@@ -470,7 +501,7 @@ test("zoovoice keeps initial and recorded Turnstile states in one desktop viewpo
   await assertNoHorizontalOverflow(page);
   await recordOnce(page);
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
   await assertNoHorizontalOverflow(page);
   await captureIfRequested(page, testInfo, "turnstile-390-light");
 });
@@ -613,13 +644,13 @@ async function installZoovoiceApi(
     turnstileRequired?: boolean;
     onCompose?: (body: string) => void;
     transcript?: string;
-    strategy?: "direct" | "pun" | "conceptnet" | "random_fallback";
     selectedAnimal?: { id: string; label_ja: string };
-    evidenceTerm?: string | null;
-    fallbackReason?: "no_association_match" | null;
+    associationReason?: string;
     enabled?: boolean;
     siteKey?: string;
     composeFailures?: Array<{ status: number; code: string; message: string }>;
+    composeDelayMilliseconds?: number;
+    soundCredits?: Array<{ license: string; creator?: string; source_url?: string }>;
   } = {},
 ) {
   let composeRequest = 0;
@@ -649,8 +680,7 @@ async function installZoovoiceApi(
           body: JSON.stringify({ error: { code: failure.code, message: failure.message } }),
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      const strategy = options.strategy || "direct";
+      await new Promise((resolve) => setTimeout(resolve, options.composeDelayMilliseconds ?? 120));
       const selectedAnimal = options.selectedAnimal || { id: "cat", label_ja: "猫" };
       return route.fulfill({
         status: 200,
@@ -660,13 +690,14 @@ async function installZoovoiceApi(
           meta: {
             transcript: options.transcript || "猫が窓辺で眠っています",
             selected_animal: selectedAnimal,
-            evidence_term: options.evidenceTerm === undefined ? "猫" : options.evidenceTerm,
-            selection_strategy: strategy,
-            fallback_reason: options.fallbackReason === undefined ? null : options.fallbackReason,
+            association_reason: options.associationReason || "猫が出てくるため",
             insertions: [
               { slot: "opening", species: selectedAnimal.id, at_seconds: 0 },
               { slot: "gaps", species: selectedAnimal.id, at_seconds: 1.2 },
               { slot: "ending", species: selectedAnimal.id, at_seconds: 2.4 },
+            ],
+            sound_credits: options.soundCredits ?? [
+              { license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" },
             ],
             input_duration_seconds: 2.4,
             output_duration_seconds: 4.7,

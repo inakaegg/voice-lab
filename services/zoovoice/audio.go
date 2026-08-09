@@ -12,7 +12,64 @@ import (
 var (
 	silenceStartPattern = regexp.MustCompile(`silence_start:\s*(-?[0-9]+(?:\.[0-9]+)?)`)
 	silenceEndPattern   = regexp.MustCompile(`silence_end:\s*(-?[0-9]+(?:\.[0-9]+)?)`)
+	// ebur128 の Summary 行だけに当たるよう、行頭のラベルで拾う。
+	integratedLoudnessPattern = regexp.MustCompile(`(?m)^\s*I:\s*(-?(?:inf|[0-9]+(?:\.[0-9]+)?))\s*LUFS`)
+	truePeakPattern           = regexp.MustCompile(`(?m)^\s*Peak:\s*(-?(?:inf|[0-9]+(?:\.[0-9]+)?))\s*dBFS`)
 )
+
+// 合成後の音量の目安。上限であり、これより大きくはしない。
+const (
+	targetLoudnessLUFS  = -19.0
+	truePeakCeilingDBTP = -1.5
+	// この幅より小さい調整は掛け直しの手間に見合わないので省く。
+	minimumGainAdjustmentDB = 0.1
+)
+
+// loudnessMeasurement は ebur128 の測定結果。
+// 無音などで測れなかった場合は Measurable が false になる。
+type loudnessMeasurement struct {
+	IntegratedLUFS float64
+	TruePeakDBTP   float64
+	Measurable     bool
+}
+
+// parseLoudnessSummary は ffmpeg の ebur128 が出す要約から
+// integrated loudness と true peak を取り出す。
+func parseLoudnessSummary(stderr string) loudnessMeasurement {
+	loudness, loudnessOK := lastFloatMatch(integratedLoudnessPattern, stderr)
+	peak, peakOK := lastFloatMatch(truePeakPattern, stderr)
+	if !loudnessOK || !peakOK {
+		return loudnessMeasurement{}
+	}
+	return loudnessMeasurement{IntegratedLUFS: loudness, TruePeakDBTP: peak, Measurable: true}
+}
+
+func lastFloatMatch(pattern *regexp.Regexp, text string) (float64, bool) {
+	matches := pattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+	raw := matches[len(matches)-1][1]
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsInf(value, 0) {
+		return 0, false
+	}
+	return value, true
+}
+
+// loudnessGainDB は完成音声へ掛ける静的gainを決める。
+// 目標より静かな音声は持ち上げず、true peak が天井を超えるときはさらに下げる。
+func loudnessGainDB(measurement loudnessMeasurement) float64 {
+	if !measurement.Measurable {
+		return 0
+	}
+	gain := math.Min(0, targetLoudnessLUFS-measurement.IntegratedLUFS)
+	gain = math.Min(gain, truePeakCeilingDBTP-measurement.TruePeakDBTP)
+	if gain > -minimumGainAdjustmentDB {
+		return 0
+	}
+	return math.Round(gain*10) / 10
+}
 
 func parseSilenceDetect(stderr string, totalDuration float64) []SilenceInterval {
 	intervals := make([]SilenceInterval, 0)
@@ -82,14 +139,34 @@ func buildFilterGraph(insertions []ResolvedInsertion) string {
 	return graph.String()
 }
 
+// アニマル度は0〜100の入力を20刻みで5段階へ丸めてから使う。
+// APIの入力形式は0〜100のまま変えない。
+const intensityStageCount = 5
+
+// 段階ごとの最大挿入数と無音検出の下限秒数。
+// 端（段階1・5）と中央（段階3）は従来の一次式と同じ値になる。
+var (
+	intensityMaxInsertions = [intensityStageCount]int{2, 3, 6, 8, 10}
+	intensityMinSilence    = [intensityStageCount]float64{1.2, 0.975, 0.75, 0.525, 0.3}
+)
+
+// intensityStage は0〜100のアニマル度を0始まりの段階番号へ丸める。
+func intensityStage(intensity int) int {
+	stage := intensity / 20
+	if stage >= intensityStageCount {
+		stage = intensityStageCount - 1
+	}
+	return stage
+}
+
 func mapIntensity(intensity int) (IntensityConfig, error) {
 	if intensity < 0 || intensity > 100 {
 		return IntensityConfig{}, fmt.Errorf("intensity must be between 0 and 100")
 	}
-	minSilence := math.Round((1.2-0.009*float64(intensity))*1000) / 1000
+	stage := intensityStage(intensity)
 	return IntensityConfig{
-		MinSilenceSeconds: minSilence,
-		MaxInsertions:     2 + int(math.Round(float64(intensity)*0.08)),
+		MinSilenceSeconds: intensityMinSilence[stage],
+		MaxInsertions:     intensityMaxInsertions[stage],
 	}, nil
 }
 

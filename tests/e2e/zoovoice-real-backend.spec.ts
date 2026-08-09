@@ -33,9 +33,9 @@ test("MediaRecorder output can be composed through local Wrangler and the real G
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible({
     timeout: 90_000,
   });
-  await expect(page.getByText("選ばれた動物", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("zoovoice-animal-figure")).toBeVisible();
   await expect(page.getByText("聞き取った言葉", { exact: true })).toBeVisible();
-  await expect(page.getByText("根拠語", { exact: true })).toBeVisible();
+  await expect(page.getByText("連想の理由", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /結果を(再生|一時停止)/ })).toBeVisible();
   const downloadLink = page.getByRole("link", { name: "WAVを保存" });
   await expect(downloadLink).toHaveAttribute(

@@ -1,5 +1,3 @@
-export type SelectionStrategy = "direct" | "pun" | "conceptnet" | "random_fallback";
-
 export type ComposeResponse = {
   audio: {
     format: "wav";
@@ -11,17 +9,23 @@ export type ComposeResponse = {
       id: string;
       label_ja: string;
     };
-    evidence_term: string | null;
-    selection_strategy: SelectionStrategy;
-    fallback_reason: "no_association_match" | null;
+    association_reason: string;
     insertions: Array<{
       slot: "opening" | "gaps" | "ending";
       species: string;
       at_seconds: number;
     }>;
+    sound_credits?: SoundCredit[];
     input_duration_seconds: number;
     output_duration_seconds: number;
   };
+};
+
+// 鳴き声素材の出典表示。CC BY素材では表示が利用条件になるため、必ず画面へ出す。
+export type SoundCredit = {
+  license: string;
+  creator?: string;
+  source_url?: string;
 };
 
 export type ZoovoiceConfig = {
@@ -39,7 +43,11 @@ type ErrorEnvelope = {
   };
 };
 
+// 同じ録音を送り直せば直り得るものだけを載せる。
+// association_unavailable は連想APIの一時的な失敗（接続不可・混雑・上流障害）で、
+// 録音を取り直さずに再試行できる。恒久的な association_failed は載せない。
 const retryableErrorCodes = new Set([
+  "association_unavailable",
   "zoovoice_backend_unavailable",
   "zoovoice_gateway_error",
   "zoovoice_http_unavailable",

@@ -1,5 +1,5 @@
 _ai/
-tmp/
+tmp*/
 logs/
 .worktrees/
 
@@ -9,6 +9,9 @@ model-cache/
 .cache/
 hf-cache/
 checkpoints/
+
+# Go build artifacts (the zoovoice binary is built locally, never committed).
+services/zoovoice/zoovoice
 
 # Python / Node build artifacts for the future web app.
 __pycache__/
@@ -26,3 +29,16 @@ build/
 .runpod.env
 .dev.vars
 .wrangler/
+_ai_output/
+
+.concept-watch/*
+
+# Terraform: stateとproviderキャッシュはローカル専用（リモートbackend移行までの暫定）
+infra/**/.terraform/
+infra/**/terraform.tfstate
+infra/**/terraform.tfstate.backup
+infra/**/*.tfplan
+
+# Terraform: 個人アカウント等の実値。変数の宣言だけをリポジトリに置く
+infra/**/*.tfvars
+infra/**/*.tfvars.json

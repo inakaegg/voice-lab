@@ -4,15 +4,17 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
+import { animalEmoji } from "./animal-emoji";
 import {
   composeRecording,
   fetchZoovoiceConfig,
   isRetryableZoovoiceError,
   wavBlobFromBase64,
   type ComposeResponse,
-  type SelectionStrategy,
+  type SoundCredit,
   type ZoovoiceConfig,
 } from "./api";
+import { defaultIntensity, intensityStage, intensityStageCount, intensityStageValues } from "./intensity";
 import { RecordOrb } from "./record-orb";
 import { ResultPlayer } from "./result-player";
 import {
@@ -54,7 +56,7 @@ type TurnstileToken = {
 
 function Zoovoice() {
   const [state, dispatch] = useReducer(zoovoiceReducer, initialZoovoiceState);
-  const [intensity, setIntensity] = useState(50);
+  const [intensity, setIntensity] = useState(defaultIntensity);
   const [result, setResult] = useState<ResultState | null>(null);
   const [config, setConfig] = useState<ZoovoiceConfig | null>(null);
   const [recording, setRecording] = useState<RecordingState | null>(null);
@@ -181,10 +183,7 @@ function Zoovoice() {
       .then((payload) => {
         const url = URL.createObjectURL(wavBlobFromBase64(payload.audio.base64));
         setResult({ payload, url });
-        dispatch({
-          type: "compose_succeeded",
-          fallback: payload.meta.selection_strategy === "random_fallback",
-        });
+        dispatch({ type: "compose_succeeded", fallback: false });
       })
       .catch((error: unknown) => {
         dispatch({
@@ -349,17 +348,22 @@ function Zoovoice() {
           />
 
           <label className="grid gap-1.5 text-sm font-bold text-foreground">
-            <span className="flex items-center justify-between gap-4"><span>アニマル度</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensity}</output></span>
+            <span className="flex items-center justify-between gap-4"><span>アニマル度</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensityStage(intensity)} / {intensityStageCount}</output></span>
             <input
               id="zoovoice-intensity"
               type="range"
               min="0"
               max="100"
+              step="25"
+              list="zoovoice-intensity-stages"
               value={intensity}
               disabled={!controls.sliderEnabled}
               onChange={(event) => setIntensity(Number(event.currentTarget.value))}
               className="w-full accent-foreground"
             />
+            <datalist id="zoovoice-intensity-stages">
+              {intensityStageValues.map((value) => <option key={value} value={value} />)}
+            </datalist>
             <span className="flex justify-between gap-3 text-[0.65rem] font-medium text-muted-foreground"><span>ひかえめ</span><span>{controls.retryVisible ? "次の再生成にも反映" : "次の録音に反映"}</span><span>にぎやか</span></span>
           </label>
 
@@ -414,12 +418,7 @@ function Zoovoice() {
         </CardContent>
       </Card>
     </main>
-    <div className="mx-auto mt-auto flex w-full max-w-6xl justify-center px-4 pb-2 text-center text-xs font-semibold text-muted-foreground">
-      <a className="rounded-md px-2 py-1 underline decoration-border underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href="https://stability.ai/" rel="noreferrer" target="_blank">
-        Powered by Stability AI
-      </a>
-    </div>
-    <TechStackNote items={["React", "Cloudflare Workers", "Cloudflare Turnstile", "Go", "Google Cloud Run", "whisper.cpp", "ConceptNet", "ffmpeg"]} />
+    <TechStackNote items={["React", "Cloudflare Workers", "Cloudflare Turnstile", "Go", "Google Cloud Run", "whisper.cpp", "OpenAI API", "ffmpeg"]} />
     <PrivacyNotice />
   </PageShell>;
 }
@@ -427,33 +426,40 @@ function Zoovoice() {
 function ResultDetails({ result }: { result: ResultState }) {
   const meta = result.payload.meta;
   return <>
-    {meta.selection_strategy === "random_fallback" && <p className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-      直接の言及や意味のつながりが見つからず、動物をランダムに選びました。
-    </p>}
+    <div data-testid="zoovoice-animal-figure" className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3">
+      <span aria-hidden="true" className="text-[2.75rem] leading-none">{animalEmoji(meta.selected_animal.id)}</span>
+      <span className="min-w-0 break-words text-xl font-bold tracking-[-0.02em] text-foreground">{meta.selected_animal.label_ja}</span>
+    </div>
     <dl className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3 text-xs leading-5">
-      <dt className="font-semibold text-muted-foreground">選ばれた動物</dt>
-      <dd className="min-w-0 break-words font-bold text-foreground">{meta.selected_animal.label_ja}</dd>
       <dt className="font-semibold text-muted-foreground">聞き取った言葉</dt>
       <dd className="min-w-0 break-words text-foreground">{meta.transcript}</dd>
-      <dt className="font-semibold text-muted-foreground">根拠語</dt>
-      <dd className="min-w-0 break-words text-foreground">{meta.evidence_term || "該当なし"}</dd>
-      <dt className="font-semibold text-muted-foreground">選択方式</dt>
-      <dd className="min-w-0 break-words text-foreground">{selectionStrategyLabel(meta.selection_strategy)}</dd>
+      <dt className="font-semibold text-muted-foreground">連想の理由</dt>
+      <dd className="min-w-0 break-words text-foreground">{meta.association_reason}</dd>
     </dl>
     <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} autoPlay />
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
       {meta.insertions.length}か所に「{meta.selected_animal.label_ja}」の鳴き声を追加しました。
     </p>
+    <SoundCredits credits={meta.sound_credits ?? []} />
   </>;
 }
 
-function selectionStrategyLabel(strategy: SelectionStrategy): string {
-  return {
-    direct: "動物名・鳴き声の直接言及",
-    pun: "語呂合わせ",
-    conceptnet: "言葉の意味のつながり",
-    random_fallback: "ランダム選択",
-  }[strategy];
+// 鳴き声素材の出典表示。CC BYの素材は表示が利用条件なので、使った素材を必ず並べる。
+// 素材はいずれも無音除去とトリム、音量調整を経ているため、改変した旨も添える。
+function SoundCredits({ credits }: { credits: SoundCredit[] }) {
+  if (credits.length === 0) return null;
+  return <div data-testid="zoovoice-sound-credits" className="grid gap-1 border-t border-border/70 pt-2.5 text-[0.68rem] leading-5 text-muted-foreground">
+    <p className="font-semibold">鳴き声素材の出典（無音除去・トリム・音量調整を実施）</p>
+    <ul className="grid gap-0.5">
+      {credits.map((credit) => <li key={`${credit.license}/${credit.creator ?? ""}/${credit.source_url ?? ""}`} className="break-words">
+        {credit.license}
+        {credit.creator ? ` / ${credit.creator}` : ""}
+        {credit.source_url
+          ? <> / <a href={credit.source_url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">出典</a></>
+          : null}
+      </li>)}
+    </ul>
+  </div>;
 }
 
 function messageFromError(error: unknown, fallback: string): string {

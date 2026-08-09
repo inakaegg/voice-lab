@@ -17,7 +17,7 @@
 - 実装前に [docs/speech-translation/SPEC.md](docs/speech-translation/SPEC.md) と [docs/speech-translation/OPEN_QUESTIONS.md](docs/speech-translation/OPEN_QUESTIONS.md) を確認する。
 - 見える公開UIを変更する前に [docs/UI_STYLE.md](docs/UI_STYLE.md) と [docs/deployment/FRONTEND_MIGRATION.md](docs/deployment/FRONTEND_MIGRATION.md) を確認する。
 - 未確定の内部メモ、AI会話ログ、調査途中のメモは `_ai/` に置く。
-- `_ai/` の計画ファイル（`*plan*.md`）の制約には出所ラベル（`[ユーザー指示]`・`[実データ確認済み]`・`[未確認の推測]`）を付ける。`tests/test_internal_plans.py` が機械検査する。
+- `_ai/` の計画ファイル（`*plan*.md`）の制約には出所ラベル（`[ユーザー指示]`・`[実データ確認済み]`・`[未確認の推測]`）を付ける。`_ai/` はgit管理外の下書き置き場なので、テストの検査対象にはしない。
 - 公開docsは、外部の読み手が理解する助けになる内容だけを書く。対象はプロダクトの価値と使い方、仕様と設計判断、検証方法である。
 - 公開docsに書く前に、「第三者がプロジェクトを理解し利用・評価・再現するために必要か」を確認する。答えが弱い内容は `_ai/` または `tmp/` に置く。
 - 作業履歴、チャットログの移動先、ローカル環境固有の情報、エージェント自身の作業都合は公開docsに書かない。ローカル環境固有の情報とは空き容量とパス、一時的な計測値である。必要なら `_ai/` または `tmp/` に置く。
@@ -30,6 +30,7 @@
 - 箇条書きの1項目・1段落は1トピックに閉じる。権限境界、UI表示、保存方針など性質の異なる内容を1文・1行へ詰め込まない。
 - 既に定着した技術用語(ASR・TTS・API・UIなど)や、製品名・ライブラリ名・API名などの固有名詞はそのまま使う。それ以外にプロジェクト独自の専門用語（例:「ownership evidence」のような独自の英語複合語）を新設する場合は、使う前にその文書の用語節で日本語の定義を与える。定義なしで独自用語を使い始めない。
 - 新しい公開docファイルは既定で作らない。既存の `README.md`、`SPEC.md`、`ROADMAP.md`、`docs/deployment/` 配下の該当文書のどれかへ統合できないかを先に確認する。統合先がなく新規作成する場合は、既存文書へ入らない理由を短く記す。
+- 例外として、`CONCEPTS/` 配下は `CONCEPT.md` の大原則を詳細化する人間向け仕様ファイルとして新規作成してよい。正本の優先順位は「`CONCEPT.md` の大原則 → `CONCEPTS/` → `docs/`」とし、矛盾時は上位に合わせて下位を修正する。
 - 完了済みの作業手順、廃止した設計案、旧方式との比較経緯は、公開docsへ詳細を残さない。現在の実装・仕様を理解するために必要な結論だけを書き、詳細は `git log` に委ねる。
 - 文書を書き終えたら、各段落が読点3つ以内・1トピックに収まっているか、独自用語に定義があるかを自己点検してから確定する。
 
@@ -81,12 +82,24 @@
 - 局所的なヒューリスティクスで1ケースだけ通す調整を避ける。
 - 性能改善や容量削減を主張する変更では、変更前後の計測または見積もりを残す。
 
+## インフラ構成（IaC）
+
+- CloudflareとGoogle Cloudの構成はIaCを基本とする。Terraformのコードをリポジトリ内の正本とし、dashboardや `gcloud`・`wrangler` の手作業だけで作った資産を残さない。
+- Terraformのコードは `infra/` に置く。Cloudflare側とGoogle Cloud側でディレクトリを分け、片方の適用がもう片方へ波及しないようにする。
+- 既存の資産は新規作成し直さず `terraform import` で取り込む。取り込み対象は、KV・D1・R2・Turnstile widget、Cloud Runサービス・Artifact Registry・Secret Manager・関連するservice accountとIAMである。
+- Workerのスクリプト本体とsecretはTerraformで持たない。前者は `wrangler deploy`、後者は `wrangler secret` とSecret Managerを正とする。両方で同じものを宣言すると、片方を変えるたびに差分が出続けるためである。
+- Cloud Runのimageは、Terraformでtagを固定せずdeploy時のdigestを正とする。Terraformが持つのはサービスの設定（CPU・メモリ・並列数・ingress・IAM）である。
+- 手作業が避けられない場合は、対象と理由を `_ai/` へ記録し、後からIaCへ取り込む。
+- `terraform apply` はクラウド設定変更であり、そのターンの明示許可を必要とする。`terraform plan` までは許可なく実行してよい。
+
 ## モデルとデータの扱い
 
 - git管理しない対象は、モデル本体とHugging Faceキャッシュ、生成音声と録音サンプル、APIキーである。
 - 重いモデルはリポジトリ外のキャッシュ、RunPod Network Volume、Modal Volumeなどに置く。
 - Docker imageへ大きいモデルを焼き込む構成は、MVPでは原則避ける。
 - 外部APIや有料API、課金や秘密情報を扱う変更は、導入前に `docs/` へ明記する。明記する内容は目的と代替案、料金と依存リスク、キー管理である。
+- 素材や資料を外部から探すとき、日本語・英語の情報源で見つからなければ中国語の情報源も探す。日本語・英語で見つからないことを「存在しない」の根拠にしない。Zoovoiceの鳴き声音源が主な対象である。
+- 中国語の情報源から採る場合も、ライセンスと出どころの確認は他と同じ基準で行う。確認できないものは使わない。
 
 ## Git運用
 

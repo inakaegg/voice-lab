@@ -87,10 +87,9 @@ func (api *httpAPI) compose(writer http.ResponseWriter, request *http.Request) {
 		"meta": map[string]any{
 			"transcript":              result.Transcript,
 			"selected_animal":         result.SelectedAnimal,
-			"evidence_term":           result.EvidenceTerm,
-			"selection_strategy":      result.SelectionStrategy,
-			"fallback_reason":         result.FallbackReason,
+			"association_reason":      result.AssociationReason,
 			"insertions":              result.Insertions,
+			"sound_credits":           result.SoundCredits,
 			"input_duration_seconds":  result.InputDurationSeconds,
 			"output_duration_seconds": result.OutputDurationSeconds,
 		},

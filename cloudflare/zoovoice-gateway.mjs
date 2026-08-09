@@ -71,29 +71,34 @@ function requireZoovoiceEnabled(env) {
   }
 }
 
+// 動物一覧はビルド時のJSONではなくGo APIの /animals から取る。
+// 合成に使う鳴き声セットは ZOOVOICE_SOUNDS_DIR で差し替わるため、
+// 表示だけがビルド時の内容に固定されると実素材と食い違う。
 async function proxyAnimals(request, env) {
-  if (!env.ASSETS) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を読み込めませんでした。");
-  }
-  const assetUrl = new URL(request.url);
-  assetUrl.pathname = "/react/zoovoice-animals.json";
-  let response;
-  let payload;
-  try {
-    response = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: "GET" }));
-    payload = await response.json();
-  } catch (_error) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を読み込めませんでした。");
-  }
+  const response = await fetchPrivateOrigin(request, env, "/animals", { method: "GET" });
+  const payload = await validatedOriginJson(response, env, "animals");
   if (!response.ok) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を読み込めませんでした。");
+    return gatewayJson(payload, { status: response.status });
   }
-  if (!Array.isArray(payload.animals) || payload.animals.length === 0) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を確認できませんでした。");
+  if (
+    !isPlainObject(payload)
+    || !Array.isArray(payload.animals)
+    || payload.animals.length === 0
+    || !payload.animals.every(isValidAnimalSummary)
+  ) {
+    throw new ZoovoiceGatewayError(502, "zoovoice_invalid_origin_response", "動物一覧を確認できませんでした。");
   }
-  return gatewayJson(payload, {
-    headers: { "Cache-Control": "public, max-age=3600, s-maxage=86400" },
+  return gatewayJson({ animals: payload.animals }, {
+    headers: { "Cache-Control": "public, max-age=300, s-maxage=300" },
   });
+}
+
+function isValidAnimalSummary(animal) {
+  return isPlainObject(animal)
+    && isBoundedIdentifier(animal.id, 80)
+    && isBoundedString(animal.label_ja, 1, 80)
+    && Number.isInteger(animal.variants)
+    && animal.variants > 0;
 }
 
 async function proxyCompose(request, env) {
@@ -101,15 +106,17 @@ async function proxyCompose(request, env) {
   if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
     throw new ZoovoiceGatewayError(400, "zoovoice_invalid_request", "音声ファイルと設定を確認してください。");
   }
+  const requestLimit = zoovoiceAudioMaxBytes(env) + DEFAULT_SETTINGS_MAX_BYTES + 128 * 1024;
   const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > zoovoiceAudioMaxBytes(env) + DEFAULT_SETTINGS_MAX_BYTES + 128 * 1024) {
+  if (contentLength > requestLimit) {
     throw audioTooLargeError();
   }
 
   let incoming;
   try {
-    incoming = await request.formData();
-  } catch (_error) {
+    incoming = await boundedFormData(request, requestLimit);
+  } catch (error) {
+    if (error instanceof ZoovoiceGatewayError) throw error;
     throw new ZoovoiceGatewayError(400, "zoovoice_invalid_request", "音声ファイルと設定を確認してください。");
   }
   const audio = incoming.get("audio");
@@ -141,6 +148,37 @@ async function proxyCompose(request, env) {
     throw new ZoovoiceGatewayError(502, "zoovoice_invalid_origin_response", "合成結果を確認できませんでした。");
   }
   return gatewayJson(payload, { status: response.status });
+}
+
+// Content-Lengthは省略も詐称もできるため、本文は上限付きで読み切ってから解析する。
+// 上限を超えた時点で読み込みを打ち切り、Workerのメモリを使い切らせない。
+async function boundedFormData(request, limit) {
+  if (!request.body) throw new ZoovoiceGatewayError(400, "zoovoice_invalid_request", "音声ファイルと設定を確認してください。");
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) throw audioTooLargeError();
+      chunks.push(value);
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return await new Request(request.url, {
+    method: "POST",
+    headers: { "content-type": request.headers.get("content-type") || "" },
+    body,
+  }).formData();
 }
 
 function isFileLike(value) {
@@ -178,7 +216,7 @@ function isValidComposeResponse(payload) {
     || !isPlainObject(meta.selected_animal)
     || !isBoundedIdentifier(meta.selected_animal.id, 80)
     || !isBoundedString(meta.selected_animal.label_ja, 1, 80)
-    || !["direct", "pun", "conceptnet", "random_fallback"].includes(meta.selection_strategy)
+    || !isBoundedString(meta.association_reason, 1, 400)
     || !Array.isArray(meta.insertions)
     || meta.insertions.length > 10
     || !isPositiveFiniteNumber(meta.input_duration_seconds)
@@ -186,12 +224,9 @@ function isValidComposeResponse(payload) {
     || meta.output_duration_seconds < meta.input_duration_seconds
   ) return false;
 
-  if (meta.selection_strategy === "random_fallback") {
-    if (meta.evidence_term !== null || meta.fallback_reason !== "no_association_match") return false;
-  } else if (
-    !isBoundedString(meta.evidence_term, 1, 200)
-    || meta.fallback_reason !== null
-  ) return false;
+  // 鳴き声素材のクレジットは画面へそのまま出すため、形の合わないものは通さない。
+  // 旧いorigin imageとの互換のため、項目そのものが無い場合だけは許す。
+  if (meta.sound_credits !== undefined && !isValidSoundCredits(meta.sound_credits)) return false;
 
   return meta.insertions.every((insertion) => (
     isPlainObject(insertion)
@@ -199,6 +234,26 @@ function isValidComposeResponse(payload) {
     && insertion.species === meta.selected_animal.id
     && isNonNegativeFiniteNumber(insertion.at_seconds)
   ));
+}
+
+function isValidSoundCredits(value) {
+  return Array.isArray(value)
+    && value.length <= 20
+    && value.every((credit) => (
+      isPlainObject(credit)
+      && isBoundedString(credit.license, 1, 200)
+      && (credit.creator === undefined || isBoundedString(credit.creator, 1, 200))
+      && (credit.source_url === undefined || isBoundedHttpsUrl(credit.source_url))
+    ));
+}
+
+function isBoundedHttpsUrl(value) {
+  if (!isBoundedString(value, 1, 500)) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
 }
 
 function isPlainObject(value) {

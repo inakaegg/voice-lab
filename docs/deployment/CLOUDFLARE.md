@@ -1,12 +1,14 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-05
+更新日: 2026-08-09
 
 ## 目的
 
 スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置く。SpeakLoopのGPU推論はprivateなRunPod Serverlessへ送り、GPU PodでWebサーバーを常時起動しない。Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスへ送る。
 
 公開Worker名は `voice-lab`、公開URLは `https://voice-lab.inakaegg.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
+
+KV・D1・R2とTurnstile widgetの構成はTerraform（`infra/cloudflare/`）を正本とする。Workerスクリプト本体とsecretはTerraformの対象外で、`wrangler deploy` と `wrangler secret` が正である。使い方は [ARCHITECTURE.md](ARCHITECTURE.md) のIaC節を参照する。
 
 日次quotaと監査ログの期限切れ削除は、`wrangler.toml` のCron Triggerで毎日03:17 UTCに実行する。48時間を超えた日次quotaと90日を超えた監査ログを削除するため、日次実行の間隔を含む実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaは利用上限維持のため公開デモの運用中に保持する。
 
@@ -208,7 +210,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 管理画面の単体Seed-VCとwarmupは同じGoogleセッションを使う。単体Seed-VCはjob作成から結果取得まで管理者だけに許可する。管理者メールに含まれるアカウントはquotaを消費しない。入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
-現行deploy経路はproduction Workerだけである。staging用の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryから削除済みで、現在このrepoからstagingへ再deployする経路はない。過去に作成したremote staging Worker・D1・KV・R2は削除していない。
+staging環境は廃止した。deploy経路はproduction Workerだけである。
 
 ### production
 
@@ -240,11 +242,11 @@ wrangler secret put PUBLIC_SESSION_SECRET
 wrangler secret put ADMIN_GOOGLE_EMAILS
 ```
 
-### staging
+### staging（廃止）
 
-staging用の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryから削除済みである。このrepoから新たにstagingへdeployする経路は現在ない。
+staging環境は廃止した。`wrangler.toml` の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryに無く、stagingへdeployする経路も設けない。検証はproductionとローカルWranglerで行う。
 
-過去にstaging Worker `voice-lab-staging` をこの経路でdeployし、2026-07-22（米国太平洋時間）に初回deploy、2026-07-23に必須Worker secretの登録とdeploy後smoke成功を確認した。Googleログインの実操作確認は当時未実施のまま残っている。remote staging Worker・D1・KV・R2は削除していない。staging構成を復元する場合は、削除前の設定をgit historyから確認する。
+Cloudflare側のstaging専用resource（Worker・D1・KV）も削除済みで、staging専用の資産は残っていない。R2 bucket `mo-speech-audio-preview` だけは残るが、これはproduction設定の `preview_bucket_name` であり、staging専用ではない。
 
 ## ログと監視
 

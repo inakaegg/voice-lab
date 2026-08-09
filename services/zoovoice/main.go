@@ -17,28 +17,20 @@ import (
 const defaultComposeTimeout = 85 * time.Second
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "association-eval" {
-		os.Exit(runAssociationEvalCLI(os.Args[2:], os.Stdout, os.Stderr))
+	if len(os.Args) > 1 && os.Args[1] == "preview" {
+		os.Exit(runPreviewCLI(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	logger, closer := openServiceLogger(defaultLogPath())
 	defer closer.Close()
 
-	assetsRoot := defaultAssetsRoot()
-	catalog, err := loadCatalog(
-		filepath.Join(assetsRoot, "animal-lexicon.json"),
-		assetsRoot,
-	)
+	catalog, err := loadRuntimeCatalog()
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
-	runtimeDependencies, err := loadRuntimeDependencies(
-		execCommandRunner{},
-		filepath.Join(assetsRoot, "animal-lexicon.json"),
-	)
+	runtimeDependencies, err := loadRuntimeDependencies(execCommandRunner{})
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
-	defer runtimeDependencies.Close()
 	timeout := durationFromEnv("ZOOVOICE_TIMEOUT_SECONDS", defaultComposeTimeout)
 	activeComposer := newComposer(
 		catalog,
@@ -91,19 +83,15 @@ func serverPort() int {
 	return integerFromEnv("PORT", 8090)
 }
 
-func defaultAssetsRoot() string {
-	if configured := os.Getenv("ZOOVOICE_ASSETS_DIR"); configured != "" {
-		return configured
+// loadRuntimeCatalog はサーバとCLIが共通で使うカタログ読み込み。
+// 鳴き声はリポジトリに置かず、ZOOVOICE_SOUNDS_DIR が指す manifest付き
+// ディレクトリだけを読む（container image ではビルド時に取り込む）。
+func loadRuntimeCatalog() (*assetCatalog, error) {
+	soundsDir := os.Getenv("ZOOVOICE_SOUNDS_DIR")
+	if soundsDir == "" {
+		return nil, fmt.Errorf("ZOOVOICE_SOUNDS_DIR is required: manifest.json付きの鳴き声ディレクトリを指定してください")
 	}
-	for _, candidate := range []string{
-		filepath.Join("services", "zoovoice", "assets"),
-		"assets",
-	} {
-		if regularFileExists(filepath.Join(candidate, "animal-lexicon.json")) {
-			return candidate
-		}
-	}
-	return filepath.Join("services", "zoovoice", "assets")
+	return loadSoundsCatalog(soundsDir)
 }
 
 func defaultLogPath() string {

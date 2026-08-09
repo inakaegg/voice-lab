@@ -9,7 +9,7 @@ def load_wrangler_config() -> dict:
     return tomllib.loads((ROOT / "wrangler.toml").read_text(encoding="utf-8"))
 
 
-def test_staging_worker_configuration_is_removed() -> None:
+def test_staging_environment_is_abolished() -> None:
     config = load_wrangler_config()
 
     assert "staging" not in config.get("env", {})

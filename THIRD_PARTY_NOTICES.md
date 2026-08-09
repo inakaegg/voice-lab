@@ -1,6 +1,6 @@
 # 第三者コンポーネントとライセンス境界
 
-更新日: 2026-07-17
+更新日: 2026-08-09
 
 Voice Lab本体にはオープンソースライセンスを付与していない。リポジトリ直下の [LICENSE](LICENSE) はVoice Lab本体に適用し、第三者のソフトウェア、モデル、データに既に付与されている権利を変更しない。
 
@@ -34,6 +34,19 @@ Cloudflare Workerはピンイン生成に [pinyin-pro](https://github.com/zh-lx/
 | [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) | `qwen-tts==0.1.1`とmodel repository | Apache-2.0 | packageとmodelのversion・条件をimage単位で確認する。 |
 
 その他の依存(FastAPI・OpenAI SDK・RunPod SDK・FunASR・faster-whisper・PyTorch・Transformers等)にも個別のライセンスがある。package managerで導入されるライセンスmetadataを削除しない。public imageを配布する場合は、対象imageからSBOMとライセンス一覧を生成して確認する。
+
+## zoovoiceの鳴き声音源
+
+zoovoiceが使う動物の鳴き声は、外部の無償配布素材である。系統ごとに条件が違うため、扱いを分けて記録する。
+
+| 系統 | 出典 | 条件の要点 |
+| --- | --- | --- |
+| 小森平「効果音で遊ぼう！」 | https://taira-komori.net/ | 商用利用・加工・製品への組込み可。事前事後の連絡は不要。ただし素材そのものの再配布・販売・音声ファイルへの直リンクは禁止。可能ならリンク表示を求めている。 |
+| freesound経由 | 各素材のlanding URL | CC0またはCC BY。個別の条件は取得時のmanifestに記録している。 |
+
+小森平の配布物に同梱される規約全文は、取得したzip内の `read me.txt` にある。作業用ディレクトリはGit管理外のため、上の要点を本ファイルの記録として残す。全文が再度必要になったときは配布ページから取り直す。
+
+この条件のうち「素材そのものの再配布の禁止」は、zoovoiceの作りに直接効く。ユーザーの音声と混ぜて出力する再生は素材そのものの配布にあたらないと読めるが、鳴き声のwavをpublic repositoryへ同梱したり、そのまま単体で取得できるURLで配信したりする形は避ける必要がある。公開の形を決める段階で改めて確認する。
 
 ## 現在の公開面判断
 

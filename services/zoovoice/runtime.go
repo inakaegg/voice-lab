@@ -2,70 +2,60 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
-
-	"github.com/inakaegg/voice-lab/services/zoovoice/internal/conceptindex"
+	"time"
 )
 
 type runtimeDependencies struct {
 	transcriber transcriber
 	associator  animalAssociator
-	store       *conceptindex.Store
 }
 
-func loadRuntimeDependencies(
-	runner commandRunner,
-	lexiconPath string,
-) (*runtimeDependencies, error) {
+func loadRuntimeDependencies(runner commandRunner) (*runtimeDependencies, error) {
+	activeTranscriber, err := loadTranscriberFromEnv(runner)
+	if err != nil {
+		return nil, err
+	}
+	associator, err := loadAssociatorFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return &runtimeDependencies{transcriber: activeTranscriber, associator: associator}, nil
+}
+
+// loadTranscriberFromEnv はwhisperによるASRを組み立てる。音声入力にだけ要る。
+func loadTranscriberFromEnv(runner commandRunner) (transcriber, error) {
 	threads, err := positiveIntegerEnv("ZOOVOICE_ASR_THREADS", 2)
 	if err != nil {
 		return nil, err
 	}
-	activeTranscriber, err := newWhisperTranscriber(
+	return newWhisperTranscriber(
 		runner,
 		os.Getenv("ZOOVOICE_WHISPER_COMMAND"),
 		os.Getenv("ZOOVOICE_ASR_MODEL_PATH"),
 		threads,
 	)
-	if err != nil {
-		return nil, err
-	}
-	indexPath := os.Getenv("ZOOVOICE_CONCEPTNET_INDEX_PATH")
-	if !regularFileExists(indexPath) {
-		return nil, fmt.Errorf("ZOOVOICE_CONCEPTNET_INDEX_PATH must be a regular file")
-	}
-	lexiconSHA, err := conceptindex.FileSHA256(lexiconPath)
-	if err != nil {
-		return nil, fmt.Errorf("hash animal lexicon: %w", err)
-	}
-	store, err := conceptindex.Open(indexPath, conceptNetSourceSHA256, lexiconSHA)
-	if err != nil {
-		return nil, err
-	}
-	engine, err := newAssociationEngine(lexiconPath, store)
-	if err != nil {
-		store.Close()
-		return nil, err
-	}
-	associator := animalAssociator(engine)
-	embedding, err := embeddingAssociatorFromEnv(runner)
-	if err != nil {
-		store.Close()
-		return nil, err
-	}
-	if embedding != nil {
-		associator = &embeddingFallbackAssociator{primary: engine, embedding: embedding}
-	}
-	return &runtimeDependencies{
-		transcriber: activeTranscriber,
-		associator:  associator,
-		store:       store,
-	}, nil
 }
 
-func (dependencies *runtimeDependencies) Close() error {
-	return dependencies.store.Close()
+// loadAssociatorFromEnv はLLM連想を組み立てる。APIキーが無ければ起動しない。
+func loadAssociatorFromEnv() (animalAssociator, error) {
+	timeoutSeconds, err := positiveIntegerEnv("ZOOVOICE_LLM_TIMEOUT_SECONDS", 20)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: time.Duration(timeoutSeconds) * time.Second}
+	associator, err := newLLMAssociator(
+		client,
+		os.Getenv("ZOOVOICE_LLM_ENDPOINT"),
+		os.Getenv("OPENAI_API_KEY"),
+		os.Getenv("ZOOVOICE_LLM_MODEL"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return associator, nil
 }
 
 func positiveIntegerEnv(name string, fallback int) (int, error) {
