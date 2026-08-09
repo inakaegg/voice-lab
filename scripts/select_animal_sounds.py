@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""tmp1/ の3系統の鳴き声音源から、優先順位に従って最終セットを組み立てる。
+"""tmp1/ の鳴き声音源から、優先順位に従って最終セットを組み立てる。
 
 優先順位（CONCEPT.md 指示欄「自然音声優先」）:
   1. processed/ (taira-komori-selected と cc0。どちらも実録音で、全ファイル残す)
+     と real-recordings/ (声の主を1本ずつ確かめた実録音)
   2. animal-sound-freesound/ (実録音)
-  3. animal-sounds/ (Stable Audio の生成音。実録音が無い動物のための暫定)
 
-実録音を生成音より上に置く。同じ動物が上位に既にあれば、下位のものは採用しない。
+すべて実録音である。同じ動物が上位に既にあれば、下位のものは採用しない。
 出力先は tmp1/final/<動物キー>/ と tmp1/final/manifest.json。
 """
 
@@ -146,14 +146,14 @@ def load_cc0_credits() -> dict[str, dict]:
     return credits
 
 
-def load_animal_sounds_credits() -> dict[str, dict]:
-    """animal-sounds/manifest.json（旧27種セットの同梱manifest）を動物キーで引く。"""
-    manifest = json.loads((SRC / "animal-sounds" / "manifest.json").read_text(encoding="utf-8"))
+def load_real_recording_credits() -> dict[str, dict]:
+    """real-recordings/manifest.json（Wikimedia CommonsとOpenverse由来の実録音）を動物キーで引く。"""
+    manifest = json.loads((SRC / "real-recordings" / "manifest.json").read_text(encoding="utf-8"))
     return {
         entry["id"]: {
             "license": entry["license"],
             "creator": entry["creator"],
-            "source_url": entry["landing_url"],
+            "source_url": entry["source_url"],
         }
         for entry in manifest["animals"]
     }
@@ -186,7 +186,7 @@ def collect() -> list[dict]:
     """(優先順位, 動物キー, 元ファイル, 出典情報) の候補を優先順に並べて返す。"""
     items: list[dict] = []
     cc0_credits = load_cc0_credits()
-    animal_sounds_credits = load_animal_sounds_credits()
+    real_recording_credits = load_real_recording_credits()
     freesound_credits = load_freesound_credits()
 
     for path in sorted((SRC / "processed" / "taira-komori-selected").glob("*.wav")):
@@ -211,6 +211,17 @@ def collect() -> list[dict]:
             }
         )
 
+    for path in sorted((SRC / "real-recordings").glob("*/*.wav")):
+        items.append(
+            {
+                "priority": 1,
+                "key": path.parent.name,
+                "path": path,
+                "source": "real-recordings",
+                "credit": real_recording_credits[path.parent.name],
+            }
+        )
+
     for path in sorted(
         p
         for p in (SRC / "animal-sound-freesound").rglob("*.wav")
@@ -223,17 +234,6 @@ def collect() -> list[dict]:
                 "path": path,
                 "source": "animal-sound-freesound",
                 "credit": freesound_credits[(path.parent.name, freesound_candidate_number(path))],
-            }
-        )
-
-    for path in sorted((SRC / "animal-sounds").glob("*.wav")):
-        items.append(
-            {
-                "priority": 3,
-                "key": path.stem,
-                "path": path,
-                "source": "animal-sounds",
-                "credit": animal_sounds_credits[path.stem],
             }
         )
 
@@ -290,10 +290,9 @@ def main() -> None:
     manifest = {
         "schema_version": 1,
         "note": (
-            "tmp1/ の3系統から優先順位で最終選別したセット。実録音を生成音より優先する。"
-            "優先順位1=processed(taira-komori-selected と cc0、実録音)、"
-            "2=animal-sound-freesound(実録音)、"
-            "3=animal-sounds(Stable Audio の生成音。実録音が無い動物のための暫定)。"
+            "tmp1/ の各系統から優先順位で最終選別したセット。すべて実録音である。"
+            "優先順位1=processed(taira-komori-selected と cc0) と real-recordings、"
+            "2=animal-sound-freesound。"
             "上位に同じ動物があれば下位は採用しない。"
         ),
         "animal_count": len(animals),
