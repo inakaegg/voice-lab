@@ -40,7 +40,8 @@ test("Zoovoice local launcher dry-run uses Go and Wrangler without starting Fast
       result.stdout,
       /wrangler d1 migrations apply MO_SPEECH_DB .*--local.*--persist-to/,
     );
-    assert.match(result.stdout, /ZOOVOICE_PORT=8090 .*go run \./);
+    assert.match(result.stdout, /go build -o tmp\/zoovoice-local-api \./);
+    assert.match(result.stdout, /ZOOVOICE_PORT=8090 .*tmp\/zoovoice-local-api/);
     assert.match(result.stdout, /ZOOVOICE_TIMEOUT_SECONDS=85/);
     assert.match(
       result.stdout,
@@ -55,6 +56,37 @@ test("Zoovoice local launcher dry-run uses Go and Wrangler without starting Fast
     assert.equal(readIfPresent(marker), "");
   } finally {
     rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("Zoovoice local launcher honours port overrides and rejects invalid ports", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zoovoice-launcher-ports-"));
+  try {
+    const runtime = createRuntimeFixtures(directory);
+
+    const overridden = runLauncher("local", {
+      ...runtime,
+      ZOOVOICE_DEV_PORT: "8788",
+      ZOOVOICE_API_PORT: "8091",
+    });
+
+    assert.equal(overridden.status, 0, overridden.stderr);
+    assert.match(overridden.stdout, /ZOOVOICE_PORT=8091 /);
+    assert.match(overridden.stdout, /wrangler dev .*--port 8788/);
+
+    const rejected = runLauncher("local", {
+      ...runtime,
+      ZOOVOICE_DEV_PORT: "not-a-port",
+    });
+
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /ZOOVOICE_DEV_PORT must be a port number/);
+    assert.doesNotMatch(
+      rejected.stdout + rejected.stderr,
+      /wrangler dev|go build|npm run build:web/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

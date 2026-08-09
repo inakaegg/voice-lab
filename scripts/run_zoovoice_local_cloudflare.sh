@@ -45,22 +45,36 @@ script_directory=${BASH_SOURCE[0]%/*}
 repository_root=$(cd "$script_directory/.." && pwd -P)
 persist_directory="$repository_root/tmp/zoovoice-wrangler"
 dry_run=${ZOOVOICE_DRY_RUN:-0}
+browser_port=${ZOOVOICE_DEV_PORT:-8787}
+api_port=${ZOOVOICE_API_PORT:-8090}
+[[ "$browser_port" =~ ^[0-9]{2,5}$ ]] || fail "ZOOVOICE_DEV_PORT must be a port number"
+[[ "$api_port" =~ ^[0-9]{2,5}$ ]] || fail "ZOOVOICE_API_PORT must be a port number"
 cloud_run_url=""
 gcp_project=""
 smoke_service_account=""
 whisper_command=""
 asr_model=""
 openai_api_key=""
+whisper_library_path=""
+sounds_directory=""
 
 if [[ "$mode" == "local" ]]; then
   whisper_command=${ZOOVOICE_WHISPER_COMMAND:-}
   asr_model=${ZOOVOICE_ASR_MODEL_PATH:-}
   openai_api_key=${OPENAI_API_KEY:-}
+  # macOS は保護された実行ファイル（npm 経由の /bin/sh 等）を通ると DYLD_LIBRARY_PATH を捨てる。
+  # そのため共有ライブラリの場所は DYLD_ 以外の名前で受け取り、API プロセスの起動時にこの場で設定する。
+  whisper_library_path=${ZOOVOICE_WHISPER_LIB_PATH:-}
+  sounds_directory=${ZOOVOICE_SOUNDS_DIR:-}
   required_file ZOOVOICE_WHISPER_COMMAND "$whisper_command"
   required_file ZOOVOICE_ASR_MODEL_PATH "$asr_model"
   [[ -n "$openai_api_key" ]] || fail "OPENAI_API_KEY is required"
   whisper_command=$(canonical_file "$whisper_command")
   asr_model=$(canonical_file "$asr_model")
+  if [[ -n "$sounds_directory" ]]; then
+    [[ -d "$sounds_directory" ]] || fail "ZOOVOICE_SOUNDS_DIR must be a directory"
+    sounds_directory=$(cd "$sounds_directory" && pwd -P)
+  fi
 fi
 
 if [[ "$mode" == "cloud-run" ]]; then
@@ -91,12 +105,13 @@ if [[ "$dry_run" == "1" ]]; then
   if [[ "$mode" == "local" ]]; then
     echo "[dry-run] env: ZOOVOICE_ORIGIN_MODE=local-origin"
     echo "[dry-run] ASR runtime artifacts and association API key: verified"
-    echo "[dry-run] ZOOVOICE_PORT=8090 ZOOVOICE_TIMEOUT_SECONDS=85 go run ."
+    echo "[dry-run] go build -o tmp/zoovoice-local-api ."
+    echo "[dry-run] ZOOVOICE_PORT=$api_port ZOOVOICE_TIMEOUT_SECONDS=85 tmp/zoovoice-local-api"
   else
     echo "[dry-run] gcloud auth print-identity-token --impersonate-service-account=<redacted> --audiences=$cloud_run_url --project=$gcp_project --quiet"
     echo "[dry-run] env: ZOOVOICE_ORIGIN_MODE=cloud-run-smoke"
   fi
-  echo "[dry-run] npx wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to $persist_directory --env-file <temporary-dev-vars>"
+  echo "[dry-run] npx wrangler dev --local --ip 127.0.0.1 --port $browser_port --persist-to $persist_directory --env-file <temporary-dev-vars>"
   exit 0
 fi
 
@@ -127,7 +142,7 @@ trap cleanup EXIT
 if [[ "$mode" == "local" ]]; then
   {
     echo "ZOOVOICE_ORIGIN_MODE=local-origin"
-    echo "ZOOVOICE_LOCAL_ORIGIN=http://127.0.0.1:8090"
+    echo "ZOOVOICE_LOCAL_ORIGIN=http://127.0.0.1:$api_port"
   } >> "$temporary_dev_vars"
 else
   temporary_error=$(mktemp "${TMPDIR:-/tmp}/zoovoice-gcloud-error.XXXXXX")
@@ -155,20 +170,27 @@ npm run build:web
 npx wrangler d1 migrations apply MO_SPEECH_DB --local --persist-to "$persist_directory"
 
 if [[ "$mode" == "local" ]]; then
+  # go run ではなくビルドした実行ファイルを起動する。署名付きの go 経由だと
+  # DYLD_LIBRARY_PATH が whisper-cli へ渡らず音声認識が起動しないため（CLI.md と同じ理由）。
+  # また go run の子プロセスは親を kill しても残るので、実行ファイルを直接持つ。
+  api_binary="$repository_root/tmp/zoovoice-local-api"
+  (cd "$repository_root/services/zoovoice" && go build -o "$api_binary" .)
   (
     cd "$repository_root/services/zoovoice"
-    ZOOVOICE_PORT=8090 \
-	  ZOOVOICE_TIMEOUT_SECONDS=85 \
+    exec env ZOOVOICE_PORT="$api_port" \
+      ZOOVOICE_TIMEOUT_SECONDS=85 \
       ZOOVOICE_WHISPER_COMMAND="$whisper_command" \
       ZOOVOICE_ASR_MODEL_PATH="$asr_model" \
+      ${sounds_directory:+ZOOVOICE_SOUNDS_DIR="$sounds_directory"} \
+      ${whisper_library_path:+DYLD_LIBRARY_PATH="$whisper_library_path"} \
       OPENAI_API_KEY="$openai_api_key" \
-      go run .
+      "$api_binary"
   ) &
   go_pid=$!
 
   ready=0
   for _attempt in {1..60}; do
-    if curl --fail --silent --show-error http://127.0.0.1:8090/healthz >/dev/null 2>&1; then
+    if curl --fail --silent --show-error "http://127.0.0.1:$api_port/healthz" >/dev/null 2>&1; then
       ready=1
       break
     fi
@@ -183,6 +205,6 @@ fi
 npx wrangler dev \
   --local \
   --ip 127.0.0.1 \
-  --port 8787 \
+  --port "$browser_port" \
   --persist-to "$persist_directory" \
   --env-file "$temporary_dev_vars"
