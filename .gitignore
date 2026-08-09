@@ -10,6 +10,9 @@ model-cache/
 hf-cache/
 checkpoints/
 
+# Go build artifacts (the zoovoice binary is built locally, never committed).
+services/zoovoice/zoovoice
+
 # Python / Node build artifacts for the future web app.
 __pycache__/
 .pytest_cache/
