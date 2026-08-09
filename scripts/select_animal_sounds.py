@@ -40,6 +40,12 @@ TAIRA_KEYS = {
     "wagtail": "wagtail",
 }
 
+# 人間が聴いて中身が名前と違うと判定したもの。入力ファイルは残したまま採用だけ止める
+# （tmp1/ は .gitignore 対象で、入力を消すと判定の理由が残らないため）。
+EXCLUDED_KEYS = {
+    "seal": "収録音が明らかに犬の声（人間の聴取判定, 2026-08-09）",
+}
+
 LABEL_JA = {
     "black-kite": "トビ",
     "blue-rock-thrush": "イソヒヨドリ",
@@ -185,6 +191,15 @@ def main() -> None:
 
     for item in collect():
         key = item["key"]
+        if key in EXCLUDED_KEYS:
+            skipped.append(
+                {
+                    "animal": key,
+                    "file": str(item["path"].relative_to(SRC)),
+                    "reason": EXCLUDED_KEYS[key],
+                }
+            )
+            continue
         if key in adopted and adopted[key]["priority"] < item["priority"]:
             skipped.append(
                 {
