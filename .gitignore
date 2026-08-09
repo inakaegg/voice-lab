@@ -30,3 +30,9 @@ _ai_output/
 
 .concept-watch/*
 !.concept-watch/concept-watch.conf
+
+# Terraform: stateとproviderキャッシュはローカル専用（リモートbackend移行までの暫定）
+infra/**/.terraform/
+infra/**/terraform.tfstate
+infra/**/terraform.tfstate.backup
+infra/**/*.tfplan

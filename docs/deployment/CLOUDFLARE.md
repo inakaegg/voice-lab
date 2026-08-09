@@ -1,12 +1,14 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-05
+更新日: 2026-08-09
 
 ## 目的
 
 スマホから触れるデモでは、Web UI配信とAPI gatewayをCloudflare Workersへ置く。SpeakLoopのGPU推論はprivateなRunPod Serverlessへ送り、GPU PodでWebサーバーを常時起動しない。Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスへ送る。
 
 公開Worker名は `voice-lab`、公開URLは `https://voice-lab.inakaegg.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
+
+KV・D1・R2とTurnstile widgetの構成はTerraform（`infra/cloudflare/`）を正本とする。Workerスクリプト本体とsecretはTerraformの対象外で、`wrangler deploy` と `wrangler secret` が正である。使い方は [ARCHITECTURE.md](ARCHITECTURE.md) のIaC節を参照する。
 
 日次quotaと監査ログの期限切れ削除は、`wrangler.toml` のCron Triggerで毎日03:17 UTCに実行する。48時間を超えた日次quotaと90日を超えた監査ログを削除するため、日次実行の間隔を含む実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaは利用上限維持のため公開デモの運用中に保持する。
 
