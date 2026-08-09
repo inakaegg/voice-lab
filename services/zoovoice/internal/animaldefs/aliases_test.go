@@ -11,8 +11,8 @@ func TestLoadTrackedAnimalLexicon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 27 {
-		t.Fatalf("animal count = %d, want 27", len(catalog))
+	if len(catalog) != 26 {
+		t.Fatalf("animal count = %d, want 26", len(catalog))
 	}
 	pig := catalog["pig"]
 	if pig.LabelJA != "ブタ" || pig.AudioFile != "animal-sounds/pig.wav" {

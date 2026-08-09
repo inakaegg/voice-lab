@@ -1,8 +1,8 @@
 # Stability AI Community Licenseの表示
 
-更新日: 2026-08-04
+更新日: 2026-08-09
 
-Zoovoiceの動物の鳴き声のうち24種は、Stable Audioで生成した音声である。この文書はその必須表示と生成物の由来を示す。Cloud Run用imageへは `/app/licenses/NOTICE-STABILITY-AI.md` として同梱する。配備scriptとDockerfileが独立したファイルとして取り込むため、既存文書へ統合せずここに置く。
+Zoovoiceの動物の鳴き声のうち23種は、Stable Audioで生成した音声である（アザラシは生成音の収録内容の不備で削除済み）。この文書はその必須表示と生成物の由来を示す。Cloud Run用imageへは `/app/licenses/NOTICE-STABILITY-AI.md` として同梱する。配備scriptとDockerfileが独立したファイルとして取り込むため、既存文書へ統合せずここに置く。
 
 ## 必須の表示文
 
@@ -20,7 +20,7 @@ This Stability AI Model is licensed under the Stability AI Community License
 | --- | --- |
 | モデル | `stabilityai/stable-audio-3-small-sfx` |
 | モデルrevision | `ae12755283df9d62ca39a9b050a39a0b607b8c20` |
-| 生成物 | `assets/animal-sounds/` のうち `source_kind` が `stable_audio` の24件 |
+| 生成物 | `assets/animal-sounds/` のうち `source_kind` が `stable_audio` の23件 |
 | 由来の記録 | `assets/animal-sounds/manifest.json` |
 | ライセンス | Stability AI Community License |
 | ライセンスURL | `https://stability.ai/license` |

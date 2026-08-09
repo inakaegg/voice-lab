@@ -17,8 +17,8 @@ func TestRepositoryAnimalLexiconHasOneValidAudioPerAnimal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Animals) != 27 {
-		t.Fatalf("animal count = %d, want 27", len(catalog.Animals))
+	if len(catalog.Animals) != 26 {
+		t.Fatalf("animal count = %d, want 26", len(catalog.Animals))
 	}
 	for _, animal := range catalog.Animals {
 		if len(animal.Variants) != 1 {

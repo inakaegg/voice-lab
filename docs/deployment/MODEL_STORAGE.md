@@ -20,7 +20,7 @@ ZoovoiceのGoサービスは、日本語ASRと動物連想のために次の3つ
 | --- | --- | --- |
 | whisper.cppソース | `whisper-cli` をbuildする元 | commit `5250a86fdebac4d51085fcfcd0b315cb0c6b91c9` |
 | ASRモデル | 日本語ASR用 `ggml-small.bin` | SHA-256 `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
-| 連想index | ConceptNet 5.7.0から作った日本語のSQLite | SHA-256 `088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71` |
+| 連想index | ConceptNet 5.7.0から作った日本語のSQLite | SHA-256 `6492ed5d72629fd51f3794e3df5e568d509fbd1382c1fe3731064177a8d6297a` |
 
 ローカル実行では、環境変数でこの3つのpathを渡す。Cloud Run向けimageでは、buildが検証済みのディレクトリをnamed contextとして受け取り、imageへ取り込む。取り込み後にimage内でSHA-256を照合し、一致しない場合はbuildを失敗させる。
 

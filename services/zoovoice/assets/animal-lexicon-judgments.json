@@ -20,7 +20,7 @@
     {"id":"donkey","concept":"ロバ","label_ja":"ロバ","accepted":true,"reason":"ヒーホーという鳴き声が広く知られている","onomatopoeia":["ヒーホー"]},
     {"id":"chimpanzee","concept":"チンパンジー","label_ja":"チンパンジー","accepted":true,"reason":"高い叫び声を明確に想起できる","onomatopoeia":["キャッキャッ"]},
     {"id":"dolphin","concept":"イルカ","label_ja":"イルカ","accepted":true,"reason":"高いクリック音や鳴き声を想起できる","onomatopoeia":["キューキュー"]},
-    {"id":"seal","concept":"アザラシ","label_ja":"アザラシ","accepted":true,"reason":"低い吠え声を想起できる","onomatopoeia":["オウオウ"]},
+    {"id":"seal","concept":"アザラシ","label_ja":"アザラシ","accepted":false,"reason":"用意した音源の収録音が明らかに犬の声だったため素材を削除した（人間の聴取判定, 2026-08-09）。使える音声候補が無い","onomatopoeia":[]},
     {"id":"whale","concept":"クジラ","label_ja":"クジラ","accepted":true,"reason":"低く長い歌声を想起できる","onomatopoeia":["ブオー"]},
     {"id":"hyena","concept":"ハイエナ","label_ja":"ハイエナ","accepted":true,"reason":"笑い声のような鳴き声を想起できる","onomatopoeia":["ケタケタ"]},
     {"id":"tiger","concept":"虎","label_ja":"トラ","accepted":true,"reason":"低い咆哮を明確に想起できる","onomatopoeia":[]},

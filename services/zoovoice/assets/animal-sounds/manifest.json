@@ -843,48 +843,6 @@
       ]
     },
     {
-      "id": "seal",
-      "label_ja": "アザラシ",
-      "file": "seal.wav",
-      "normalized_sha256": "20288520a96b2e93faeaf43f5000bcce262500aa7e46b455e0c95446b300f165",
-      "source_kind": "stable_audio",
-      "license": "Stability AI Community License",
-      "creator": "stabilityai/stable-audio-3-small-sfx",
-      "landing_url": "https://stability.ai/license",
-      "duration_seconds": 5.0,
-      "sample_rate": 24000,
-      "channels": 1,
-      "bits_per_sample": 16,
-      "mean_dbfs": -17.5,
-      "peak_dbfs": 0.0,
-      "adopted_candidate": {
-        "variant": 1,
-        "seed": 4191,
-        "prompt": "A single harbor seal barking twice, isolated close wildlife recording, no music, no ambience, no human voice",
-        "source_file": "seal-4191.wav",
-        "source_sha256": "3510697727ab99e6cb62e2ec581efd94f90a46f93807a1ce2b2f1cc8d4e05f44",
-        "receipt_file": "seal-4191.receipt.json"
-      },
-      "candidates": [
-        {
-          "variant": 1,
-          "seed": 4191,
-          "prompt": "A single harbor seal barking twice, isolated close wildlife recording, no music, no ambience, no human voice",
-          "source_file": "seal-4191.wav",
-          "source_sha256": "3510697727ab99e6cb62e2ec581efd94f90a46f93807a1ce2b2f1cc8d4e05f44",
-          "receipt_file": "seal-4191.receipt.json"
-        },
-        {
-          "variant": 2,
-          "seed": 4192,
-          "prompt": "A single harbor seal barking twice, isolated close wildlife recording, no music, no ambience, no human voice",
-          "source_file": "seal-4192.wav",
-          "source_sha256": "cbc7dac490a4e7a90bc0680b2e736a92c46d1bd093b9b855c60de39c4d47d512",
-          "receipt_file": "seal-4192.receipt.json"
-        }
-      ]
-    },
-    {
       "id": "sheep",
       "label_ja": "羊",
       "file": "sheep.wav",

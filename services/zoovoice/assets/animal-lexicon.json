@@ -6,8 +6,8 @@
     "generated_by": "services/zoovoice/cmd/animal-lexicon",
     "conceptnet_version": "5.7.0",
     "conceptnet_sha256": "accd65fe94038584295574ddc26e1500c1919c8c4532bf771811cafd0948af7e",
-    "judgments_sha256": "bb2bc133ca1a41fe39326121c1e10ec9f1ad434d1e1511d01bf886db7193f6e8",
-    "audio_manifest_sha256": "84bb10c17e20719743bd44317aa1cc8888e42a6e6d31c152435b612b2694e129",
+    "judgments_sha256": "03997f9d053ac9714c975cb34f1824eeca26fe4fce4f9cbffb92ac940ccaa648",
+    "audio_manifest_sha256": "7588021301a6cd2d3fd91efe6a31dbcd1f39c51aceca931dc33d9886a4a0180c",
     "animal_root_concepts": [
       "動物",
       "哺乳類",
@@ -346,20 +346,6 @@
       ],
       "audio_file": "animal-sounds/rooster.wav",
       "audio_sha256": "89ac3867ee9fad0730f0fbcb8fc50cc642584ff36e8c6af898d5b50d5a65725a"
-    },
-    {
-      "id": "seal",
-      "label_ja": "アザラシ",
-      "terms": [
-        "あざらし",
-        "アザラシ"
-      ],
-      "onomatopoeia": [
-        "おうおう",
-        "オウオウ"
-      ],
-      "audio_file": "animal-sounds/seal.wav",
-      "audio_sha256": "20288520a96b2e93faeaf43f5000bcce262500aa7e46b455e0c95446b300f165"
     },
     {
       "id": "sheep",
