@@ -82,12 +82,24 @@
 - 局所的なヒューリスティクスで1ケースだけ通す調整を避ける。
 - 性能改善や容量削減を主張する変更では、変更前後の計測または見積もりを残す。
 
+## インフラ構成（IaC）
+
+- CloudflareとGoogle Cloudの構成はIaCを基本とする。Terraformのコードをリポジトリ内の正本とし、dashboardや `gcloud`・`wrangler` の手作業だけで作った資産を残さない。
+- Terraformのコードは `infra/` に置く。Cloudflare側とGoogle Cloud側でディレクトリを分け、片方の適用がもう片方へ波及しないようにする。
+- 既存の資産は新規作成し直さず `terraform import` で取り込む。取り込み対象は、KV・D1・R2・Turnstile widget、Cloud Runサービス・Artifact Registry・Secret Manager・関連するservice accountとIAMである。
+- Workerのスクリプト本体とsecretはTerraformで持たない。前者は `wrangler deploy`、後者は `wrangler secret` とSecret Managerを正とする。両方で同じものを宣言すると、片方を変えるたびに差分が出続けるためである。
+- Cloud Runのimageは、Terraformでtagを固定せずdeploy時のdigestを正とする。Terraformが持つのはサービスの設定（CPU・メモリ・並列数・ingress・IAM）である。
+- 手作業が避けられない場合は、対象と理由を `_ai/` へ記録し、後からIaCへ取り込む。
+- `terraform apply` はクラウド設定変更であり、そのターンの明示許可を必要とする。`terraform plan` までは許可なく実行してよい。
+
 ## モデルとデータの扱い
 
 - git管理しない対象は、モデル本体とHugging Faceキャッシュ、生成音声と録音サンプル、APIキーである。
 - 重いモデルはリポジトリ外のキャッシュ、RunPod Network Volume、Modal Volumeなどに置く。
 - Docker imageへ大きいモデルを焼き込む構成は、MVPでは原則避ける。
 - 外部APIや有料API、課金や秘密情報を扱う変更は、導入前に `docs/` へ明記する。明記する内容は目的と代替案、料金と依存リスク、キー管理である。
+- 素材や資料を外部から探すとき、日本語・英語の情報源で見つからなければ中国語の情報源も探す。日本語・英語で見つからないことを「存在しない」の根拠にしない。Zoovoiceの鳴き声音源が主な対象である。
+- 中国語の情報源から採る場合も、ライセンスと出どころの確認は他と同じ基準で行う。確認できないものは使わない。
 
 ## Git運用
 
