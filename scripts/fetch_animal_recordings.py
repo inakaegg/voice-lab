@@ -167,6 +167,24 @@ def commons_file_details(titles: list[str]) -> list[dict]:
     return details
 
 
+def openverse_license_name(slug: str | None, version: str | None) -> str:
+    """Openverse の license slug を許可判定と同じ表記へ直す。
+
+    Openverse は表示義務ありの CC BY を `by` という slug で返す。そのまま大文字化すると
+    "BY 4.0" になり、"CC BY" 始まりだけを通す許可リストから CC BY の候補が全部落ちる。
+    """
+    normalized = (slug or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized == "cc0":
+        label = "CC0"
+    elif normalized == "pdm":
+        label = "Public Domain Mark"
+    else:
+        label = "CC " + normalized.upper()
+    return f"{label} {(version or '').strip()}".strip()
+
+
 def openverse_results(query: str, license_filter: str, limit: int = 20) -> list[dict]:
     url = OPENVERSE_API + "?" + urllib.parse.urlencode(
         {"q": query, "license": license_filter, "page_size": str(limit)}
@@ -186,7 +204,7 @@ def openverse_results(query: str, license_filter: str, limit: int = 20) -> list[
                 "title": item.get("title") or "",
                 "download_url": download_url,
                 "landing_url": item.get("foreign_landing_url") or "",
-                "license": (item.get("license") or "").upper() + " " + (item.get("license_version") or ""),
+                "license": openverse_license_name(item.get("license"), item.get("license_version")),
                 "license_url": item.get("license_url") or "",
                 "creator": item.get("creator") or "",
                 "description": (item.get("description") or "")[:400],

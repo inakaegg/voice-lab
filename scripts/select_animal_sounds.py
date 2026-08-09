@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""tmp1/ の鳴き声音源から、優先順位に従って最終セットを組み立てる。
+"""集めた鳴き声音源から、優先順位に従って最終セットを組み立てる。
+
+使い方:
+    python3 scripts/select_animal_sounds.py <素材ディレクトリ> [--output <出力先>]
+
+素材ディレクトリは processed/・real-recordings/・animal-sound-freesound/ を含む親である。
+build_real_recordings.py の出力先をこの下の real-recordings/ に置く。
+出力先の既定は <素材ディレクトリ>/final で、その下に <動物キー>/ と manifest.json を作る。
 
 優先順位（CONCEPT.md 指示欄「自然音声優先」）:
   1. processed/ (taira-komori-selected と cc0。どちらも実録音で、全ファイル残す)
@@ -7,21 +14,18 @@
   2. animal-sound-freesound/ (実録音)
 
 すべて実録音である。同じ動物が上位に既にあれば、下位のものは採用しない。
-出力先は tmp1/final/<動物キー>/ と tmp1/final/manifest.json。
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
 import shutil
+import sys
 import wave
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "tmp1"
-OUT = SRC / "final"
 
 # taira-komori は素材セット単位の出典（配布zip同梱の read me.txt と
 # THIRD_PARTY_NOTICES.md「zoovoiceの鳴き声音源」を正とする）。
@@ -132,10 +136,10 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_cc0_credits() -> dict[str, dict]:
+def load_cc0_credits(src: Path) -> dict[str, dict]:
     """processed/cc0 の取得記録（Openverse経由freesound）を動物キーで引く。"""
     credits: dict[str, dict] = {}
-    with (SRC / "processed" / "cc0-manifest.jsonl").open(encoding="utf-8") as f:
+    with (src / "processed" / "cc0-manifest.jsonl").open(encoding="utf-8") as f:
         for line in f:
             entry = json.loads(line)
             credits[entry["animal"]] = {
@@ -146,9 +150,9 @@ def load_cc0_credits() -> dict[str, dict]:
     return credits
 
 
-def load_real_recording_credits() -> dict[str, dict]:
+def load_real_recording_credits(src: Path) -> dict[str, dict]:
     """real-recordings/manifest.json（Wikimedia CommonsとOpenverse由来の実録音）を動物キーで引く。"""
-    manifest = json.loads((SRC / "real-recordings" / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((src / "real-recordings" / "manifest.json").read_text(encoding="utf-8"))
     return {
         entry["id"]: {
             "license": entry["license"],
@@ -159,10 +163,10 @@ def load_real_recording_credits() -> dict[str, dict]:
     }
 
 
-def load_freesound_credits() -> dict[tuple[str, int], dict]:
+def load_freesound_credits(src: Path) -> dict[tuple[str, int], dict]:
     """trim-manifest.json を (動物キー, candidate番号) で引く。"""
     manifest = json.loads(
-        (SRC / "animal-sound-freesound" / "trim-manifest.json").read_text(encoding="utf-8")
+        (src / "animal-sound-freesound" / "trim-manifest.json").read_text(encoding="utf-8")
     )
     credits: dict[tuple[str, int], dict] = {}
     for key, species in manifest["species"].items():
@@ -182,14 +186,14 @@ def freesound_candidate_number(path: Path) -> int:
     return int(match.group(1))
 
 
-def collect() -> list[dict]:
+def collect(src: Path) -> list[dict]:
     """(優先順位, 動物キー, 元ファイル, 出典情報) の候補を優先順に並べて返す。"""
     items: list[dict] = []
-    cc0_credits = load_cc0_credits()
-    real_recording_credits = load_real_recording_credits()
-    freesound_credits = load_freesound_credits()
+    cc0_credits = load_cc0_credits(src)
+    real_recording_credits = load_real_recording_credits(src)
+    freesound_credits = load_freesound_credits(src)
 
-    for path in sorted((SRC / "processed" / "taira-komori-selected").glob("*.wav")):
+    for path in sorted((src / "processed" / "taira-komori-selected").glob("*.wav")):
         items.append(
             {
                 "priority": 1,
@@ -200,7 +204,7 @@ def collect() -> list[dict]:
             }
         )
 
-    for path in sorted((SRC / "processed" / "cc0").glob("*.wav")):
+    for path in sorted((src / "processed" / "cc0").glob("*.wav")):
         items.append(
             {
                 "priority": 1,
@@ -211,7 +215,7 @@ def collect() -> list[dict]:
             }
         )
 
-    for path in sorted((SRC / "real-recordings").glob("*/*.wav")):
+    for path in sorted((src / "real-recordings").glob("*/*.wav")):
         items.append(
             {
                 "priority": 1,
@@ -224,7 +228,7 @@ def collect() -> list[dict]:
 
     for path in sorted(
         p
-        for p in (SRC / "animal-sound-freesound").rglob("*.wav")
+        for p in (src / "animal-sound-freesound").rglob("*.wav")
         if p.is_file() and not superseded_by_retrim(p)
     ):
         items.append(
@@ -241,21 +245,21 @@ def collect() -> list[dict]:
     return items
 
 
-def main() -> None:
-    if OUT.exists():
-        shutil.rmtree(OUT)
-    OUT.mkdir(parents=True)
+def run(src: Path, out: Path) -> int:
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
 
     adopted: dict[str, dict] = {}
     skipped: list[dict] = []
 
-    for item in collect():
+    for item in collect(src):
         key = item["key"]
         if key in adopted and adopted[key]["priority"] < item["priority"]:
             skipped.append(
                 {
                     "animal": key,
-                    "file": str(item["path"].relative_to(SRC)),
+                    "file": str(item["path"].relative_to(src)),
                     "reason": f"優先順位{adopted[key]['priority']}に同じ動物が採用済み",
                 }
             )
@@ -269,14 +273,14 @@ def main() -> None:
                 "files": [],
             },
         )
-        dest_dir = OUT / key
+        dest_dir = out / key
         dest_dir.mkdir(exist_ok=True)
         dest = dest_dir / f"{key}-{len(entry['files']) + 1}.wav"
         shutil.copy2(item["path"], dest)
         entry["files"].append(
             {
                 "file": f"{key}/{dest.name}",
-                "source_file": str(item["path"].relative_to(SRC)),
+                "source_file": str(item["path"].relative_to(src)),
                 "source_set": item["source"],
                 "license": item["credit"]["license"],
                 "creator": item["credit"]["creator"],
@@ -290,7 +294,7 @@ def main() -> None:
     manifest = {
         "schema_version": 1,
         "note": (
-            "tmp1/ の各系統から優先順位で最終選別したセット。すべて実録音である。"
+            "素材ディレクトリの各系統から優先順位で最終選別したセット。すべて実録音である。"
             "優先順位1=processed(taira-komori-selected と cc0) と real-recordings、"
             "2=animal-sound-freesound。"
             "上位に同じ動物があれば下位は採用しない。"
@@ -300,16 +304,28 @@ def main() -> None:
         "animals": animals,
         "skipped": skipped,
     }
-    (OUT / "manifest.json").write_text(
+    (out / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
-    print(f"動物 {len(animals)} 種 / ファイル {manifest['file_count']} 個 → {OUT}")
+    print(f"動物 {len(animals)} 種 / ファイル {manifest['file_count']} 個 → {out}")
     for a in animals:
         sets = sorted({f["source_set"] for f in a["files"]})
         print(f"  [{a['priority']}] {a['id']:<18} {len(a['files'])}個  {', '.join(sets)}")
     print(f"不採用（上位に同じ動物あり）: {len(skipped)} 件")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("sources_dir", type=Path, help="processed/・real-recordings/ などを含む素材ディレクトリ")
+    parser.add_argument("--output", type=Path, default=None, help="出力先（既定: <素材ディレクトリ>/final）")
+    args = parser.parse_args(argv)
+    src = args.sources_dir.resolve()
+    if not src.is_dir():
+        parser.error(f"素材ディレクトリがない: {src}")
+    return run(src, (args.output or src / "final").resolve())
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

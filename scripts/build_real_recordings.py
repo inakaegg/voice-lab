@@ -50,6 +50,14 @@ def run(selection_path: Path, output_dir: Path) -> int:
         animal_id = item["id"]
         candidate_path = Path(item["candidate"]).resolve()
         source = provenance(candidate_path)
+        # 取得時のhashと今のhashが違う候補は、出所の記録と中身が食い違っている。
+        # そのまま進めると manifest へ嘘の source_sha256 を書いてしまうので止める。
+        actual = sha256(candidate_path)
+        if actual != source["sha256"]:
+            raise ValueError(
+                f"{candidate_path} の内容が取得時と違う: "
+                f"candidates.json={source['sha256']} 実ファイル={actual}"
+            )
         destination = output_dir / animal_id / f"{animal_id}-1.wav"
         result = prepare(
             candidate_path,
