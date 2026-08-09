@@ -54,9 +54,10 @@ case "${0##*/}:$*" in
     exit 0
     ;;
   gcloud:auth\ print-access-token*) printf 'fake-access-token\n'; exit 0 ;;
-  gcloud:artifacts\ repositories\ describe*) exit 1 ;;
+  gcloud:artifacts\ repositories\ describe*)
+    if [ "${ZOOVOICE_FAKE_AR_DESCRIBE_FAIL:-0}" = "1" ]; then exit 1; fi
+    printf '{"name":"voice-lab"}\n'; exit 0 ;;
   gcloud:artifacts\ docker\ images\ describe*) printf 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n'; exit 0 ;;
-  gcloud:iam\ service-accounts\ describe*) exit 1 ;;
   gcloud:config\ get-value\ account*) printf 'developer@example.com\n'; exit 0 ;;
   gcloud:run\ services\ get-iam-policy*) printf '{"bindings":[]}\n'; exit 0 ;;
   gcloud:artifacts\ repositories\ get-iam-policy*) printf '{"bindings":[]}\n'; exit 0 ;;
@@ -118,21 +119,18 @@ def test_cloud_run_deploy_dry_run_is_private_bounded_and_has_no_side_effects(
     output = result.stdout
     assert "mode: dry-run" in output
     assert "--region us-central1" in output
-    assert "--no-allow-unauthenticated" in output
-    assert "--min-instances 0" in output
-    assert "--max-instances 2" in output
-    assert "--concurrency 1" in output
-    assert "--timeout 90s" in output
-    assert "--cpu 2" in output
-    assert "--memory 2Gi" in output
+    assert "gcloud run services update zoovoice --image <image-by-digest>" in output
     assert "--build-context whisper_source=<temporary-context>" in output
     assert "--build-context zoovoice_runtime=<temporary-context>" in output
     assert "--build-context zoovoice_sounds=<temporary-context>" in output
-    assert "--allow-unauthenticated" not in output.replace(
-        "--no-allow-unauthenticated", ""
-    )
-    assert "roles/run.invoker" in output
-    assert "roles/iam.serviceAccountTokenCreator" in output
+    # サービス設定とIAMはTerraform（infra/gcp）が正であり、scriptからは操作しない。
+    assert "gcloud run deploy" not in output
+    assert "--allow-unauthenticated" not in output
+    assert "--set-secrets" not in output
+    assert "gcloud services enable" not in output
+    assert "repositories create" not in output
+    assert "add-iam-policy-binding" not in output
+    assert "Terraform" in output
     assert "allUsers" in output
     assert "must be absent" in output
     assert "production credential" not in output.lower()
@@ -227,7 +225,7 @@ def test_cloud_run_deploy_rejects_a_dirty_whisper_source_before_build(
     assert "docker " not in commands
 
 
-def test_cloud_run_apply_uses_digest_private_iam_and_bounded_resources(
+def test_cloud_run_apply_swaps_the_image_by_digest_without_touching_settings(
     tmp_path: Path,
 ) -> None:
     command_log = install_recording_fakes(tmp_path)
@@ -247,37 +245,56 @@ def test_cloud_run_apply_uses_digest_private_iam_and_bounded_resources(
     commands = command_log.read_text(encoding="utf-8")
     assert "docker info" in commands
     assert "gcloud auth print-access-token" in commands
-    assert "gcloud services enable" in commands
-    assert "run.googleapis.com" in commands
-    assert "artifactregistry.googleapis.com" in commands
-    assert "iamcredentials.googleapis.com" in commands
-    assert "gcloud artifacts repositories create voice-lab" in commands
+    assert "gcloud artifacts repositories describe voice-lab" in commands
     assert "docker buildx build --platform linux/amd64" in commands
     assert "--push" in commands
-    assert "gcloud run deploy zoovoice" in commands
+    assert "gcloud run services update zoovoice" in commands
     assert "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" in commands
-    assert "--no-allow-unauthenticated" in commands
-    assert "--min-instances 0" in commands
-    assert "--max-instances 2" in commands
-    assert "--concurrency 1" in commands
-    assert "--timeout 90s" in commands
-    assert "--cpu 2" in commands
-    assert "--memory 2Gi" in commands
     assert "--build-context whisper_source=" in commands
     assert "--build-context zoovoice_runtime=" in commands
     assert "--build-context zoovoice_sounds=" in commands
-    assert "gcloud run services add-iam-policy-binding zoovoice" in commands
-    assert "roles/run.invoker" in commands
-    assert "gcloud iam service-accounts add-iam-policy-binding" in commands
-    assert "roles/iam.serviceAccountTokenCreator" in commands
-    assert "--allow-unauthenticated" not in commands.replace(
-        "--no-allow-unauthenticated", ""
-    )
+    # サービス設定・API有効化・IAMはTerraform（infra/gcp）が正であり、scriptからは操作しない。
+    assert "gcloud run deploy" not in commands
+    assert "gcloud services enable" not in commands
+    assert "repositories create" not in commands
+    assert "add-iam-policy-binding" not in commands
+    assert "--set-secrets" not in commands
+    assert "--allow-unauthenticated" not in commands
+    assert "--cpu 2" not in commands
+    assert "--memory 2Gi" not in commands
+    # privateの検証（allUsers不在の確認）はscriptに残す。
+    assert "gcloud run services get-iam-policy zoovoice" in commands
+    assert "gcloud artifacts repositories get-iam-policy voice-lab" in commands
 
     combined_output = result.stdout + result.stderr
     assert "fake-access-token" not in combined_output
     assert "developer@example.com" not in combined_output
     assert "zoovoice-local-smoke-invoker@example-project" not in combined_output
+
+
+def test_cloud_run_apply_stops_when_the_terraform_managed_repository_is_absent(
+    tmp_path: Path,
+) -> None:
+    command_log = install_recording_fakes(tmp_path)
+    artifacts = valid_artifact_env(tmp_path)
+    result = run_deploy(
+        {
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "ZOOVOICE_FAKE_COMMAND_LOG": str(command_log),
+            "ZOOVOICE_FAKE_AR_DESCRIBE_FAIL": "1",
+            "ZOOVOICE_GCP_PROJECT": "example-project",
+            "ZOOVOICE_DEPLOY_APPLY": "1",
+            "ZOOVOICE_LOCAL_SMOKE_PORT": "18082",
+            **artifacts,
+        }
+    )
+
+    assert result.returncode != 0
+    assert "infra/gcp" in result.stderr
+    commands = command_log.read_text(encoding="utf-8")
+    assert "repositories create" not in commands
+    assert "gcloud run services update" not in commands
+    assert "--push" not in commands
 
 
 def test_local_verify_builds_and_smokes_without_gcloud(tmp_path: Path) -> None:
