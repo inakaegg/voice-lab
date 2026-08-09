@@ -43,7 +43,11 @@ type ErrorEnvelope = {
   };
 };
 
+// 同じ録音を送り直せば直り得るものだけを載せる。
+// association_unavailable は連想APIの一時的な失敗（接続不可・混雑・上流障害）で、
+// 録音を取り直さずに再試行できる。恒久的な association_failed は載せない。
 const retryableErrorCodes = new Set([
+  "association_unavailable",
   "zoovoice_backend_unavailable",
   "zoovoice_gateway_error",
   "zoovoice_http_unavailable",

@@ -23,6 +23,12 @@ const (
 	defaultAssociationEndpoint = "https://api.openai.com/v1/responses"
 )
 
+// associationReasonMaxRunes は連想理由の上限。Worker側が合成応答の理由を400文字までしか
+// 通さないため、超過分でASR済みのrequestごと捨てられないようサービス側で丸める。
+// 上限をschemaのmaxLengthで宣言しないのは、strictな構造化出力が受け付ける制約に依存せず
+// 手元で必ず守れるようにするため。
+const associationReasonMaxRunes = 200
+
 // associationInstructions は「必ず1種選ぶ」プロンプト。
 // 慎重版のプロンプトは候補に無い動物を聞かれると回答を避けたため、遊びの製品意図に合わなかった。
 const associationInstructions = `あなたは日本語の発話から動物を1種連想する担当です。
@@ -115,10 +121,16 @@ func (a *llmAssociator) Select(
 			fmt.Errorf("model returned unknown species %q", truncate(answer.Species, 80)),
 		)
 	}
+	reason := strings.TrimSpace(answer.Reason)
+	if reason == "" {
+		return AnimalSelection{}, associationUnavailableError(
+			"連想の理由を受け取れませんでした。", fmt.Errorf("model returned an empty reason"),
+		)
+	}
 	return AnimalSelection{
 		Species:  answer.Species,
 		LabelJA:  labelJA,
-		Reason:   strings.TrimSpace(answer.Reason),
+		Reason:   truncateRunes(reason, associationReasonMaxRunes),
 		Strategy: strategyLLM,
 	}, nil
 }
@@ -127,6 +139,11 @@ func (a *llmAssociator) ask(ctx context.Context, input associationRequest) (asso
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return associationAnswer{}, err
+	}
+	// 候補外のidを返されるとその回の連想がまるごと失敗するため、選べる値をenumで固定する。
+	speciesIDs := make([]string, 0, len(input.Candidates))
+	for _, candidate := range input.Candidates {
+		speciesIDs = append(speciesIDs, candidate.ID)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"model":        a.model,
@@ -140,7 +157,7 @@ func (a *llmAssociator) ask(ctx context.Context, input associationRequest) (asso
 				"schema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"species": map[string]any{"type": "string"},
+						"species": map[string]any{"type": "string", "enum": speciesIDs},
 						"reason":  map[string]any{"type": "string"},
 					},
 					"required":             []string{"species", "reason"},
@@ -160,22 +177,24 @@ func (a *llmAssociator) ask(ctx context.Context, input associationRequest) (asso
 	request.Header.Set("Content-Type", "application/json")
 	response, err := a.client.Do(request)
 	if err != nil {
-		return associationAnswer{}, associationAPIError("連想に使うAPIへ接続できませんでした。", err)
+		return associationAnswer{}, associationUnavailableError("連想に使うAPIへ接続できませんでした。", err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return associationAnswer{}, associationAPIError("連想に使うAPIの応答を読めませんでした。", err)
+		return associationAnswer{}, associationUnavailableError("連想に使うAPIの応答を読めませんでした。", err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return associationAnswer{}, associationAPIError(
-			"連想に使うAPIがエラーを返しました。",
-			fmt.Errorf("association API returned HTTP %d: %s", response.StatusCode, truncate(string(body), 300)),
-		)
+		message := "連想に使うAPIがエラーを返しました。"
+		cause := fmt.Errorf("association API returned HTTP %d: %s", response.StatusCode, truncate(string(body), 300))
+		if isTransientUpstreamStatus(response.StatusCode) {
+			return associationAnswer{}, associationUnavailableError(message, cause)
+		}
+		return associationAnswer{}, associationAPIError(message, cause)
 	}
 	text := outputTextFromResponses(body)
 	if text == "" {
-		return associationAnswer{}, associationAPIError(
+		return associationAnswer{}, associationUnavailableError(
 			"連想に使うAPIが空の応答を返しました。", fmt.Errorf("empty output text"),
 		)
 	}
@@ -220,8 +239,24 @@ func outputTextFromResponses(body []byte) string {
 	return strings.TrimSpace(chunks.String())
 }
 
+// associationAPIError は作り直しても直らない失敗を表す。認証の誤りや、
+// 解釈できない応答が対象で、ブラウザは再試行ボタンを出さない。
 func associationAPIError(message string, err error) *APIError {
 	return &APIError{Status: 502, Code: "association_failed", Message: message, Err: err}
+}
+
+// associationUnavailableError は時間をおけば直り得る失敗を表す。
+// ブラウザ側の再試行対象コードに入っているため、録音を取り直さず同じ音声を送り直せる。
+func associationUnavailableError(message string, err error) *APIError {
+	return &APIError{Status: 503, Code: "association_unavailable", Message: message, Err: err}
+}
+
+func isTransientUpstreamStatus(status int) bool {
+	switch status {
+	case http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+		return true
+	}
+	return status >= 500
 }
 
 func truncate(value string, limit int) string {
@@ -229,4 +264,13 @@ func truncate(value string, limit int) string {
 		return value
 	}
 	return value[:limit] + "…"
+}
+
+// truncateRunes は文字数で丸める。byte単位で切るとUTF-8の途中で切れるため使い分ける。
+func truncateRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
 }

@@ -241,11 +241,16 @@ test("non-JSON HTTP 5xx remains retryable while unknown JSON codes fail closed",
 
 test("gateway error codes use an explicit retry allowlist and fail closed", () => {
   const retryable = new Set([
+    "association_unavailable",
     "zoovoice_backend_unavailable",
     "zoovoice_gateway_error",
     "zoovoice_origin_timeout",
   ]);
+  // Cloud Run由来のコードはWorkerがそのまま中継するため、gatewayのコードと同じ表で扱う。
   const knownGatewayCodes = [
+    "asr_empty",
+    "association_failed",
+    "association_unavailable",
     "zoovoice_audio_too_large",
     "zoovoice_backend_unavailable",
     "zoovoice_budget_unavailable",
