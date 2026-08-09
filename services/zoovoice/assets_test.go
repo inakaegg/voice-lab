@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -189,6 +190,94 @@ func TestLoadSoundsCatalogRequiresAttributionWhenTheLicenseNeedsCredit(t *testin
 			}
 			if !test.accepted && err == nil {
 				t.Fatal("loadSoundsCatalog accepted an entry without the required credit")
+			}
+		})
+	}
+}
+
+// gatewayはクレジットの文字数とURLの形も検査する。条件外のクレジットを載せた素材が
+// 選ばれると、その回の合成結果だけがWorkerに捨てられる。起動時に落とす。
+func TestLoadSoundsCatalogRejectsCreditsTheGatewayWouldReject(t *testing.T) {
+	root := t.TempDir()
+	animalDir := filepath.Join(root, "dog")
+	if err := os.MkdirAll(animalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	audio := []byte("dog")
+	if err := os.WriteFile(filepath.Join(animalDir, "dog-1.wav"), audio, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash := hex.EncodeToString(func() []byte { sum := sha256.Sum256(audio); return sum[:] }())
+	manifestPath := filepath.Join(root, "manifest.json")
+	payload := func(license, creator, sourceURL string) string {
+		return `{"schema_version":1,"animals":[{"id":"dog","label_ja":"犬","files":[{"file":"dog/dog-1.wav","license":` +
+			strconv.Quote(license) + `,"creator":` + strconv.Quote(creator) + `,"source_url":` +
+			strconv.Quote(sourceURL) + `,"sha256":` + strconv.Quote(hash) + `}]}]}`
+	}
+	longURL := "https://example.com/" + strings.Repeat("d", 500-len("https://example.com/"))
+	for _, test := range []struct {
+		name                        string
+		license, creator, sourceURL string
+		accepted                    bool
+	}{
+		{name: "credit at the limits", license: "CC BY 4.0", creator: strings.Repeat("c", 200), sourceURL: longURL, accepted: true},
+		{name: "blank license", license: "   "},
+		{name: "license over the limit", license: strings.Repeat("l", 201)},
+		{name: "blank creator", license: "CC BY 4.0", creator: "   ", sourceURL: "https://example.com/dog"},
+		{name: "creator over the limit", license: "CC BY 4.0", creator: strings.Repeat("c", 201), sourceURL: "https://example.com/dog"},
+		{name: "http source url", license: "CC BY 4.0", creator: "someone", sourceURL: "http://example.com/dog"},
+		{name: "source url without a scheme", license: "CC BY 4.0", creator: "someone", sourceURL: "example.com/dog"},
+		{name: "source url over the limit", license: "CC BY 4.0", creator: "someone", sourceURL: longURL + "d"},
+		{name: "http source url on a cc0 file", license: "CC0 1.0", sourceURL: "http://example.com/dog"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			content := payload(test.license, test.creator, test.sourceURL)
+			if err := os.WriteFile(manifestPath, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadSoundsCatalog(root)
+			if test.accepted && err != nil {
+				t.Fatalf("loadSoundsCatalog rejected a valid entry: %v", err)
+			}
+			if !test.accepted && err == nil {
+				t.Fatal("loadSoundsCatalog accepted a credit the gateway would reject")
+			}
+		})
+	}
+}
+
+// カタログ側の上限はgatewayのWorkerと同じ値でなければ意味がない。
+// 片方だけ変えると検査をすり抜けるので、Workerのソースに書かれた数値と突き合わせる。
+func TestCatalogLimitsMatchTheGatewayContract(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "cloudflare", "zoovoice-gateway.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := string(source)
+	if !strings.Contains(gateway, `/^[a-z0-9_-]+$/`) {
+		t.Fatal("the gateway no longer restricts identifiers to /^[a-z0-9_-]+$/")
+	}
+	for _, test := range []struct {
+		name, pattern string
+		want          int
+	}{
+		{name: "animal id", pattern: `isBoundedIdentifier\(animal\.id, (\d+)\)`, want: catalogIDMaxUnits},
+		{name: "animal label", pattern: `isBoundedString\(animal\.label_ja, 1, (\d+)\)`, want: catalogLabelMaxUnits},
+		{name: "credit license", pattern: `isBoundedString\(credit\.license, 1, (\d+)\)`, want: catalogCreditTextMaxUnits},
+		{name: "credit creator", pattern: `isBoundedString\(credit\.creator, 1, (\d+)\)`, want: catalogCreditTextMaxUnits},
+		{name: "source url", pattern: `isBoundedHttpsUrl\(value\) \{\n  if \(!isBoundedString\(value, 1, (\d+)\)\)`, want: catalogSourceURLMaxUnits},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			match := regexp.MustCompile(test.pattern).FindStringSubmatch(gateway)
+			if match == nil {
+				t.Fatalf("the gateway no longer contains a limit matching %s", test.pattern)
+			}
+			limit, err := strconv.Atoi(match[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if limit != test.want {
+				t.Fatalf("gateway limit = %d, catalog limit = %d", limit, test.want)
 			}
 		})
 	}

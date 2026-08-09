@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -76,8 +78,9 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 		}
 		variants := make([]assetVariant, 0, len(animal.Files))
 		for _, file := range animal.Files {
-			if file.License == "" {
-				return nil, fmt.Errorf("sounds manifest entry %q has a file without license", animal.ID)
+			credit := soundCredit{License: file.License, Creator: file.Creator, SourceURL: file.SourceURL}
+			if err := validateCatalogCredit(animal.ID, credit); err != nil {
+				return nil, fmt.Errorf("sounds manifest %s: %w", manifestPath, err)
 			}
 			if licenseNeedsCredit(file.License) && (file.Creator == "" || file.SourceURL == "") {
 				return nil, fmt.Errorf(
@@ -88,26 +91,26 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 			if err != nil {
 				return nil, err
 			}
-			variants = append(variants, assetVariant{
-				Path: path,
-				Credit: soundCredit{
-					License:   file.License,
-					Creator:   file.Creator,
-					SourceURL: file.SourceURL,
-				},
-			})
+			variants = append(variants, assetVariant{Path: path, Credit: credit})
 		}
 		animals = append(animals, availableAnimal{ID: animal.ID, LabelJA: animal.LabelJA, Variants: variants})
 	}
 	return newCatalog(animals), nil
 }
 
-// catalogIDPattern と catalogLabelMaxUnits は、Cloudflare Workerが動物一覧と合成結果に
-// 課している検査（isBoundedIdentifier / isBoundedString）と同じ条件である。
+// 次の上限とパターンは、Cloudflare Workerが動物一覧と合成結果に課している検査
+// （isBoundedIdentifier / isBoundedString / isBoundedHttpsUrl）と同じ条件である。
 // 上限はJavaScriptの String.length と同じUTF-16のcode unit数で数える。
-var catalogIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,80}$`)
+// 値が食い違うと検査がすり抜けるので、TestCatalogLimitsMatchTheGatewayContract が
+// Workerのソースと突き合わせる。
+const (
+	catalogIDMaxUnits         = 80
+	catalogLabelMaxUnits      = 80
+	catalogCreditTextMaxUnits = 200
+	catalogSourceURLMaxUnits  = 500
+)
 
-const catalogLabelMaxUnits = 80
+var catalogIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,` + strconv.Itoa(catalogIDMaxUnits) + `}$`)
 
 // validateCatalogIdentity は動物IDと表示名がgateway側の検査を通る形かを起動時に確かめる。
 // 差し替え可能な音源ディレクトリに条件外のIDや長い表示名が入ると、Workerが一覧ごと
@@ -117,11 +120,45 @@ func validateCatalogIdentity(id, labelJA string) error {
 	if !catalogIDPattern.MatchString(id) {
 		return fmt.Errorf("entry id %q must match %s", id, catalogIDPattern)
 	}
-	if strings.TrimFunc(labelJA, unicode.IsSpace) == "" {
-		return fmt.Errorf("entry %q has an empty label", id)
+	if err := validateBoundedText(labelJA, catalogLabelMaxUnits); err != nil {
+		return fmt.Errorf("entry %q label %w", id, err)
 	}
-	if units := len(utf16.Encode([]rune(labelJA))); units > catalogLabelMaxUnits {
-		return fmt.Errorf("entry %q label is %d units long, limit is %d", id, units, catalogLabelMaxUnits)
+	return nil
+}
+
+// validateCatalogCredit はクレジットがgateway側の検査（isValidSoundCredits）を通る形かを
+// 起動時に確かめる。空でないが条件を外れたクレジットを載せると、その素材が選ばれた回の
+// 合成結果だけをWorkerが捨てるため、利用者から見ると散発的な失敗になる。
+func validateCatalogCredit(animalID string, credit soundCredit) error {
+	if err := validateBoundedText(credit.License, catalogCreditTextMaxUnits); err != nil {
+		return fmt.Errorf("entry %q license %w", animalID, err)
+	}
+	// 空の作者と配布ページはJSONから落とすので、gatewayでは未指定として通る。
+	if credit.Creator != "" {
+		if err := validateBoundedText(credit.Creator, catalogCreditTextMaxUnits); err != nil {
+			return fmt.Errorf("entry %q creator %w", animalID, err)
+		}
+	}
+	if credit.SourceURL != "" {
+		if err := validateBoundedText(credit.SourceURL, catalogSourceURLMaxUnits); err != nil {
+			return fmt.Errorf("entry %q source_url %w", animalID, err)
+		}
+		parsed, err := url.Parse(credit.SourceURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return fmt.Errorf("entry %q source_url %q must be an https URL", animalID, credit.SourceURL)
+		}
+	}
+	return nil
+}
+
+// validateBoundedText はgatewayの isBoundedString と同じ条件を確かめる。
+// 空白だけの値を空として扱い、長さはUTF-16のcode unit数で数える。
+func validateBoundedText(value string, maxUnits int) error {
+	if strings.TrimFunc(value, unicode.IsSpace) == "" {
+		return fmt.Errorf("is blank")
+	}
+	if units := len(utf16.Encode([]rune(value))); units > maxUnits {
+		return fmt.Errorf("is %d units long, limit is %d", units, maxUnits)
 	}
 	return nil
 }
