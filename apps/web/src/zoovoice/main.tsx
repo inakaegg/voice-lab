@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
+import { animalEmoji } from "./animal-emoji";
 import {
   composeRecording,
   fetchZoovoiceConfig,
@@ -12,6 +13,7 @@ import {
   type ComposeResponse,
   type ZoovoiceConfig,
 } from "./api";
+import { defaultIntensity, intensityStage, intensityStageCount, intensityStageValues } from "./intensity";
 import { RecordOrb } from "./record-orb";
 import { ResultPlayer } from "./result-player";
 import {
@@ -53,7 +55,7 @@ type TurnstileToken = {
 
 function Zoovoice() {
   const [state, dispatch] = useReducer(zoovoiceReducer, initialZoovoiceState);
-  const [intensity, setIntensity] = useState(50);
+  const [intensity, setIntensity] = useState(defaultIntensity);
   const [result, setResult] = useState<ResultState | null>(null);
   const [config, setConfig] = useState<ZoovoiceConfig | null>(null);
   const [recording, setRecording] = useState<RecordingState | null>(null);
@@ -345,17 +347,22 @@ function Zoovoice() {
           />
 
           <label className="grid gap-1.5 text-sm font-bold text-foreground">
-            <span className="flex items-center justify-between gap-4"><span>アニマル度</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensity}</output></span>
+            <span className="flex items-center justify-between gap-4"><span>アニマル度</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensityStage(intensity)} / {intensityStageCount}</output></span>
             <input
               id="zoovoice-intensity"
               type="range"
               min="0"
               max="100"
+              step="25"
+              list="zoovoice-intensity-stages"
               value={intensity}
               disabled={!controls.sliderEnabled}
               onChange={(event) => setIntensity(Number(event.currentTarget.value))}
               className="w-full accent-foreground"
             />
+            <datalist id="zoovoice-intensity-stages">
+              {intensityStageValues.map((value) => <option key={value} value={value} />)}
+            </datalist>
             <span className="flex justify-between gap-3 text-[0.65rem] font-medium text-muted-foreground"><span>ひかえめ</span><span>{controls.retryVisible ? "次の再生成にも反映" : "次の録音に反映"}</span><span>にぎやか</span></span>
           </label>
 
@@ -423,9 +430,11 @@ function Zoovoice() {
 function ResultDetails({ result }: { result: ResultState }) {
   const meta = result.payload.meta;
   return <>
+    <div data-testid="zoovoice-animal-figure" className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3">
+      <span aria-hidden="true" className="text-[2.75rem] leading-none">{animalEmoji(meta.selected_animal.id)}</span>
+      <span className="min-w-0 break-words text-xl font-bold tracking-[-0.02em] text-foreground">{meta.selected_animal.label_ja}</span>
+    </div>
     <dl className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3 text-xs leading-5">
-      <dt className="font-semibold text-muted-foreground">選ばれた動物</dt>
-      <dd className="min-w-0 break-words font-bold text-foreground">{meta.selected_animal.label_ja}</dd>
       <dt className="font-semibold text-muted-foreground">聞き取った言葉</dt>
       <dd className="min-w-0 break-words text-foreground">{meta.transcript}</dd>
       <dt className="font-semibold text-muted-foreground">連想の理由</dt>

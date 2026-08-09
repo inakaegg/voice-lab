@@ -97,6 +97,7 @@ func (c *composer) Compose(
 	normalizedPath := filepath.Join(workDir, "normalized.wav")
 	asrPath := filepath.Join(workDir, "asr.wav")
 	outputPath := filepath.Join(workDir, "composed.wav")
+	leveledPath := filepath.Join(workDir, "leveled.wav")
 	if err := os.WriteFile(inputPath, audio, 0o600); err != nil {
 		return ComposeResult{}, internalProcessingError("write uploaded audio", err)
 	}
@@ -283,14 +284,9 @@ func (c *composer) Compose(
 	}
 	logProgress(c.logger, started, "association", "complete", "species=%s", selection.Species)
 
-	var outputAudio []byte
+	finalPath := normalizedPath
 	outputDuration := inputDuration
-	if len(insertions) == 0 {
-		outputAudio, err = os.ReadFile(normalizedPath)
-		if err != nil {
-			return ComposeResult{}, internalProcessingError("read normalized output", err)
-		}
-	} else {
+	if len(insertions) > 0 {
 		logProgress(c.logger, started, "compose", "start", "insertion_count=%d", len(insertions))
 		if err := c.mix(contextWithTimeout, normalizedPath, outputPath, insertions); err != nil {
 			return ComposeResult{}, c.commandAPIError(
@@ -315,11 +311,28 @@ func (c *composer) Compose(
 				err,
 			)
 		}
-		outputAudio, err = os.ReadFile(outputPath)
-		if err != nil {
-			return ComposeResult{}, internalProcessingError("read composed output", err)
-		}
+		finalPath = outputPath
 		logProgress(c.logger, started, "compose", "complete", "output_seconds=%.3f", outputDuration)
+	}
+
+	logProgress(c.logger, started, "loudness", "start", "")
+	finalPath, gainDB, err := c.applyLoudnessCeiling(contextWithTimeout, finalPath, leveledPath)
+	if err != nil {
+		return ComposeResult{}, c.commandAPIError(
+			contextWithTimeout,
+			started,
+			"loudness",
+			500,
+			"audio_processing_failed",
+			"合成した音声の音量を調整できませんでした。",
+			err,
+		)
+	}
+	logProgress(c.logger, started, "loudness", "complete", "gain_db=%.1f", gainDB)
+
+	outputAudio, err := os.ReadFile(finalPath)
+	if err != nil {
+		return ComposeResult{}, internalProcessingError("read composed output", err)
 	}
 
 	insertionPaths := make([]string, 0, len(insertions))
@@ -489,6 +502,59 @@ func (c *composer) mix(
 		return fmt.Errorf("ffmpeg compose failed: %w: %s", err, compactCommandError(output.Stderr))
 	}
 	return nil
+}
+
+// applyLoudnessCeiling は完成音声をEBU R128で測り、目標より大きければ静的gainで下げる。
+// 人間の発話と鳴き声を混ぜた後の全体へ一律に掛ける。limiterは使わない。
+// 調整が要らなかった場合は入力のパスをそのまま返す。
+func (c *composer) applyLoudnessCeiling(
+	ctx context.Context,
+	inputPath string,
+	outputPath string,
+) (string, float64, error) {
+	measurement, err := c.measureLoudness(ctx, inputPath)
+	if err != nil {
+		return "", 0, err
+	}
+	gainDB := loudnessGainDB(measurement)
+	if gainDB == 0 {
+		return inputPath, 0, nil
+	}
+	output, err := c.runner.Run(
+		ctx,
+		"ffmpeg",
+		"-nostdin",
+		"-y",
+		"-v", "error",
+		"-i", inputPath,
+		"-af", fmt.Sprintf("volume=%.1fdB", gainDB),
+		"-ar", "24000",
+		"-ac", "1",
+		"-c:a", "pcm_s16le",
+		outputPath,
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf("ffmpeg loudness gain failed: %w: %s", err, compactCommandError(output.Stderr))
+	}
+	return outputPath, gainDB, nil
+}
+
+func (c *composer) measureLoudness(ctx context.Context, path string) (loudnessMeasurement, error) {
+	output, err := c.runner.Run(
+		ctx,
+		"ffmpeg",
+		"-nostdin",
+		"-hide_banner",
+		"-nostats",
+		"-i", path,
+		"-af", "ebur128=peak=true",
+		"-f", "null",
+		"-",
+	)
+	if err != nil {
+		return loudnessMeasurement{}, fmt.Errorf("ffmpeg ebur128 failed: %w: %s", err, compactCommandError(output.Stderr))
+	}
+	return parseLoudnessSummary(output.Stderr), nil
 }
 
 func (c *composer) commandAPIError(

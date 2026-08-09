@@ -83,7 +83,7 @@ Browser
 
 ブラウザが送るのは録音とアニマル度だけとする。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。Workerは合成応答を中継し、ASR本文と連想metadataを送信元と同じブラウザへ返す。
 
-動物一覧はCloud Runを起動せず、Worker Static Assetsの静的JSONから返す。この静的JSONは音源manifestから同期し、現在は26種を載せる。この経路では音声データを扱わない。
+動物一覧はCloud RunのGo APIの `/animals` を中継して返す。実際に合成へ使う音源カタログと必ず同じ内容になる。この経路では音声データを扱わない。
 
 Cloud Runへ載せるDocker imageは、Goバイナリに加えて実行に必要なDebian runtime、CA証明書、ffmpegを含める。これに日本語ASR用のwhisper.cpp commandとモデルを加える。commandとモデルはリポジトリで管理せず、build時にgit外の検証済みディレクトリから取り込む。取り込むcommitとSHA-256はbuildとdeploy scriptの両方で照合し、image labelへも残す。連想に使うLLMのAPIキーはimageへ焼き込まず、Cloud RunのsecretとしてOPENAI_API_KEYへ渡す。
 
@@ -132,7 +132,7 @@ Cloud Run側の反映はCloudflare Worker deployとは別の外部操作gateと�
 実環境smokeで確認済みなのは次の範囲である。
 
 - 公開 `GET /api/zoovoice/config` が200を返し、有効な状態とTurnstile必須を示すこと
-- 公開 `GET /api/zoovoice/animals` が200で27種を返すこと
+- 公開 `GET /api/zoovoice/animals` が200で音源カタログを返すこと（当時27種。この確認はビルド時の静的JSONを返していた頃のもの）
 - 公開 `/zoovoice` とZoovoice用JS assetが200で配信されること
 - 実ブラウザでのUI表示、production Turnstile widgetの表示、`Powered by Stability AI` の表示
 - private Cloud Runの `/animals` と実音声の `POST /compose` が認証付きrequestで200を返すこと

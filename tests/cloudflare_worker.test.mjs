@@ -743,24 +743,35 @@ test("Cloudflare worker validates every Zoovoice success metadata field", async 
   }
 });
 
-test("Cloudflare worker serves Zoovoice animals from a cacheable static asset", async () => {
+test("Cloudflare worker serves Zoovoice animals from the running origin catalog", async () => {
+  const requested = [];
   const env = await zoovoiceEnv(async (url) => {
-    throw new Error(`animals must not call an external service: ${url}`);
+    requested.push(String(url));
+    return json({ animals: [{ id: "cat", label_ja: "猫", variants: 2 }] });
   });
   env.ASSETS = {
-    async fetch(request) {
-      assert.equal(new URL(request.url).pathname, "/react/zoovoice-animals.json");
-      return json({ animals: [{ id: "cat", label_ja: "猫", variants: 2 }] });
+    async fetch() {
+      throw new Error("animals must not be read from a build-time asset");
     },
   };
 
-  const response = await handleRequest(new Request("https://example.com/api/zoovoice/animals"), env);
+  const response = await handleRequest(new Request("http://127.0.0.1:8787/api/zoovoice/animals"), env);
 
+  assert.deepEqual(requested, ["https://zoovoice.example.run.app/animals"]);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     animals: [{ id: "cat", label_ja: "猫", variants: 2 }],
   });
-  assert.equal(response.headers.get("Cache-Control"), "public, max-age=3600, s-maxage=86400");
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, s-maxage=300");
+});
+
+test("Cloudflare worker rejects a malformed Zoovoice animals catalog", async () => {
+  const env = await zoovoiceEnv(async () => json({ animals: [{ id: "cat" }] }));
+
+  const response = await handleRequest(new Request("http://127.0.0.1:8787/api/zoovoice/animals"), env);
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
 });
 
 test("Cloudflare playback padding stops before neighboring speech", () => {

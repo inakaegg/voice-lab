@@ -45,14 +45,20 @@ func TestBuildFilterGraphDelaysEachAnimalAndKeepsOriginalVolume(t *testing.T) {
 	}
 }
 
-func TestMapIntensityUsesSpecifiedEndpointsAndMidpoint(t *testing.T) {
+func TestMapIntensityRoundsToFiveStages(t *testing.T) {
 	tests := []struct {
 		intensity     int
 		minSilence    float64
 		maxInsertions int
 	}{
 		{intensity: 0, minSilence: 1.2, maxInsertions: 2},
+		{intensity: 19, minSilence: 1.2, maxInsertions: 2},
+		{intensity: 20, minSilence: 0.975, maxInsertions: 3},
+		{intensity: 40, minSilence: 0.75, maxInsertions: 6},
 		{intensity: 50, minSilence: 0.75, maxInsertions: 6},
+		{intensity: 59, minSilence: 0.75, maxInsertions: 6},
+		{intensity: 60, minSilence: 0.525, maxInsertions: 8},
+		{intensity: 80, minSilence: 0.3, maxInsertions: 10},
 		{intensity: 100, minSilence: 0.3, maxInsertions: 10},
 	}
 
@@ -102,5 +108,74 @@ func TestValidateAudioLimitsRejectsSizeDurationAndSpeechShortage(t *testing.T) {
 
 	if err := validateAudioLimits(maxAudioBytes, 60, 0.5); err != nil {
 		t.Fatalf("boundary values rejected: %v", err)
+	}
+}
+
+func TestParseLoudnessSummaryReadsTheEbur128Summary(t *testing.T) {
+	stderr := `[Parsed_ebur128_0 @ 0x1] t: 1.2 M: -14.2 S: -14.4 I: -14.1 LUFS  LRA: 1.0 LU
+[Parsed_ebur128_0 @ 0x1] Summary:
+
+  Integrated loudness:
+    I:         -14.3 LUFS
+    Threshold: -24.5 LUFS
+
+  True peak:
+    Peak:       -0.4 dBFS
+`
+	measurement := parseLoudnessSummary(stderr)
+	if !measurement.Measurable || measurement.IntegratedLUFS != -14.3 || measurement.TruePeakDBTP != -0.4 {
+		t.Fatalf("parseLoudnessSummary = %#v", measurement)
+	}
+}
+
+func TestParseLoudnessSummaryTreatsSilenceAsUnmeasurable(t *testing.T) {
+	stderr := `  Integrated loudness:
+    I:         -inf LUFS
+
+  True peak:
+    Peak:       -inf dBFS
+`
+	if measurement := parseLoudnessSummary(stderr); measurement.Measurable {
+		t.Fatalf("silence must not be measurable: %#v", measurement)
+	}
+}
+
+func TestLoudnessGainOnlyAttenuates(t *testing.T) {
+	tests := []struct {
+		name        string
+		measurement loudnessMeasurement
+		gain        float64
+	}{
+		{
+			name:        "louder than the target is pulled down",
+			measurement: loudnessMeasurement{IntegratedLUFS: -14.3, TruePeakDBTP: -3.0, Measurable: true},
+			gain:        -4.7,
+		},
+		{
+			name:        "true peak headroom wins over the loudness target",
+			measurement: loudnessMeasurement{IntegratedLUFS: -20.0, TruePeakDBTP: -0.2, Measurable: true},
+			gain:        -1.3,
+		},
+		{
+			name:        "quieter than the target is left alone",
+			measurement: loudnessMeasurement{IntegratedLUFS: -26.0, TruePeakDBTP: -8.0, Measurable: true},
+			gain:        0,
+		},
+		{
+			name:        "a difference below 0.1dB is left alone",
+			measurement: loudnessMeasurement{IntegratedLUFS: -18.95, TruePeakDBTP: -8.0, Measurable: true},
+			gain:        0,
+		},
+		{
+			name:        "an unmeasurable input is left alone",
+			measurement: loudnessMeasurement{},
+			gain:        0,
+		},
+	}
+
+	for _, test := range tests {
+		if got := loudnessGainDB(test.measurement); got != test.gain {
+			t.Errorf("%s: loudnessGainDB = %v, want %v", test.name, got, test.gain)
+		}
 	}
 }

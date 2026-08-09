@@ -71,29 +71,34 @@ function requireZoovoiceEnabled(env) {
   }
 }
 
+// 動物一覧はビルド時のJSONではなくGo APIの /animals から取る。
+// 合成に使う鳴き声セットは ZOOVOICE_SOUNDS_DIR で差し替わるため、
+// 表示だけがビルド時の内容に固定されると実素材と食い違う。
 async function proxyAnimals(request, env) {
-  if (!env.ASSETS) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を読み込めませんでした。");
-  }
-  const assetUrl = new URL(request.url);
-  assetUrl.pathname = "/react/zoovoice-animals.json";
-  let response;
-  let payload;
-  try {
-    response = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: "GET" }));
-    payload = await response.json();
-  } catch (_error) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を読み込めませんでした。");
-  }
+  const response = await fetchPrivateOrigin(request, env, "/animals", { method: "GET" });
+  const payload = await validatedOriginJson(response, env, "animals");
   if (!response.ok) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を読み込めませんでした。");
+    return gatewayJson(payload, { status: response.status });
   }
-  if (!Array.isArray(payload.animals) || payload.animals.length === 0) {
-    throw new ZoovoiceGatewayError(503, "zoovoice_catalog_unavailable", "動物一覧を確認できませんでした。");
+  if (
+    !isPlainObject(payload)
+    || !Array.isArray(payload.animals)
+    || payload.animals.length === 0
+    || !payload.animals.every(isValidAnimalSummary)
+  ) {
+    throw new ZoovoiceGatewayError(502, "zoovoice_invalid_origin_response", "動物一覧を確認できませんでした。");
   }
-  return gatewayJson(payload, {
-    headers: { "Cache-Control": "public, max-age=3600, s-maxage=86400" },
+  return gatewayJson({ animals: payload.animals }, {
+    headers: { "Cache-Control": "public, max-age=300, s-maxage=300" },
   });
+}
+
+function isValidAnimalSummary(animal) {
+  return isPlainObject(animal)
+    && isBoundedIdentifier(animal.id, 80)
+    && isBoundedString(animal.label_ja, 1, 80)
+    && Number.isInteger(animal.variants)
+    && animal.variants > 0;
 }
 
 async function proxyCompose(request, env) {

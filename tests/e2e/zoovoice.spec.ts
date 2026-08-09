@@ -43,7 +43,7 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   }
   await expect(page.locator("select")).toHaveCount(0);
   await expect(page.getByText("feel lucky?", { exact: true })).toHaveCount(0);
-  await page.locator("#zoovoice-intensity").fill("72");
+  await page.locator("#zoovoice-intensity").fill("75");
   await page.getByRole("button", { name: "録音する" }).click();
   await expect(page.getByText("REC", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "録音をキャンセル" })).toBeVisible();
@@ -56,13 +56,13 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   await captureIfRequested(page, testInfo, "processing-light");
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
 
-  assertMultipartField(composeBody, "settings", JSON.stringify({ intensity: 72 }));
+  assertMultipartField(composeBody, "settings", JSON.stringify({ intensity: 75 }));
   assertMultipartField(composeBody, "turnstile_token", "browser-turnstile-token-1");
   expect(composeBody).not.toContain("arrangement");
   await expect.poll(() => page.evaluate(() => Number((window as typeof window & { __zoovoicePlayAttempts?: number }).__zoovoicePlayAttempts || 0))).toBe(1);
   await expect(page.getByText("猫", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("猫が窓辺でゆっくり眠っています。とても長い日本語でも結果欄からはみ出しません。")).toBeVisible();
-  await expect(page.getByText("動物名・鳴き声の直接言及")).toBeVisible();
+  await expect(page.getByTestId("zoovoice-animal-figure")).toContainText("猫");
   await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
   await page.getByRole("button", { name: "結果を一時停止" }).click();
   await expect(page.getByRole("button", { name: "結果を再生" })).toBeVisible();
@@ -117,7 +117,7 @@ test("zoovoice shows the association reason for a literal mention", async ({ pag
 
   await setTheme(page, "暗色");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByText("語呂合わせ", { exact: true })).toBeVisible();
+  await expect(page.getByText("「ぞうきん」の語呂合わせでゾウを連想", { exact: true })).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await captureIfRequested(page, testInfo, "pun-success-dark");
 });
@@ -226,13 +226,13 @@ test("zoovoice retries a transient compose failure only after explicit retry", a
   await expect(page.getByRole("button", { name: "もう一度生成" })).toBeVisible();
   await page.waitForTimeout(250);
   expect(composeBodies).toHaveLength(1);
-  await page.locator("#zoovoice-intensity").fill("88");
+  await page.locator("#zoovoice-intensity").fill("100");
   await page.getByRole("button", { name: "もう一度生成" }).click();
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
   expect(composeBodies).toHaveLength(2);
   assertMultipartField(composeBodies[0], "turnstile_token", "browser-turnstile-token-1");
   assertMultipartField(composeBodies[1], "turnstile_token", "browser-turnstile-token-2");
-  assertMultipartField(composeBodies[1], "settings", JSON.stringify({ intensity: 88 }));
+  assertMultipartField(composeBodies[1], "settings", JSON.stringify({ intensity: 100 }));
 });
 
 test("zoovoice keeps manual playback available when autoplay is rejected", async ({ page }) => {
