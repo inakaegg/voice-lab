@@ -12,5 +12,5 @@ resource "google_service_account" "worker_invoker" {
 resource "google_service_account_iam_member" "smoke_invoker_token_creator" {
   service_account_id = google_service_account.smoke_invoker.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "user:52376271+inakaegg@users.noreply.github.com"
+  member             = var.smoke_invoker_principal
 }

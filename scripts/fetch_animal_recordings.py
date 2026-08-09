@@ -32,7 +32,7 @@ import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
 
-USER_AGENT = "zoovoice-audio-sourcing/1.0 (https://github.com/inakaegg; 52376271+inakaegg@users.noreply.github.com)"
+USER_AGENT = "zoovoice-audio-sourcing/1.0 (https://github.com/inakaegg)"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 OPENVERSE_API = "https://api.openverse.org/v1/audio/"
 AUDIO_SUFFIXES = (".ogg", ".oga", ".wav", ".mp3", ".flac", ".opus")

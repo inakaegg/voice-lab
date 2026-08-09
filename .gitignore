@@ -39,3 +39,7 @@ infra/**/.terraform/
 infra/**/terraform.tfstate
 infra/**/terraform.tfstate.backup
 infra/**/*.tfplan
+
+# Terraform: 個人アカウント等の実値。変数の宣言だけをリポジトリに置く
+infra/**/*.tfvars
+infra/**/*.tfvars.json

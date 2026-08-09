@@ -23,7 +23,7 @@ import {
 
 import {
   to = google_service_account_iam_member.smoke_invoker_token_creator
-  id = "projects/${local.project}/serviceAccounts/zoovoice-local-smoke-invoker@${local.project}.iam.gserviceaccount.com roles/iam.serviceAccountTokenCreator user:52376271+inakaegg@users.noreply.github.com"
+  id = "projects/${local.project}/serviceAccounts/zoovoice-local-smoke-invoker@${local.project}.iam.gserviceaccount.com roles/iam.serviceAccountTokenCreator ${var.smoke_invoker_principal}"
 }
 
 import {
