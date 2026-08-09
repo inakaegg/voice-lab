@@ -59,7 +59,7 @@ ZOOVOICE_SOUNDS_DIR=tmp1/final \
 
 鳴き声素材:
   tmp1/final/wolf/wolf-1.wav
-    クレジット: Stability AI Community License / stabilityai/stable-audio-3-small-sfx / https://stability.ai/license
+    クレジット: CC0 1.0 / craigsmith / https://freesound.org/people/craigsmith/sounds/675445
 ```
 
 ### 音声から合成まで確認する
@@ -94,7 +94,7 @@ afplay /tmp/zv-out.wav
 
 使った鳴き声素材:
   tmp1/final/owl/owl-1.wav
-  クレジット: Stability AI Community License / stabilityai/stable-audio-3-small-sfx / https://stability.ai/license
+  クレジット: CC0 1.0 / faxfaxfax / https://freesound.org/people/faxfaxfax/sounds/655380
 
 挿入位置:
   opening 0.00秒

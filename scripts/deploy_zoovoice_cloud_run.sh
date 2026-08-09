@@ -22,12 +22,10 @@ whisper_source=${ZOOVOICE_WHISPER_SOURCE_DIR:-}
 asr_model=${ZOOVOICE_ASR_MODEL_PATH:-}
 sounds_directory=${ZOOVOICE_SOUNDS_DIR:-}
 openai_api_key=${OPENAI_API_KEY:-}
-openai_secret_name=${ZOOVOICE_OPENAI_SECRET_NAME:-zoovoice-openai-api-key}
 smoke_audio=${ZOOVOICE_SMOKE_AUDIO_PATH:-}
 region=us-central1
 service=zoovoice
 artifact_repository=voice-lab
-smoke_account_name=zoovoice-local-smoke-invoker
 local_smoke_port=${ZOOVOICE_LOCAL_SMOKE_PORT:-18080}
 
 expected_whisper_commit=5250a86fdebac4d51085fcfcd0b315cb0c6b91c9
@@ -103,26 +101,21 @@ fi
 
 registry_host="${region}-docker.pkg.dev"
 image_tag="${registry_host}/${project}/${artifact_repository}/${service}:${head_sha}"
-smoke_service_account="${smoke_account_name}@${project}.iam.gserviceaccount.com"
 
 if [[ "$mode" == "dry-run" ]]; then
   echo "[dry-run] copy verified whisper.cpp source excluding .git, build, models, and samples into a temporary context"
-  echo "[dry-run] copy verified ASR model and notice into a temporary runtime context"
+  echo "[dry-run] copy verified ASR model into a temporary runtime context"
   echo "[dry-run] copy the sound set from ZOOVOICE_SOUNDS_DIR into a temporary sounds context"
   echo "[dry-run] docker info"
   echo "[dry-run] docker buildx build --platform linux/amd64 --load --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --build-context zoovoice_sounds=<temporary-context> --tag <local-smoke-image> --file services/zoovoice/Dockerfile ."
   echo "[dry-run] docker run --memory 2g --cpus 2 --env OPENAI_API_KEY=<redacted> --publish 127.0.0.1:${local_smoke_port}:8080 <local-smoke-image>"
   echo "[dry-run] curl local /healthz and intensity-only /compose fixture"
   echo "[dry-run] gcloud auth print-access-token --project $project --quiet > <temporary-secret>"
-  echo "[dry-run] gcloud services enable run.googleapis.com artifactregistry.googleapis.com iamcredentials.googleapis.com --project $project --quiet"
-  echo "[dry-run] gcloud artifacts repositories create $artifact_repository --repository-format docker --location $region --project $project --quiet (only when absent)"
+  echo "[dry-run] verify Artifact Registry repository $artifact_repository exists (created by Terraform in infra/gcp)"
   echo "[dry-run] gcloud auth configure-docker $registry_host --quiet"
   echo "[dry-run] docker buildx build --platform linux/amd64 --push --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --build-context zoovoice_sounds=<temporary-context> --tag $image_tag --file services/zoovoice/Dockerfile ."
-  echo "[dry-run] resolve pushed image digest and deploy IMAGE@sha256:<digest>"
-  echo "[dry-run] gcloud run deploy $service --set-secrets OPENAI_API_KEY=${openai_secret_name}:latest --image <image-by-digest> --project $project --region $region --platform managed --ingress all --no-allow-unauthenticated --cpu 2 --memory 2Gi --port 8080 --timeout 90s --concurrency 1 --min-instances 0 --max-instances 2 --quiet"
-  echo "[dry-run] create or reuse smoke service account <redacted>"
-  echo "[dry-run] grant roles/run.invoker on service $service only to <smoke-service-account>"
-  echo "[dry-run] grant roles/iam.serviceAccountTokenCreator on <smoke-service-account> to <active-developer>"
+  echo "[dry-run] resolve pushed image digest and swap the running image to IMAGE@sha256:<digest>"
+  echo "[dry-run] gcloud run services update $service --image <image-by-digest> --project $project --region $region --quiet"
   echo "[dry-run] verify allUsers must be absent from Cloud Run and Artifact Registry IAM policies"
   exit 0
 fi
@@ -163,7 +156,6 @@ mkdir -p "$whisper_context" "$runtime_context" "$sounds_context"
     -cf - .
 ) | tar -xf - -C "$whisper_context"
 cp "$asr_model" "$runtime_context/ggml-small.bin"
-cp services/zoovoice/NOTICE-STABILITY-AI.md "$runtime_context/NOTICE-STABILITY-AI.md"
 (cd "$sounds_directory" && tar -cf - .) | tar -xf - -C "$sounds_context"
 
 build_arguments=(
@@ -258,27 +250,12 @@ if [[ -z "$access_token" || ! "$access_token" =~ ^[A-Za-z0-9._~-]+$ ]]; then
 fi
 unset access_token
 
-if ! gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  iamcredentials.googleapis.com \
-  --project "$project" \
-  --quiet >"$temporary_directory/services.out" 2>"$temporary_directory/services.err"; then
-  fail "必要なGoogle Cloud APIを有効化できませんでした。"
-fi
-
+# API有効化とArtifact Registry作成はTerraform（infra/gcp）が正。scriptは存在確認だけ行う。
 if ! gcloud artifacts repositories describe "$artifact_repository" \
   --location "$region" \
   --project "$project" \
   --format=json >"$temporary_directory/repository.json" 2>/dev/null; then
-  if ! gcloud artifacts repositories create "$artifact_repository" \
-    --repository-format docker \
-    --location "$region" \
-    --project "$project" \
-    --description "Private Voice Lab container images" \
-    --quiet >"$temporary_directory/repository-create.out" 2>"$temporary_directory/repository-create.err"; then
-    fail "private Artifact Registry repositoryを作成できませんでした。"
-  fi
+  fail "Artifact Registry repository ${artifact_repository} がありません。infra/gcp のTerraformでapplyしてください。"
 fi
 
 if ! gcloud auth configure-docker "$registry_host" --quiet \
@@ -298,63 +275,15 @@ if [[ ! "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 fi
 image_by_digest="${registry_host}/${project}/${artifact_repository}/${service}@${image_digest}"
 
-if ! gcloud run deploy "$service" \
+# サービス設定（CPU・メモリ・並列数・ingress・secret・IAM）はTerraform（infra/gcp）が正。
+# scriptはimageの入れ替えだけを行う。serviceが無い場合はTerraformでの作成を促して止まる。
+if ! gcloud run services update "$service" \
   --image "$image_by_digest" \
   --project "$project" \
   --region "$region" \
-  --platform managed \
-  --ingress all \
-  --no-allow-unauthenticated \
-  --cpu 2 \
-  --memory 2Gi \
-  --port 8080 \
-  --timeout 90s \
-  --concurrency 1 \
-  --min-instances 0 \
-  --max-instances 2 \
-  --set-secrets "OPENAI_API_KEY=${openai_secret_name}:latest" \
   --quiet >"$temporary_directory/run-deploy.out" 2>"$temporary_directory/run-deploy.err"; then
-  fail "private Cloud Run serviceをdeployできませんでした。"
+  fail "Cloud Run serviceのimageを更新できませんでした。service未作成の場合は infra/gcp のTerraformでapplyしてください。"
 fi
-
-if ! gcloud iam service-accounts describe "$smoke_service_account" \
-  --project "$project" \
-  --format=json >"$temporary_directory/smoke-account.json" 2>/dev/null; then
-  if ! gcloud iam service-accounts create "$smoke_account_name" \
-    --project "$project" \
-    --display-name "Zoovoice local smoke invoker" \
-    --quiet >"$temporary_directory/smoke-account-create.out" 2>"$temporary_directory/smoke-account-create.err"; then
-    fail "local smoke用service accountを作成できませんでした。"
-  fi
-fi
-
-if ! gcloud run services add-iam-policy-binding "$service" \
-  --project "$project" \
-  --region "$region" \
-  --member "serviceAccount:${smoke_service_account}" \
-  --role roles/run.invoker \
-  --quiet >"$temporary_directory/run-invoker.out" 2>"$temporary_directory/run-invoker.err"; then
-  fail "local smoke用Cloud Run Invoker権限を設定できませんでした。"
-fi
-
-if ! developer_account=$(gcloud config get-value account --quiet 2>"$temporary_directory/gcloud-account.err"); then
-  fail "active gcloud accountを確認できませんでした。"
-fi
-if [[ -z "$developer_account" || "$developer_account" == *[$'\r\n\t ']* || "$developer_account" != *@* ]]; then
-  fail "active gcloud accountを確認できませんでした。"
-fi
-developer_member_type=user
-if [[ "$developer_account" == *.gserviceaccount.com ]]; then
-  developer_member_type=serviceAccount
-fi
-if ! gcloud iam service-accounts add-iam-policy-binding "$smoke_service_account" \
-  --project "$project" \
-  --member "${developer_member_type}:${developer_account}" \
-  --role roles/iam.serviceAccountTokenCreator \
-  --quiet >"$temporary_directory/token-creator.out" 2>"$temporary_directory/token-creator.err"; then
-  fail "service account impersonation権限を設定できませんでした。"
-fi
-unset developer_account
 
 if ! gcloud run services get-iam-policy "$service" \
   --project "$project" \

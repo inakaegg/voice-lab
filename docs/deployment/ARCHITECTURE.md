@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-07
+更新日: 2026-08-09
 
 ## 構成
 
@@ -87,7 +87,7 @@ Browser
 
 Cloud Runへ載せるDocker imageは、Goバイナリに加えて実行に必要なDebian runtime、CA証明書、ffmpegを含める。これに日本語ASR用のwhisper.cpp commandとモデルを加える。commandとモデルはリポジトリで管理せず、build時にgit外の検証済みディレクトリから取り込む。取り込むcommitとSHA-256はbuildとdeploy scriptの両方で照合し、image labelへも残す。連想に使うLLMのAPIキーはimageへ焼き込まず、Cloud RunのsecretとしてOPENAI_API_KEYへ渡す。
 
-音源素材はリポジトリで追跡せず、build時に `zoovoice_sounds` named contextから `/app/sounds` へ取り込む。素材の出所と採用hashは、そのセットの `manifest.json` を正とする。Stability AIの必須表示は `services/zoovoice/NOTICE-STABILITY-AI.md` を正とし、`/app/licenses` へ同梱する。公開UIはfooterへ `Powered by Stability AI` を表示する。secretと開発用ファイルはimageへ含めない。containerはnon-rootで実行する。
+音源素材はリポジトリで追跡せず、build時に `zoovoice_sounds` named contextから `/app/sounds` へ取り込む。素材の出所と採用hashは、そのセットの `manifest.json` を正とする。secretと開発用ファイルはimageへ含めない。containerはnon-rootで実行する。
 
 ASRモデル、必要な外部command、LLMのAPIキーのいずれかが欠けた場合は起動しない。固定の動物へ黙って切り替えない。
 
@@ -95,14 +95,15 @@ D1へ追加するのは `zoovoice_usage_counters` テーブルだけである。
 
 ASR本文、根拠語、録音、生成音声は応答の生成に必要な間だけ扱う。これらの永続保存先は持たず、D1、R2、application logへ書かない。
 
-Cloud Runのregionは `us-central1` とする。`scripts/deploy_zoovoice_cloud_run.sh` は次の値でdeployする。
+Cloud Runのregionは `us-central1` とする。サービス設定の正本はTerraform（`infra/gcp/`）で、次の値を宣言する。
 
-- private（`--no-allow-unauthenticated`）
+- private（未認証アクセス不可）
 - CPU 2、メモリ2GiB
 - port 8080、timeout 90秒、concurrency 1
 - min 0、max 2
-- imageはlocalでbuildし、`us-central1-docker.pkg.dev/<project>/voice-lab/zoovoice:<git-sha>` へpushする
-- imageはtagではなくdigestを固定して指定する
+- `OPENAI_API_KEY` はSecret Manager `zoovoice-openai-api-key` から渡す
+
+`scripts/deploy_zoovoice_cloud_run.sh` が担当するのはimageだけである。imageはlocalでbuildし、`us-central1-docker.pkg.dev/<project>/voice-lab/zoovoice:<git-sha>` へpushする。Cloud Runへはtagではなくdigestを固定して指定し、image以外の設定は変更しない。
 
 Cloud RunへGit repositoryを接続する自動buildは使わない。container imageのbuildとpushはローカルの配備scriptだけが行う。
 
@@ -134,11 +135,48 @@ Cloud Run側の反映はCloudflare Worker deployとは別の外部操作gateと�
 - 公開 `GET /api/zoovoice/config` が200を返し、有効な状態とTurnstile必須を示すこと
 - 公開 `GET /api/zoovoice/animals` が200で音源カタログを返すこと（当時27種。この確認はビルド時の静的JSONを返していた頃のもの）
 - 公開 `/zoovoice` とZoovoice用JS assetが200で配信されること
-- 実ブラウザでのUI表示、production Turnstile widgetの表示、`Powered by Stability AI` の表示
+- 実ブラウザでのUI表示、production Turnstile widgetの表示
 - private Cloud Runの `/animals` と実音声の `POST /compose` が認証付きrequestで200を返すこと
 - 認証なしのCloud Run直接requestが403で拒否されること
 
 Worker経由の実 `POST /api/zoovoice/compose` は未確認である。この経路の通過にはproduction Turnstileの人間操作が必要なためである。CAPTCHAは回避しないため、自動smokeの対象にしない。Worker側のID token交換とorigin requestは、fake endpointを使う契約testで固定している。この1件の人間確認を終えるまで、公開経路全体を実地確認済みとして扱わない。
+
+## IaC（Terraform）
+
+CloudflareとGoogle Cloudの構成はTerraformを正本とする。コードは `infra/cloudflare/` と `infra/gcp/` に分かれており、片方の適用はもう片方へ波及しない。設計方針は `AGENTS.md` の「インフラ構成（IaC）」節を正とする。
+
+Terraformが管理する対象は次のとおり。
+
+- Cloudflare: KV `MO_SPEECH_KV`、D1 `mo-speech-demo-db`、R2 bucket 2つ、Turnstile widget `voice-lab-zoovoice`
+- Google Cloud: Cloud Run service `zoovoice` の設定、Artifact Registry `voice-lab`、必要APIの有効化
+- Google Cloud（続き）: Secret Manager `zoovoice-openai-api-key` の入れ物とアクセス権、invoker用service account 2つと関連IAM
+
+Terraformが管理しない対象は次のとおり。
+
+- Workerスクリプト本体とbinding（`wrangler deploy` と `wrangler.toml` が正）
+- secretの値（`wrangler secret put` と `gcloud secrets versions add` が正）
+- Cloud Runのimage digest（配備scriptが入れ替える。Terraformはimage差分を無視する）
+
+### 認証
+
+Cloudflare側は環境変数 `CLOUDFLARE_API_TOKEN` を使う。対象を絞ったAPI tokenをdashboardで発行するのが安全である。専用tokenを作らない場合は、`wrangler login` 済みのOAuth tokenを流用できる。OAuth tokenは約1時間で切れるため、先に `npx wrangler whoami` で更新してから読み出す。
+
+```sh
+export CLOUDFLARE_API_TOKEN=$(grep -m1 '^oauth_token' \
+  ~/Library/Preferences/.wrangler/config/default.toml | sed 's/.*= *"\(.*\)"/\1/')
+```
+
+Google Cloud側は環境変数 `GOOGLE_OAUTH_ACCESS_TOKEN` を使う。こちらも約1時間で切れる。
+
+```sh
+export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
+```
+
+### 使い方
+
+各ディレクトリで `terraform init` の後、`terraform plan` で実物との差分を確認する。既存資産の取り込み定義は `imports.tf` にあり、stateへの取り込みは `terraform import` で行う。planまでは自由に実行してよい。`terraform apply` はクラウド設定の変更にあたるため、そのターンの明示許可を必要とする。
+
+stateはローカルファイル（`terraform.tfstate`）で、gitでは管理しない。リモートbackendへ移す場合は、置き場（Cloud Storage bucket等）を明示許可の上で作成し、`terraform { backend }` blockを追加して `terraform init -migrate-state` を実行する。
 
 ## 将来の分割
 

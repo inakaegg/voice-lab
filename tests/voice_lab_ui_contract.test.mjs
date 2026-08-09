@@ -142,7 +142,7 @@ test("Zoovoice keeps Turnstile mounted and stops recording into automatic compos
   assert.doesNotMatch(zoovoiceMain, />生成する</);
   assert.doesNotMatch(zoovoiceMain, /録り直す/);
   assert.doesNotMatch(zoovoiceMain, /styles\.css|record-orb\.css|practice-record-orb/);
-  assert.match(zoovoiceMain, />\s*Powered by Stability AI\s*</);
+  assert.doesNotMatch(zoovoiceMain, /Stability AI/);
 });
 
 test("Zoovoice is labeled beta on the portal and its own page", () => {

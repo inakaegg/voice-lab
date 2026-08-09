@@ -244,21 +244,21 @@ ASR本文と連想の理由は応答とプロセスのメモリ内だけで扱�
 セットの `manifest.json` に1本ずつ記録します。サービスは起動時にSHA-256を照合し、
 1件でも合わなければ起動しません。合成応答にはその回に使った素材のクレジットを含めます。
 
-Stable Audioで生成した素材を含む場合の必須表示は
-[NOTICE-STABILITY-AI.md](NOTICE-STABILITY-AI.md) を正とし、公開UIはfooterへ
-`Powered by Stability AI` を表示します。
+素材はすべて実録音で、無償で商用利用できるライセンス（CC0・CC BY・小森平の利用規約）の
+ものだけを使います。生成音声は使いません。
 
 ## 素材の準備
 
 `tools/prepare_assets.sh` は集めた素材を実行時の形式へ規格化します。
-`tools/import_stable_audio.py` は Stable Audio の生成候補から1種1本を採用して規格化し、
-manifestを書き出します（モデルの実行そのものは行いません）。出力先はリポジトリ外を指定します。
+実録音を新しく集めるところからやり直す場合は、リポジトリ直下の3つのスクリプトを順に使います。
 
 ```sh
-python3 tools/import_stable_audio.py <stable-audio-output-dir> <repo-outside>/animal-sounds
+python3 scripts/fetch_animal_recordings.py <queries.json> <repo-outside>/candidates
+python3 scripts/build_real_recordings.py <selection.json> <repo-outside>/real-recordings
+python3 scripts/select_animal_sounds.py
 ```
 
-どちらも取得条件を伴う素材準備用なので CI では実行しません。
+いずれも取得条件を伴う素材準備用なので CI では実行しません。
 
 ## Docker image
 
@@ -266,7 +266,7 @@ imageは`services/zoovoice/Dockerfile`で作ります。
 モデルと鳴き声素材はリポジトリへcommitしないため、buildはgit外の成果物を named context として受け取ります。
 
 - `whisper_source`: 検証済みのwhisper.cppソース。commitは`5250a86fdebac4d51085fcfcd0b315cb0c6b91c9`に固定する
-- `zoovoice_runtime`: `ggml-small.bin`と`NOTICE-STABILITY-AI.md`を置いた一時ディレクトリ
+- `zoovoice_runtime`: `ggml-small.bin`を置いた一時ディレクトリ
 - `zoovoice_sounds`: `manifest.json`付きの鳴き声セット（`ZOOVOICE_SOUNDS_DIR`の中身をそのまま渡す）
 
 buildは`ggml-small.bin`のSHA-256をimage内で照合します。
@@ -278,7 +278,7 @@ whisper.cpp commit、ASRモデルのSHA-256、ライセンス識別子はimage l
 
 - Goバイナリと`whisper-cli`
 - `ggml-small.bin`
-- whisper.cppとStability AIのライセンス表示
+- whisper.cppのライセンス表示
 - Debian runtime、CA証明書、ffmpeg
 - `zoovoice_sounds`から取り込んだ鳴き声セット（`/app/sounds`）
 
@@ -300,7 +300,7 @@ Cloud Runへの配備は`./scripts/deploy_zoovoice_cloud_run.sh`を使います�
 
 scriptはwhisper.cpp commitとASRモデルのSHA-256を先に検査します。
 一致しない場合は、buildへ進まず停止します。
-applyでは`OPENAI_API_KEY`をSecret Manager経由でCloud Runへ渡します。secret名は`ZOOVOICE_OPENAI_SECRET_NAME`（既定`zoovoice-openai-api-key`）で変えられます。
+Cloud Run上の`OPENAI_API_KEY`はSecret Manager `zoovoice-openai-api-key` から渡します。この紐付けはTerraform（`infra/gcp/`）が管理し、scriptは変更しません。
 
 whisper.cppソースは、固定commitに加えて作業ツリーがcleanであることも必須です。
 未commitの変更やuntracked fileが1つでもあれば、buildへ進まず停止します。
@@ -311,7 +311,7 @@ whisper.cppソースは、固定commitに加えて作業ツリーがcleanであ�
 | --- | --- | --- |
 | dry-run | 既定 | 実行予定の操作を表示するだけ。build、local起動、remote writeを行わない |
 | local-only verification | `ZOOVOICE_LOCAL_VERIFY=1` | imageのbuild、local起動、`/healthz`と`/compose`の確認まで。remote writeを行わない |
-| apply | `ZOOVOICE_DEPLOY_APPLY=1` | 上記に続けてimage push、Cloud Run deploy、IAM設定を実行する |
+| apply | `ZOOVOICE_DEPLOY_APPLY=1` | 上記に続けてimage pushと、Cloud Run serviceのimage入れ替えを実行する |
 
 `ZOOVOICE_DEPLOY_APPLY=1`と`ZOOVOICE_LOCAL_VERIFY=1`は同時に指定できません。
 applyはcleanなworking treeを必要とします。
@@ -319,9 +319,10 @@ applyはcleanなworking treeを必要とします。
 Cloud Runの配備契約は次のとおりです。
 CPUとメモリはlocal-only verificationで同じ上限を課して起動を確認しています。
 この契約で、us-central1のprivate Cloud Run serviceへdeploy済みです。
+サービス設定（下記の資源上限・ingress・IAM・secret紐付け）の正本はTerraform（`infra/gcp/`）で、scriptが担当するのはimage buildとpush、digest指定での入れ替えだけです。
 
 - region: `us-central1`
-- private（`--no-allow-unauthenticated`、`allUsers`と`allAuthenticatedUsers`は不可）
+- private（未認証アクセス不可。`allUsers`と`allAuthenticatedUsers`は不可）
 - CPU 2、メモリ2GiB
 - port 8080、timeout 90秒、concurrency 1
 - min 0、max 2
@@ -334,6 +335,7 @@ container imageのbuildとpushはローカルの配備scriptだけが行いま�
 invoker権限はservice単位の`roles/run.invoker`だけを付与し、`allUsers`へは付与しません。
 付与先はCloudflare Worker用のinvoker service accountと、smoke専用のservice accountの2つです。
 active developerのgcloudアカウントは、smoke専用service account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
+これらのIAMもTerraform（`infra/gcp/`）が管理します。scriptはapply時に`allUsers`が居ないことの確認だけを行います。
 
 ### local-only verificationの実測
 

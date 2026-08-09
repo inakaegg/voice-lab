@@ -44,7 +44,6 @@ WORKDIR /app
 COPY --from=service-builder /out/zoovoice /usr/local/bin/zoovoice
 COPY --from=whisper-builder /src/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper_source LICENSE /app/licenses/LICENSE-whisper.cpp
-COPY --from=zoovoice_runtime --chmod=0444 NOTICE-STABILITY-AI.md /app/licenses/NOTICE-STABILITY-AI.md
 COPY --from=zoovoice_runtime --chmod=0444 ggml-small.bin /app/models/ggml-small.bin
 # 鳴き声素材はリポジトリに置かず、build時に zoovoice_sounds context から取り込む。
 COPY --from=zoovoice_sounds . /app/sounds
@@ -52,7 +51,7 @@ COPY --from=zoovoice_sounds . /app/sounds
 RUN chmod -R a=rX /app/sounds
 RUN printf '%s  %s\n' "$ZOOVOICE_ASR_MODEL_SHA256" /app/models/ggml-small.bin | sha256sum --check --strict
 
-LABEL org.opencontainers.image.licenses="MIT, CC0-1.0, CC-BY-4.0, Stability-AI-Community, LicenseRef-Taira-Komori" \
+LABEL org.opencontainers.image.licenses="MIT, CC0-1.0, CC-BY-4.0, LicenseRef-Taira-Komori" \
     io.voicelab.zoovoice.whisper.commit="$WHISPER_SOURCE_COMMIT" \
     io.voicelab.zoovoice.asr-model.sha256="$ZOOVOICE_ASR_MODEL_SHA256"
 

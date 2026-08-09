@@ -148,7 +148,6 @@ Zoovoiceはβ版として公開する。公開UIは、ポータルの製品行�
 - manifestの実体は `ZOOVOICE_SOUNDS_DIR` が指すディレクトリの `manifest.json` とする（image内では `/app/sounds/manifest.json`）。素材はリポジトリへ置かない。同じ内容を実装コードやdocsへ手書きしない。
 - Go APIは起動時に、manifestの全ファイルについて実在とSHA-256の一致を確認する。1件でも欠けるか一致しない配備では起動しない。
 - 音源を1本も持たない動物はカタログへ載せない。載っていない動物は連想の候補にもならない。
-- 生成音声を使う公開UIは `Powered by Stability AI` を表示する。必須の表示文とlink先は [NOTICE-STABILITY-AI.md](../../services/zoovoice/NOTICE-STABILITY-AI.md) を正とする。
 - 対象種の追加は音源の追加とmanifestの更新で行う。
 
 ### 通常の流れ

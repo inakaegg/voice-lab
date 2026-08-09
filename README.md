@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 2. 発話内容から動物を1種自動で連想する
 3. 鳴き声を発話のすき間へ重ねた音声を再生・ダウンロードする
 
-日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はLLM（OpenAI API）が音源のある動物から1種を選びます。同梱する鳴き声にはStable Audioで生成した音源を含みます。
+日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はLLM（OpenAI API）が音源のある動物から1種を選びます。同梱する鳴き声はすべて実録音で、無償で商用利用できるものだけを使っています。
 
 ## 構成
 
