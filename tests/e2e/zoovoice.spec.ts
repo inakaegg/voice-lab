@@ -30,7 +30,8 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   await expect(page.getByRole("heading", { name: "話すだけで、ぴったりの動物を。" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /声から動物を連想する/ }).getByText("β版", { exact: true })).toBeVisible();
   await expect(page.locator("[data-tech-note]")).toContainText("Google Cloud Run");
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
+  await expect(page.getByText("不正利用防止の確認が完了しました。")).toHaveCount(0);
   await expect.poll(() => page.getByRole("button", { name: "録音する" }).evaluate((element) => ({
     background: getComputedStyle(element).backgroundColor,
     borderRadius: getComputedStyle(element).borderRadius,
@@ -171,13 +172,13 @@ test("zoovoice refreshes an expired Turnstile token before one automatic compose
   });
   await installTurnstileStub(page);
   await page.goto("/zoovoice");
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
 
   await page.evaluate(() => {
     const state = (window as typeof window & { __zoovoiceTurnstileTest: { expire: () => void } }).__zoovoiceTurnstileTest;
     state.expire();
   });
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
   await recordOnce(page);
   await expect.poll(() => composeBodies.length).toBe(1);
   assertMultipartField(composeBodies[0], "turnstile_token", "browser-turnstile-token-2");
@@ -189,7 +190,7 @@ test("zoovoice keeps the orb disabled while waiting for a Turnstile token", asyn
   await page.goto("/zoovoice");
   await recordOnce(page);
 
-  await expect(page.getByText("不正利用防止の確認を待っています。").last()).toBeVisible();
+  await expect(page.getByTestId("zoovoice-status")).toHaveText("不正利用防止の確認を待っています。");
   await expect(page.getByRole("button", { name: "録音する" })).toBeDisabled();
   await captureIfRequested(page, testInfo, "token-waiting-light");
   await setTheme(page, "暗色");
@@ -452,7 +453,6 @@ test("zoovoice keeps initial and recorded Turnstile states in one desktop viewpo
 
     await recordOnce(page);
     await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
-    await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
     await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
     await assertWorkspaceInsideViewport(page, viewport.height);
     await assertVisibleControlsInsideViewport(page);
@@ -464,7 +464,7 @@ test("zoovoice keeps initial and recorded Turnstile states in one desktop viewpo
   await assertNoHorizontalOverflow(page);
   await recordOnce(page);
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
-  await expect(page.getByText("不正利用防止の確認が完了しました。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
   await assertNoHorizontalOverflow(page);
   await captureIfRequested(page, testInfo, "turnstile-390-light");
 });

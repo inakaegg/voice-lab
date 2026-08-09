@@ -38,7 +38,9 @@ export function TurnstileWidget({
   const onTokenRef = useRef(onToken);
   const onUnavailableRef = useRef(onUnavailable);
   const onInteractionChangeRef = useRef(onInteractionChange);
-  const [status, setStatus] = useState("不正利用防止の確認を待っています。");
+  // 待機中・完了・自動更新中は文言を出さない。Cloudflareのwidgetだけで足りるため、
+  // 利用者の操作が必要なときと失敗したときだけ説明を表示する。
+  const [status, setStatus] = useState("");
   onTokenRef.current = onToken;
   onUnavailableRef.current = onUnavailable;
   onInteractionChangeRef.current = onInteractionChange;
@@ -66,12 +68,12 @@ export function TurnstileWidget({
             if (!active) return;
             onTokenRef.current(token);
             onInteractionChangeRef.current(false);
-            setStatus("不正利用防止の確認が完了しました。");
+            setStatus("");
           },
           "expired-callback": () => {
             if (!active) return;
             onTokenRef.current("");
-            setStatus("確認の有効期限が切れました。自動で更新しています。");
+            setStatus("");
           },
           "error-callback": () => {
             if (!active) return;
@@ -86,7 +88,7 @@ export function TurnstileWidget({
           "after-interactive-callback": () => {
             if (!active) return;
             onInteractionChangeRef.current(false);
-            setStatus("不正利用防止の確認を待っています。");
+            setStatus("");
           },
         });
       })
@@ -111,7 +113,7 @@ export function TurnstileWidget({
     if (previousResetVersion.current === resetVersion) return;
     previousResetVersion.current = resetVersion;
     onTokenRef.current("");
-    setStatus("不正利用防止の確認を待っています。");
+    setStatus("");
     if (widgetIdRef.current && window.turnstile) {
       window.turnstile.reset(widgetIdRef.current);
     }
@@ -119,7 +121,9 @@ export function TurnstileWidget({
 
   return <div className="grid justify-items-center gap-2 rounded-xl border border-border/80 bg-muted/35 px-3 py-3">
     <div ref={containerRef} aria-label="不正利用防止の確認" className="min-h-[65px] max-w-full" />
-    <p role="status" className="text-center text-xs leading-5 text-muted-foreground">{status}</p>
+    {status
+      ? <p role="status" className="text-center text-xs leading-5 text-muted-foreground">{status}</p>
+      : null}
   </div>;
 }
 

@@ -126,6 +126,7 @@ Tailwindへ移行済みのrouteでは、shadcn/ui互換のsemantic tokenと`apps
 - 録音中だけorbの近くに取消ボタン（X）を表示する。取消した音声は送信しない。
 - 500ms未満の録音は送信しない。短すぎたことを伝えて待機状態へ戻す。
 - Turnstileのscriptとwidgetは、config取得後のページ表示時から読み込む。調整可能な設定ではなく、生成前に完了させる検証として扱う。
+- Turnstileの説明文言は、利用者の操作が必要なときと失敗したときだけ出す。待機中・完了・自動更新中はCloudflareのwidgetだけを見せる。
 - 停止後にTurnstileが未完了の場合はtoken待ちを明示し、orbを無効にする。tokenはcomposeごとに検証し、成功・失敗の後は次のtokenへresetする。
 - 追加送信は、retry可能な失敗の後に利用者が「もう一度生成」を押した場合だけとする。retry不能な失敗ではこのボタンを表示しない。
 - アニマル度は録音開始時の値を初回生成に使う。retry可能なerrorの後の「もう一度生成」には現在の値を使う。
