@@ -65,9 +65,9 @@
 ## 音声の出どころ
 
 - Taira Komori 利用規約: 31本
-- Stability AI Community License: 14本
+- CC0: 16本
 - CC0 1.0: 11本
-- CC0: 8本
+- Stability AI Community License: 6本
 - CC BY 4.0: 2本
 
 出どころと採用した音声の SHA-256 は `manifest.json` に1本ずつ記録してある。

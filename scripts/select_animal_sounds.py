@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """tmp1/ の3系統の鳴き声音源から、優先順位に従って最終セットを組み立てる。
 
-優先順位（CONCEPT.md 指示欄）:
-  1. processed/ (taira-komori-selected と cc0。どちらも使えるので全ファイル残す)
-  2. animal-sounds/
-  3. animal-sound-freesound/
+優先順位（CONCEPT.md 指示欄「自然音声優先」）:
+  1. processed/ (taira-komori-selected と cc0。どちらも実録音で、全ファイル残す)
+  2. animal-sound-freesound/ (実録音)
+  3. animal-sounds/ (Stable Audio の生成音。実録音が無い動物のための暫定)
 
-同じ動物が上位に既にあれば、下位のものは採用しない。
+実録音を生成音より上に置く。同じ動物が上位に既にあれば、下位のものは採用しない。
 出力先は tmp1/final/<動物キー>/ と tmp1/final/manifest.json。
 """
 
@@ -211,17 +211,6 @@ def collect() -> list[dict]:
             }
         )
 
-    for path in sorted((SRC / "animal-sounds").glob("*.wav")):
-        items.append(
-            {
-                "priority": 2,
-                "key": path.stem,
-                "path": path,
-                "source": "animal-sounds",
-                "credit": animal_sounds_credits[path.stem],
-            }
-        )
-
     for path in sorted(
         p
         for p in (SRC / "animal-sound-freesound").rglob("*.wav")
@@ -229,11 +218,22 @@ def collect() -> list[dict]:
     ):
         items.append(
             {
-                "priority": 3,
+                "priority": 2,
                 "key": path.parent.name,
                 "path": path,
                 "source": "animal-sound-freesound",
                 "credit": freesound_credits[(path.parent.name, freesound_candidate_number(path))],
+            }
+        )
+
+    for path in sorted((SRC / "animal-sounds").glob("*.wav")):
+        items.append(
+            {
+                "priority": 3,
+                "key": path.stem,
+                "path": path,
+                "source": "animal-sounds",
+                "credit": animal_sounds_credits[path.stem],
             }
         )
 
@@ -290,9 +290,11 @@ def main() -> None:
     manifest = {
         "schema_version": 1,
         "note": (
-            "tmp1/ の3系統から優先順位で最終選別したセット。"
-            "優先順位1=processed(taira-komori-selected と cc0)、2=animal-sounds、"
-            "3=animal-sound-freesound。上位に同じ動物があれば下位は採用しない。"
+            "tmp1/ の3系統から優先順位で最終選別したセット。実録音を生成音より優先する。"
+            "優先順位1=processed(taira-komori-selected と cc0、実録音)、"
+            "2=animal-sound-freesound(実録音)、"
+            "3=animal-sounds(Stable Audio の生成音。実録音が無い動物のための暫定)。"
+            "上位に同じ動物があれば下位は採用しない。"
         ),
         "animal_count": len(animals),
         "file_count": sum(len(a["files"]) for a in animals),
