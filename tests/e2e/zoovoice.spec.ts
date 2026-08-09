@@ -116,6 +116,28 @@ test("zoovoice shows the association reason for a far-fetched pick", async ({ pa
   await captureIfRequested(page, testInfo, "reason-light");
 });
 
+test("zoovoice shows the sound credits with the modification notice", async ({ page }, testInfo) => {
+  await installZoovoiceApi(page, {
+    soundCredits: [
+      { license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" },
+      { license: "CC0 1.0" },
+    ],
+  });
+  await page.goto("/zoovoice");
+  await recordOnce(page);
+
+  const credits = page.getByTestId("zoovoice-sound-credits");
+  await expect(credits).toContainText("無音除去・トリム・音量調整を実施");
+  await expect(credits).toContainText("CC BY 4.0 / dobroide");
+  await expect(credits).toContainText("CC0 1.0");
+  await expect(credits.getByRole("link", { name: "出典" })).toHaveAttribute(
+    "href",
+    "https://freesound.org/people/dobroide/sounds/17353",
+  );
+  await assertNoHorizontalOverflow(page);
+  await captureIfRequested(page, testInfo, "sound-credits-light");
+});
+
 test("zoovoice shows the association reason for a literal mention", async ({ page }, testInfo) => {
   await installZoovoiceApi(page, {
     transcript: "ぞうきんを絞る",
@@ -628,6 +650,7 @@ async function installZoovoiceApi(
     siteKey?: string;
     composeFailures?: Array<{ status: number; code: string; message: string }>;
     composeDelayMilliseconds?: number;
+    soundCredits?: Array<{ license: string; creator?: string; source_url?: string }>;
   } = {},
 ) {
   let composeRequest = 0;
@@ -672,6 +695,9 @@ async function installZoovoiceApi(
               { slot: "opening", species: selectedAnimal.id, at_seconds: 0 },
               { slot: "gaps", species: selectedAnimal.id, at_seconds: 1.2 },
               { slot: "ending", species: selectedAnimal.id, at_seconds: 2.4 },
+            ],
+            sound_credits: options.soundCredits ?? [
+              { license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" },
             ],
             input_duration_seconds: 2.4,
             output_duration_seconds: 4.7,

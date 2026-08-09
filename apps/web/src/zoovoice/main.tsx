@@ -11,6 +11,7 @@ import {
   isRetryableZoovoiceError,
   wavBlobFromBase64,
   type ComposeResponse,
+  type SoundCredit,
   type ZoovoiceConfig,
 } from "./api";
 import { defaultIntensity, intensityStage, intensityStageCount, intensityStageValues } from "./intensity";
@@ -439,7 +440,26 @@ function ResultDetails({ result }: { result: ResultState }) {
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
       {meta.insertions.length}か所に「{meta.selected_animal.label_ja}」の鳴き声を追加しました。
     </p>
+    <SoundCredits credits={meta.sound_credits ?? []} />
   </>;
+}
+
+// 鳴き声素材の出典表示。CC BYの素材は表示が利用条件なので、使った素材を必ず並べる。
+// 素材はいずれも無音除去とトリム、音量調整を経ているため、改変した旨も添える。
+function SoundCredits({ credits }: { credits: SoundCredit[] }) {
+  if (credits.length === 0) return null;
+  return <div data-testid="zoovoice-sound-credits" className="grid gap-1 border-t border-border/70 pt-2.5 text-[0.68rem] leading-5 text-muted-foreground">
+    <p className="font-semibold">鳴き声素材の出典（無音除去・トリム・音量調整を実施）</p>
+    <ul className="grid gap-0.5">
+      {credits.map((credit) => <li key={`${credit.license}/${credit.creator ?? ""}/${credit.source_url ?? ""}`} className="break-words">
+        {credit.license}
+        {credit.creator ? ` / ${credit.creator}` : ""}
+        {credit.source_url
+          ? <> / <a href={credit.source_url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">出典</a></>
+          : null}
+      </li>)}
+    </ul>
+  </div>;
 }
 
 function messageFromError(error: unknown, fallback: string): string {

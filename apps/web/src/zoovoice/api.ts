@@ -15,9 +15,17 @@ export type ComposeResponse = {
       species: string;
       at_seconds: number;
     }>;
+    sound_credits?: SoundCredit[];
     input_duration_seconds: number;
     output_duration_seconds: number;
   };
+};
+
+// 鳴き声素材の出典表示。CC BY素材では表示が利用条件になるため、必ず画面へ出す。
+export type SoundCredit = {
+  license: string;
+  creator?: string;
+  source_url?: string;
 };
 
 export type ZoovoiceConfig = {

@@ -118,6 +118,78 @@ test("Cloudflare worker rejects oversized Zoovoice audio before external calls",
   assert.deepEqual(calls, []);
 });
 
+test("Cloudflare worker stops an oversized Zoovoice upload that declares no Content-Length", async () => {
+  const calls = [];
+  const env = await zoovoiceEnv(async (url) => {
+    calls.push(String(url));
+    throw new Error("oversized input must not call an external service");
+  });
+
+  // Content-Lengthを付けずに上限超えを流し込む。本文を読み切る前に打ち切る必要がある。
+  const megabyte = new Uint8Array(1_000_000);
+  let emitted = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (emitted >= 12) {
+        controller.close();
+        return;
+      }
+      emitted += 1;
+      controller.enqueue(megabyte);
+    },
+  });
+  const request = new Request("http://127.0.0.1:8787/api/zoovoice/compose", {
+    method: "POST",
+    headers: { "content-type": "multipart/form-data; boundary=zoovoice-test" },
+    body,
+    duplex: "half",
+  });
+
+  const response = await handleRequest(request, env);
+
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, "zoovoice_audio_too_large");
+  assert.ok(emitted < 12, `body must be abandoned before it is fully read (read ${emitted}MB)`);
+  assert.deepEqual(calls, []);
+});
+
+test("Cloudflare worker passes valid Zoovoice sound credits through and rejects malformed ones", async () => {
+  const withCredits = async (credits) => {
+    const origin = validZoovoiceOriginResponse();
+    if (credits === undefined) delete origin.meta.sound_credits;
+    else origin.meta.sound_credits = credits;
+    const env = await zoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      return json(origin);
+    }, { db: fakeZoovoiceBudgetD1() });
+    env.ZOOVOICE_LOCAL_DEV = "1";
+    env.ZOOVOICE_ORIGIN_MODE = "local-origin";
+    env.ZOOVOICE_LOCAL_ORIGIN = "http://127.0.0.1:8090";
+    return await handleRequest(zoovoiceComposeRequest(), env);
+  };
+
+  const valid = await withCredits([{ license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" }]);
+  assert.equal(valid.status, 200);
+  assert.deepEqual((await valid.json()).meta.sound_credits, [
+    { license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" },
+  ]);
+
+  // 項目が無い応答は旧いorigin imageとして通す。形が壊れているものは通さない。
+  assert.equal((await withCredits(undefined)).status, 200);
+  for (const malformed of [
+    "CC0 1.0",
+    [{ creator: "someone" }],
+    [{ license: "CC BY 4.0", source_url: "javascript:alert(1)" }],
+    [{ license: "CC BY 4.0", source_url: "http://example.com/x" }],
+  ]) {
+    const response = await withCredits(malformed);
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+  }
+});
+
 test("Cloudflare worker rejects invalid Zoovoice Turnstile action before quota and origin", async () => {
   const calls = [];
   const db = fakeZoovoiceBudgetD1();
@@ -3671,6 +3743,7 @@ function validZoovoiceOriginResponse() {
       selected_animal: { id: "cat", label_ja: "猫" },
       association_reason: "猫が出てくるため",
       insertions: [{ slot: "opening", species: "cat", at_seconds: 0 }],
+      sound_credits: [{ license: "CC0 1.0", creator: "someone", source_url: "https://example.com/cat" }],
       input_duration_seconds: 1,
       output_duration_seconds: 1.4,
     },

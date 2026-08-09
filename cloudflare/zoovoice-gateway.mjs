@@ -106,15 +106,17 @@ async function proxyCompose(request, env) {
   if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
     throw new ZoovoiceGatewayError(400, "zoovoice_invalid_request", "音声ファイルと設定を確認してください。");
   }
+  const requestLimit = zoovoiceAudioMaxBytes(env) + DEFAULT_SETTINGS_MAX_BYTES + 128 * 1024;
   const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > zoovoiceAudioMaxBytes(env) + DEFAULT_SETTINGS_MAX_BYTES + 128 * 1024) {
+  if (contentLength > requestLimit) {
     throw audioTooLargeError();
   }
 
   let incoming;
   try {
-    incoming = await request.formData();
-  } catch (_error) {
+    incoming = await boundedFormData(request, requestLimit);
+  } catch (error) {
+    if (error instanceof ZoovoiceGatewayError) throw error;
     throw new ZoovoiceGatewayError(400, "zoovoice_invalid_request", "音声ファイルと設定を確認してください。");
   }
   const audio = incoming.get("audio");
@@ -146,6 +148,37 @@ async function proxyCompose(request, env) {
     throw new ZoovoiceGatewayError(502, "zoovoice_invalid_origin_response", "合成結果を確認できませんでした。");
   }
   return gatewayJson(payload, { status: response.status });
+}
+
+// Content-Lengthは省略も詐称もできるため、本文は上限付きで読み切ってから解析する。
+// 上限を超えた時点で読み込みを打ち切り、Workerのメモリを使い切らせない。
+async function boundedFormData(request, limit) {
+  if (!request.body) throw new ZoovoiceGatewayError(400, "zoovoice_invalid_request", "音声ファイルと設定を確認してください。");
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) throw audioTooLargeError();
+      chunks.push(value);
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return await new Request(request.url, {
+    method: "POST",
+    headers: { "content-type": request.headers.get("content-type") || "" },
+    body,
+  }).formData();
 }
 
 function isFileLike(value) {
@@ -191,12 +224,36 @@ function isValidComposeResponse(payload) {
     || meta.output_duration_seconds < meta.input_duration_seconds
   ) return false;
 
+  // 鳴き声素材のクレジットは画面へそのまま出すため、形の合わないものは通さない。
+  // 旧いorigin imageとの互換のため、項目そのものが無い場合だけは許す。
+  if (meta.sound_credits !== undefined && !isValidSoundCredits(meta.sound_credits)) return false;
+
   return meta.insertions.every((insertion) => (
     isPlainObject(insertion)
     && ["opening", "gaps", "ending"].includes(insertion.slot)
     && insertion.species === meta.selected_animal.id
     && isNonNegativeFiniteNumber(insertion.at_seconds)
   ));
+}
+
+function isValidSoundCredits(value) {
+  return Array.isArray(value)
+    && value.length <= 20
+    && value.every((credit) => (
+      isPlainObject(credit)
+      && isBoundedString(credit.license, 1, 200)
+      && (credit.creator === undefined || isBoundedString(credit.creator, 1, 200))
+      && (credit.source_url === undefined || isBoundedHttpsUrl(credit.source_url))
+    ));
+}
+
+function isBoundedHttpsUrl(value) {
+  if (!isBoundedString(value, 1, 500)) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
 }
 
 function isPlainObject(value) {
