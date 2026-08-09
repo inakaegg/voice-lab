@@ -179,6 +179,7 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 よく参照する文書:
 
+- [CLI一覧](CLI.md) — 手元で機能を確かめるコマンドと出力例
 - [全体仕様](docs/speech-translation/SPEC.md)
 - [現在のデプロイ構成](docs/deployment/ARCHITECTURE.md)
 - [既知の制限](docs/speech-translation/KNOWN_LIMITS.md)
