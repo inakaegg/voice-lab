@@ -31,12 +31,17 @@ def render(manifest: dict) -> str:
             licenses[name] = licenses.get(name, 0) + 1
 
     lines = [
+        "<!-- 自動生成ファイル。手で書き換えない。"
+        " 作り直し: python3 scripts/generate_animals_doc.py <sounds-dir> -->",
+        "",
         f"# Zoovoice の対象動物（{len(animals)}種）",
         "",
-        "この一覧の正本は実際の音声ファイルである。鳴き声セットの `manifest.json` から",
-        "`python3 scripts/generate_animals_doc.py <sounds-dir>` で作り直す。手で書き換えない。",
-        "音源のある動物だけが連想の候補になるので、動物を増やしたり減らしたりするときは",
-        "音声ファイルの側を変え、この文書を作り直す。",
+        "**この文書は自動生成である。手で書き換えないこと。**",
+        "内容を直すときは鳴き声セットの `manifest.json` を直し、",
+        "`python3 scripts/generate_animals_doc.py <sounds-dir>` で作り直す。",
+        "",
+        "この一覧の正本は実際の音声ファイルである。音源のある動物だけが連想の候補になるので、",
+        "動物を増やしたり減らしたりするときは音声ファイルの側を変え、この文書を作り直す。",
         "",
         f"音声ファイルは全部で{file_count}本ある。1種に複数本ある動物は、合成のたびにその中から選ばれる。",
         "",
