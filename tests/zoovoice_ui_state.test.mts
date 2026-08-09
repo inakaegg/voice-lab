@@ -145,9 +145,7 @@ test("zoovoice compose sends the current single-use Turnstile token", async () =
       meta: {
         transcript: "猫が眠っています",
         selected_animal: { id: "cat", label_ja: "猫" },
-        evidence_term: "猫",
-        selection_strategy: "direct",
-        fallback_reason: null,
+        association_reason: "猫が出てくるため",
         insertions: [],
         input_duration_seconds: 1,
         output_duration_seconds: 1,
@@ -167,17 +165,15 @@ test("zoovoice compose sends the current single-use Turnstile token", async () =
   }
 });
 
-test("zoovoice compose preserves pun strategy and its literal evidence", async () => {
+test("zoovoice compose preserves the association reason", async () => {
   const originalFetch = globalThis.fetch;
-  const strategy: zoovoiceApi.ComposeResponse["meta"]["selection_strategy"] = "pun";
+  const reason: zoovoiceApi.ComposeResponse["meta"]["association_reason"] = "「ぞうきん」の語呂合わせでゾウを連想";
   globalThis.fetch = async () => Response.json({
     audio: { format: "wav", base64: "UklGRg==" },
     meta: {
       transcript: "ぞうきんを絞る",
       selected_animal: { id: "elephant", label_ja: "象" },
-      evidence_term: "ぞう",
-      selection_strategy: strategy,
-      fallback_reason: null,
+      association_reason: reason,
       insertions: [],
       input_duration_seconds: 1,
       output_duration_seconds: 1,
@@ -185,8 +181,7 @@ test("zoovoice compose preserves pun strategy and its literal evidence", async (
   });
   try {
     const response = await zoovoiceApi.composeRecording(new Blob(["audio"]), 50);
-    assert.equal(response.meta.selection_strategy, "pun");
-    assert.equal(response.meta.evidence_term, "ぞう");
+    assert.equal(response.meta.association_reason, reason);
   } finally {
     globalThis.fetch = originalFetch;
   }

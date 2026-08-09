@@ -86,37 +86,31 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   }
 });
 
-test("zoovoice explains random fallback without inventing an evidence term", async ({ page }, testInfo) => {
+test("zoovoice shows the association reason for a far-fetched pick", async ({ page }, testInfo) => {
   await installZoovoiceApi(page, {
-    strategy: "random_fallback",
-    selectedAnimal: { id: "frog", label_ja: "カエル" },
-    evidenceTerm: null,
-    fallbackReason: "no_association_match",
+    transcript: "眠れない夜だった",
+    selectedAnimal: { id: "sheep", label_ja: "羊" },
+    associationReason: "眠れない夜は羊を数えるため",
   });
   await page.goto("/zoovoice");
   await recordOnce(page);
 
-  await expect(page.getByText("関連する動物が見つからなかったため、ランダムに選びました。")).toBeVisible();
-  await expect(page.getByText("該当なし", { exact: true })).toBeVisible();
-  await expect(page.getByText("ランダム選択", { exact: true })).toBeVisible();
-  await expect(page.getByText("カエル", { exact: true })).toBeVisible();
-  await captureIfRequested(page, testInfo, "fallback-light");
+  await expect(page.getByText("眠れない夜は羊を数えるため", { exact: true })).toBeVisible();
+  await expect(page.getByText("羊", { exact: true }).first()).toBeVisible();
+  await captureIfRequested(page, testInfo, "reason-light");
 });
 
-test("zoovoice labels playful literal association without a fallback warning", async ({ page }, testInfo) => {
+test("zoovoice shows the association reason for a literal mention", async ({ page }, testInfo) => {
   await installZoovoiceApi(page, {
     transcript: "ぞうきんを絞る",
-    strategy: "pun",
     selectedAnimal: { id: "elephant", label_ja: "象" },
-    evidenceTerm: "ぞう",
+    associationReason: "「ぞうきん」の語呂合わせでゾウを連想",
   });
   await page.goto("/zoovoice");
   await recordOnce(page);
 
-  await expect(page.getByText("語呂合わせ", { exact: true })).toBeVisible();
-  await expect(page.getByText("ぞう", { exact: true })).toBeVisible();
+  await expect(page.getByText("「ぞうきん」の語呂合わせでゾウを連想", { exact: true })).toBeVisible();
   await expect(page.getByText("象", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("関連する動物が見つからなかったため、ランダムに選びました。")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "結果を一時停止" })).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await captureIfRequested(page, testInfo, "pun-success-light");
@@ -613,10 +607,8 @@ async function installZoovoiceApi(
     turnstileRequired?: boolean;
     onCompose?: (body: string) => void;
     transcript?: string;
-    strategy?: "direct" | "pun" | "conceptnet" | "random_fallback";
     selectedAnimal?: { id: string; label_ja: string };
-    evidenceTerm?: string | null;
-    fallbackReason?: "no_association_match" | null;
+    associationReason?: string;
     enabled?: boolean;
     siteKey?: string;
     composeFailures?: Array<{ status: number; code: string; message: string }>;
@@ -650,7 +642,6 @@ async function installZoovoiceApi(
         });
       }
       await new Promise((resolve) => setTimeout(resolve, 120));
-      const strategy = options.strategy || "direct";
       const selectedAnimal = options.selectedAnimal || { id: "cat", label_ja: "猫" };
       return route.fulfill({
         status: 200,
@@ -660,9 +651,7 @@ async function installZoovoiceApi(
           meta: {
             transcript: options.transcript || "猫が窓辺で眠っています",
             selected_animal: selectedAnimal,
-            evidence_term: options.evidenceTerm === undefined ? "猫" : options.evidenceTerm,
-            selection_strategy: strategy,
-            fallback_reason: options.fallbackReason === undefined ? null : options.fallbackReason,
+            association_reason: options.associationReason || "猫が出てくるため",
             insertions: [
               { slot: "opening", species: selectedAnimal.id, at_seconds: 0 },
               { slot: "gaps", species: selectedAnimal.id, at_seconds: 1.2 },

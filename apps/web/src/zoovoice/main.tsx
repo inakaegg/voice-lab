@@ -10,7 +10,6 @@ import {
   isRetryableZoovoiceError,
   wavBlobFromBase64,
   type ComposeResponse,
-  type SelectionStrategy,
   type ZoovoiceConfig,
 } from "./api";
 import { RecordOrb } from "./record-orb";
@@ -181,10 +180,7 @@ function Zoovoice() {
       .then((payload) => {
         const url = URL.createObjectURL(wavBlobFromBase64(payload.audio.base64));
         setResult({ payload, url });
-        dispatch({
-          type: "compose_succeeded",
-          fallback: payload.meta.selection_strategy === "random_fallback",
-        });
+        dispatch({ type: "compose_succeeded", fallback: false });
       })
       .catch((error: unknown) => {
         dispatch({
@@ -419,7 +415,7 @@ function Zoovoice() {
         Powered by Stability AI
       </a>
     </div>
-    <TechStackNote items={["React", "Cloudflare Workers", "Cloudflare Turnstile", "Go", "Google Cloud Run", "whisper.cpp", "ConceptNet", "ffmpeg"]} />
+    <TechStackNote items={["React", "Cloudflare Workers", "Cloudflare Turnstile", "Go", "Google Cloud Run", "whisper.cpp", "OpenAI API", "ffmpeg"]} />
     <PrivacyNotice />
   </PageShell>;
 }
@@ -427,33 +423,19 @@ function Zoovoice() {
 function ResultDetails({ result }: { result: ResultState }) {
   const meta = result.payload.meta;
   return <>
-    {meta.selection_strategy === "random_fallback" && <p className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-      直接の言及や意味のつながりが見つからず、動物をランダムに選びました。
-    </p>}
     <dl className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3 text-xs leading-5">
       <dt className="font-semibold text-muted-foreground">選ばれた動物</dt>
       <dd className="min-w-0 break-words font-bold text-foreground">{meta.selected_animal.label_ja}</dd>
       <dt className="font-semibold text-muted-foreground">聞き取った言葉</dt>
       <dd className="min-w-0 break-words text-foreground">{meta.transcript}</dd>
-      <dt className="font-semibold text-muted-foreground">根拠語</dt>
-      <dd className="min-w-0 break-words text-foreground">{meta.evidence_term || "該当なし"}</dd>
-      <dt className="font-semibold text-muted-foreground">選択方式</dt>
-      <dd className="min-w-0 break-words text-foreground">{selectionStrategyLabel(meta.selection_strategy)}</dd>
+      <dt className="font-semibold text-muted-foreground">連想の理由</dt>
+      <dd className="min-w-0 break-words text-foreground">{meta.association_reason}</dd>
     </dl>
     <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} autoPlay />
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
       {meta.insertions.length}か所に「{meta.selected_animal.label_ja}」の鳴き声を追加しました。
     </p>
   </>;
-}
-
-function selectionStrategyLabel(strategy: SelectionStrategy): string {
-  return {
-    direct: "動物名・鳴き声の直接言及",
-    pun: "語呂合わせ",
-    conceptnet: "言葉の意味のつながり",
-    random_fallback: "ランダム選択",
-  }[strategy];
 }
 
 function messageFromError(error: unknown, fallback: string): string {

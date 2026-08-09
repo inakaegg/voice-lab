@@ -12,8 +12,8 @@ import (
 	"testing"
 )
 
-func TestRepositoryAnimalLexiconHasOneValidAudioPerAnimal(t *testing.T) {
-	catalog, err := loadCatalog("assets/animal-lexicon.json", "assets")
+func TestRepositoryCatalogHasOneValidAudioPerAnimal(t *testing.T) {
+	catalog, err := loadLegacyCatalog("assets")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRepositoryAnimalAudioIsDecodableAndNormalized(t *testing.T) {
 	if err != nil {
 		t.Skip("ffprobe is unavailable")
 	}
-	catalog, err := loadCatalog("assets/animal-lexicon.json", "assets")
+	catalog, err := loadLegacyCatalog("assets")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,31 +61,32 @@ func TestRepositoryAnimalAudioIsDecodableAndNormalized(t *testing.T) {
 	}
 }
 
-func TestLoadCatalogRejectsMissingAndMismatchedAudio(t *testing.T) {
+func TestLoadLegacyCatalogRejectsMissingAndMismatchedAudio(t *testing.T) {
 	root := t.TempDir()
 	audioDir := filepath.Join(root, "animal-sounds")
 	if err := os.Mkdir(audioDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	audioPath := filepath.Join(audioDir, "dog.wav")
-	if err := os.WriteFile(audioPath, []byte("dog"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(audioDir, "dog.wav"), []byte("dog"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256([]byte("dog"))
+	manifestPath := filepath.Join(audioDir, "manifest.json")
 	payload := func(file, digest string) string {
-		return `{"schema_version":1,"generated":true,"do_not_edit":"generated","metadata":{},"animals":[{"id":"dog","label_ja":"犬","terms":["犬"],"onomatopoeia":[],"audio_file":` + strconv.Quote(file) + `,"audio_sha256":` + strconv.Quote(digest) + `}]}`
+		return `{"animals":[{"id":"dog","label_ja":"犬","file":` + strconv.Quote(file) +
+			`,"normalized_sha256":` + strconv.Quote(digest) +
+			`,"license":"CC0 1.0","creator":"someone","landing_url":"https://example.com/dog"}]}`
 	}
-	lexiconPath := filepath.Join(root, "animal-lexicon.json")
 	for _, test := range []struct{ name, file, digest string }{
-		{"missing", "animal-sounds/missing.wav", hex.EncodeToString(hash[:])},
-		{"mismatch", "animal-sounds/dog.wav", strings.Repeat("a", 64)},
+		{"missing", "missing.wav", hex.EncodeToString(hash[:])},
+		{"mismatch", "dog.wav", strings.Repeat("a", 64)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := os.WriteFile(lexiconPath, []byte(payload(test.file, test.digest)), 0o600); err != nil {
+			if err := os.WriteFile(manifestPath, []byte(payload(test.file, test.digest)), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := loadCatalog(lexiconPath, root); err == nil {
-				t.Fatal("loadCatalog accepted invalid audio")
+			if _, err := loadLegacyCatalog(root); err == nil {
+				t.Fatal("loadLegacyCatalog accepted invalid audio")
 			}
 		})
 	}

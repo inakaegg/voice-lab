@@ -178,19 +178,12 @@ function isValidComposeResponse(payload) {
     || !isPlainObject(meta.selected_animal)
     || !isBoundedIdentifier(meta.selected_animal.id, 80)
     || !isBoundedString(meta.selected_animal.label_ja, 1, 80)
-    || !["direct", "pun", "conceptnet", "random_fallback"].includes(meta.selection_strategy)
+    || !isBoundedString(meta.association_reason, 1, 400)
     || !Array.isArray(meta.insertions)
     || meta.insertions.length > 10
     || !isPositiveFiniteNumber(meta.input_duration_seconds)
     || !isPositiveFiniteNumber(meta.output_duration_seconds)
     || meta.output_duration_seconds < meta.input_duration_seconds
-  ) return false;
-
-  if (meta.selection_strategy === "random_fallback") {
-    if (meta.evidence_term !== null || meta.fallback_reason !== "no_association_match") return false;
-  } else if (
-    !isBoundedString(meta.evidence_term, 1, 200)
-    || meta.fallback_reason !== null
   ) return false;
 
   return meta.insertions.every((insertion) => (

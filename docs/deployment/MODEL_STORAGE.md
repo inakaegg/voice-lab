@@ -14,27 +14,24 @@
 
 ## Zoovoiceのruntime artifact
 
-ZoovoiceのGoサービスは、日本語ASRと動物連想のために次の3つを必要とする。いずれもgit管理せず、リポジトリ外へ置く。
+ZoovoiceのGoサービスは、日本語ASRのために次の2つを必要とする。いずれもgit管理せず、リポジトリ外へ置く。動物連想はLLMのAPIで行うため、連想用の辞書やindexは持たない。
 
 | artifact | 内容 | 固定する識別子 |
 | --- | --- | --- |
 | whisper.cppソース | `whisper-cli` をbuildする元 | commit `5250a86fdebac4d51085fcfcd0b315cb0c6b91c9` |
 | ASRモデル | 日本語ASR用 `ggml-small.bin` | SHA-256 `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
-| 連想index | ConceptNet 5.7.0から作った日本語のSQLite | SHA-256 `6492ed5d72629fd51f3794e3df5e568d509fbd1382c1fe3731064177a8d6297a` |
 
-ローカル実行では、環境変数でこの3つのpathを渡す。Cloud Run向けimageでは、buildが検証済みのディレクトリをnamed contextとして受け取り、imageへ取り込む。取り込み後にimage内でSHA-256を照合し、一致しない場合はbuildを失敗させる。
+ローカル実行では、環境変数でこの2つのpathを渡す。連想に使うAPIキーは `OPENAI_API_KEY` で渡す。Cloud Run向けimageでは、buildが検証済みのディレクトリをnamed contextとして受け取り、imageへ取り込む。取り込み後にimage内でSHA-256を照合し、一致しない場合はbuildを失敗させる。
 
 RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のとおりである。
 
 - Cloud Runは永続volumeを前提にせず、起動ごとのdownloadはcold startを長くする。
 - versionとhashをimageへ固定すると、選ばれる動物の再現性を保てる。
-- smallモデルと1-hop indexはCPU向けであり、GPUモデル候補より小さい。
+- smallモデルはCPU向けであり、GPUモデル候補より小さい。
 
-連想indexの帰属と再配布条件は `services/zoovoice/LICENSE-CONCEPTNET.md` を正とする。同じ内容をimageへ同梱する。
+動物音はgit管理する。これはリポジトリ外の2つとは扱いを分ける。出所と採用hashは `services/zoovoice/assets/animal-sounds/manifest.json` を正とし、Goサービスが起動時にSHA-256を照合する。同梱する動物音のうちStable Audioで生成したものは表示義務があり、`services/zoovoice/NOTICE-STABILITY-AI.md` をimageへ同梱する。
 
-動物レキシコンと動物音はgit管理する。これらはリポジトリ外の3つとは扱いを分ける。imageのbuildは、追跡している `services/zoovoice/assets/animal-lexicon.json` のSHA-256も照合する。同梱する動物音のうちStable Audioで生成した24件は表示義務があり、`services/zoovoice/NOTICE-STABILITY-AI.md` をimageへ同梱する。
-
-このimageのlocal buildと起動は実測済みである。linux/amd64のimageをCPU 2とメモリ2GiBの上限付きでnon-root起動し、image size 1,053,233,511 bytes、compose完了後の観測メモリ359.4 MiB / 2 GiBを得た。ASRモデルと連想indexはnon-rootの実行ユーザーから読める。この実測は動物レキシコン導入前のimageに対するものであり、現在のassetsを含むimageでは再測定していない。
+このimageのlocal buildと起動は実測済みである。linux/amd64のimageをCPU 2とメモリ2GiBの上限付きでnon-root起動し、image size 1,053,233,511 bytes、compose完了後の観測メモリ359.4 MiB / 2 GiBを得た。ASRモデルはnon-rootの実行ユーザーから読める。この実測は動物音の同梱前かつConceptNet indexを含んでいた頃のimageに対するものであり、現在のimageでは再測定していない。
 
 取り込んだ `whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。この確認では、`whisper-cli` がwhisper/ggmlを共有libraryとして要求しないことを確かめた。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
 

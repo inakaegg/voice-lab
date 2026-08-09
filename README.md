@@ -11,7 +11,7 @@ Zoovoiceは、録音した日本語の発話から動物を1種自動で連想�
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
-> **English:** Voice Lab is a voice web app with two features. SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Zoovoice (beta) transcribes a Japanese recording, associates it with one animal, and layers that animal's call into the pauses of your speech. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, a private RunPod Serverless GPU backend, and a private Go service on Google Cloud Run (whisper.cpp ASR / ConceptNet association / ffmpeg mixing). CI runs Python, Worker, Go, and browser tests plus E2E on every pull request.
+> **English:** Voice Lab is a voice web app with two features. SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Zoovoice (beta) transcribes a Japanese recording, associates it with one animal, and layers that animal's call into the pauses of your speech. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, a private RunPod Serverless GPU backend, and a private Go service on Google Cloud Run (whisper.cpp ASR / LLM-based animal association / ffmpeg mixing). CI runs Python, Worker, Go, and browser tests plus E2E on every pull request.
 
 ## 画面
 
@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 2. 発話内容から動物を1種自動で連想する
 3. 鳴き声を発話のすき間へ重ねた音声を再生・ダウンロードする
 
-日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はConceptNet由来の動物レキシコンを使います。同梱する鳴き声にはStable Audioで生成した音源を含みます。
+日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はLLM（OpenAI API）が音源のある動物から1種を選びます。同梱する鳴き声にはStable Audioで生成した音源を含みます。
 
 ## 構成
 
@@ -68,7 +68,7 @@ flowchart LR
 - ブラウザへOpenAIやRunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
 - 公開版はGoogleログイン、機能別quota、入力上限、簡易監査ログをCloudflare Workerで処理します。
 - 中国語の発音比較と任意の声質変換は、privateなRunPod Serverlessへ必要な音声だけを一時送信します。
-- Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービス（whisper.cpp・ConceptNet・ffmpeg）が担当し、WorkerがGoogle IAM認証付きで中継します。
+- Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービス（whisper.cpp・OpenAI API・ffmpeg）が担当し、WorkerがGoogle IAM認証付きで中継します。
 - ZoovoiceはCloudflare Turnstileで自動アクセスを抑止し、共通の利用上限をD1で管理します。
 - Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しません。
 - GPU課金が必要な確認と、fake modelで検証できるrequest・job・error処理を分離しています。

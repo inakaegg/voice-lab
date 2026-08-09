@@ -145,4 +145,4 @@ randomの最終手段は廃止する。当てずっぽうの動物には製品�
 1. **プライバシー説明の更新**: 発話内容が外部API（OpenAI）へ渡るようになるため、公開デモのプライバシー説明を先に更新する。
 2. **プロンプトが製品の性格を決める**: 慎重版と必ず選ぶ版で結果が大きく変わった。Zoovoiceは必ず選ぶ版が合う。連想の理由も短文で返せるため、UIで理由を見せる拡張も選べる。
 
-Embedding・WordNet・LLMの評価一式はローカル実験として残した。再実行の方法は `services/zoovoice/README.md` と `tools/rensou_dict.md` を参照。LLM評価は `tmp/llm-association/` のスクリプトで再現できる。
+この方針は実装済みである。辞書・Embedding・語彙表の連想経路と診断CLIはリポジトリから退役させ、連想はLLMの1経路だけになった。現在の実装は `services/zoovoice/README.md` を参照。LLM評価は `tmp/llm-association/` のスクリプトで再現できる（リポジトリ管理外）。

@@ -128,32 +128,27 @@ Zoovoiceはβ版として公開する。公開UIは、ポータルの製品行�
 
 ### 用語
 
-- 動物連想とは、ASR本文から根拠語を探し、利用できる音源を持つ動物1種を自動で選ぶ処理を指す。
-- 動物レキシコンとは、種ID・語・オノマトペ・採用音声の対応を1ファイルへ持つ生成物を指す。
-- 連想根拠とは、選ばれた動物と、その選択に使った語またはfallbackの理由を指す。
+- 動物連想とは、ASR本文をLLMへ渡し、音源のある動物1種を必ず選ばせる処理を指す。
+- 音源カタログとは、動物の種ID・日本語ラベル・鳴き声ファイル・出典の対応を持つmanifestを指す。
+- 連想の理由とは、その動物を選んだ理由としてLLMが返す日本語の短文を指す。
 - アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
 
-### 動物レキシコン
+### 音源カタログ
 
-- 音源の取得方針、ライセンス方針、正規化仕様の正本は [CONCEPTS/ZOOVOICE/AUDIO.md](../../CONCEPTS/ZOOVOICE/AUDIO.md) とする。本節の27種・Stable Audio前提は新方針により廃止予定であり、現行実装の記録として残す。
-- 次の項目は動物レキシコンを唯一の正本とする。
+- 音源の取得方針、ライセンス方針、正規化仕様の正本は [CONCEPTS/ZOOVOICE/AUDIO.md](../../CONCEPTS/ZOOVOICE/AUDIO.md) とする。
+- 次の項目は音源manifestを唯一の正本とする。
 
   - 自動連想が選べる動物の種ID
   - 動物の日本語ラベル
-  - 照合に使う語
-  - 鳴き声オノマトペ
-  - 動物と音声ファイルの対応
+  - 動物と鳴き声ファイルの対応
+  - 素材ごとの出所・ライセンス・採用hash
 
-- 動物レキシコンは追跡している生成物であり、実体は `services/zoovoice/assets/animal-lexicon.json` とする。同じ内容を実装コードやdocsへ手書きしない。
-- レキシコンの動物は、検証済みの音声ファイルをちょうど1本だけ持つ。レキシコンは音声のSHA-256を記録する。
-- Go APIは起動時に、レキシコンの全動物について音声ファイルの実在とSHA-256の一致を確認する。1件でも欠けるか一致しない配備では起動しない。
-- 第1弾の対象は27種とする。内訳は、Stability AI Community LicenseのStable Audio生成音声24件と、CC0からの移行fallback 3件である。移行fallbackの対象は犬・猫・コオロギとする。
-- 素材ごとの出所、ライセンス、採用hashは `services/zoovoice/assets/animal-sounds/manifest.json` を正とする。
-- 語はConceptNet由来のため、動物そのものを指さない表記も含む。例えば `pig` の語は `豚` と `豚肉` である。
-- 現在の合格条件として、「豚肉は美味しいです」は `random_fallback` にならず `pig` を選ぶ。
+- 連想に使う語彙表（レキシコン）は持たない。動物を選ぶ知識はLLM側にあり、サービスは候補の一覧だけを渡す。
+- manifestの実体は、同梱音源では `services/zoovoice/assets/animal-sounds/manifest.json`、最終選別セットでは `ZOOVOICE_SOUNDS_DIR` が指すディレクトリの `manifest.json` とする。同じ内容を実装コードやdocsへ手書きしない。
+- Go APIは起動時に、manifestの全ファイルについて実在とSHA-256の一致を確認する。1件でも欠けるか一致しない配備では起動しない。
+- 音源を1本も持たない動物はカタログへ載せない。載っていない動物は連想の候補にもならない。
 - 生成音声を使う公開UIは `Powered by Stability AI` を表示する。必須の表示文とlink先は [NOTICE-STABILITY-AI.md](../../services/zoovoice/NOTICE-STABILITY-AI.md) を正とする。
-- 対象種の追加は入力の更新と再生成で行う。
-- 約50種規模への拡張は将来の段階として扱う。現在の仕様は27種であり、拡張の時期は含めない。
+- 対象種の追加は音源の追加とmanifestの更新で行う。
 
 ### 通常の流れ
 
@@ -177,7 +172,7 @@ Zoovoiceはβ版として公開する。公開UIは、ポータルの製品行�
 
 - `GET /api/zoovoice/config` は有効・無効の状態と公開設定を返す。UIはこの応答だけで利用可否を判断する。
 - `GET /api/zoovoice/animals` はWorker Static Assetsの静的JSONを返す。この経路は合成backendを起動せず音声データも扱わない。
-- この静的JSONは動物レキシコンから生成する。種IDと日本語ラベルだけを載せ、音源のファイル名は載せない。
+- この静的JSONは音源manifestから生成する。種IDと日本語ラベルだけを載せ、音源のファイル名は載せない。
 - 自動連想が選べる動物は、この一覧にある音源付きの動物に限る。
 - `POST /api/zoovoice/compose` は録音とアニマル度を受け取る。通常の設定契約は `{intensity}` だけとし、動物と挿入位置はGo APIが決める。
 - Workerは合成前にTurnstile検証と利用上限判定を行う。
@@ -192,44 +187,21 @@ Zoovoiceはβ版として公開する。公開UIは、ポータルの製品行�
 
 ### 動物の自動連想
 
-- 連想はKagome v2のIPA辞書で日本語ASR本文を形態素解析し、照合に使うtoken列を得る。
-- 連想は `direct`、`pun`、`conceptnet`、`random_fallback` の4段を順に試す。上位の段で決まった時点で確定する。
-- `direct` と `pun` の照合には、ASR本文の表層に現れる動物レキシコンの語だけを使う。基本形や読みから一致を作らない。
-- 語の一致は、始まりと終わりがtoken境界にそろう連続token列だけを認める。
-- 動物名の語の一致は `direct` か `pun` のどちらかへ分類する。動物への直接の言及を `direct` とする。
-- 鳴き声オノマトペの一致は、前後の音の文脈を要求せず `direct` とする。
-- `pun` は、動物名の語が別の語句と重なる語呂合わせとする。「うしろ」の牛、「ぞうきん」の象のように、tokenizer上の連続token列と一致した場合だけ採用する。
-- 一致が複数ある場合は `direct` を `pun` より優先し、同方式ではASR本文の先頭に近いものを選ぶ。
-
-#### ConceptNet候補の作り方
-
-次の候補は、`direct` と `pun` で動物が決まらなかった後だけ使う。
-
-- 名詞は一般・固有名詞・サ変接続を残す。
-- 動詞と形容詞は基本形を残す。「てる」のような非自立語と接尾は除く。
-- 感動詞と、記号・フィラーではない未知語も残す。擬音語は表層形を保つ。
-- 助詞、助動詞、代名詞は除く。単独の接尾、記号、フィラーも除く。
-- 長音記号だけの断片は除く。たとえば `ー` は候補にしない。
-- 各tokenの表層形と基本形を候補にする。読みもひらがなへ変換して加える。
-- たとえば「喉」からは「喉」と「のど」を作る。
-- 隣り合う名詞2語は、表層形を1回だけ結合する。「北海道」と「大学」から「北海道大学」を作る。
-- 3語以上や非名詞の連接は作らない。「山と羊」のように間へ助詞が入る場合も「山羊」を作らない。
-
-- `conceptnet` は、形態素候補と隣接する2名詞の複合形を使う日本語ConceptNetの1-hopとする。関係の種類ごとの係数をweightへ掛けた合計で順位を決め、同点の場合は本文の先頭に近い根拠語を優先する。
-- どの段でも決まらない入力は `random_fallback` にする。
-- 採用するのは最上位の1種だけとする。複数候補を利用者へ提示しない。
-- 1回の合成で使う動物は1種だけとし、すべての挿入位置へ同じ動物を配置する。
-- 合成応答のmetadataはASR本文、選ばれた動物、根拠語を返す。
-- 合成応答のmetadataは選択方式、fallback理由、挿入位置、入出力の長さも返す。
-- 根拠語は、`direct` と `pun` では一致したレキシコンの語、`conceptnet` では概念語とし、`random_fallback` ではnullとする。
-- fallback理由は `random_fallback` のときだけ `no_association_match` とし、それ以外はnullとする。
-- UIは、根拠語のある連想とrandom fallbackを利用者が区別できるように表示する。
-- ASRモデル、ConceptNet index、必要な外部commandのいずれかが欠けた場合はエラーを返す。固定の動物へ黙って切り替えない。
-- ASR本文と根拠語は応答とサーバーのメモリ内だけで扱い、ログや保存先へ残さない。
+- 連想はLLM（既定 `gpt-5.6-luna`）へ一本化する。辞書・語彙表・意味ベクトルによる連想経路と、当てずっぽうのrandom選択は持たない。判断の根拠は [ZOOVOICE_ASSOCIATION_CASE_STUDY.md](ZOOVOICE_ASSOCIATION_CASE_STUDY.md) を参照。
+- Go APIはASR本文と音源カタログの候補一覧（種IDと日本語ラベル）をLLMへ渡す。
+- プロンプトは「どんなこじつけでもよいので候補から必ず1種選ぶ」方式とする。「選べない」という回答は許さない。Zoovoiceは遊びの製品であり、手がかりの薄い発話にも動物を返すことを優先する。
+- LLMは選んだ種IDと、選んだ理由の日本語短文を返す。
+- 候補一覧に無い種IDが返った場合はエラーとする。別の動物へ黙って読み替えない。
+- 1回の合成で使う動物は1種だけとし、すべての挿入位置へ同じ動物を配置する。複数候補を利用者へ提示しない。
+- 合成応答のmetadataはASR本文、選ばれた動物、連想の理由、素材のクレジット、挿入位置、入出力の長さを返す。
+- UIは連想の理由を利用者へ表示する。
+- ASRモデル、必要な外部command、LLMのAPIキーのいずれかが欠けた場合は起動しない。LLMの呼び出しに失敗した合成はエラーを返し、固定の動物へ黙って切り替えない。
+- ASR本文と連想の理由は応答とサーバーのメモリ内だけで扱い、ログや保存先へ残さない。
+- 発話内容は連想のため外部のLLM APIへ渡る。この点はプライバシー説明へ明記する。
 
 ### ローカル確認
 
-ローカル確認の正本はWranglerで動かすWorkerとする。ブラウザでの手動確認とPlaywrightのe2e確認は、どちらもWrangler localを起動する。Go APIは起動時にwhisper.cppのcommand、ASRモデル、ConceptNet indexの実在を確認し、欠けた場合は起動しない。これらはリポジトリ外へ置き、環境変数でpathを渡す。
+ローカル確認の正本はWranglerで動かすWorkerとする。ブラウザでの手動確認とPlaywrightのe2e確認は、どちらもWrangler localを起動する。Go APIは起動時にwhisper.cppのcommandとASRモデルの実在、およびLLMのAPIキーの設定を確認し、欠けた場合は起動しない。commandとモデルはリポジトリ外へ置き、環境変数でpathを渡す。
 
 確認modeは次の2つとし、いずれも用語をここで定義する。
 
@@ -250,7 +222,7 @@ Cloud Run smoke modeの条件は次のとおりとする。
 - production用のservice account keyは使わない
 - 接続先はus-central1のprivate Cloud Runとする
 
-local origin modeの通し確認はPlaywrightのe2eで行う。対象は録音から日本語ASR、動物の自動連想、合成を経て再生とダウンロードまでとする。この確認はTurnstileのtest keyを使い、実モデルと実indexを持つlocalのGo APIへ接続する。
+local origin modeの通し確認はPlaywrightのe2eで行う。対象は録音から日本語ASR、動物の自動連想、合成を経て再生とダウンロードまでとする。この確認はTurnstileのtest keyを使い、実モデルを持つlocalのGo APIへ接続する。
 
 ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の根拠に使わない。SpeakLoopのFastAPI版は従来どおり維持する。
 
@@ -261,7 +233,7 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 - production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
 - 外部deployとproduction有効化は別のgateで扱う。privateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行は完了している。
 - 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
-- ASRモデルと連想indexを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
+- ASRモデルを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
 - 実測はApple Silicon上のlinux/amd64 emulationで行っており、Cloud Runの実CPU上の処理時間は未確認である。
 - 本番D1へのcounter migration適用と、有効化varsを含むproduction Workerのdeployは完了している。
 - 実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答を確認した。公開 `/zoovoice` は実ブラウザでUIとproduction Turnstileの表示を確認した。

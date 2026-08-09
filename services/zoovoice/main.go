@@ -17,9 +17,6 @@ import (
 const defaultComposeTimeout = 85 * time.Second
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "association-eval" {
-		os.Exit(runAssociationEvalCLI(os.Args[2:], os.Stdout, os.Stderr))
-	}
 	if len(os.Args) > 1 && os.Args[1] == "preview" {
 		os.Exit(runPreviewCLI(os.Args[2:], os.Stdout, os.Stderr))
 	}
@@ -31,20 +28,10 @@ func main() {
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
-	if len(catalog.UnusedSoundAnimals) > 0 {
-		logger.Printf(
-			"zoovoice sounds manifest has %d animals without lexicon entries (not selectable)",
-			len(catalog.UnusedSoundAnimals),
-		)
-	}
-	runtimeDependencies, err := loadRuntimeDependencies(
-		execCommandRunner{},
-		filepath.Join(assetsRoot, "animal-lexicon.json"),
-	)
+	runtimeDependencies, err := loadRuntimeDependencies(execCommandRunner{})
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
-	defer runtimeDependencies.Close()
 	timeout := durationFromEnv("ZOOVOICE_TIMEOUT_SECONDS", defaultComposeTimeout)
 	activeComposer := newComposer(
 		catalog,
@@ -101,18 +88,10 @@ func serverPort() int {
 // ZOOVOICE_SOUNDS_DIR が指す manifest付きディレクトリを優先し、
 // 未設定なら従来の assets/animal-sounds/ を使う。どちらもクレジット付き。
 func loadRuntimeCatalog(assetsRoot string) (*assetCatalog, error) {
-	lexiconPath := filepath.Join(assetsRoot, "animal-lexicon.json")
 	if soundsDir := os.Getenv("ZOOVOICE_SOUNDS_DIR"); soundsDir != "" {
-		return loadSoundsCatalog(lexiconPath, soundsDir)
+		return loadSoundsCatalog(soundsDir)
 	}
-	catalog, err := loadCatalog(lexiconPath, assetsRoot)
-	if err != nil {
-		return nil, err
-	}
-	if err := attachLegacyCredits(catalog, filepath.Join(assetsRoot, "animal-sounds", "manifest.json")); err != nil {
-		return nil, err
-	}
-	return catalog, nil
+	return loadLegacyCatalog(assetsRoot)
 }
 
 func defaultAssetsRoot() string {
@@ -123,7 +102,7 @@ func defaultAssetsRoot() string {
 		filepath.Join("services", "zoovoice", "assets"),
 		"assets",
 	} {
-		if regularFileExists(filepath.Join(candidate, "animal-lexicon.json")) {
+		if regularFileExists(filepath.Join(candidate, "animal-sounds", "manifest.json")) {
 			return candidate
 		}
 	}

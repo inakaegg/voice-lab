@@ -44,6 +44,6 @@ Zoovoiceの公開画面はfooterへ `Powered by Stability AI` を表示し、`ht
 
 この文書はStable Audioで生成した音声だけを対象とする。同じディレクトリにあるCC0音源3件（`dog`・`cat`・`cricket`）はこの対象に含まない。各音声の区分は `manifest.json` の `source_kind` と `license` を正とする。
 
-他の成果物のライセンスは別の文書を参照する。ConceptNet派生データベースは [LICENSE-CONCEPTNET.md](LICENSE-CONCEPTNET.md)、CC0音源3件の帰属は [README.md](README.md) の同梱する動物音、リポジトリ本体と他の第三者成果物は [LICENSE](../../LICENSE) と [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) とする。
+他の成果物のライセンスは別の文書を参照する。CC0音源3件の帰属は [README.md](README.md) の同梱する動物音、リポジトリ本体と他の第三者成果物は [LICENSE](../../LICENSE) と [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) とする。
 
 本書はライセンスが求める表示と、生成物の由来を記録するための文書である。条件の解釈や適法性の判断を示すものではない。

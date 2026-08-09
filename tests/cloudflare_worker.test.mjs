@@ -672,11 +672,10 @@ test("Cloudflare worker rejects malformed successful responses from Zoovoice ori
   assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
 });
 
-test("Cloudflare worker accepts Zoovoice pun metadata with literal evidence", async () => {
+test("Cloudflare worker accepts Zoovoice metadata for a far-fetched association", async () => {
   const punPayload = validZoovoiceOriginResponse();
   punPayload.meta.selected_animal = { id: "elephant", label_ja: "象" };
-  punPayload.meta.evidence_term = "ぞう";
-  punPayload.meta.selection_strategy = "pun";
+  punPayload.meta.association_reason = "「ぞうきん」の語呂合わせでゾウを連想";
   punPayload.meta.insertions = [{ slot: "opening", species: "elephant", at_seconds: 0 }];
   const env = await zoovoiceEnv(async (url) => {
     const target = String(url);
@@ -725,11 +724,9 @@ test("Cloudflare worker validates every Zoovoice success metadata field", async 
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "" } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, transcript: "長".repeat(20_001) } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selected_animal: { id: "", label_ja: "猫" } } },
-    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: 3 } },
-    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, selection_strategy: "heuristic" } },
-    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, fallback_reason: "unknown" } },
-    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "pun" } },
-    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, evidence_term: null, selection_strategy: "random_fallback", fallback_reason: "no_direct_or_conceptnet_match" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, association_reason: 3 } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, association_reason: "" } },
+    { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, association_reason: "長".repeat(401) } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, insertions: [{ slot: "middle", species: "cat", at_seconds: 1 }] } },
     { ...validZoovoiceOriginResponse(), meta: { ...validZoovoiceOriginResponse().meta, input_duration_seconds: "1" } },
   ];
@@ -3661,9 +3658,7 @@ function validZoovoiceOriginResponse() {
     meta: {
       transcript: "猫が窓辺で眠っています",
       selected_animal: { id: "cat", label_ja: "猫" },
-      evidence_term: "猫",
-      selection_strategy: "direct",
-      fallback_reason: null,
+      association_reason: "猫が出てくるため",
       insertions: [{ slot: "opening", species: "cat", at_seconds: 0 }],
       input_duration_seconds: 1,
       output_duration_seconds: 1.4,

@@ -44,7 +44,7 @@ test("Zoovoice local launcher dry-run uses Go and Wrangler without starting Fast
     assert.match(result.stdout, /ZOOVOICE_TIMEOUT_SECONDS=85/);
     assert.match(
       result.stdout,
-      /ASR and ConceptNet runtime artifacts: verified/,
+      /ASR runtime artifacts and association API key: verified/,
     );
     assert.match(
       result.stdout,
@@ -58,14 +58,14 @@ test("Zoovoice local launcher dry-run uses Go and Wrangler without starting Fast
   }
 });
 
-test("Zoovoice local launcher requires ASR and ConceptNet runtime artifacts before child commands", () => {
+test("Zoovoice local launcher requires ASR runtime artifacts and an API key before child commands", () => {
   const directory = mkdtempSync(join(tmpdir(), "zoovoice-launcher-inputs-"));
   try {
     const runtime = createRuntimeFixtures(directory);
     for (const omitted of [
       "ZOOVOICE_WHISPER_COMMAND",
       "ZOOVOICE_ASR_MODEL_PATH",
-      "ZOOVOICE_CONCEPTNET_INDEX_PATH",
+      "OPENAI_API_KEY",
     ]) {
       const values = { ...runtime };
       delete values[omitted as keyof typeof values];
@@ -225,13 +225,11 @@ function readIfPresent(path: string): string {
 function createRuntimeFixtures(directory: string): Record<string, string> {
   const command = join(directory, "whisper-cli");
   const model = join(directory, "ggml-small.bin");
-  const index = join(directory, "conceptnet.sqlite");
   writeFileSync(command, "fixture");
   writeFileSync(model, "fixture");
-  writeFileSync(index, "fixture");
   return {
     ZOOVOICE_WHISPER_COMMAND: command,
     ZOOVOICE_ASR_MODEL_PATH: model,
-    ZOOVOICE_CONCEPTNET_INDEX_PATH: index,
+    OPENAI_API_KEY: "test-openai-key",
   };
 }

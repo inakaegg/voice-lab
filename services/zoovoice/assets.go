@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/inakaegg/voice-lab/services/zoovoice/internal/animaldefs"
 )
 
 type assetVariant struct {
@@ -25,51 +23,12 @@ type availableAnimal struct {
 	Variants []assetVariant
 }
 
+// assetCatalog は音源カタログ。動物IDと鳴き声素材の対応だけを持ち、
+// 連想の知識は持たない（連想はLLMが候補リストから選ぶ）。
 type assetCatalog struct {
-	Animals []availableAnimal
-	// UnusedSoundAnimals は音源manifestにあるが動物レキシコンに無い動物ID。
-	// 語彙が未整備のため連想では選ばれない。
-	UnusedSoundAnimals []string
-	byID               map[string]availableAnimal
-	creditByPath       map[string]soundCredit
-}
-
-func loadCatalog(lexiconPath, assetsRoot string) (*assetCatalog, error) {
-	lexicon, err := animaldefs.Load(lexiconPath)
-	if err != nil {
-		return nil, err
-	}
-	catalog := &assetCatalog{
-		Animals: make([]availableAnimal, 0, len(lexicon)),
-		byID:    make(map[string]availableAnimal, len(lexicon)),
-	}
-	for _, id := range lexicon.IDs() {
-		definition := lexicon[id]
-		if filepath.IsAbs(definition.AudioFile) || filepath.Clean(definition.AudioFile) != definition.AudioFile || definition.AudioFile == "." || definition.AudioFile == ".." || filepath.Dir(definition.AudioFile) == ".." {
-			return nil, fmt.Errorf("animal %q has invalid audio file %q", id, definition.AudioFile)
-		}
-		path := filepath.Join(assetsRoot, filepath.FromSlash(definition.AudioFile))
-		if !regularFileExists(path) {
-			return nil, fmt.Errorf("animal %q audio is missing: %s", id, definition.AudioFile)
-		}
-		actualSHA, err := fileSHA256(path)
-		if err != nil {
-			return nil, fmt.Errorf("hash animal %q audio: %w", id, err)
-		}
-		if actualSHA != definition.AudioSHA256 {
-			return nil, fmt.Errorf("animal %q audio SHA-256 mismatch", id)
-		}
-		animal := availableAnimal{
-			ID: id, LabelJA: definition.LabelJA,
-			Variants: []assetVariant{{Path: path}},
-		}
-		catalog.Animals = append(catalog.Animals, animal)
-		catalog.byID[id] = animal
-	}
-	if err := lexicon.ValidateAvailable(catalog.ids()); err != nil {
-		return nil, err
-	}
-	return catalog, nil
+	Animals      []availableAnimal
+	byID         map[string]availableAnimal
+	creditByPath map[string]soundCredit
 }
 
 // 最終セットのmanifest（tmp1/final/manifest.json と同スキーマ）。
@@ -90,12 +49,8 @@ type soundsManifest struct {
 }
 
 // loadSoundsCatalog は manifest付き音源ディレクトリからカタログを作る。
-// レキシコンの全動物に音源があることと、各ファイルのSHA-256一致を必須にする。
-func loadSoundsCatalog(lexiconPath, soundsDir string) (*assetCatalog, error) {
-	lexicon, err := animaldefs.Load(lexiconPath)
-	if err != nil {
-		return nil, err
-	}
+// 各ファイルのSHA-256一致を必須にする。
+func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 	manifestPath := filepath.Join(soundsDir, "manifest.json")
 	payload, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -108,35 +63,19 @@ func loadSoundsCatalog(lexiconPath, soundsDir string) (*assetCatalog, error) {
 	if manifest.SchemaVersion != 1 || len(manifest.Animals) == 0 {
 		return nil, fmt.Errorf("sounds manifest %s is invalid", manifestPath)
 	}
-	variantsByID := make(map[string][]assetVariant, len(manifest.Animals))
-	unused := make([]string, 0)
+	animals := make([]availableAnimal, 0, len(manifest.Animals))
 	for _, animal := range manifest.Animals {
-		if animal.ID == "" || len(animal.Files) == 0 {
-			return nil, fmt.Errorf("sounds manifest %s has an entry without id or files", manifestPath)
-		}
-		if _, inLexicon := lexicon[animal.ID]; !inLexicon {
-			unused = append(unused, animal.ID)
-			continue
+		if animal.ID == "" || animal.LabelJA == "" || len(animal.Files) == 0 {
+			return nil, fmt.Errorf("sounds manifest %s has an entry without id, label or files", manifestPath)
 		}
 		variants := make([]assetVariant, 0, len(animal.Files))
 		for _, file := range animal.Files {
 			if file.License == "" {
 				return nil, fmt.Errorf("sounds manifest entry %q has a file without license", animal.ID)
 			}
-			relative := filepath.FromSlash(file.File)
-			if filepath.IsAbs(relative) || strings.HasPrefix(relative, "..") {
-				return nil, fmt.Errorf("sounds manifest entry %q has invalid file path %q", animal.ID, file.File)
-			}
-			path := filepath.Join(soundsDir, relative)
-			if !regularFileExists(path) {
-				return nil, fmt.Errorf("animal %q audio is missing: %s", animal.ID, file.File)
-			}
-			actualSHA, err := fileSHA256(path)
+			path, err := verifiedAssetPath(soundsDir, animal.ID, file.File, file.SHA256)
 			if err != nil {
-				return nil, fmt.Errorf("hash animal %q audio: %w", animal.ID, err)
-			}
-			if actualSHA != strings.ToLower(file.SHA256) {
-				return nil, fmt.Errorf("animal %q audio SHA-256 mismatch: %s", animal.ID, file.File)
+				return nil, err
 			}
 			variants = append(variants, assetVariant{
 				Path: path,
@@ -147,34 +86,98 @@ func loadSoundsCatalog(lexiconPath, soundsDir string) (*assetCatalog, error) {
 				},
 			})
 		}
-		variantsByID[animal.ID] = variants
+		animals = append(animals, availableAnimal{ID: animal.ID, LabelJA: animal.LabelJA, Variants: variants})
 	}
-	sort.Strings(unused)
-	catalog := &assetCatalog{
-		Animals:            make([]availableAnimal, 0, len(lexicon)),
-		UnusedSoundAnimals: unused,
-		byID:               make(map[string]availableAnimal, len(lexicon)),
-	}
-	for _, id := range lexicon.IDs() {
-		variants, found := variantsByID[id]
-		if !found {
-			return nil, fmt.Errorf("animal lexicon entry %q has no available audio", id)
-		}
-		animal := availableAnimal{ID: id, LabelJA: lexicon[id].LabelJA, Variants: variants}
-		catalog.Animals = append(catalog.Animals, animal)
-		catalog.byID[id] = animal
-	}
-	catalog.rebuildCreditIndex()
-	return catalog, nil
+	return newCatalog(animals), nil
 }
 
-func (catalog *assetCatalog) rebuildCreditIndex() {
-	catalog.creditByPath = make(map[string]soundCredit)
-	for _, animal := range catalog.Animals {
+// 旧スキーマ: assets/animal-sounds/manifest.json（1動物1ファイル、
+// クレジットを動物単位で持つ）。
+type legacySoundsManifest struct {
+	Animals []struct {
+		ID         string `json:"id"`
+		LabelJA    string `json:"label_ja"`
+		File       string `json:"file"`
+		SHA256     string `json:"normalized_sha256"`
+		License    string `json:"license"`
+		Creator    string `json:"creator"`
+		LandingURL string `json:"landing_url"`
+	} `json:"animals"`
+}
+
+// loadLegacyCatalog は同梱の assets/animal-sounds/ からカタログを作る。
+func loadLegacyCatalog(assetsRoot string) (*assetCatalog, error) {
+	soundsDir := filepath.Join(assetsRoot, "animal-sounds")
+	manifestPath := filepath.Join(soundsDir, "manifest.json")
+	payload, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("read sounds manifest: %w", err)
+	}
+	var manifest legacySoundsManifest
+	if err := json.Unmarshal(payload, &manifest); err != nil {
+		return nil, fmt.Errorf("parse sounds manifest %s: %w", manifestPath, err)
+	}
+	if len(manifest.Animals) == 0 {
+		return nil, fmt.Errorf("sounds manifest %s has no animals", manifestPath)
+	}
+	animals := make([]availableAnimal, 0, len(manifest.Animals))
+	for _, animal := range manifest.Animals {
+		if animal.ID == "" || animal.LabelJA == "" || animal.File == "" || animal.License == "" {
+			return nil, fmt.Errorf("sounds manifest %s has an incomplete entry", manifestPath)
+		}
+		path, err := verifiedAssetPath(soundsDir, animal.ID, animal.File, animal.SHA256)
+		if err != nil {
+			return nil, err
+		}
+		animals = append(animals, availableAnimal{
+			ID: animal.ID, LabelJA: animal.LabelJA,
+			Variants: []assetVariant{{
+				Path: path,
+				Credit: soundCredit{
+					License:   animal.License,
+					Creator:   animal.Creator,
+					SourceURL: animal.LandingURL,
+				},
+			}},
+		})
+	}
+	return newCatalog(animals), nil
+}
+
+// verifiedAssetPath は manifest記載の相対パスを検証し、SHA-256の一致を確かめる。
+func verifiedAssetPath(soundsDir, animalID, file, expectedSHA string) (string, error) {
+	relative := filepath.FromSlash(file)
+	if filepath.IsAbs(relative) || strings.HasPrefix(relative, "..") || filepath.Clean(relative) != relative {
+		return "", fmt.Errorf("sounds manifest entry %q has invalid file path %q", animalID, file)
+	}
+	path := filepath.Join(soundsDir, relative)
+	if !regularFileExists(path) {
+		return "", fmt.Errorf("animal %q audio is missing: %s", animalID, file)
+	}
+	actualSHA, err := fileSHA256(path)
+	if err != nil {
+		return "", fmt.Errorf("hash animal %q audio: %w", animalID, err)
+	}
+	if actualSHA != strings.ToLower(expectedSHA) {
+		return "", fmt.Errorf("animal %q audio SHA-256 mismatch: %s", animalID, file)
+	}
+	return path, nil
+}
+
+func newCatalog(animals []availableAnimal) *assetCatalog {
+	sort.Slice(animals, func(i, j int) bool { return animals[i].ID < animals[j].ID })
+	catalog := &assetCatalog{
+		Animals:      animals,
+		byID:         make(map[string]availableAnimal, len(animals)),
+		creditByPath: make(map[string]soundCredit),
+	}
+	for _, animal := range animals {
+		catalog.byID[animal.ID] = animal
 		for _, variant := range animal.Variants {
 			catalog.creditByPath[variant.Path] = variant.Credit
 		}
 	}
+	return catalog
 }
 
 // creditsForPaths は使用した素材パス群のクレジットを重複なしで返す。

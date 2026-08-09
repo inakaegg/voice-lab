@@ -23,9 +23,7 @@ type ComposeResult struct {
 	AudioBase64           string
 	Transcript            string
 	SelectedAnimal        SelectedAnimal
-	EvidenceTerm          *string
-	SelectionStrategy     SelectionStrategy
-	FallbackReason        *string
+	AssociationReason     string
 	Insertions            []ResolvedInsertion
 	SoundCredits          []soundCredit
 	InputDurationSeconds  float64
@@ -255,11 +253,10 @@ func (c *composer) Compose(
 	logProgress(c.logger, started, "asr", "complete", "")
 
 	var insertions []ResolvedInsertion
-	c.rngMu.Lock()
-	selection, err := c.associator.Select(contextWithTimeout, transcript, c.catalog.Animals, c.rng)
+	selection, err := c.associator.Select(contextWithTimeout, transcript, c.catalog.Animals)
 	if err == nil {
-		var arrangementErr error
-		insertions, arrangementErr = resolveArrangement(
+		c.rngMu.Lock()
+		insertions, err = resolveArrangement(
 			c.catalog,
 			selection.Species,
 			settings.Intensity,
@@ -267,9 +264,8 @@ func (c *composer) Compose(
 			inputDuration,
 			c.rng,
 		)
-		err = arrangementErr
+		c.rngMu.Unlock()
 	}
-	c.rngMu.Unlock()
 	if err != nil {
 		var apiError *APIError
 		if !errors.As(err, &apiError) {
@@ -285,9 +281,7 @@ func (c *composer) Compose(
 			apiError,
 		)
 	}
-	logProgress(
-		c.logger, started, "association", "complete", "species=%s strategy=%s", selection.Species, selection.Strategy,
-	)
+	logProgress(c.logger, started, "association", "complete", "species=%s", selection.Species)
 
 	var outputAudio []byte
 	outputDuration := inputDuration
@@ -337,9 +331,7 @@ func (c *composer) Compose(
 		AudioBase64:           base64.StdEncoding.EncodeToString(outputAudio),
 		Transcript:            transcript,
 		SelectedAnimal:        SelectedAnimal{ID: selection.Species, LabelJA: selection.LabelJA},
-		EvidenceTerm:          optionalString(selection.EvidenceTerm),
-		SelectionStrategy:     selection.Strategy,
-		FallbackReason:        optionalString(selection.FallbackReason),
+		AssociationReason:     selection.Reason,
 		Insertions:            insertions,
 		SoundCredits:          c.catalog.creditsForPaths(insertionPaths),
 		InputDurationSeconds:  roundSeconds(inputDuration),

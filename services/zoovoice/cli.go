@@ -9,8 +9,6 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -45,26 +43,17 @@ func runPreview(textInput, audioInput, outputPath string, intensity int, verbose
 	if err != nil {
 		return err
 	}
-	associator, store, err := loadAssociatorFromEnv(execCommandRunner{}, filepath.Join(assetsRoot, "animal-lexicon.json"))
+	associator, err := loadAssociatorFromEnv()
 	if err != nil {
 		return err
 	}
-	defer store.Close()
 
-	fmt.Fprintf(stdout, "動物カタログ: %d種\n", len(catalog.Animals))
-	if len(catalog.UnusedSoundAnimals) > 0 {
-		fmt.Fprintf(
-			stdout,
-			"注: 音源はあるが連想語彙が未整備のため選ばれない動物が%d種あります: %s\n",
-			len(catalog.UnusedSoundAnimals),
-			strings.Join(catalog.UnusedSoundAnimals, ", "),
-		)
-	}
+	fmt.Fprintf(stdout, "動物カタログ: %d種（すべて連想の候補になります）\n", len(catalog.Animals))
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	ctx := context.Background()
 	if textInput != "" {
-		return previewText(ctx, textInput, catalog, associator, rng, stdout)
+		return previewText(ctx, textInput, catalog, associator, stdout)
 	}
 	return previewAudio(ctx, audioInput, outputPath, intensity, verbose, catalog, associator, rng, stdout, stderr)
 }
@@ -74,15 +63,14 @@ func previewText(
 	textInput string,
 	catalog *assetCatalog,
 	associator animalAssociator,
-	rng *rand.Rand,
 	stdout io.Writer,
 ) error {
-	selection, err := associator.Select(ctx, textInput, catalog.Animals, rng)
+	selection, err := associator.Select(ctx, textInput, catalog.Animals)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "\n入力テキスト: %s\n", textInput)
-	printSelection(stdout, selection)
+	printSelection(stdout, selection.LabelJA, selection.Species, selection.Reason)
 	fmt.Fprintln(stdout, "\n鳴き声素材:")
 	for _, variant := range catalog.byID[selection.Species].Variants {
 		fmt.Fprintf(stdout, "  %s\n    クレジット: %s\n", variant.Path, variant.Credit.Line())
@@ -127,13 +115,7 @@ func previewAudio(
 		return err
 	}
 	fmt.Fprintf(stdout, "文字起こし: %s\n", result.Transcript)
-	printSelection(stdout, AnimalSelection{
-		Species:        result.SelectedAnimal.ID,
-		LabelJA:        result.SelectedAnimal.LabelJA,
-		EvidenceTerm:   stringValue(result.EvidenceTerm),
-		Strategy:       result.SelectionStrategy,
-		FallbackReason: stringValue(result.FallbackReason),
-	})
+	printSelection(stdout, result.SelectedAnimal.LabelJA, result.SelectedAnimal.ID, result.AssociationReason)
 	fmt.Fprintln(stdout, "\n使った鳴き声素材:")
 	printedPaths := map[string]bool{}
 	for _, insertion := range result.Insertions {
@@ -167,53 +149,9 @@ func previewAudio(
 	return nil
 }
 
-func printSelection(stdout io.Writer, selection AnimalSelection) {
-	fmt.Fprintf(stdout, "連想した動物: %s（%s）\n", selection.LabelJA, selection.Species)
-	fmt.Fprintf(stdout, "決まった経路: %s（%s）\n", selection.Strategy, strategyExplanation(selection.Strategy))
-	if selection.EvidenceTerm != "" {
-		fmt.Fprintf(stdout, "根拠語: %s\n", selection.EvidenceTerm)
+func printSelection(stdout io.Writer, labelJA, species, reason string) {
+	fmt.Fprintf(stdout, "連想した動物: %s（%s）\n", labelJA, species)
+	if reason != "" {
+		fmt.Fprintf(stdout, "連想の理由: %s\n", reason)
 	}
-	if selection.FallbackReason != "" {
-		fmt.Fprintf(stdout, "fallback理由: %s\n", selection.FallbackReason)
-	}
-	if selection.Score != nil && len(selection.Score.Contributions) > 0 {
-		fmt.Fprintln(stdout, "連想の内訳（スコア上位）:")
-		for index, contribution := range selection.Score.Contributions {
-			if index >= 3 {
-				break
-			}
-			fmt.Fprintf(
-				stdout,
-				"  概念「%s」 %s 重み%.2f×%.2f=%.2f\n",
-				contribution.Concept,
-				contribution.Relation,
-				contribution.Weight,
-				contribution.Multiplier,
-				contribution.Weighted,
-			)
-		}
-	}
-}
-
-func strategyExplanation(strategy SelectionStrategy) string {
-	switch strategy {
-	case strategyDirect:
-		return "発話の語が動物の語彙と直接一致"
-	case strategyPun:
-		return "別の語句と重なる語呂合わせで一致"
-	case strategyConceptNet:
-		return "ConceptNetの連想で関係の重み合計が最大"
-	case strategyEmbedding:
-		return "意味ベクトルによる連想"
-	case strategyRandom:
-		return "一致が無かったため利用可能な動物からランダム選択"
-	}
-	return string(strategy)
-}
-
-func stringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }

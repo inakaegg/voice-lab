@@ -50,18 +50,17 @@ gcp_project=""
 smoke_service_account=""
 whisper_command=""
 asr_model=""
-conceptnet_index=""
+openai_api_key=""
 
 if [[ "$mode" == "local" ]]; then
   whisper_command=${ZOOVOICE_WHISPER_COMMAND:-}
   asr_model=${ZOOVOICE_ASR_MODEL_PATH:-}
-  conceptnet_index=${ZOOVOICE_CONCEPTNET_INDEX_PATH:-}
+  openai_api_key=${OPENAI_API_KEY:-}
   required_file ZOOVOICE_WHISPER_COMMAND "$whisper_command"
   required_file ZOOVOICE_ASR_MODEL_PATH "$asr_model"
-  required_file ZOOVOICE_CONCEPTNET_INDEX_PATH "$conceptnet_index"
+  [[ -n "$openai_api_key" ]] || fail "OPENAI_API_KEY is required"
   whisper_command=$(canonical_file "$whisper_command")
   asr_model=$(canonical_file "$asr_model")
-  conceptnet_index=$(canonical_file "$conceptnet_index")
 fi
 
 if [[ "$mode" == "cloud-run" ]]; then
@@ -91,7 +90,7 @@ if [[ "$dry_run" == "1" ]]; then
   echo "[dry-run] npx wrangler d1 migrations apply MO_SPEECH_DB --local --persist-to $persist_directory"
   if [[ "$mode" == "local" ]]; then
     echo "[dry-run] env: ZOOVOICE_ORIGIN_MODE=local-origin"
-    echo "[dry-run] ASR and ConceptNet runtime artifacts: verified"
+    echo "[dry-run] ASR runtime artifacts and association API key: verified"
     echo "[dry-run] ZOOVOICE_PORT=8090 ZOOVOICE_TIMEOUT_SECONDS=85 go run ."
   else
     echo "[dry-run] gcloud auth print-identity-token --impersonate-service-account=<redacted> --audiences=$cloud_run_url --project=$gcp_project --quiet"
@@ -162,7 +161,7 @@ if [[ "$mode" == "local" ]]; then
 	  ZOOVOICE_TIMEOUT_SECONDS=85 \
       ZOOVOICE_WHISPER_COMMAND="$whisper_command" \
       ZOOVOICE_ASR_MODEL_PATH="$asr_model" \
-      ZOOVOICE_CONCEPTNET_INDEX_PATH="$conceptnet_index" \
+      OPENAI_API_KEY="$openai_api_key" \
       go run .
   ) &
   go_pid=$!

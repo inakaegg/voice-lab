@@ -9,9 +9,6 @@ DOCKERFILE = ROOT / "services/zoovoice/Dockerfile"
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 WHISPER_COMMIT = "5250a86fdebac4d51085fcfcd0b315cb0c6b91c9"
 MODEL_SHA256 = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
-INDEX_SHA256 = "088d3e4b199604a538e4f0cac7c29b6f21da1d995c24354fc5d07c7cf3b03a71"
-SOURCE_SHA256 = "accd65fe94038584295574ddc26e1500c1919c8c4532bf771811cafd0948af7e"
-LEXICON_SHA256 = "ba3f08ca64a8736121704ace37e3766b61d816447befe5364de8edebad7b248d"
 
 
 def run_deploy(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -41,9 +38,6 @@ case "${0##*/}:$*" in
   git:*rev-parse\ HEAD*) printf '0123456789abcdef0123456789abcdef01234567\n'; exit 0 ;;
   git:*status\ --porcelain*) printf '%s' "${ZOOVOICE_FAKE_GIT_STATUS:-}"; exit 0 ;;
   shasum:*ggml-small.bin*) printf '%s  model\n' "$ZOOVOICE_FAKE_MODEL_SHA"; exit 0 ;;
-  shasum:*conceptnet-ja-5.7.0.sqlite*) printf '%s  index\n' "$ZOOVOICE_FAKE_INDEX_SHA"; exit 0 ;;
-  shasum:*animal-lexicon.json*) printf '%s  lexicon\n' "$ZOOVOICE_FAKE_LEXICON_SHA"; exit 0 ;;
-  sqlite3:*) printf '%s\n' "$ZOOVOICE_FAKE_INDEX_METADATA"; exit 0 ;;
   docker:info*) exit 0 ;;
   docker:run*) printf 'zoovoice-container-id\n'; exit 0 ;;
   docker:image\ inspect*) printf '612345678\n'; exit 0 ;;
@@ -53,7 +47,7 @@ case "${0##*/}:$*" in
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "--output" ]; then
         shift
-        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"evidence_term":"犬","selection_strategy":"%s","fallback_reason":null,"insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_SELECTION_STRATEGY:-direct}" > "$1"
+        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"association_reason":"%s","insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" > "$1"
       fi
       shift || true
     done
@@ -75,7 +69,7 @@ exit 97
         encoding="utf-8",
     )
     fake.chmod(0o755)
-    for name in ("docker", "gcloud", "curl", "git", "shasum", "sqlite3"):
+    for name in ("docker", "gcloud", "curl", "git", "shasum"):
         (directory / name).symlink_to(fake.name)
     return log_path
 
@@ -87,30 +81,15 @@ def valid_artifact_env(tmp_path: Path) -> dict[str, str]:
     (source / "CMakeLists.txt").write_text("# fixture\n", encoding="utf-8")
     model = tmp_path / "ggml-small.bin"
     model.write_bytes(b"model fixture")
-    index = tmp_path / "conceptnet-ja-5.7.0.sqlite"
-    index.write_bytes(b"index fixture")
     smoke = tmp_path / "smoke.wav"
     smoke.write_bytes(b"RIFF fixture")
-    metadata = "|".join(
-        [
-            "2",
-            "5.7.0",
-            "CC BY-SA 4.0",
-            SOURCE_SHA256,
-            LEXICON_SHA256,
-            "Japanese ConceptNet 1-hop edges whose opposite endpoint matches a generated Zoovoice animal lexicon term; duplicate weights keep the maximum",
-        ]
-    )
     return {
         "ZOOVOICE_WHISPER_SOURCE_DIR": str(source),
         "ZOOVOICE_ASR_MODEL_PATH": str(model),
-        "ZOOVOICE_CONCEPTNET_INDEX_PATH": str(index),
         "ZOOVOICE_SMOKE_AUDIO_PATH": str(smoke),
         "ZOOVOICE_FAKE_WHISPER_COMMIT": WHISPER_COMMIT,
         "ZOOVOICE_FAKE_MODEL_SHA": MODEL_SHA256,
-        "ZOOVOICE_FAKE_INDEX_SHA": INDEX_SHA256,
-        "ZOOVOICE_FAKE_LEXICON_SHA": LEXICON_SHA256,
-        "ZOOVOICE_FAKE_INDEX_METADATA": metadata,
+        "OPENAI_API_KEY": "test-openai-key",
     }
 
 
@@ -152,7 +131,6 @@ def test_cloud_run_deploy_dry_run_is_private_bounded_and_has_no_side_effects(
     for value in (
         artifacts["ZOOVOICE_WHISPER_SOURCE_DIR"],
         artifacts["ZOOVOICE_ASR_MODEL_PATH"],
-        artifacts["ZOOVOICE_CONCEPTNET_INDEX_PATH"],
         artifacts["ZOOVOICE_SMOKE_AUDIO_PATH"],
     ):
         assert value not in output + result.stderr
@@ -186,11 +164,11 @@ def test_cloud_run_deploy_requires_runtime_artifacts_before_build(tmp_path: Path
     for omitted in (
         "ZOOVOICE_WHISPER_SOURCE_DIR",
         "ZOOVOICE_ASR_MODEL_PATH",
-        "ZOOVOICE_CONCEPTNET_INDEX_PATH",
         "ZOOVOICE_SMOKE_AUDIO_PATH",
+        "OPENAI_API_KEY",
     ):
-        env = {**artifacts, "ZOOVOICE_GCP_PROJECT": "example-project"}
-        del env[omitted]
+        # 実行環境に残る値が漏れないよう、削除ではなく空値で上書きする。
+        env = {**artifacts, "ZOOVOICE_GCP_PROJECT": "example-project", omitted: ""}
         result = run_deploy(
             {
                 "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
@@ -202,7 +180,7 @@ def test_cloud_run_deploy_requires_runtime_artifacts_before_build(tmp_path: Path
         assert f"{omitted} is required" in result.stderr
 
 
-def test_cloud_run_deploy_rejects_model_sha_and_index_metadata_mismatch(
+def test_cloud_run_deploy_rejects_a_model_sha_mismatch(
     tmp_path: Path,
 ) -> None:
     command_log = install_recording_fakes(tmp_path)
@@ -218,12 +196,6 @@ def test_cloud_run_deploy_rejects_model_sha_and_index_metadata_mismatch(
     assert wrong_model.returncode != 0
     assert "ASR model SHA-256 mismatch" in wrong_model.stderr
     assert "0" * 64 not in wrong_model.stdout + wrong_model.stderr
-
-    wrong_metadata = run_deploy(
-        {**base, "ZOOVOICE_FAKE_INDEX_METADATA": "1|5.7.0|CC BY-SA 4.0|wrong|wrong|wrong"}
-    )
-    assert wrong_metadata.returncode != 0
-    assert "ConceptNet index metadata mismatch" in wrong_metadata.stderr
 
 
 def test_cloud_run_deploy_rejects_a_dirty_whisper_source_before_build(
@@ -319,21 +291,21 @@ def test_local_verify_builds_and_smokes_without_gcloud(tmp_path: Path) -> None:
     assert "local verification complete" in result.stdout
 
 
-def test_local_verify_accepts_pun_selection_strategy(tmp_path: Path) -> None:
+def test_local_verify_rejects_a_response_without_an_association_reason(tmp_path: Path) -> None:
     command_log = install_recording_fakes(tmp_path)
     result = run_deploy(
         {
             "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
             "ZOOVOICE_FAKE_COMMAND_LOG": str(command_log),
-            "ZOOVOICE_FAKE_SELECTION_STRATEGY": "pun",
+            "ZOOVOICE_FAKE_ASSOCIATION_REASON": "   ",
             "ZOOVOICE_GCP_PROJECT": "example-project",
             "ZOOVOICE_LOCAL_VERIFY": "1",
             **valid_artifact_env(tmp_path),
         }
     )
 
-    assert result.returncode == 0, result.stderr
-    assert "local verification complete" in result.stdout
+    assert result.returncode != 0
+    assert "local verification complete" not in result.stdout
 
 
 def test_whisper_builder_supplies_version_without_copying_git_history() -> None:
@@ -365,16 +337,12 @@ def test_runtime_artifacts_are_readable_by_the_nonroot_user() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
     assert (
-        "install -d --mode=0755 /app/assets /app/data /app/licenses /app/models"
+        "install -d --mode=0755 /app/assets /app/licenses /app/models"
         in dockerfile
     )
     assert (
         "COPY --from=zoovoice_runtime --chmod=0444 ggml-small.bin "
         "/app/models/ggml-small.bin"
     ) in dockerfile
-    assert (
-        "COPY --from=zoovoice_runtime --chmod=0444 conceptnet-ja-5.7.0.sqlite "
-        "/app/data/conceptnet-ja-5.7.0.sqlite"
-    ) in dockerfile
-    assert "ARG ZOOVOICE_ANIMAL_LEXICON_SHA256" in dockerfile
-    assert "/app/assets/animal-lexicon.json | sha256sum --check --strict" in dockerfile
+    assert "ZOOVOICE_CONCEPTNET_INDEX_PATH" not in dockerfile
+    assert "/app/models/ggml-small.bin | sha256sum --check --strict" in dockerfile

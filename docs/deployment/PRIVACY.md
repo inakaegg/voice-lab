@@ -10,12 +10,12 @@
 | --- | --- | --- |
 | Cloudflare Worker | Googleログイン結果、入力テキスト、音声bytes、job状態 | 認証、quota、API gateway、短期job中継 |
 | Google OAuth | OAuth認証に必要な情報 | 公開生成APIと管理画面のログイン |
-| OpenAI | 対象機能の入力音声またはテキスト | ASR、翻訳、テキスト加工、TTS |
+| OpenAI | 対象機能の入力音声またはテキスト、Zoovoiceの認識文と動物候補一覧 | ASR、翻訳、テキスト加工、TTS、Zoovoiceの動物連想 |
 | RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声 | FunASR、Seed-VC |
 | Cloudflare Turnstile | Zoovoiceの検証tokenとclient IP | 自動化された大量利用の抑止 |
 | Google Cloud Run | Zoovoiceの録音音声とアニマル度 | 日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成 |
 
-最後の2行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。公開環境の配備はこの値を設定している。
+Cloudflare TurnstileとGoogle Cloud Runの行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。公開環境の配備はこの値を設定している。ZoovoiceがOpenAIへ渡すのはASRの認識文だけであり、録音音声そのものは渡さない。
 
 ブラウザへOpenAI・RunPodのAPI keyを渡さない。Cloudflare WorkerとRunPodへURL、cookie、ログイン情報を送らない。公開SpeakLoopの自己音声は同じ送信のステップ1本人録音だけを参照にし、別ファイル、タブ音声、URLを受け付けない。
 

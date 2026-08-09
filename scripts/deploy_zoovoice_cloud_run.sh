@@ -20,7 +20,8 @@ apply=${ZOOVOICE_DEPLOY_APPLY:-0}
 local_verify=${ZOOVOICE_LOCAL_VERIFY:-0}
 whisper_source=${ZOOVOICE_WHISPER_SOURCE_DIR:-}
 asr_model=${ZOOVOICE_ASR_MODEL_PATH:-}
-conceptnet_index=${ZOOVOICE_CONCEPTNET_INDEX_PATH:-}
+openai_api_key=${OPENAI_API_KEY:-}
+openai_secret_name=${ZOOVOICE_OPENAI_SECRET_NAME:-zoovoice-openai-api-key}
 smoke_audio=${ZOOVOICE_SMOKE_AUDIO_PATH:-}
 region=us-central1
 service=zoovoice
@@ -30,9 +31,6 @@ local_smoke_port=${ZOOVOICE_LOCAL_SMOKE_PORT:-18080}
 
 expected_whisper_commit=5250a86fdebac4d51085fcfcd0b315cb0c6b91c9
 expected_model_sha256=1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
-expected_index_sha256=6492ed5d72629fd51f3794e3df5e568d509fbd1382c1fe3731064177a8d6297a
-expected_conceptnet_source_sha256=accd65fe94038584295574ddc26e1500c1919c8c4532bf771811cafd0948af7e
-expected_transformation='Japanese ConceptNet 1-hop edges whose opposite endpoint matches a generated Zoovoice animal lexicon term; duplicate weights keep the maximum'
 
 required_value ZOOVOICE_GCP_PROJECT "$project"
 if [[ ! "$project" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]; then
@@ -53,12 +51,11 @@ fi
 
 required_value ZOOVOICE_WHISPER_SOURCE_DIR "$whisper_source"
 required_value ZOOVOICE_ASR_MODEL_PATH "$asr_model"
-required_value ZOOVOICE_CONCEPTNET_INDEX_PATH "$conceptnet_index"
 required_value ZOOVOICE_SMOKE_AUDIO_PATH "$smoke_audio"
+required_value OPENAI_API_KEY "$openai_api_key"
 [[ -d "$whisper_source" ]] || fail "ZOOVOICE_WHISPER_SOURCE_DIR must be a directory"
 [[ -f "$whisper_source/CMakeLists.txt" && -f "$whisper_source/LICENSE" ]] || fail "whisper.cpp source is incomplete"
 [[ -f "$asr_model" ]] || fail "ZOOVOICE_ASR_MODEL_PATH must be a regular file"
-[[ -f "$conceptnet_index" ]] || fail "ZOOVOICE_CONCEPTNET_INDEX_PATH must be a regular file"
 [[ -f "$smoke_audio" ]] || fail "ZOOVOICE_SMOKE_AUDIO_PATH must be a regular file"
 
 whisper_commit=$(git -C "$whisper_source" rev-parse HEAD 2>/dev/null) || fail "whisper.cpp commitを確認できませんでした。"
@@ -69,21 +66,6 @@ whisper_status=$(git -C "$whisper_source" status --porcelain=v1 --untracked-file
 unset whisper_status
 model_sha256=$(shasum -a 256 "$asr_model" | awk '{print $1}')
 [[ "$model_sha256" == "$expected_model_sha256" ]] || fail "ASR model SHA-256 mismatch"
-index_sha256=$(shasum -a 256 "$conceptnet_index" | awk '{print $1}')
-[[ "$index_sha256" == "$expected_index_sha256" ]] || fail "ConceptNet index SHA-256 mismatch"
-lexicon_sha256=$(shasum -a 256 "$repository_root/services/zoovoice/assets/animal-lexicon.json" | awk '{print $1}')
-
-metadata=$(sqlite3 -noheader -separator '|' "$conceptnet_index" \
-  "SELECT
-    (SELECT value FROM metadata WHERE key='schema_version'),
-    (SELECT value FROM metadata WHERE key='source_version'),
-    (SELECT value FROM metadata WHERE key='license'),
-    (SELECT value FROM metadata WHERE key='source_sha256'),
-    (SELECT value FROM metadata WHERE key='lexicon_sha256'),
-    (SELECT value FROM metadata WHERE key='transformation');") || fail "ConceptNet index metadataを読み取れませんでした。"
-expected_metadata="2|5.7.0|CC BY-SA 4.0|${expected_conceptnet_source_sha256}|${lexicon_sha256}|${expected_transformation}"
-[[ "$metadata" == "$expected_metadata" ]] || fail "ConceptNet index metadata mismatch"
-unset metadata expected_metadata
 
 cd "$repository_root"
 branch=$(git branch --show-current)
@@ -109,7 +91,6 @@ echo "source branch: ${branch:-detached}"
 echo "source revision: $short_sha"
 echo "whisper.cpp revision: ${whisper_commit:0:12}"
 echo "ASR model: verified"
-echo "ConceptNet index: verified"
 if [[ -n "$working_tree_status" ]]; then
   echo "working tree: has changes"
 else
@@ -122,10 +103,10 @@ smoke_service_account="${smoke_account_name}@${project}.iam.gserviceaccount.com"
 
 if [[ "$mode" == "dry-run" ]]; then
   echo "[dry-run] copy verified whisper.cpp source excluding .git, build, models, and samples into a temporary context"
-  echo "[dry-run] copy verified ASR model, ConceptNet index, and license into a temporary runtime context"
+  echo "[dry-run] copy verified ASR model and notice into a temporary runtime context"
   echo "[dry-run] docker info"
   echo "[dry-run] docker buildx build --platform linux/amd64 --load --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --tag <local-smoke-image> --file services/zoovoice/Dockerfile ."
-  echo "[dry-run] docker run --memory 2g --cpus 2 --publish 127.0.0.1:${local_smoke_port}:8080 <local-smoke-image>"
+  echo "[dry-run] docker run --memory 2g --cpus 2 --env OPENAI_API_KEY=<redacted> --publish 127.0.0.1:${local_smoke_port}:8080 <local-smoke-image>"
   echo "[dry-run] curl local /healthz and intensity-only /compose fixture"
   echo "[dry-run] gcloud auth print-access-token --project $project --quiet > <temporary-secret>"
   echo "[dry-run] gcloud services enable run.googleapis.com artifactregistry.googleapis.com iamcredentials.googleapis.com --project $project --quiet"
@@ -133,7 +114,7 @@ if [[ "$mode" == "dry-run" ]]; then
   echo "[dry-run] gcloud auth configure-docker $registry_host --quiet"
   echo "[dry-run] docker buildx build --platform linux/amd64 --push --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --tag $image_tag --file services/zoovoice/Dockerfile ."
   echo "[dry-run] resolve pushed image digest and deploy IMAGE@sha256:<digest>"
-  echo "[dry-run] gcloud run deploy $service --image <image-by-digest> --project $project --region $region --platform managed --ingress all --no-allow-unauthenticated --cpu 2 --memory 2Gi --port 8080 --timeout 90s --concurrency 1 --min-instances 0 --max-instances 2 --quiet"
+  echo "[dry-run] gcloud run deploy $service --set-secrets OPENAI_API_KEY=${openai_secret_name}:latest --image <image-by-digest> --project $project --region $region --platform managed --ingress all --no-allow-unauthenticated --cpu 2 --memory 2Gi --port 8080 --timeout 90s --concurrency 1 --min-instances 0 --max-instances 2 --quiet"
   echo "[dry-run] create or reuse smoke service account <redacted>"
   echo "[dry-run] grant roles/run.invoker on service $service only to <smoke-service-account>"
   echo "[dry-run] grant roles/iam.serviceAccountTokenCreator on <smoke-service-account> to <active-developer>"
@@ -176,8 +157,6 @@ mkdir -p "$whisper_context" "$runtime_context"
     -cf - .
 ) | tar -xf - -C "$whisper_context"
 cp "$asr_model" "$runtime_context/ggml-small.bin"
-cp "$conceptnet_index" "$runtime_context/conceptnet-ja-5.7.0.sqlite"
-cp services/zoovoice/LICENSE-CONCEPTNET.md "$runtime_context/LICENSE-CONCEPTNET.md"
 cp services/zoovoice/NOTICE-STABILITY-AI.md "$runtime_context/NOTICE-STABILITY-AI.md"
 
 build_arguments=(
@@ -186,8 +165,6 @@ build_arguments=(
   --build-context "zoovoice_runtime=$runtime_context"
   --build-arg "WHISPER_SOURCE_COMMIT=$whisper_commit"
   --build-arg "ZOOVOICE_ASR_MODEL_SHA256=$model_sha256"
-  --build-arg "ZOOVOICE_CONCEPTNET_INDEX_SHA256=$index_sha256"
-  --build-arg "ZOOVOICE_ANIMAL_LEXICON_SHA256=$lexicon_sha256"
   --file services/zoovoice/Dockerfile
 )
 
@@ -205,6 +182,7 @@ local_container_id=$(docker run \
   --platform linux/amd64 \
   --memory 2g \
   --cpus 2 \
+  --env "OPENAI_API_KEY=$openai_api_key" \
   --publish "127.0.0.1:${local_smoke_port}:8080" \
   "$local_image")
 [[ -n "$local_container_id" ]] || fail "local smoke containerを起動できませんでした。"
@@ -246,8 +224,8 @@ if not isinstance(meta.get("transcript"), str) or not meta["transcript"].strip()
     raise SystemExit("invalid local compose transcript")
 if not isinstance(selected.get("id"), str) or not selected["id"]:
     raise SystemExit("invalid local compose selected animal")
-if meta.get("selection_strategy") not in {"direct", "pun", "conceptnet", "random_fallback"}:
-    raise SystemExit("invalid local compose strategy")
+if not isinstance(meta.get("association_reason"), str) or not meta["association_reason"].strip():
+    raise SystemExit("invalid local compose association reason")
 ' "$temporary_directory/compose.json"
 
 image_size_bytes=$(docker image inspect --format '{{.Size}}' "$local_image")
@@ -326,6 +304,7 @@ if ! gcloud run deploy "$service" \
   --concurrency 1 \
   --min-instances 0 \
   --max-instances 2 \
+  --set-secrets "OPENAI_API_KEY=${openai_secret_name}:latest" \
   --quiet >"$temporary_directory/run-deploy.out" 2>"$temporary_directory/run-deploy.err"; then
   fail "private Cloud Run serviceをdeployできませんでした。"
 fi
