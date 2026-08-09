@@ -29,7 +29,7 @@ RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のと
 - versionとhashをimageへ固定すると、選ばれる動物の再現性を保てる。
 - smallモデルはCPU向けであり、GPUモデル候補より小さい。
 
-動物音はgit管理する。これはリポジトリ外の2つとは扱いを分ける。出所と採用hashは `services/zoovoice/assets/animal-sounds/manifest.json` を正とし、Goサービスが起動時にSHA-256を照合する。同梱する動物音のうちStable Audioで生成したものは表示義務があり、`services/zoovoice/NOTICE-STABILITY-AI.md` をimageへ同梱する。
+動物音もgit管理せず、ASRモデルと同じくリポジトリ外へ置き、build時に `zoovoice_sounds` named contextからimageへ取り込む。出所と採用hashはそのセットの `manifest.json` を正とし、Goサービスが起動時にSHA-256を照合する。Stable Audioで生成した音を含む場合は表示義務があり、`services/zoovoice/NOTICE-STABILITY-AI.md` をimageへ同梱する。
 
 このimageのlocal buildと起動は実測済みである。linux/amd64のimageをCPU 2とメモリ2GiBの上限付きでnon-root起動し、image size 1,053,233,511 bytes、compose完了後の観測メモリ359.4 MiB / 2 GiBを得た。ASRモデルはnon-rootの実行ユーザーから読める。この実測は動物音の同梱前かつConceptNet indexを含んでいた頃のimageに対するものであり、現在のimageでは再測定していない。
 

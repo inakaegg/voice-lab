@@ -83,9 +83,16 @@ def valid_artifact_env(tmp_path: Path) -> dict[str, str]:
     model.write_bytes(b"model fixture")
     smoke = tmp_path / "smoke.wav"
     smoke.write_bytes(b"RIFF fixture")
+    sounds = tmp_path / "sounds"
+    (sounds / "dog").mkdir(parents=True)
+    (sounds / "dog" / "dog-1.wav").write_bytes(b"RIFF fixture")
+    (sounds / "manifest.json").write_text(
+        '{"schema_version":1,"animals":[]}', encoding="utf-8"
+    )
     return {
         "ZOOVOICE_WHISPER_SOURCE_DIR": str(source),
         "ZOOVOICE_ASR_MODEL_PATH": str(model),
+        "ZOOVOICE_SOUNDS_DIR": str(sounds),
         "ZOOVOICE_SMOKE_AUDIO_PATH": str(smoke),
         "ZOOVOICE_FAKE_WHISPER_COMMIT": WHISPER_COMMIT,
         "ZOOVOICE_FAKE_MODEL_SHA": MODEL_SHA256,
@@ -120,6 +127,7 @@ def test_cloud_run_deploy_dry_run_is_private_bounded_and_has_no_side_effects(
     assert "--memory 2Gi" in output
     assert "--build-context whisper_source=<temporary-context>" in output
     assert "--build-context zoovoice_runtime=<temporary-context>" in output
+    assert "--build-context zoovoice_sounds=<temporary-context>" in output
     assert "--allow-unauthenticated" not in output.replace(
         "--no-allow-unauthenticated", ""
     )
@@ -164,6 +172,7 @@ def test_cloud_run_deploy_requires_runtime_artifacts_before_build(tmp_path: Path
     for omitted in (
         "ZOOVOICE_WHISPER_SOURCE_DIR",
         "ZOOVOICE_ASR_MODEL_PATH",
+        "ZOOVOICE_SOUNDS_DIR",
         "ZOOVOICE_SMOKE_AUDIO_PATH",
         "OPENAI_API_KEY",
     ):
@@ -256,6 +265,7 @@ def test_cloud_run_apply_uses_digest_private_iam_and_bounded_resources(
     assert "--memory 2Gi" in commands
     assert "--build-context whisper_source=" in commands
     assert "--build-context zoovoice_runtime=" in commands
+    assert "--build-context zoovoice_sounds=" in commands
     assert "gcloud run services add-iam-policy-binding zoovoice" in commands
     assert "roles/run.invoker" in commands
     assert "gcloud iam service-accounts add-iam-policy-binding" in commands
@@ -337,12 +347,17 @@ def test_runtime_artifacts_are_readable_by_the_nonroot_user() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
     assert (
-        "install -d --mode=0755 /app/assets /app/licenses /app/models"
+        "install -d --mode=0755 /app/licenses /app/models /app/sounds"
         in dockerfile
     )
     assert (
         "COPY --from=zoovoice_runtime --chmod=0444 ggml-small.bin "
         "/app/models/ggml-small.bin"
     ) in dockerfile
+    assert "COPY --from=zoovoice_sounds . /app/sounds" in dockerfile
+    assert "chmod -R a=rX /app/sounds" in dockerfile
+    assert "ZOOVOICE_SOUNDS_DIR=/app/sounds" in dockerfile
+    # 鳴き声素材はリポジトリに置かないので、image へ repository から入れない。
+    assert "COPY services/zoovoice/assets" not in dockerfile
     assert "ZOOVOICE_CONCEPTNET_INDEX_PATH" not in dockerfile
     assert "/app/models/ggml-small.bin | sha256sum --check --strict" in dockerfile

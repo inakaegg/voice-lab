@@ -38,8 +38,7 @@ func runPreviewCLI(arguments []string, stdout, stderr io.Writer) int {
 }
 
 func runPreview(textInput, audioInput, outputPath string, intensity int, verbose bool, stdout, stderr io.Writer) error {
-	assetsRoot := defaultAssetsRoot()
-	catalog, err := loadRuntimeCatalog(assetsRoot)
+	catalog, err := loadRuntimeCatalog()
 	if err != nil {
 		return err
 	}

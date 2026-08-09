@@ -37,7 +37,7 @@ ARG ZOOVOICE_ASR_MODEL_SHA256
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && install -d --mode=0755 /app/assets /app/licenses /app/models \
+    && install -d --mode=0755 /app/licenses /app/models /app/sounds \
     && useradd --create-home --uid 10001 zoovoice
 
 WORKDIR /app
@@ -46,15 +46,18 @@ COPY --from=whisper-builder /src/whisper.cpp/build/bin/whisper-cli /usr/local/bi
 COPY --from=whisper_source LICENSE /app/licenses/LICENSE-whisper.cpp
 COPY --from=zoovoice_runtime --chmod=0444 NOTICE-STABILITY-AI.md /app/licenses/NOTICE-STABILITY-AI.md
 COPY --from=zoovoice_runtime --chmod=0444 ggml-small.bin /app/models/ggml-small.bin
-COPY services/zoovoice/assets /app/assets
+# 鳴き声素材はリポジトリに置かず、build時に zoovoice_sounds context から取り込む。
+COPY --from=zoovoice_sounds . /app/sounds
+# ディレクトリは r-x、ファイルは r-- にする（--chmod は両方へ同じ値を当てるため使わない）。
+RUN chmod -R a=rX /app/sounds
 RUN printf '%s  %s\n' "$ZOOVOICE_ASR_MODEL_SHA256" /app/models/ggml-small.bin | sha256sum --check --strict
 
-LABEL org.opencontainers.image.licenses="MIT, CC0-1.0, Stability-AI-Community" \
+LABEL org.opencontainers.image.licenses="MIT, CC0-1.0, CC-BY-4.0, Stability-AI-Community, LicenseRef-Taira-Komori" \
     io.voicelab.zoovoice.whisper.commit="$WHISPER_SOURCE_COMMIT" \
     io.voicelab.zoovoice.asr-model.sha256="$ZOOVOICE_ASR_MODEL_SHA256"
 
 ENV PORT=8080 \
-    ZOOVOICE_ASSETS_DIR=/app/assets \
+    ZOOVOICE_SOUNDS_DIR=/app/sounds \
     ZOOVOICE_WHISPER_COMMAND=/usr/local/bin/whisper-cli \
     ZOOVOICE_ASR_MODEL_PATH=/app/models/ggml-small.bin \
     ZOOVOICE_LOG_PATH=/dev/stderr \

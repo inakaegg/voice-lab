@@ -200,10 +200,7 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := loadLegacyCatalog("assets")
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalog := fixtureCatalog(t)
 	composer := newComposer(
 		catalog,
 		execCommandRunner{},

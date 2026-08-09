@@ -23,8 +23,7 @@ func main() {
 	logger, closer := openServiceLogger(defaultLogPath())
 	defer closer.Close()
 
-	assetsRoot := defaultAssetsRoot()
-	catalog, err := loadRuntimeCatalog(assetsRoot)
+	catalog, err := loadRuntimeCatalog()
 	if err != nil {
 		logger.Fatalf("zoovoice startup failed: %v", err)
 	}
@@ -85,28 +84,14 @@ func serverPort() int {
 }
 
 // loadRuntimeCatalog はサーバとCLIが共通で使うカタログ読み込み。
-// ZOOVOICE_SOUNDS_DIR が指す manifest付きディレクトリを優先し、
-// 未設定なら従来の assets/animal-sounds/ を使う。どちらもクレジット付き。
-func loadRuntimeCatalog(assetsRoot string) (*assetCatalog, error) {
-	if soundsDir := os.Getenv("ZOOVOICE_SOUNDS_DIR"); soundsDir != "" {
-		return loadSoundsCatalog(soundsDir)
+// 鳴き声はリポジトリに置かず、ZOOVOICE_SOUNDS_DIR が指す manifest付き
+// ディレクトリだけを読む（container image ではビルド時に取り込む）。
+func loadRuntimeCatalog() (*assetCatalog, error) {
+	soundsDir := os.Getenv("ZOOVOICE_SOUNDS_DIR")
+	if soundsDir == "" {
+		return nil, fmt.Errorf("ZOOVOICE_SOUNDS_DIR is required: manifest.json付きの鳴き声ディレクトリを指定してください")
 	}
-	return loadLegacyCatalog(assetsRoot)
-}
-
-func defaultAssetsRoot() string {
-	if configured := os.Getenv("ZOOVOICE_ASSETS_DIR"); configured != "" {
-		return configured
-	}
-	for _, candidate := range []string{
-		filepath.Join("services", "zoovoice", "assets"),
-		"assets",
-	} {
-		if regularFileExists(filepath.Join(candidate, "animal-sounds", "manifest.json")) {
-			return candidate
-		}
-	}
-	return filepath.Join("services", "zoovoice", "assets")
+	return loadSoundsCatalog(soundsDir)
 }
 
 func defaultLogPath() string {

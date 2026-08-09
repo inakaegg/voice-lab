@@ -83,7 +83,7 @@ func TestComposerPipelineConvertsASRThenTranscribesAssociatesAndMixes(t *testing
 	}
 	events := []string{}
 	composer := newComposer(
-		repositoryCatalog(t),
+		fixtureCatalog(t),
 		trackingExecRunner{events: &events},
 		fixedTranscriber{events: &events, transcript: "犬が公園を走っています"},
 		fixedAssociator{events: &events, selection: AnimalSelection{
@@ -118,7 +118,7 @@ func TestComposerLogsNeverContainTranscriptOrReason(t *testing.T) {
 	secretTranscript := "秘密の猫"
 	secretReason := "秘密の理由"
 	composer := newComposer(
-		repositoryCatalog(t),
+		fixtureCatalog(t),
 		execCommandRunner{},
 		fixedTranscriber{transcript: secretTranscript},
 		fixedAssociator{selection: AnimalSelection{
@@ -215,7 +215,7 @@ func TestComposerLogsNeverContainPrivateTextOnFailureTimeoutOrCancel(t *testing.
 			}
 			var logs bytes.Buffer
 			composer := newComposer(
-				repositoryCatalog(t),
+				fixtureCatalog(t),
 				execCommandRunner{},
 				test.transcriber,
 				associator,
@@ -233,15 +233,6 @@ func TestComposerLogsNeverContainPrivateTextOnFailureTimeoutOrCancel(t *testing.
 			}
 		})
 	}
-}
-
-func repositoryCatalog(t *testing.T) *assetCatalog {
-	t.Helper()
-	catalog, err := loadLegacyCatalog("assets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog
 }
 
 func (runner fixedCommandRunner) Run(

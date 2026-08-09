@@ -23,11 +23,8 @@ func TestSoundCreditLineDropsEmptyParts(t *testing.T) {
 	}
 }
 
-func TestRepositoryCatalogHasCreditForEveryAnimal(t *testing.T) {
-	catalog, err := loadLegacyCatalog("assets")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestCatalogHasCreditForEveryAnimal(t *testing.T) {
+	catalog := fixtureCatalog(t)
 	for _, animal := range catalog.Animals {
 		for _, variant := range animal.Variants {
 			if variant.Credit.License == "" {
@@ -37,23 +34,23 @@ func TestRepositoryCatalogHasCreditForEveryAnimal(t *testing.T) {
 	}
 }
 
-func TestLoadLegacyCatalogRejectsEntryWithoutLicense(t *testing.T) {
+func TestLoadSoundsCatalogRejectsEntryWithoutLicense(t *testing.T) {
 	root := t.TempDir()
-	audioDir := filepath.Join(root, "animal-sounds")
-	if err := os.Mkdir(audioDir, 0o755); err != nil {
+	animalDir := filepath.Join(root, "dog")
+	if err := os.MkdirAll(animalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	audio := []byte("dog")
-	if err := os.WriteFile(filepath.Join(audioDir, "dog.wav"), audio, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(animalDir, "dog-1.wav"), audio, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(audio)
-	manifest := `{"animals":[{"id":"dog","label_ja":"犬","file":"dog.wav","normalized_sha256":` +
-		strconv.Quote(hex.EncodeToString(digest[:])) + `,"creator":"someone"}]}`
-	if err := os.WriteFile(filepath.Join(audioDir, "manifest.json"), []byte(manifest), 0o600); err != nil {
+	manifest := `{"schema_version":1,"animals":[{"id":"dog","label_ja":"犬","files":[{"file":"dog/dog-1.wav","sha256":` +
+		strconv.Quote(hex.EncodeToString(digest[:])) + `,"creator":"someone"}]}]}`
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadLegacyCatalog(root); err == nil {
+	if _, err := loadSoundsCatalog(root); err == nil {
 		t.Fatal("entry without license accepted")
 	}
 }

@@ -69,12 +69,12 @@ if [[ "$mode" == "local" ]]; then
   required_file ZOOVOICE_WHISPER_COMMAND "$whisper_command"
   required_file ZOOVOICE_ASR_MODEL_PATH "$asr_model"
   [[ -n "$openai_api_key" ]] || fail "OPENAI_API_KEY is required"
+  [[ -n "$sounds_directory" ]] || fail "ZOOVOICE_SOUNDS_DIR is required"
   whisper_command=$(canonical_file "$whisper_command")
   asr_model=$(canonical_file "$asr_model")
-  if [[ -n "$sounds_directory" ]]; then
-    [[ -d "$sounds_directory" ]] || fail "ZOOVOICE_SOUNDS_DIR must be a directory"
-    sounds_directory=$(cd "$sounds_directory" && pwd -P)
-  fi
+  [[ -d "$sounds_directory" ]] || fail "ZOOVOICE_SOUNDS_DIR must be a directory"
+  [[ -f "$sounds_directory/manifest.json" ]] || fail "ZOOVOICE_SOUNDS_DIR must contain manifest.json"
+  sounds_directory=$(cd "$sounds_directory" && pwd -P)
 fi
 
 if [[ "$mode" == "cloud-run" ]]; then
@@ -181,7 +181,7 @@ if [[ "$mode" == "local" ]]; then
       ZOOVOICE_TIMEOUT_SECONDS=85 \
       ZOOVOICE_WHISPER_COMMAND="$whisper_command" \
       ZOOVOICE_ASR_MODEL_PATH="$asr_model" \
-      ${sounds_directory:+ZOOVOICE_SOUNDS_DIR="$sounds_directory"} \
+      ZOOVOICE_SOUNDS_DIR="$sounds_directory" \
       ${whisper_library_path:+DYLD_LIBRARY_PATH="$whisper_library_path"} \
       OPENAI_API_KEY="$openai_api_key" \
       "$api_binary"

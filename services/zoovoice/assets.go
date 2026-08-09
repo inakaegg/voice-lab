@@ -91,59 +91,6 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 	return newCatalog(animals), nil
 }
 
-// 旧スキーマ: assets/animal-sounds/manifest.json（1動物1ファイル、
-// クレジットを動物単位で持つ）。
-type legacySoundsManifest struct {
-	Animals []struct {
-		ID         string `json:"id"`
-		LabelJA    string `json:"label_ja"`
-		File       string `json:"file"`
-		SHA256     string `json:"normalized_sha256"`
-		License    string `json:"license"`
-		Creator    string `json:"creator"`
-		LandingURL string `json:"landing_url"`
-	} `json:"animals"`
-}
-
-// loadLegacyCatalog は同梱の assets/animal-sounds/ からカタログを作る。
-func loadLegacyCatalog(assetsRoot string) (*assetCatalog, error) {
-	soundsDir := filepath.Join(assetsRoot, "animal-sounds")
-	manifestPath := filepath.Join(soundsDir, "manifest.json")
-	payload, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("read sounds manifest: %w", err)
-	}
-	var manifest legacySoundsManifest
-	if err := json.Unmarshal(payload, &manifest); err != nil {
-		return nil, fmt.Errorf("parse sounds manifest %s: %w", manifestPath, err)
-	}
-	if len(manifest.Animals) == 0 {
-		return nil, fmt.Errorf("sounds manifest %s has no animals", manifestPath)
-	}
-	animals := make([]availableAnimal, 0, len(manifest.Animals))
-	for _, animal := range manifest.Animals {
-		if animal.ID == "" || animal.LabelJA == "" || animal.File == "" || animal.License == "" {
-			return nil, fmt.Errorf("sounds manifest %s has an incomplete entry", manifestPath)
-		}
-		path, err := verifiedAssetPath(soundsDir, animal.ID, animal.File, animal.SHA256)
-		if err != nil {
-			return nil, err
-		}
-		animals = append(animals, availableAnimal{
-			ID: animal.ID, LabelJA: animal.LabelJA,
-			Variants: []assetVariant{{
-				Path: path,
-				Credit: soundCredit{
-					License:   animal.License,
-					Creator:   animal.Creator,
-					SourceURL: animal.LandingURL,
-				},
-			}},
-		})
-	}
-	return newCatalog(animals), nil
-}
-
 // verifiedAssetPath は manifest記載の相対パスを検証し、SHA-256の一致を確かめる。
 func verifiedAssetPath(soundsDir, animalID, file, expectedSHA string) (string, error) {
 	relative := filepath.FromSlash(file)

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -97,6 +98,7 @@ test("Zoovoice local launcher requires ASR runtime artifacts and an API key befo
     for (const omitted of [
       "ZOOVOICE_WHISPER_COMMAND",
       "ZOOVOICE_ASR_MODEL_PATH",
+      "ZOOVOICE_SOUNDS_DIR",
       "OPENAI_API_KEY",
     ]) {
       const values = { ...runtime };
@@ -257,11 +259,18 @@ function readIfPresent(path: string): string {
 function createRuntimeFixtures(directory: string): Record<string, string> {
   const command = join(directory, "whisper-cli");
   const model = join(directory, "ggml-small.bin");
+  const sounds = join(directory, "sounds");
   writeFileSync(command, "fixture");
   writeFileSync(model, "fixture");
+  mkdirSync(sounds, { recursive: true });
+  writeFileSync(
+    join(sounds, "manifest.json"),
+    '{"schema_version":1,"animals":[]}',
+  );
   return {
     ZOOVOICE_WHISPER_COMMAND: command,
     ZOOVOICE_ASR_MODEL_PATH: model,
+    ZOOVOICE_SOUNDS_DIR: sounds,
     OPENAI_API_KEY: "test-openai-key",
   };
 }

@@ -3,7 +3,7 @@
 更新日: 2026-08-09
 
 Zoovoice は録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話の無音区間へ重ねるデモです。
-このディレクトリには Go 製の API と鳴き声素材を置いています。
+このディレクトリには Go 製の API を置いています。鳴き声素材はリポジトリに置かず、実行時とimage build時に外から渡します。
 1リクエストの流れは、日本語ASR、動物の自動連想、音声合成の順です。
 公開のUI・API入り口はCloudflare Workerであり、Workerが有効化した配備ではこのGoサービスをprivateなGoogle Cloud Run上のコンテナとして呼び出します。
 Cloud Run配備の契約は[Cloud Run配備](#cloud-run配備)を、公開側の全体構成は[ARCHITECTURE.md](../../docs/deployment/ARCHITECTURE.md)を参照してください。
@@ -32,14 +32,15 @@ npm run dev:zoovoice
 `http://127.0.0.1:8787/zoovoice` を開くとCloudflare Worker local経由で確認できます。
 Playwrightによるローカルe2e確認も同じWrangler localを起動します。
 
-local起動では`ZOOVOICE_WHISPER_COMMAND`、`ZOOVOICE_ASR_MODEL_PATH`、`OPENAI_API_KEY`の3つが必須です。
-起動scriptはWranglerとGoサービスを立ち上げる前にこの3つを検査し、1つでも未設定または不在なら停止します。
+local起動では`ZOOVOICE_WHISPER_COMMAND`、`ZOOVOICE_ASR_MODEL_PATH`、`ZOOVOICE_SOUNDS_DIR`、`OPENAI_API_KEY`の4つが必須です。
+起動scriptはWranglerとGoサービスを立ち上げる前にこの4つを検査し、1つでも未設定または不在なら停止します。
 検査を通ったpathは絶対pathへ正規化してからGoサービスへ渡すため、相対pathで指定しても作業ディレクトリの違いで壊れません。
-Goサービス自身も起動時に同じ3つを確認します。
+Goサービス自身も起動時に同じ4つを確認します。
 
 ```sh
 export ZOOVOICE_WHISPER_COMMAND=<repo-outside>/whisper.cpp/build/bin/whisper-cli
 export ZOOVOICE_ASR_MODEL_PATH=<repo-outside>/models/ggml-small.bin
+export ZOOVOICE_SOUNDS_DIR=<repo-outside>/animal-sounds
 export OPENAI_API_KEY=<OpenAIのAPIキー>
 ```
 
@@ -49,7 +50,7 @@ export OPENAI_API_KEY=<OpenAIのAPIキー>
 go run .
 ```
 
-起動時に `assets/animal-sounds/manifest.json` を読み込み、音源のある動物をすべて公開します。
+起動時に `ZOOVOICE_SOUNDS_DIR` の `manifest.json` を読み込み、音源のある動物をすべて公開します。
 manifestが持つ音声のSHA-256と実ファイルが一致しない場合は起動しません。
 鳴き声のクレジット（ライセンス・作者・出典URL）も起動時にmanifestから読み込み、合成応答に含めます。
 
@@ -101,8 +102,7 @@ npm run dev:zoovoice:cloud-run
 | --- | --- | --- |
 | `ZOOVOICE_PORT` | `8090` | Go API の待受ポート。設定時はこちらを優先する |
 | `PORT` | `8090` | `ZOOVOICE_PORT` 未設定時のfallback。Cloud Runが自動注入する |
-| `ZOOVOICE_ASSETS_DIR` | 自動検出した `assets` | `animal-sounds/` の親ディレクトリ |
-| `ZOOVOICE_SOUNDS_DIR` | なし（任意） | `manifest.json` 付き鳴き声ディレクトリ。設定時は `animal-sounds/` の代わりに音源とクレジットをここから読む |
+| `ZOOVOICE_SOUNDS_DIR` | なし（必須） | `manifest.json` 付き鳴き声ディレクトリ。音源とクレジットをここから読む |
 | `ZOOVOICE_WHISPER_COMMAND` | なし（必須） | whisper.cpp の `whisper-cli` の実行ファイル |
 | `ZOOVOICE_ASR_MODEL_PATH` | なし（必須） | 日本語ASRに使う `ggml-small.bin` |
 | `OPENAI_API_KEY` | なし（必須） | 連想に使うOpenAI APIのキー |
@@ -232,64 +232,42 @@ ASR本文と連想の理由は応答とプロセスのメモリ内だけで扱�
 いずれの項目も音声や本文の内容そのものを含みません。
 録音と生成音声の内容、ASR本文、連想の理由はサービスログへ書きません。
 
-## 同梱する動物音
+## 鳴き声素材
 
-`assets/animal-sounds/` には26種の規格化済み WAV を1種1本ずつ置きます。
-内訳はStable Audioで生成した23種と、CC0音源から移行した3種です。
-26件のWAVの合計は5,725,320 bytes（約5.5 MiB）です。
+鳴き声素材はリポジトリに置きません。実行時は `ZOOVOICE_SOUNDS_DIR`、image build時は
+`zoovoice_sounds` context で外から渡します。対象動物の正本は素材そのものであり、
+一覧は [CONCEPTS/ZOOVOICE/ANIMALS.md](../../CONCEPTS/ZOOVOICE/ANIMALS.md) に写してあります
+（`python3 scripts/generate_animals_doc.py <sounds-dir>` で作り直します）。
 
-| 区分 | 種数 | ライセンス | 形式 |
-| --- | --- | --- | --- |
-| Stable Audio生成 | 23 | Stability AI Community License | 24kHz、mono、signed 16-bit PCM、5秒 |
-| CC0移行fallback | 3 | CC0 1.0 | 24kHz、mono、signed 16-bit PCM |
+素材の形式は 24kHz、mono、signed 16-bit PCM WAV です。
+1種に複数本あってよく、出所（ライセンス・作者・配布ページ）と採用時のSHA-256は
+セットの `manifest.json` に1本ずつ記録します。サービスは起動時にSHA-256を照合し、
+1件でも合わなければ起動しません。合成応答にはその回に使った素材のクレジットを含めます。
 
-犬・猫・コオロギの3種は、既存の連想評価が退行しないようCC0音源のまま残しています。
-この3件は Freesound の各配布ページから取得した音源です。
+Stable Audioで生成した素材を含む場合の必須表示は
+[NOTICE-STABILITY-AI.md](NOTICE-STABILITY-AI.md) を正とし、公開UIはfooterへ
+`Powered by Stability AI` を表示します。
 
-| 種 | タイトル | 作者 | 配布ページ |
-| --- | --- | --- | --- |
-| 犬 | Single Dog Bark | kwahmah_02 | [Freesound 277058](https://freesound.org/people/kwahmah_02/sounds/277058) |
-| 猫 | Cat meow | philsapphire | [Freesound 256452](https://freesound.org/people/philsapphire/sounds/256452) |
-| コオロギ | Crickets chirping loop | Patrick_Corra | [Freesound 633196](https://freesound.org/people/Patrick_Corra/sounds/633196) |
+## 素材の準備
 
-この3件のライセンスは [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) です。
-Stable Audioで生成した23件の必須表示と由来は [NOTICE-STABILITY-AI.md](NOTICE-STABILITY-AI.md) を正とします。
-公開UIはfooterへ `Powered by Stability AI` を表示します。
-
-種ごとの出所は `assets/animal-sounds/manifest.json` に保存します。
-Stable Audio分はモデル `stabilityai/stable-audio-3-small-sfx` とそのrevisionを記録します。
-各動物では採用variantのpromptとseed、生成元と規格化後のSHA-256、音声指標を残します。
-不採用を含む候補2件のreceiptも同じmanifestへ残します。
-CC0の3件は作者と配布ページ、移行前の音源のSHA-256を記録します。
-
-## 動物音の準備
-
-`tools/import_stable_audio.py` は、生成済みの候補から1種1本を採用して規格化し、manifestを書き出します。
-モデルの実行そのものは行いません。
+`tools/prepare_assets.sh` は集めた素材を実行時の形式へ規格化します。
+`tools/import_stable_audio.py` は Stable Audio の生成候補から1種1本を採用して規格化し、
+manifestを書き出します（モデルの実行そのものは行いません）。出力先はリポジトリ外を指定します。
 
 ```sh
-python3 tools/import_stable_audio.py <stable-audio-output-dir> assets/animal-sounds
+python3 tools/import_stable_audio.py <stable-audio-output-dir> <repo-outside>/animal-sounds
 ```
 
-処理内容は次のとおりです。
-
-1. 候補manifestとreceiptを突き合わせ、生成元のSHA-256を検査する。
-2. 種ごとにvariant 1を決定論的に採用する。
-3. `24kHz`、mono、signed 16-bit PCM WAV へ変換する。
-4. 生成音声は長さが5秒であること、平均dBFSとピークdBFSが想定範囲にあることを検査する。
-5. 出力するWAV全体の合計が15,000,000 bytesを超えないことを検査する。
-
-CC0の3種は `--include-cc0` で同じ出力へ含めます。
-移行元の素材はリポジトリに残していないため、この3件の再生成には移行前の素材と出所manifestが要ります。
-このスクリプトは取得条件を伴う素材準備用なので CI では実行しません。
+どちらも取得条件を伴う素材準備用なので CI では実行しません。
 
 ## Docker image
 
 imageは`services/zoovoice/Dockerfile`で作ります。
-モデルはリポジトリへcommitしないため、buildはgit外の成果物を named context として受け取ります。
+モデルと鳴き声素材はリポジトリへcommitしないため、buildはgit外の成果物を named context として受け取ります。
 
 - `whisper_source`: 検証済みのwhisper.cppソース。commitは`5250a86fdebac4d51085fcfcd0b315cb0c6b91c9`に固定する
 - `zoovoice_runtime`: `ggml-small.bin`と`NOTICE-STABILITY-AI.md`を置いた一時ディレクトリ
+- `zoovoice_sounds`: `manifest.json`付きの鳴き声セット（`ZOOVOICE_SOUNDS_DIR`の中身をそのまま渡す）
 
 buildは`ggml-small.bin`のSHA-256をimage内で照合します。
 固定値は`1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b`です。
@@ -302,7 +280,7 @@ whisper.cpp commit、ASRモデルのSHA-256、ライセンス識別子はimage l
 - `ggml-small.bin`
 - whisper.cppとStability AIのライセンス表示
 - Debian runtime、CA証明書、ffmpeg
-- リポジトリで追跡する動物音26件
+- `zoovoice_sounds`から取り込んだ鳴き声セット（`/app/sounds`）
 
 secretと開発用ファイルは含めません。
 実行ユーザーはuid 10001のnon-rootで、待受portは8080です。
@@ -310,12 +288,13 @@ secretと開発用ファイルは含めません。
 ## Cloud Run配備
 
 Cloud Runへの配備は`./scripts/deploy_zoovoice_cloud_run.sh`を使います。
-実行前に次の4つを環境変数で渡します。
+実行前に次の5つを環境変数で渡します。
 
 | 変数 | 内容 |
 | --- | --- |
 | `ZOOVOICE_WHISPER_SOURCE_DIR` | 検証済みwhisper.cppのソースディレクトリ |
 | `ZOOVOICE_ASR_MODEL_PATH` | `ggml-small.bin` |
+| `ZOOVOICE_SOUNDS_DIR` | imageへ入れる鳴き声セット（`manifest.json`付き） |
 | `ZOOVOICE_SMOKE_AUDIO_PATH` | local smokeへ送る短い音声 |
 | `OPENAI_API_KEY` | local smokeとCloud Runが使う連想APIのキー |
 

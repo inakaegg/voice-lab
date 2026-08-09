@@ -20,8 +20,8 @@ This Stability AI Model is licensed under the Stability AI Community License
 | --- | --- |
 | モデル | `stabilityai/stable-audio-3-small-sfx` |
 | モデルrevision | `ae12755283df9d62ca39a9b050a39a0b607b8c20` |
-| 生成物 | `assets/animal-sounds/` のうち `source_kind` が `stable_audio` の23件 |
-| 由来の記録 | `assets/animal-sounds/manifest.json` |
+| 生成物 | 鳴き声セット（`ZOOVOICE_SOUNDS_DIR`、image内は `/app/sounds`）のうち、ライセンスが Stability AI Community License の音声 |
+| 由来の記録 | 鳴き声セットの `manifest.json` |
 | ライセンス | Stability AI Community License |
 | ライセンスURL | `https://stability.ai/license` |
 

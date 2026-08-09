@@ -63,7 +63,7 @@ Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを
 
 Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想、音声合成をこの順で担当する。自動連想はLLM（既定 `gpt-5.6-luna`）へ一本化しており、ASR本文と音源カタログの候補一覧を渡して1種を必ず選ばせる。辞書やConceptNetによる連想経路と、当てずっぽうのrandom選択は持たない。
 
-連想の候補と音声再生が参照する動物一覧は、音源manifest（同梱音源では `services/zoovoice/assets/animal-sounds/manifest.json`）を正とする。音源を持つ動物だけが候補になる。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
+連想の候補と音声再生が参照する動物一覧は、音源manifest（`ZOOVOICE_SOUNDS_DIR` が指すディレクトリの `manifest.json`、image内では `/app/sounds/manifest.json`）を正とする。音源を持つ動物だけが候補になる。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。ローカルのsmoke確認では、gcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由でこのGoサービスへ渡す。
 
 productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。invoker service accountの作成と権限付与、key発行、Worker secretの登録も完了している。
 
@@ -87,7 +87,7 @@ Browser
 
 Cloud Runへ載せるDocker imageは、Goバイナリに加えて実行に必要なDebian runtime、CA証明書、ffmpegを含める。これに日本語ASR用のwhisper.cpp commandとモデルを加える。commandとモデルはリポジトリで管理せず、build時にgit外の検証済みディレクトリから取り込む。取り込むcommitとSHA-256はbuildとdeploy scriptの両方で照合し、image labelへも残す。連想に使うLLMのAPIキーはimageへ焼き込まず、Cloud RunのsecretとしてOPENAI_API_KEYへ渡す。
 
-imageへ入れる音源素材は、リポジトリで追跡する `services/zoovoice/assets/animal-sounds/` だけとする。素材の出所と採用hashは `services/zoovoice/assets/animal-sounds/manifest.json` を正とする。Stability AIの必須表示は `services/zoovoice/NOTICE-STABILITY-AI.md` を正とし、`/app/licenses` へ同梱する。公開UIはfooterへ `Powered by Stability AI` を表示する。secretと開発用ファイルはimageへ含めない。containerはnon-rootで実行する。
+音源素材はリポジトリで追跡せず、build時に `zoovoice_sounds` named contextから `/app/sounds` へ取り込む。素材の出所と採用hashは、そのセットの `manifest.json` を正とする。Stability AIの必須表示は `services/zoovoice/NOTICE-STABILITY-AI.md` を正とし、`/app/licenses` へ同梱する。公開UIはfooterへ `Powered by Stability AI` を表示する。secretと開発用ファイルはimageへ含めない。containerはnon-rootで実行する。
 
 ASRモデル、必要な外部command、LLMのAPIキーのいずれかが欠けた場合は起動しない。固定の動物へ黙って切り替えない。
 

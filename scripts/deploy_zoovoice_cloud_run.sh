@@ -20,6 +20,7 @@ apply=${ZOOVOICE_DEPLOY_APPLY:-0}
 local_verify=${ZOOVOICE_LOCAL_VERIFY:-0}
 whisper_source=${ZOOVOICE_WHISPER_SOURCE_DIR:-}
 asr_model=${ZOOVOICE_ASR_MODEL_PATH:-}
+sounds_directory=${ZOOVOICE_SOUNDS_DIR:-}
 openai_api_key=${OPENAI_API_KEY:-}
 openai_secret_name=${ZOOVOICE_OPENAI_SECRET_NAME:-zoovoice-openai-api-key}
 smoke_audio=${ZOOVOICE_SMOKE_AUDIO_PATH:-}
@@ -51,11 +52,14 @@ fi
 
 required_value ZOOVOICE_WHISPER_SOURCE_DIR "$whisper_source"
 required_value ZOOVOICE_ASR_MODEL_PATH "$asr_model"
+required_value ZOOVOICE_SOUNDS_DIR "$sounds_directory"
 required_value ZOOVOICE_SMOKE_AUDIO_PATH "$smoke_audio"
 required_value OPENAI_API_KEY "$openai_api_key"
 [[ -d "$whisper_source" ]] || fail "ZOOVOICE_WHISPER_SOURCE_DIR must be a directory"
 [[ -f "$whisper_source/CMakeLists.txt" && -f "$whisper_source/LICENSE" ]] || fail "whisper.cpp source is incomplete"
 [[ -f "$asr_model" ]] || fail "ZOOVOICE_ASR_MODEL_PATH must be a regular file"
+[[ -d "$sounds_directory" ]] || fail "ZOOVOICE_SOUNDS_DIR must be a directory"
+[[ -f "$sounds_directory/manifest.json" ]] || fail "ZOOVOICE_SOUNDS_DIR must contain manifest.json"
 [[ -f "$smoke_audio" ]] || fail "ZOOVOICE_SMOKE_AUDIO_PATH must be a regular file"
 
 whisper_commit=$(git -C "$whisper_source" rev-parse HEAD 2>/dev/null) || fail "whisper.cpp commitを確認できませんでした。"
@@ -104,15 +108,16 @@ smoke_service_account="${smoke_account_name}@${project}.iam.gserviceaccount.com"
 if [[ "$mode" == "dry-run" ]]; then
   echo "[dry-run] copy verified whisper.cpp source excluding .git, build, models, and samples into a temporary context"
   echo "[dry-run] copy verified ASR model and notice into a temporary runtime context"
+  echo "[dry-run] copy the sound set from ZOOVOICE_SOUNDS_DIR into a temporary sounds context"
   echo "[dry-run] docker info"
-  echo "[dry-run] docker buildx build --platform linux/amd64 --load --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --tag <local-smoke-image> --file services/zoovoice/Dockerfile ."
+  echo "[dry-run] docker buildx build --platform linux/amd64 --load --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --build-context zoovoice_sounds=<temporary-context> --tag <local-smoke-image> --file services/zoovoice/Dockerfile ."
   echo "[dry-run] docker run --memory 2g --cpus 2 --env OPENAI_API_KEY=<redacted> --publish 127.0.0.1:${local_smoke_port}:8080 <local-smoke-image>"
   echo "[dry-run] curl local /healthz and intensity-only /compose fixture"
   echo "[dry-run] gcloud auth print-access-token --project $project --quiet > <temporary-secret>"
   echo "[dry-run] gcloud services enable run.googleapis.com artifactregistry.googleapis.com iamcredentials.googleapis.com --project $project --quiet"
   echo "[dry-run] gcloud artifacts repositories create $artifact_repository --repository-format docker --location $region --project $project --quiet (only when absent)"
   echo "[dry-run] gcloud auth configure-docker $registry_host --quiet"
-  echo "[dry-run] docker buildx build --platform linux/amd64 --push --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --tag $image_tag --file services/zoovoice/Dockerfile ."
+  echo "[dry-run] docker buildx build --platform linux/amd64 --push --build-context whisper_source=<temporary-context> --build-context zoovoice_runtime=<temporary-context> --build-context zoovoice_sounds=<temporary-context> --tag $image_tag --file services/zoovoice/Dockerfile ."
   echo "[dry-run] resolve pushed image digest and deploy IMAGE@sha256:<digest>"
   echo "[dry-run] gcloud run deploy $service --set-secrets OPENAI_API_KEY=${openai_secret_name}:latest --image <image-by-digest> --project $project --region $region --platform managed --ingress all --no-allow-unauthenticated --cpu 2 --memory 2Gi --port 8080 --timeout 90s --concurrency 1 --min-instances 0 --max-instances 2 --quiet"
   echo "[dry-run] create or reuse smoke service account <redacted>"
@@ -136,6 +141,7 @@ umask 077
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/zoovoice-cloud-run-deploy.XXXXXX")
 whisper_context="$temporary_directory/whisper-source"
 runtime_context="$temporary_directory/runtime"
+sounds_context="$temporary_directory/sounds"
 local_container_id=""
 cleanup() {
   if [[ -n "$local_container_id" ]]; then
@@ -145,7 +151,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$whisper_context" "$runtime_context"
+mkdir -p "$whisper_context" "$runtime_context" "$sounds_context"
 (
   cd "$whisper_source"
   tar \
@@ -158,11 +164,13 @@ mkdir -p "$whisper_context" "$runtime_context"
 ) | tar -xf - -C "$whisper_context"
 cp "$asr_model" "$runtime_context/ggml-small.bin"
 cp services/zoovoice/NOTICE-STABILITY-AI.md "$runtime_context/NOTICE-STABILITY-AI.md"
+(cd "$sounds_directory" && tar -cf - .) | tar -xf - -C "$sounds_context"
 
 build_arguments=(
   --platform linux/amd64
   --build-context "whisper_source=$whisper_context"
   --build-context "zoovoice_runtime=$runtime_context"
+  --build-context "zoovoice_sounds=$sounds_context"
   --build-arg "WHISPER_SOURCE_COMMIT=$whisper_commit"
   --build-arg "ZOOVOICE_ASR_MODEL_SHA256=$model_sha256"
   --file services/zoovoice/Dockerfile

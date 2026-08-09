@@ -1,28 +1,70 @@
-# Zoovoice 音源カタログの対象動物（44種）
+# Zoovoice の対象動物（46種）
 
-更新日: 2026-08-08
+この一覧の正本は実際の音声ファイルである。鳴き声セットの `manifest.json` から
+`python3 scripts/generate_animals_doc.py <sounds-dir>` で作り直す。手で書き換えない。
+音源のある動物だけが連想の候補になるので、動物を増やしたり減らしたりするときは
+音声ファイルの側を変え、この文書を作り直す。
 
-本ファイルは `CONCEPTS/ZOOVOICE/AUDIO.md` の取得方針に対する対象動物リストの正本である。選定基準は「声を聞けば分かる」または「言われればあの動物と分かる」代表種とする。カタログ実体 `services/zoovoice/tools/animal_sound_catalog.json` は本リストへ追随する。
+音声ファイルは全部で66本ある。1種に複数本ある動物は、合成のたびにその中から選ばれる。
 
-## 身近で即わかる（29種）
+## 一覧
 
-- 犬（dog）、猫（cat）、ニワトリ（rooster）、ヒヨコ（chick）
-- 牛（cow）、馬（horse）、ロバ（donkey）、豚（pig）、ヤギ（goat）、羊（sheep）
-- アヒル（duck）、ガチョウ（goose）
-- カラス（crow）、スズメ（sparrow）、ハト（pigeon）、ウグイス（bush-warbler）、フクロウ（owl）、カッコウ（cuckoo）、トンビ（black-kite）
-- ニホンザル（macaque）、ニホンジカ（sika-deer）
-- アマガエル（tree-frog）、ウシガエル（bullfrog）
-- スズムシ（suzumushi）、コオロギ（cricket）
-- アブラゼミ（aburazemi）、ミンミンゼミ（minminzemi）、ヒグラシ（higurashi）、ツクツクボウシ（tsukutsukuboushi）
+| 動物 | id | 音声の本数 |
+| --- | --- | --- |
+| トビ | `black-kite` | 1 |
+| イソヒヨドリ | `blue-rock-thrush` | 1 |
+| ヒグマ | `brown-bear` | 1 |
+| ウシガエル | `bullfrog` | 1 |
+| ウグイス | `bush-warbler` | 1 |
+| ノスリ | `buzzard` | 1 |
+| 猫 | `cat` | 11 |
+| チンパンジー | `chimpanzee` | 1 |
+| 牛 | `cow` | 1 |
+| コオロギ | `cricket` | 1 |
+| カラス | `crow` | 2 |
+| 犬 | `dog` | 6 |
+| イルカ | `dolphin` | 1 |
+| ロバ | `donkey` | 1 |
+| アヒル | `duck` | 1 |
+| ゾウ | `elephant` | 1 |
+| フラミンゴ | `flamingo` | 2 |
+| キツネ | `fox` | 1 |
+| カエル | `frog` | 1 |
+| ヤギ | `goat` | 1 |
+| ガチョウ | `goose` | 1 |
+| ゴリラ | `gorilla` | 1 |
+| サギ | `heron` | 2 |
+| ヒグラシ | `higurashi` | 1 |
+| 馬 | `horse` | 1 |
+| ハイエナ | `hyena` | 1 |
+| ライオン | `lion` | 1 |
+| カイツブリ | `little-grebe` | 3 |
+| カササギ | `magpie` | 1 |
+| マガモ | `mallard` | 1 |
+| ミンミンゼミ | `minminzemi` | 1 |
+| フクロウ | `owl` | 1 |
+| クジャク | `peacock` | 1 |
+| 豚 | `pig` | 1 |
+| ハト | `pigeon` | 1 |
+| ニワトリ | `rooster` | 1 |
+| アシカ | `sea-lion` | 1 |
+| 羊 | `sheep` | 1 |
+| スズメ | `sparrow` | 1 |
+| スズムシ | `suzumushi` | 1 |
+| ツバメ | `swallow` | 1 |
+| トラ | `tiger` | 1 |
+| シチメンチョウ | `turkey` | 1 |
+| セキレイ | `wagtail` | 1 |
+| クジラ | `whale` | 1 |
+| オオカミ | `wolf` | 1 |
 
-## 動物園・映像で有名（15種）
+## 音声の出どころ
 
-- ライオン（lion）、トラ（tiger）、オオカミ（wolf）、キツネ（fox）、クマ（brown-bear）
-- ゾウ（elephant）、ハイエナ（hyena）
-- チンパンジー（chimpanzee）、ゴリラ（gorilla）
-- クジャク（peacock）、ペンギン（penguin）
-- アシカ（sea-lion）、イルカ（dolphin）、クジラ（whale）、シャチ（orca）
+- Taira Komori 利用規約: 31本
+- Stability AI Community License: 14本
+- CC0 1.0: 11本
+- CC0: 8本
+- CC BY 4.0: 2本
 
-## リスト外の種
-
-上記以外の旧カタログ57種は、声を聞いても種を特定しにくいため落とした。復活や入れ替えは本ファイルを更新してから行う。
+出どころと採用した音声の SHA-256 は `manifest.json` に1本ずつ記録してある。
+素材そのものはリポジトリへ置かず、container image を作るときだけ取り込む。

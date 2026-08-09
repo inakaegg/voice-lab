@@ -18,7 +18,7 @@
 | `OPENAI_API_KEY` | 動物を連想する OpenAI API のキー | `.env` から読む |
 | `ZOOVOICE_WHISPER_COMMAND` | 文字起こしの実行ファイル | `/path/to/ext/pj/whisper.cpp/build/bin/whisper-cli` |
 | `ZOOVOICE_ASR_MODEL_PATH` | 文字起こしのモデル | `/path/to/ext/pj/whisper.cpp/models/ggml-small.bin` |
-| `ZOOVOICE_SOUNDS_DIR` | 鳴き声素材の置き場（省略時は同梱の26種） | `tmp1/final`（46種） |
+| `ZOOVOICE_SOUNDS_DIR` | 鳴き声素材の置き場（必須） | `tmp1/final`（46種） |
 
 ## 1. CLI で確かめる
 
@@ -44,7 +44,6 @@ cd /path/to/mo/services/zoovoice && go build -o /tmp/zoovoice-cli . && cd /path/
 ```sh
 cd /path/to/mo
 export OPENAI_API_KEY=$(grep -m1 '^OPENAI_API_KEY=' .env | cut -d= -f2- | tr -d '"')
-ZOOVOICE_ASSETS_DIR=services/zoovoice/assets \
 ZOOVOICE_SOUNDS_DIR=tmp1/final \
 /tmp/zoovoice-cli preview -text "夜中に遠吠えが聞こえた"
 ```
@@ -74,7 +73,6 @@ ffmpeg -y -v error -i /tmp/zv-in.aiff -ar 16000 -ac 1 /tmp/zv-in.wav
 
 export OPENAI_API_KEY=$(grep -m1 '^OPENAI_API_KEY=' .env | cut -d= -f2- | tr -d '"')
 export W=/path/to/ext/pj/whisper.cpp/build
-ZOOVOICE_ASSETS_DIR=services/zoovoice/assets \
 ZOOVOICE_SOUNDS_DIR=tmp1/final \
 ZOOVOICE_WHISPER_COMMAND=$W/bin/whisper-cli \
 ZOOVOICE_ASR_MODEL_PATH=/path/to/ext/pj/whisper.cpp/models/ggml-small.bin \
@@ -150,5 +148,5 @@ ZOOVOICE_DEV_PORT=8788 ZOOVOICE_API_PORT=8091 …（上と同じ環境変数）�
 
 - `go run` ではなくビルドした実行ファイルを使う。署名付きの `go` 経由だと `DYLD_LIBRARY_PATH` が
   whisper-cli へ渡らず、音声認識が起動しない。
-- `ZOOVOICE_SOUNDS_DIR` を外すと、リポジトリ同梱の26種（`services/zoovoice/assets/animal-sounds`）で動く。
+- `ZOOVOICE_SOUNDS_DIR` は必須。鳴き声素材はリポジトリに置かず、ここで場所を渡す（手元では `tmp1/final` の46種）。
 - 動物の連想は OpenAI API を呼ぶので、`OPENAI_API_KEY` が要る。テキスト入力ならこれだけで動く。
