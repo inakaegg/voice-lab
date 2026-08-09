@@ -246,15 +246,7 @@ wrangler secret put ADMIN_GOOGLE_EMAILS
 
 staging環境は廃止した。`wrangler.toml` の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryに無く、stagingへdeployする経路も設けない。検証はproductionとローカルWranglerで行う。
 
-Cloudflare側に残っていたstaging専用resourceの3件は2026-08-09に削除した。実行したコマンドは次のとおりで、削除後の一覧に3件とも残っていない。
-
-```sh
-npx wrangler delete --name voice-lab-staging --force
-npx wrangler d1 delete mo-speech-staging-db -y
-npx wrangler kv namespace delete --namespace-id 8eb39f43a18c4a9892dfafe1ae391a72 -y
-```
-
-R2 bucket `mo-speech-audio-preview` は削除しない。production設定の `preview_bucket_name` として今も使っており、staging専用ではない。
+Cloudflare側のstaging専用resource（Worker・D1・KV）も削除済みで、staging専用の資産は残っていない。R2 bucket `mo-speech-audio-preview` だけは残るが、これはproduction設定の `preview_bucket_name` であり、staging専用ではない。
 
 ## ログと監視
 

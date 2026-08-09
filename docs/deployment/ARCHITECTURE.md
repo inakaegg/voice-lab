@@ -56,7 +56,6 @@ Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選�
 
 - アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
 - 動物の自動連想とは、ASR本文から動物1種を自動で選ぶ処理を指す。
-- 根拠語とは、その選択に使ったASR本文中の語を指す。
 - 連想metadataとは、選ばれた動物と、その動物を選んだ理由の短文を指す。
 
 Workerは `ZOOVOICE_ENABLED=1` の配備だけでZoovoiceの公開routeとAPIを提供する。この値が未設定または `1` 以外の配備では、`/zoovoice` は404、`/api/zoovoice/animals` と `/api/zoovoice/compose` は503を返す。`GET /api/zoovoice/config` はflagの状態を伝えるため、無効な配備でも応答する。現在のproduction `wrangler.toml` は `ZOOVOICE_ENABLED="1"` を設定している。
@@ -93,7 +92,7 @@ ASRモデル、必要な外部command、LLMのAPIキーのいずれかが欠け�
 
 D1へ追加するのは `zoovoice_usage_counters` テーブルだけである。対応するmigrationは `migrations/0004_zoovoice_usage_counters.sql` であり、本番D1へ適用済みである。データ境界は [PRIVACY.md](PRIVACY.md) を参照する。
 
-ASR本文、根拠語、録音、生成音声は応答の生成に必要な間だけ扱う。これらの永続保存先は持たず、D1、R2、application logへ書かない。
+ASR本文、録音、生成音声は応答の生成に必要な間だけ扱う。これらの永続保存先は持たず、D1、R2、application logへ書かない。
 
 Cloud Runのregionは `us-central1` とする。サービス設定の正本はTerraform（`infra/gcp/`）で、次の値を宣言する。
 
@@ -133,7 +132,7 @@ Cloud Run側の反映はCloudflare Worker deployとは別の外部操作gateと�
 実環境smokeで確認済みなのは次の範囲である。
 
 - 公開 `GET /api/zoovoice/config` が200を返し、有効な状態とTurnstile必須を示すこと
-- 公開 `GET /api/zoovoice/animals` が200で音源カタログを返すこと（当時27種。この確認はビルド時の静的JSONを返していた頃のもの）
+- 公開 `GET /api/zoovoice/animals` が200で音源カタログを返すこと
 - 公開 `/zoovoice` とZoovoice用JS assetが200で配信されること
 - 実ブラウザでのUI表示、production Turnstile widgetの表示
 - private Cloud Runの `/animals` と実音声の `POST /compose` が認証付きrequestで200を返すこと
