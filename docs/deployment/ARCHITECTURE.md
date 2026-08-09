@@ -142,4 +142,4 @@ Worker経由の実 `POST /api/zoovoice/compose` は未確認である。この�
 
 ## 将来の分割
 
-productionでは単一Workerを正とする。staging用の `wrangler.toml` blockとdeploy workflowはrepositoryから削除済みで、現行deploy経路には含まない。過去に作成したremote staging Worker・D1・KV・R2は削除していない。stagingは製品の機能分割には数えない。
+productionでは単一Workerを正とする。staging環境は廃止したため、環境の分割は将来の分割候補に数えない。

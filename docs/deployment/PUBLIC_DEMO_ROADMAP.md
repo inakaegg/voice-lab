@@ -17,7 +17,7 @@
 - Gitleaksはcommit前、push前、全branchへのpush・pull requestで独立して実行する。
 - GitHub repositoryはpublicである。Secret scanning、Push Protection、Private vulnerability reportingを有効にしている。
 - Docker HubのRunPod image repositoryはprivateで、認証済みcold startを確認済み。
-- staging Workerは配備済みで、必須Worker secretと非課金smokeも確認済みである。Googleログインの実操作は未確認である。
+- staging環境は廃止した。検証はproductionとローカルWranglerで行う。
 
 ## 公開判断
 
@@ -35,7 +35,7 @@ Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオ�
 6. GitHub Homepageを現行のCloudflare公開URLへ更新した。
 7. GitHub repositoryをpublicにし、security設定と`main`のbranch protectionを有効にした。
 8. READMEへPC・スマートフォンの代表スクリーンショットを追加した。
-9. staging Workerをproductionと別resourceへ配備した。
+9. staging環境を廃止し、deploy経路をproduction Workerだけにした。
 10. Zoovoiceをproductionへ有効化し、公開route・公開Zoovoice API・Turnstile表示のsmokeを確認した。private Cloud Runへの認証付きrequestと認証なしrequestの拒否も確認した。
 
 ## 公開運用で継続すること
@@ -45,7 +45,6 @@ Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオ�
 3. GitHub security設定と`main`のbranch protectionを定期確認する。
 4. 匿名状態でrepositoryトップ、脆弱性報告導線、公開デモURLを確認する。
 5. deploy後smokeで公開画面、公開JSON API、匿名管理APIの拒否を確認する。
-6. stagingのGoogle OAuthリダイレクトURIとGoogleログインを実操作で確認する。
 
 ## 公開後に検討する改善
 

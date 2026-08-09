@@ -4,7 +4,7 @@
 
 ## 現在の判定
 
-CloudflareのSpeakLoopデモはproduction公開中である。GitHub repositoryもpublicであり、公開時のsecurity設定を有効にしている。staging Workerは必須secretを登録済みで、非課金smokeも成功している。
+CloudflareのSpeakLoopデモはproduction公開中である。GitHub repositoryもpublicであり、公開時のsecurity設定を有効にしている。staging環境は廃止した。
 
 ## 外部状態スナップショット（2026-07-23確認）
 
@@ -16,7 +16,7 @@ CloudflareのSpeakLoopデモはproduction公開中である。GitHub repository�
 - Docker Hub repository `dockerhubfd/mo-speech` はprivate（APIの `is_private=true`）。2026-07-17の確認では匿名pullを拒否した。
 - RunPodのDocker Hub read-only registry credentialは1件を登録済み。2026-07-17には強制scale-to-zero後の新しいworkerを起動し、private image revisionとの一致を確認した。Docker HubとRunPodの公開状態は別々に確認する。
 - Cloudflare production公開URLでの確認結果は次のとおり。`/`、`/speakloop`、`/privacy` は200。匿名の管理用status APIは401。公開sample APIは全featureが `null`。管理HTMLはGoogle OAuthへ302。旧routeは404。
-- Cloudflare stagingは2026-07-22（米国太平洋時間）に配備済み。Cloudflare APIの初回deployment記録は `2026-07-23T04:38:20Z` である。2026-07-23に必須Worker secret 7件を登録し、非課金smokeの全6項目が成功した。Googleログインの実操作は未確認である。
+- Cloudflare stagingは廃止した。repository側の設定と経路は無い。Cloudflare側に残るstaging専用のWorker `voice-lab-staging`・D1 `mo-speech-staging-db`・KV 1件の削除は未実施であり、[CLOUDFLARE.md](CLOUDFLARE.md)のコマンドでaccount所有者が削除する。
 - 2026-07-17に確認したCloudflare KVは全5件で、平文emailを含むlegacy quota keyは0件。削除前に確認したD1 audit 97件では、hash形式でないactor識別子またはdetail内の平文email候補は0件だった。
 
 この節は確認時点の観測値である。release前と外部設定変更後にGitHub・Cloudflare・Docker Hub・RunPodの実状態を再確認する。

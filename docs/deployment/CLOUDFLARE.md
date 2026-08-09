@@ -208,7 +208,7 @@ warmup jobまたはSeed-VC voice conversion jobが成功し、レスポンス上
 
 管理画面の単体Seed-VCとwarmupは同じGoogleセッションを使う。単体Seed-VCはjob作成から結果取得まで管理者だけに許可する。管理者メールに含まれるアカウントはquotaを消費しない。入力サイズ上限は維持する。管理者専用の別パスワード、別cookie、認証例外は設けない。
 
-現行deploy経路はproduction Workerだけである。staging用の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryから削除済みで、現在このrepoからstagingへ再deployする経路はない。過去に作成したremote staging Worker・D1・KV・R2は削除していない。
+staging環境は廃止した。deploy経路はproduction Workerだけである。
 
 ### production
 
@@ -240,11 +240,19 @@ wrangler secret put PUBLIC_SESSION_SECRET
 wrangler secret put ADMIN_GOOGLE_EMAILS
 ```
 
-### staging
+### staging（廃止）
 
-staging用の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryから削除済みである。このrepoから新たにstagingへdeployする経路は現在ない。
+staging環境は廃止した。`wrangler.toml` の `[env.staging]` blockと `Deploy Cloudflare Staging` workflowはrepositoryに無く、stagingへdeployする経路も設けない。検証はproductionとローカルWranglerで行う。
 
-過去にstaging Worker `voice-lab-staging` をこの経路でdeployし、2026-07-22（米国太平洋時間）に初回deploy、2026-07-23に必須Worker secretの登録とdeploy後smoke成功を確認した。Googleログインの実操作確認は当時未実施のまま残っている。remote staging Worker・D1・KV・R2は削除していない。staging構成を復元する場合は、削除前の設定をgit historyから確認する。
+Cloudflare側に残っているstaging専用resourceは次の3件で、以下のコマンドで削除する。D1の中身は戻せないため、実行はaccount所有者が行う。
+
+```sh
+npx wrangler delete --name voice-lab-staging
+npx wrangler d1 delete mo-speech-staging-db
+npx wrangler kv namespace delete --namespace-id 8eb39f43a18c4a9892dfafe1ae391a72
+```
+
+R2 bucket `mo-speech-audio-preview` は削除しない。production設定の `preview_bucket_name` として今も使っており、staging専用ではない。
 
 ## ログと監視
 
