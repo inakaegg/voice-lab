@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 type RecordOrbProps = {
   disabled: boolean;
   durationMilliseconds: number;
@@ -17,6 +19,7 @@ export function RecordOrb({
   onCancel,
   onPress,
 }: RecordOrbProps) {
+  const processingMilliseconds = useProcessingElapsed(isProcessing);
   const progressDegrees = Math.min(360, Math.max(0, durationMilliseconds / 60_000 * 360));
   const label = isRecording ? "録音を止める" : "録音する";
   const orbBackground = isProcessing
@@ -103,8 +106,29 @@ export function RecordOrb({
     <strong className={`text-xs ${isRecording ? "text-red-700 dark:text-red-300" : "text-foreground"}`}>
       {isRecording ? "録音中" : isProcessing ? "生成中" : "タップして話す"}
     </strong>
-    <span className="text-[0.68rem] tabular-nums text-muted-foreground">{formatMilliseconds(durationMilliseconds)}</span>
+    <span data-testid="zoovoice-orb-time" className="text-[0.68rem] tabular-nums text-muted-foreground">
+      {formatMilliseconds(isProcessing ? processingMilliseconds : durationMilliseconds)}
+    </span>
   </div>;
+}
+
+// 生成中は録音の長さではなく、生成を始めてからの経過時間を数える。
+// 録音の長さのままだと止まった数字に見えてしまうためである。
+function useProcessingElapsed(isProcessing: boolean): number {
+  const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
+
+  useEffect(() => {
+    if (!isProcessing) {
+      setElapsedMilliseconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedMilliseconds(0);
+    const interval = window.setInterval(() => setElapsedMilliseconds(Date.now() - startedAt), 200);
+    return () => window.clearInterval(interval);
+  }, [isProcessing]);
+
+  return elapsedMilliseconds;
 }
 
 function formatMilliseconds(milliseconds: number): string {

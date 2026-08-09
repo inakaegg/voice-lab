@@ -87,6 +87,21 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   }
 });
 
+test("zoovoice counts up the elapsed seconds while composing", async ({ page }) => {
+  await installZoovoiceApi(page, { composeDelayMilliseconds: 3_000 });
+  await page.goto("/zoovoice");
+
+  await page.getByRole("button", { name: "録音する" }).click();
+  await expect(page.getByText("REC", { exact: true })).toBeVisible();
+  await page.waitForTimeout(1_200);
+  await page.getByRole("button", { name: "録音を止める" }).click();
+
+  await expect(page.getByText("生成中", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("zoovoice-orb-time")).toHaveText("0:00");
+  await expect(page.getByTestId("zoovoice-orb-time")).toHaveText("0:02", { timeout: 4_000 });
+  await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
+});
+
 test("zoovoice shows the association reason for a far-fetched pick", async ({ page }, testInfo) => {
   await installZoovoiceApi(page, {
     transcript: "眠れない夜だった",
@@ -612,6 +627,7 @@ async function installZoovoiceApi(
     enabled?: boolean;
     siteKey?: string;
     composeFailures?: Array<{ status: number; code: string; message: string }>;
+    composeDelayMilliseconds?: number;
   } = {},
 ) {
   let composeRequest = 0;
@@ -641,7 +657,7 @@ async function installZoovoiceApi(
           body: JSON.stringify({ error: { code: failure.code, message: failure.message } }),
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await new Promise((resolve) => setTimeout(resolve, options.composeDelayMilliseconds ?? 120));
       const selectedAnimal = options.selectedAnimal || { id: "cat", label_ja: "猫" };
       return route.fulfill({
         status: 200,
