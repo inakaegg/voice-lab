@@ -103,6 +103,17 @@ def taira_key(stem: str) -> str:
     raise KeyError(f"未知の taira ファイル名: {stem}")
 
 
+def superseded_by_retrim(path: Path) -> bool:
+    """30秒の 24k 原音は、人が切り直した *_retrimmed.wav があればそちらに譲る。
+
+    自動トリムが鳴き声本体を切り落としたため 24k 原音を採用していた音源を、
+    retrim_long_finals.py で切り直した分。両方を採用しないための判定。
+    """
+    if not path.name.endswith("_24k.wav"):
+        return False
+    return path.with_name(path.name.replace("_24k.wav", "_retrimmed.wav")).exists()
+
+
 def wav_seconds(path: Path) -> float:
     with wave.open(str(path)) as w:
         return round(w.getnframes() / w.getframerate(), 3)
@@ -146,7 +157,9 @@ def collect() -> list[dict]:
         )
 
     for path in sorted(
-        p for p in (SRC / "animal-sound-freesound").rglob("*.wav") if p.is_file()
+        p
+        for p in (SRC / "animal-sound-freesound").rglob("*.wav")
+        if p.is_file() and not superseded_by_retrim(p)
     ):
         items.append(
             {
