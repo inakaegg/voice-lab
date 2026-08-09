@@ -1,5 +1,5 @@
 _ai/
-tmp/
+tmp*/
 logs/
 .worktrees/
 
