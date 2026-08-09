@@ -118,11 +118,11 @@ Cloud RunへGit repositoryを接続する自動buildは使わない。container 
 
 配備scriptの実行modeはdry-run、local-only verification、明示applyの3つとする。既定はdry-runであり、remote writeを行うのは明示applyだけである。scriptは実行前に、whisper.cpp commitとASRモデルのSHA-256を検査する。local smokeでは実際のLLMを呼ぶため、`OPENAI_API_KEY` の指定も必須とする。
 
-上のCPUとメモリはlocal-only verificationで実測済みである。linux/amd64のCloud Run相当imageをlocal buildし、CPU 2とメモリ2GiBの上限付きでnon-root起動して測った。image sizeは1,053,233,511 bytes、compose完了後の観測メモリは359.4 MiB / 2 GiB、`/healthz` がreadyになるまでは1,350 msである。2.044秒の日本語fixtureの合成は23,826 msだった。同じ確認で、ASRモデルがnon-rootから読めることも確かめた。
+local-only verificationは、linux/amd64のCloud Run相当imageをlocal buildする。CPU 2とメモリ2GiBの上限付きでnon-root起動し、`/healthz` と `/compose` を確認する。出力するのはimage size、使用メモリ、起動までの時間、compose時間である。
 
-`whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。この確認では、`whisper-cli` がwhisper/ggmlを共有libraryとして要求しないことを確かめた。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
+上のCPUとメモリは現在の設定値であり、現在のimageでの実測の裏付けは無い。以前ここに載せていた数値は、連想をLLMへ移す前のimageのものだったため削除した。当時のimageはConceptNet indexを同梱し、鳴き声素材を同梱していなかった。再測定にはlinux/amd64 emulationでのbuildと、課金の発生するLLM呼び出しが1回必要である。
 
-上の実測値は動物音の同梱前のimageに対するものである。連想をLLMへ移し、ConceptNet indexを外した現在のimageでは再測定していない。
+`whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
 
 この測定はApple Silicon上のlinux/amd64 emulationで行っている。合成時間はemulationの影響を受けるため、Cloud Runの実CPU上の値とは一致しない。上記の値はすべてこのlocal環境の実測であり、Cloud Run実機では未確認である。
 

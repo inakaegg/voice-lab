@@ -325,7 +325,8 @@ whisper.cppソースは、固定commitに加えて作業ツリーがcleanであ�
 applyはcleanなworking treeを必要とします。
 
 Cloud Runの配備契約は次のとおりです。
-CPUとメモリはlocal-only verificationで同じ上限を課して起動を確認しています。
+CPUとメモリはlocal-only verificationで同じ上限を課して起動できます。
+現在のimageでの実測値は未取得です（後述の「local-only verificationで測るもの」を参照）。
 この契約で、us-central1のprivate Cloud Run serviceへdeploy済みです。
 サービス設定（下記の資源上限・ingress・IAM・secret紐付け）の正本はTerraform（`infra/gcp/`）で、scriptが担当するのはimage buildとpush、digest指定での入れ替えだけです。
 
@@ -345,30 +346,23 @@ invoker権限はservice単位の`roles/run.invoker`だけを付与し、`allUser
 active developerのgcloudアカウントは、smoke専用service account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
 これらのIAMもTerraform（`infra/gcp/`）が管理します。scriptはapply時に`allUsers`が居ないことの確認だけを行います。
 
-### local-only verificationの実測
+### local-only verificationで測るもの
 
-`ZOOVOICE_LOCAL_VERIFY=1`で、linux/amd64のCloud Run相当imageをlocal buildし、CPU 2とメモリ2GiBの上限付きでnon-root起動しました。
-測定値は次のとおりです。
-
-| 項目 | 実測値 |
-| --- | --- |
-| image size | 1,053,233,511 bytes（約1.05 GB） |
-| compose完了後の観測メモリ | 359.4 MiB / 2 GiB |
-| `/healthz` がreadyになるまで | 1,350 ms |
-| 2.044秒の日本語fixtureの`/compose` | 23,826 ms |
-
-同じ確認で、ASRモデルがnon-rootの実行ユーザーから読めることも確認しました。
+`ZOOVOICE_LOCAL_VERIFY=1`は、linux/amd64のCloud Run相当imageをlocal buildします。
+CPU 2とメモリ2GiBの上限付きでnon-root起動し、`/healthz`がreadyになるまで待ちます。
+続けて日本語fixtureで`/compose`を1回実行し、返ってきた音声とmetaの形を検査します。
+最後にimage size、使用メモリ、起動までの時間、compose時間を標準出力へ出します。
 
 `whisper-cli`はDockerfileの`-DBUILD_SHARED_LIBS=OFF`により、whisper/ggmlのlibraryをstaticに組み込んでbuildしています。
-この確認では、`whisper-cli`がwhisper/ggmlを共有libraryとして要求しないことを確かめました。
 libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではありません。
 
-この測定はApple Silicon上のlinux/amd64 emulationで行っています。
-compose時間はemulationの影響を受けるため、Cloud Runの実CPU上の値とは一致しません。
-上の表の値はすべてこのlocal環境の実測であり、Cloud Run実機では未確認です。
+現在のimageの実測値はまだありません。
+以前ここに載せていた表は、連想をLLMへ移す前のimageの値だったため削除しました。
+当時のimageはConceptNet indexを同梱し、鳴き声素材を同梱していませんでした。
+上のCPU 2とメモリ2GiBは、現在は実測の裏付けを持たない設定値として読んでください。
 
-上の表は連想をLLMへ移す前、ConceptNet indexを同梱していた頃のimageの実測です。
-現在のimageでは再測定していません。
+再測定にはlinux/amd64 emulationでのimage buildと、課金の発生するLLM呼び出しが1回必要です。
+測定するかどうかは別途決めます。
 
 ### 外部操作の状況
 
@@ -418,4 +412,4 @@ ASRとLLM連想はテスト用のfakeへ差し替えます。
 このテストはWrangler localのWorker、Turnstileのtest key、native localのGoサービスを通し、録音から音声の再生とダウンロードまでをブラウザ操作で確認します。
 日本語ASR、動物の自動連想、音声合成を含む1回の通しが成功しています。
 所要時間はtest本体13.1秒、run全体13.7秒です。
-この経路はDocker imageではなくnative localのGoサービスを使うため、上のlocal-only verificationとは測定条件が異なります。
+この経路はDocker imageではなくnative localのGoサービスを使うため、local-only verificationとは測定条件が異なります。
