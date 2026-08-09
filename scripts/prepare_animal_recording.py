@@ -7,8 +7,9 @@
 2. 長い無音や複数の鳴き声が混ざった素材から、代表となる1区間を切り出す
    （CONCEPTS/ZOOVOICE/AUDIO.md のトリム加工仕様に従う）。切り出す位置を
    `--start` と `--end` で指定した場合は、その区間をそのまま使う。
-3. 音量を測り、-19 LUFS を上限に合わせる。true peak が -1.0 dBFS を超えないよう、
-   超える分はさらに下げる。
+3. 音量を測り、-19 LUFS へそろえる（小さい素材は持ち上げ、大きい素材は下げる）。
+   true peak が -1.0 dBFS を超える場合は、超える分だけさらに下げる。
+   合成した最終音声を -19 LUFS 以下に抑えるのは Go 側の役目であり、ここは素材の音量そろえである。
 
 使い方:
     python3 scripts/prepare_animal_recording.py <入力音声> <出力WAV> [--start 秒] [--end 秒]
@@ -116,7 +117,9 @@ def choose_segment(samples: np.ndarray) -> tuple[int, int]:
     if end - start > limit:
         chunk = samples[start:end]
         window = min(limit, len(chunk))
-        energy = np.convolve(np.square(chunk), np.ones(window), mode="valid")
+        # 累積和で窓ごとのエネルギーを求める。畳み込みだと長い素材で計算量が跳ね上がる。
+        cumulative = np.concatenate(([0.0], np.cumsum(chunk.astype(np.float64) ** 2)))
+        energy = cumulative[window:] - cumulative[:-window]
         offset = int(np.argmax(energy))
         start, end = start + offset, start + offset + window
     return start, end
