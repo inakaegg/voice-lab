@@ -104,6 +104,51 @@ func TestLoadSoundsCatalogRejectsMissingAndMismatchedAudio(t *testing.T) {
 	}
 }
 
+// gatewayの検査を通らないIDや表示名を起動時に通すと、公開requestが502で落ちる。
+func TestLoadSoundsCatalogRejectsIdentifiersTheGatewayWouldReject(t *testing.T) {
+	root := t.TempDir()
+	audio := []byte("dog")
+	if err := os.MkdirAll(filepath.Join(root, "dog"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dog", "dog-1.wav"), audio, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(audio)
+	manifestPath := filepath.Join(root, "manifest.json")
+	payload := func(id, label string) string {
+		return `{"schema_version":1,"animals":[{"id":` + strconv.Quote(id) + `,"label_ja":` + strconv.Quote(label) +
+			`,"files":[{"file":"dog/dog-1.wav","license":"CC0 1.0","sha256":` +
+			strconv.Quote(hex.EncodeToString(hash[:])) + `}]}]}`
+	}
+	for _, test := range []struct {
+		name, id, label string
+		accepted        bool
+	}{
+		{name: "lowercase id", id: "dog_2-a", label: "犬", accepted: true},
+		{name: "label at the limit", id: "dog", label: strings.Repeat("犬", 80), accepted: true},
+		{name: "empty id", id: "", label: "犬"},
+		{name: "uppercase id", id: "Dog", label: "犬"},
+		{name: "japanese id", id: "犬", label: "犬"},
+		{name: "id over the limit", id: strings.Repeat("d", 81), label: "犬"},
+		{name: "blank label", id: "dog", label: "   "},
+		{name: "label over the limit", id: "dog", label: strings.Repeat("犬", 81)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := os.WriteFile(manifestPath, []byte(payload(test.id, test.label)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadSoundsCatalog(root)
+			if test.accepted && err != nil {
+				t.Fatalf("loadSoundsCatalog rejected a valid entry: %v", err)
+			}
+			if !test.accepted && err == nil {
+				t.Fatal("loadSoundsCatalog accepted an entry the gateway would reject")
+			}
+		})
+	}
+}
+
 // 表示義務のあるライセンスで作者と配布ページが欠けた素材は、出典を出せないまま配信されてしまう。
 func TestLoadSoundsCatalogRequiresAttributionWhenTheLicenseNeedsCredit(t *testing.T) {
 	root := t.TempDir()

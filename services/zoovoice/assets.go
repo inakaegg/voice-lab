@@ -8,8 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 )
 
 type assetVariant struct {
@@ -65,8 +68,11 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 	}
 	animals := make([]availableAnimal, 0, len(manifest.Animals))
 	for _, animal := range manifest.Animals {
-		if animal.ID == "" || animal.LabelJA == "" || len(animal.Files) == 0 {
-			return nil, fmt.Errorf("sounds manifest %s has an entry without id, label or files", manifestPath)
+		if len(animal.Files) == 0 {
+			return nil, fmt.Errorf("sounds manifest %s has an entry without files", manifestPath)
+		}
+		if err := validateCatalogIdentity(animal.ID, animal.LabelJA); err != nil {
+			return nil, fmt.Errorf("sounds manifest %s: %w", manifestPath, err)
 		}
 		variants := make([]assetVariant, 0, len(animal.Files))
 		for _, file := range animal.Files {
@@ -94,6 +100,30 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 		animals = append(animals, availableAnimal{ID: animal.ID, LabelJA: animal.LabelJA, Variants: variants})
 	}
 	return newCatalog(animals), nil
+}
+
+// catalogIDPattern と catalogLabelMaxUnits は、Cloudflare Workerが動物一覧と合成結果に
+// 課している検査（isBoundedIdentifier / isBoundedString）と同じ条件である。
+// 上限はJavaScriptの String.length と同じUTF-16のcode unit数で数える。
+var catalogIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,80}$`)
+
+const catalogLabelMaxUnits = 80
+
+// validateCatalogIdentity は動物IDと表示名がgateway側の検査を通る形かを起動時に確かめる。
+// 差し替え可能な音源ディレクトリに条件外のIDや長い表示名が入ると、Workerが一覧ごと
+// 502で捨てたり、その動物が選ばれた回の合成結果だけを捨てたりする。
+// 公開requestが壊れる前に、起動時点で落とす。
+func validateCatalogIdentity(id, labelJA string) error {
+	if !catalogIDPattern.MatchString(id) {
+		return fmt.Errorf("entry id %q must match %s", id, catalogIDPattern)
+	}
+	if strings.TrimFunc(labelJA, unicode.IsSpace) == "" {
+		return fmt.Errorf("entry %q has an empty label", id)
+	}
+	if units := len(utf16.Encode([]rune(labelJA))); units > catalogLabelMaxUnits {
+		return fmt.Errorf("entry %q label is %d units long, limit is %d", id, units, catalogLabelMaxUnits)
+	}
+	return nil
 }
 
 // licenseNeedsCredit は、そのライセンスが出典表示を条件にしているかを返す。
