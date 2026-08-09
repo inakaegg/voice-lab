@@ -103,3 +103,48 @@ func TestLoadSoundsCatalogRejectsMissingAndMismatchedAudio(t *testing.T) {
 		})
 	}
 }
+
+// 表示義務のあるライセンスで作者と配布ページが欠けた素材は、出典を出せないまま配信されてしまう。
+func TestLoadSoundsCatalogRequiresAttributionWhenTheLicenseNeedsCredit(t *testing.T) {
+	root := t.TempDir()
+	animalDir := filepath.Join(root, "dog")
+	if err := os.MkdirAll(animalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	audio := []byte("dog")
+	if err := os.WriteFile(filepath.Join(animalDir, "dog-1.wav"), audio, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash := hex.EncodeToString(func() []byte { sum := sha256.Sum256(audio); return sum[:] }())
+	manifestPath := filepath.Join(root, "manifest.json")
+	payload := func(license, creator, sourceURL string) string {
+		return `{"schema_version":1,"animals":[{"id":"dog","label_ja":"犬","files":[{"file":"dog/dog-1.wav","license":` +
+			strconv.Quote(license) + `,"creator":` + strconv.Quote(creator) + `,"source_url":` +
+			strconv.Quote(sourceURL) + `,"sha256":` + strconv.Quote(hash) + `}]}]}`
+	}
+	for _, test := range []struct {
+		name                        string
+		license, creator, sourceURL string
+		accepted                    bool
+	}{
+		{name: "cc by without creator", license: "CC BY 4.0", sourceURL: "https://example.com/dog"},
+		{name: "cc by without source url", license: "CC BY 4.0", creator: "someone"},
+		{name: "taira komori without creator", license: "Taira Komori 利用規約", sourceURL: "https://example.com/dog"},
+		{name: "cc by with attribution", license: "CC BY 4.0", creator: "someone", sourceURL: "https://example.com/dog", accepted: true},
+		{name: "cc0 without attribution", license: "CC0 1.0", accepted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			content := payload(test.license, test.creator, test.sourceURL)
+			if err := os.WriteFile(manifestPath, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadSoundsCatalog(root)
+			if test.accepted && err != nil {
+				t.Fatalf("loadSoundsCatalog rejected a valid entry: %v", err)
+			}
+			if !test.accepted && err == nil {
+				t.Fatal("loadSoundsCatalog accepted an entry without the required credit")
+			}
+		})
+	}
+}

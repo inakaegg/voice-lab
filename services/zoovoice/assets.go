@@ -73,6 +73,11 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 			if file.License == "" {
 				return nil, fmt.Errorf("sounds manifest entry %q has a file without license", animal.ID)
 			}
+			if licenseNeedsCredit(file.License) && (file.Creator == "" || file.SourceURL == "") {
+				return nil, fmt.Errorf(
+					"sounds manifest entry %q has a %q file without creator or source_url", animal.ID, file.License,
+				)
+			}
 			path, err := verifiedAssetPath(soundsDir, animal.ID, file.File, file.SHA256)
 			if err != nil {
 				return nil, err
@@ -89,6 +94,15 @@ func loadSoundsCatalog(soundsDir string) (*assetCatalog, error) {
 		animals = append(animals, availableAnimal{ID: animal.ID, LabelJA: animal.LabelJA, Variants: variants})
 	}
 	return newCatalog(animals), nil
+}
+
+// licenseNeedsCredit は、そのライセンスが出典表示を条件にしているかを返す。
+// CC0とpublic domainは表示義務が無いので作者と配布ページが空でよい。
+// それ以外（CC BY・小森平の利用規約）は表示が利用条件なので、画面へ出す材料が
+// 欠けたまま配信されないよう起動時に落とす。
+func licenseNeedsCredit(license string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(license))
+	return !strings.HasPrefix(normalized, "CC0") && !strings.HasPrefix(normalized, "PUBLIC DOMAIN")
 }
 
 // verifiedAssetPath は manifest記載の相対パスを検証し、SHA-256の一致を確かめる。
