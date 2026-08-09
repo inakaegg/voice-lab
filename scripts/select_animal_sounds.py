@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
 import wave
 from pathlib import Path
@@ -20,6 +22,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "tmp1"
 OUT = SRC / "final"
+
+# taira-komori は素材セット単位の出典（配布zip同梱の read me.txt と
+# THIRD_PARTY_NOTICES.md「zoovoiceの鳴き声音源」を正とする）。
+TAIRA_CREDIT = {
+    "license": "Taira Komori 利用規約（商用・加工可、素材そのものの再配布・販売・直リンク禁止）",
+    "creator": "小森平（Taira Komori）",
+    "source_url": "https://taira-komori.net/",
+}
 
 # taira-komori のファイル名は動物キーを直接持たないため対応表を置く。
 TAIRA_KEYS = {
@@ -78,7 +88,6 @@ LABEL_JA = {
     "pigeon": "ハト",
     "rooster": "ニワトリ",
     "sea-lion": "アシカ",
-    "seal": "アザラシ",
     "sheep": "羊",
     "sparrow": "スズメ",
     "suzumushi": "スズムシ",
@@ -119,9 +128,66 @@ def wav_seconds(path: Path) -> float:
         return round(w.getnframes() / w.getframerate(), 3)
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_cc0_credits() -> dict[str, dict]:
+    """processed/cc0 の取得記録（Openverse経由freesound）を動物キーで引く。"""
+    credits: dict[str, dict] = {}
+    with (SRC / "processed" / "cc0-manifest.jsonl").open(encoding="utf-8") as f:
+        for line in f:
+            entry = json.loads(line)
+            credits[entry["animal"]] = {
+                "license": "CC0 1.0" if entry["license"] == "cc0" else entry["license"],
+                "creator": entry["creator"],
+                "source_url": entry["landing_url"],
+            }
+    return credits
+
+
+def load_animal_sounds_credits() -> dict[str, dict]:
+    """animal-sounds/manifest.json（旧27種セットの同梱manifest）を動物キーで引く。"""
+    manifest = json.loads((SRC / "animal-sounds" / "manifest.json").read_text(encoding="utf-8"))
+    return {
+        entry["id"]: {
+            "license": entry["license"],
+            "creator": entry["creator"],
+            "source_url": entry["landing_url"],
+        }
+        for entry in manifest["animals"]
+    }
+
+
+def load_freesound_credits() -> dict[tuple[str, int], dict]:
+    """trim-manifest.json を (動物キー, candidate番号) で引く。"""
+    manifest = json.loads(
+        (SRC / "animal-sound-freesound" / "trim-manifest.json").read_text(encoding="utf-8")
+    )
+    credits: dict[tuple[str, int], dict] = {}
+    for key, species in manifest["species"].items():
+        for candidate in species["candidates"]:
+            credits[(key, candidate["candidate"])] = {
+                "license": candidate["license"],
+                "creator": candidate["creator"],
+                "source_url": candidate["landing_url"],
+            }
+    return credits
+
+
+def freesound_candidate_number(path: Path) -> int:
+    match = re.match(r"candidate(\d+)_", path.name)
+    if not match:
+        raise KeyError(f"candidate番号を持たない freesound ファイル名: {path}")
+    return int(match.group(1))
+
+
 def collect() -> list[dict]:
     """(優先順位, 動物キー, 元ファイル, 出典情報) の候補を優先順に並べて返す。"""
     items: list[dict] = []
+    cc0_credits = load_cc0_credits()
+    animal_sounds_credits = load_animal_sounds_credits()
+    freesound_credits = load_freesound_credits()
 
     for path in sorted((SRC / "processed" / "taira-komori-selected").glob("*.wav")):
         items.append(
@@ -130,7 +196,7 @@ def collect() -> list[dict]:
                 "key": taira_key(path.stem),
                 "path": path,
                 "source": "processed/taira-komori-selected",
-                "license": "Taira Komori（配布元の利用条件に従う。要出典表記の確認）",
+                "credit": TAIRA_CREDIT,
             }
         )
 
@@ -141,7 +207,7 @@ def collect() -> list[dict]:
                 "key": path.stem,
                 "path": path,
                 "source": "processed/cc0",
-                "license": "CC0 1.0",
+                "credit": cc0_credits[path.stem],
             }
         )
 
@@ -152,7 +218,7 @@ def collect() -> list[dict]:
                 "key": path.stem,
                 "path": path,
                 "source": "animal-sounds",
-                "license": "animal-sounds/manifest.json の該当エントリ参照",
+                "credit": animal_sounds_credits[path.stem],
             }
         )
 
@@ -167,7 +233,7 @@ def collect() -> list[dict]:
                 "key": path.parent.name,
                 "path": path,
                 "source": "animal-sound-freesound",
-                "license": "freesound（CC0 または CC BY。trim-manifest.json 参照）",
+                "credit": freesound_credits[(path.parent.name, freesound_candidate_number(path))],
             }
         )
 
@@ -212,7 +278,10 @@ def main() -> None:
                 "file": f"{key}/{dest.name}",
                 "source_file": str(item["path"].relative_to(SRC)),
                 "source_set": item["source"],
-                "license": item["license"],
+                "license": item["credit"]["license"],
+                "creator": item["credit"]["creator"],
+                "source_url": item["credit"]["source_url"],
+                "sha256": file_sha256(dest),
                 "duration_seconds": wav_seconds(dest),
             }
         )
