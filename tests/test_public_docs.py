@@ -429,6 +429,7 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
 
     for relative_path in (
         "README.md",
+        "docs/UI_STYLE.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/speech-translation/SPEC.md",
@@ -437,6 +438,15 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         # β版バッジは廃止した。公開docsが「表示する」の記述へ戻らないよう固定する。
         assert "β版として公開" not in document, relative_path
         assert "`β版` バッジを表示する" not in document, relative_path
+        assert "β版表示" not in document, relative_path
+
+    for relative_path in (
+        "README.md",
+        "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
+        "docs/deployment/ARCHITECTURE.md",
+        "docs/speech-translation/SPEC.md",
+    ):
+        document = read_text(relative_path)
         assert "production未反映" in document, relative_path
         assert "merge後に" in document, relative_path
         assert "deploy後smoke" in document, relative_path
