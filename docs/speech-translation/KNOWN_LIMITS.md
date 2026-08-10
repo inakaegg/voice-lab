@@ -1,6 +1,6 @@
 # 既知の制限
 
-更新日: 2026-07-30
+更新日: 2026-08-10
 
 ## 公開デモと外部依存
 
@@ -8,6 +8,12 @@
 - RunPod Serverlessにはcontainer cold start、モデルロード、queue待ちがあり、初回生成の待ち時間は一定しない。
 - OpenAI APIとRunPodの障害、rate limit、仕様変更はローカルテストだけでは保証できない。公開前後に最小入力のスモーク確認が必要。
 - RunPod image buildとGPU smokeは費用が発生するため通常CIには含めず、手動workflowで実行する。
+
+## 費用の推定
+
+- SpeakLoopの比較・採点は、`MO_PRACTICE_LLM_PRICING_JSON` を設定したときだけ推定費用を記録する。
+- この推定はキャッシュへの新規書き込み（`cache_write_tokens`）の割増単価を加算しない。GPT-5.6系では初回入力の実額より小さく出る。
+- 単価は各モデルの公開価格に従うため、この文書には固定値を書かない。実額が要る場合は応答の `usage` を記録する。
 
 ## 声質変換の品質
 

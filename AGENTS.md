@@ -16,7 +16,6 @@
 - 合意事項、前提、要件はチャットではなく `docs/` に残す。
 - 実装前に [docs/speech-translation/SPEC.md](docs/speech-translation/SPEC.md) と [docs/speech-translation/OPEN_QUESTIONS.md](docs/speech-translation/OPEN_QUESTIONS.md) を確認する。
 - 見える公開UIを変更する前に [docs/UI_STYLE.md](docs/UI_STYLE.md) と [docs/deployment/FRONTEND_MIGRATION.md](docs/deployment/FRONTEND_MIGRATION.md) を確認する。
-- 未確定の内部メモ、AI会話ログ、調査途中のメモは `_ai/` に置く。
 - `_ai/` の計画ファイル（`*plan*.md`）の制約には出所ラベル（`[ユーザー指示]`・`[実データ確認済み]`・`[未確認の推測]`）を付ける。`_ai/` はgit管理外の下書き置き場なので、テストの検査対象にはしない。
 - 公開docsは、外部の読み手が理解する助けになる内容だけを書く。対象はプロダクトの価値と使い方、仕様と設計判断、検証方法である。
 - 公開docsに書く前に、「第三者がプロジェクトを理解し利用・評価・再現するために必要か」を確認する。答えが弱い内容は `_ai/` または `tmp/` に置く。
