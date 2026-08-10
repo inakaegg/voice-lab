@@ -145,11 +145,11 @@ test("Zoovoice keeps Turnstile mounted and stops recording into automatic compos
   assert.doesNotMatch(zoovoiceMain, /Stability AI/);
 });
 
-test("Zoovoice is labeled beta on the portal and its own page", () => {
-  assert.match(portalMain, /name:\s*"Zoovoice"[\s\S]{0,200}beta:\s*true/);
-  assert.doesNotMatch(portalMain, /name:\s*"SpeakLoop"[\s\S]{0,200}beta:\s*true/);
-  assert.match(portalMain, /β版/);
-  assert.match(zoovoiceMain, /badge="β版"/);
+test("no product carries a beta label any more", () => {
+  assert.doesNotMatch(portalMain, /β版/);
+  assert.doesNotMatch(portalMain, /beta/);
+  assert.doesNotMatch(zoovoiceMain, /badge=/);
+  // バッジの仕組み自体は共通部品に残す。次の新機能で使えるようにしておく。
   assert.match(sharedComponents, /badge\?:\s*string/);
 });
 

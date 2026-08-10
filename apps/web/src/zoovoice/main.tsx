@@ -320,7 +320,7 @@ function Zoovoice() {
   const isProcessing = state.phase === "processing";
 
   return <PageShell className="zoovoice-shell max-w-[1120px]">
-    <ProductHeader product="zoovoice" title="声から動物を連想する" badge="β版" />
+    <ProductHeader product="zoovoice" title="声から動物を連想する" />
     <section className="mb-3 flex flex-col gap-1.5 border-l-[3px] border-[var(--react-ink)] pl-4 sm:mb-4 sm:flex-row sm:items-end sm:justify-between sm:gap-5">
       <div>
         <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-[var(--react-muted)]">Record · Associate · Play</p>

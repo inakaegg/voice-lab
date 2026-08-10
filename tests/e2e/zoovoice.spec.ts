@@ -28,7 +28,7 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   await page.goto("/zoovoice");
 
   await expect(page.getByRole("heading", { name: "話すだけで、ぴったりの動物を。" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /声から動物を連想する/ }).getByText("β版", { exact: true })).toBeVisible();
+  await expect(page.getByText("β版", { exact: true })).toHaveCount(0);
   await expect(page.locator("[data-tech-note]")).toContainText("Google Cloud Run");
   await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
   await expect(page.getByText("不正利用防止の確認が完了しました。")).toHaveCount(0);

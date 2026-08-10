@@ -18,8 +18,7 @@ test("portal renders two equal products without overflow", async ({ page }, test
   await expect(nav).toHaveAttribute("data-zoovoice-state", "shown");
   await expect(page.getByRole("link", { name: /01.*SpeakLoop/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /02.*Zoovoice/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /02.*Zoovoice/ }).getByText("β版", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /01.*SpeakLoop/ }).getByText("β版", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("β版", { exact: true })).toHaveCount(0);
   await expect(page.locator("[data-tech-note]")).toBeVisible();
   await expect(page.locator("[data-tech-note]")).toContainText("Google Cloud Run");
   await assertNoHorizontalOverflow(page);

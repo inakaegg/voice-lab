@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-09
+更新日: 2026-08-10
 
 ## 構成
 
@@ -48,7 +48,7 @@ SpeakLoopの中国語比較はRunPodのjob IDをブラウザへ返し、Worker�
 
 ## Zoovoice
 
-Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。GoサービスはprivateなCloud Runへdeploy済みである。公開Workerも有効化varsを含めてdeploy済みである。公開UIのβ版表示は本branchで追加した変更であり、production未反映である。merge後にWorker deployとdeploy後smokeを実施する。
+Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。GoサービスはprivateなCloud Runへdeploy済みである。公開Workerも有効化varsを含めてdeploy済みである。公開UIからのβ版バッジ削除は本branchで追加した変更であり、production未反映である。merge後にWorker deployとdeploy後smokeを実施する。
 
 この節はリポジトリの現在のコードの構成を示す。日本語ASRと動物の自動連想はGoサービスへ実装済みである。Cloud Runとproduction Workerへのdeployは完了しており、有効化varsも `wrangler.toml` へ設定済みである。外部操作と実環境smokeの状況はこの節の末尾に示す。機能仕様は [SPEC.md](../speech-translation/SPEC.md) を正とする。
 

@@ -1,12 +1,12 @@
 # Voice Lab公開デモ・ポートフォリオ
 
-更新日: 2026-08-05
+更新日: 2026-08-10
 
 ## 現在地
 
-- Voice Labの公開ポートフォリオはSpeakLoopを中心とし、β版のZoovoiceを含む。
+- Voice Labの公開ポートフォリオはSpeakLoopを中心とし、Zoovoiceを含む。
 - Cloudflareのproduction公開環境にはmerge済みの版を反映済みである。公開routeは `/`・`/speakloop`・`/zoovoice`・`/privacy` とする。
-- 本branchのUI変更（Zoovoiceのβ表示・使用技術表示・SpeakLoopのGitHub導線）はproduction未反映である。merge後にdeployとdeploy後smokeを実施する。
+- 本branchのUI変更（β表示の削除・使用技術表示・SpeakLoopのGitHub導線）はproduction未反映である。merge後にdeployとdeploy後smokeを実施する。
 - 実装済みの機能: Google OAuth・機能別quota・入力上限・管理者認証・簡易監査ログ。
 - 利用者音声と生成音声はCloudflare版のVoice Lab履歴へ保存しない。
 - quota・監査情報はD1、短期jobとfallbackはKVを使い、平文emailを含む旧quota keyは削除済み。

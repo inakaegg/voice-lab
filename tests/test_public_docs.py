@@ -434,14 +434,16 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         "docs/speech-translation/SPEC.md",
     ):
         document = read_text(relative_path)
-        assert "β版" in document, relative_path
+        # β版バッジは廃止した。公開docsが「表示する」の記述へ戻らないよう固定する。
+        assert "β版として公開" not in document, relative_path
+        assert "`β版` バッジを表示する" not in document, relative_path
         assert "production未反映" in document, relative_path
         assert "merge後に" in document, relative_path
         assert "deploy後smoke" in document, relative_path
 
     readme = read_text("README.md")
     assert "production公開環境にはmerge済みの版を反映済み" in readme
-    assert "Zoovoiceのβ表示" in readme
+    assert "β表示の削除" in readme
     assert "使用技術表示" in readme
     assert "SpeakLoopのGitHub導線" in readme
     assert "production未反映" in readme
@@ -450,7 +452,7 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     assert "production公開環境にはmerge済みの版を反映済み" in roadmap
     assert "本branchのUI変更" in roadmap
-    assert "Zoovoiceのβ表示" in roadmap
+    assert "β表示の削除" in roadmap
     assert "使用技術表示" in roadmap
     assert "SpeakLoopのGitHub導線" in roadmap
     assert "production未反映" in roadmap
