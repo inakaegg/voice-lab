@@ -6,8 +6,8 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   exit 1
 fi
 
-# core.hooksPath 設定中はローカル hook が呼ばれないため、ここから委譲する
-# （concept-watch の CONCEPT.md セクション除去 hook 等）。gitleaks より前に実行する
+# core.hooksPath 設定中はローカル hook が呼ばれないため、ここから委譲する。
+# gitleaks より前に実行する
 h=$(git rev-parse --git-common-dir)/hooks/pre-commit; if [ -x "$h" ]; then "$h" "$@" || exit 1; fi
 
 exec gitleaks git --pre-commit --redact --staged --verbose

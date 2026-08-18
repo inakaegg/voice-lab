@@ -5,7 +5,7 @@
 
 1. ffmpeg で 24kHz・モノラル・16bit PCM へ揃える。
 2. 長い無音や複数の鳴き声が混ざった素材から、代表となる1区間を切り出す
-   （CONCEPTS/ZOOVOICE/AUDIO.md のトリム加工仕様に従う）。切り出す位置を
+   （docs/speech-translation/SPEC.md のトリム加工仕様に従う）。切り出す位置を
    `--start` と `--end` で指定した場合は、その区間をそのまま使う。
 3. 音量を測り、-19 LUFS へそろえる（小さい素材は持ち上げ、大きい素材は下げる）。
    true peak が -1.0 dBFS を超える場合は、超える分だけさらに下げる。
@@ -79,7 +79,7 @@ def loudness(path: Path) -> tuple[float, float]:
 
 
 def loud_segments(samples: np.ndarray) -> list[tuple[int, int]]:
-    """無音でない区間を、AUDIO.md のしきい値で拾って統合する。"""
+    """無音でない区間を、SPEC.md のトリム加工しきい値で拾って統合する。"""
     peak = float(np.abs(samples).max())
     if peak <= 0:
         return []

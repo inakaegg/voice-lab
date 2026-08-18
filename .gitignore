@@ -31,8 +31,6 @@ build/
 .wrangler/
 _ai_output/
 
-.concept-watch/*
-
 # Terraform: stateとproviderキャッシュはローカル専用（リモートbackend移行までの暫定）
 infra/**/.terraform/
 infra/**/terraform.tfstate
@@ -42,4 +40,3 @@ infra/**/*.tfplan
 # Terraform: 個人アカウント等の実値。変数の宣言だけをリポジトリに置く
 infra/**/*.tfvars
 infra/**/*.tfvars.json
-/CONCEPT.md
