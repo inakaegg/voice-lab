@@ -12,6 +12,12 @@ updates:
         update-types:
           - patch
           - minor
+    ignore:
+      # pinyin-pro 3.29系はモジュール読込時にsetTimeoutを呼び、Cloudflare Workersの
+      # グローバルスコープ制限でworkerd起動が失敗する（3.29.1で確認した回帰）。
+      # 修正版が出たらこのignoreを外して追従する。
+      - dependency-name: pinyin-pro
+        versions: ["3.29.x"]
 
   - package-ecosystem: pip
     directory: /
