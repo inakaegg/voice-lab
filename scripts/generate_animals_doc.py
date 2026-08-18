@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""鳴き声セットの manifest.json から CONCEPTS/ZOOVOICE/ANIMALS.md を作り直す。
+"""鳴き声セットの manifest.json から services/zoovoice/ANIMALS.md を作り直す。
 
 対象動物の正本は実際の音声ファイルであり、この文書は音声ファイルの一覧を
 人が読める形に写したものである。人が手で編集しない。
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-DOCUMENT_PATH = REPOSITORY_ROOT / "CONCEPTS" / "ZOOVOICE" / "ANIMALS.md"
+DOCUMENT_PATH = REPOSITORY_ROOT / "services" / "zoovoice" / "ANIMALS.md"
 
 
 def render(manifest: dict) -> str:

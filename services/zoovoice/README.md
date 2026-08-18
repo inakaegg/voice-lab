@@ -241,7 +241,7 @@ ASR本文と連想の理由は応答とプロセスのメモリ内だけで扱�
 
 鳴き声素材はリポジトリに置きません。実行時は `ZOOVOICE_SOUNDS_DIR`、image build時は
 `zoovoice_sounds` context で外から渡します。対象動物の正本は素材そのものであり、
-一覧は [CONCEPTS/ZOOVOICE/ANIMALS.md](../../CONCEPTS/ZOOVOICE/ANIMALS.md) に写してあります
+一覧は [ANIMALS.md](ANIMALS.md) に写してあります
 （`python3 scripts/generate_animals_doc.py <sounds-dir>` で作り直します）。
 
 素材の形式は 24kHz、mono、signed 16-bit PCM WAV です。

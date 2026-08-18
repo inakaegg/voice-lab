@@ -8,7 +8,7 @@
 build_real_recordings.py の出力先をこの下の real-recordings/ に置く。
 出力先の既定は <素材ディレクトリ>/final で、その下に <動物キー>/ と manifest.json を作る。
 
-優先順位（CONCEPT.md 指示欄「自然音声優先」）:
+優先順位（docs/speech-translation/SPEC.md の音源方針「実録音優先」に従う）:
   1. processed/ (taira-komori-selected と cc0。どちらも実録音で、全ファイル残す)
      と real-recordings/ (声の主を1本ずつ確かめた実録音)
   2. animal-sound-freesound/ (実録音)
