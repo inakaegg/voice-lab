@@ -326,7 +326,7 @@ RunPod handlerの契約:
 ## 保存とプライバシー
 
 - 実装上のデータフローと保持境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md)、利用者向け説明は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とする。
-- D1は48時間を超えた日次quotaと90日を超えた監査ログを日次削除し、利用者向けには実際の最大保持期間である3日未満、91日未満と案内する。署名cookieは30日、短期job snapshotは1時間、累計quotaは公開デモの運用中に保持する。
+- D1は48時間を超えた日次quotaと90日を超えた監査ログを日次削除し、利用者向けには実際の最大保持期間である3日未満、91日未満と案内する。署名cookieは30日、native session token（iOSアプリのログイン。[CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする）は最大1時間、短期job snapshotは1時間、累計quotaは公開デモの運用中に保持する。
 - API key・OAuth token・モデル・生成音声・録音サンプルをgit管理しない。
 - 公開デモのquota・audit識別子はGoogle emailをSHA-256 hash化してD1またはKV fallbackへ保存し、平文emailを新規のquota・audit履歴へ保存しない。
 - ログインしたemailと日時だけは `public_users` へ平文で保存し、管理者専用の `GET /api/public-users` と `/admin` の利用者一覧から読む。保持は公開デモの運用中に限る。quota・auditは引き続きhashだけを使う。

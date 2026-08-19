@@ -1,5 +1,6 @@
 import { pinyin } from "pinyin-pro";
 import { Converter } from "opencc-js/t2cn";
+import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import {
   lookupPracticeModelAsrCache,
   practiceModelAsrCacheKey,
@@ -35,8 +36,13 @@ const PUBLIC_USAGE_KV_PREFIX = "public-usage:";
 const PUBLIC_SESSION_COOKIE = "mo_public_session";
 const PUBLIC_OAUTH_STATE_COOKIE = "mo_google_oauth_state";
 const PUBLIC_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const NATIVE_SESSION_TTL_SECONDS = 60 * 60;
+const GOOGLE_ID_TOKEN_MAX_BYTES = 16 * 1024;
+const NATIVE_SESSION_REQUEST_MAX_BYTES = GOOGLE_ID_TOKEN_MAX_BYTES + 512;
 const PUBLIC_OAUTH_STATE_TTL_SECONDS = 60 * 10;
 const PUBLIC_ACCESS_FEATURES = ["speakloop", "voice_conversion"];
+const GOOGLE_ID_TOKEN_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
+const GOOGLE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
 const OPENAI_LANGUAGE_CODES = {
   auto: "",
   "id-ID": "id",
@@ -931,6 +937,123 @@ async function fetchGoogleUserInfo(env, accessToken) {
   return body;
 }
 
+async function handleNativeSessionRequest(request, env) {
+  const responseInit = { headers: { "Cache-Control": "no-store" } };
+  try {
+    if (!String(env.GOOGLE_CLIENT_ID || "").trim() || !publicSessionSecret(env)) {
+      throw httpError(503, "native session is not configured");
+    }
+    const text = await readRequestTextWithLimit(request, NATIVE_SESSION_REQUEST_MAX_BYTES);
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch (_error) {
+      throw httpError(400, "invalid native session request");
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.id_token !== "string" || !body.id_token) {
+      throw httpError(400, "invalid native session request");
+    }
+    const idToken = body.id_token;
+    if (new TextEncoder().encode(idToken).byteLength > GOOGLE_ID_TOKEN_MAX_BYTES) {
+      throw httpError(413, "Google ID token is too large");
+    }
+    const identity = await verifyNativeGoogleIdToken(idToken, env);
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = Math.min(now + NATIVE_SESSION_TTL_SECONDS, identity.exp);
+    if (expiresAt <= now) {
+      throw httpError(401, "invalid Google ID token");
+    }
+    const sessionToken = await createPublicSessionValue(env, { email: identity.email }, expiresAt);
+    const settings = await readPublicAccessSettings(env);
+    await recordPublicUserLogin(env, identity.email);
+    await appendPublicAuditEvent(env, {
+      action: "google_native_login_success",
+      email: identity.email,
+      is_admin: isPublicAdminEmail(identity.email, settings),
+      ...requestAuditContext(request),
+    });
+    return jsonResponse({
+      session_token: sessionToken,
+      token_type: "Bearer",
+      expires_at: expiresAt,
+    }, responseInit);
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    if (status >= 500) {
+      console.error("native session exchange failed", JSON.stringify({ status }));
+    }
+    const detail = status === 500 ? "native session exchange failed" : errorMessage(error);
+    return jsonResponse({ detail }, { ...responseInit, status });
+  }
+}
+
+async function verifyNativeGoogleIdToken(idToken, env) {
+  const audience = String(env.GOOGLE_CLIENT_ID || "").trim();
+  const keyResolver = env.__googleJwks || GOOGLE_JWKS;
+  let verified;
+  try {
+    verified = await jwtVerify(idToken, keyResolver, {
+      algorithms: ["RS256"],
+      issuer: GOOGLE_ID_TOKEN_ISSUERS,
+      audience,
+      requiredClaims: ["exp", "sub", "email", "email_verified"],
+    });
+  } catch (error) {
+    if (
+      error instanceof joseErrors.JWKSTimeout
+      || error instanceof joseErrors.JWKInvalid
+      || error instanceof joseErrors.JWKSInvalid
+      || error?.constructor === joseErrors.JOSEError
+      || !(error instanceof joseErrors.JOSEError)
+    ) {
+      throw httpError(503, "Google token verification is unavailable");
+    }
+    throw httpError(401, "invalid Google ID token");
+  }
+  const { payload, protectedHeader } = verified;
+  const email = normalizeEmail(payload.email);
+  if (
+    protectedHeader.alg !== "RS256"
+    || payload.aud !== audience
+    || !GOOGLE_ID_TOKEN_ISSUERS.includes(String(payload.iss || ""))
+    || typeof payload.sub !== "string"
+    || !payload.sub.trim()
+    || typeof payload.email !== "string"
+    || !email
+    || payload.email_verified !== true
+    || !Number.isFinite(payload.exp)
+  ) {
+    throw httpError(401, "invalid Google ID token");
+  }
+  return { sub: payload.sub, email, exp: Number(payload.exp) };
+}
+
+async function readRequestTextWithLimit(request, maxBytes) {
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw httpError(413, "request body is too large");
+  }
+  if (!request.body) {
+    return "";
+  }
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return text + decoder.decode();
+    }
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel("request body is too large");
+      throw httpError(413, "request body is too large");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
 function googleRedirectUri(url) {
   return new URL("/auth/google/callback", url.origin).toString();
 }
@@ -957,12 +1080,16 @@ function safePublicNextPath(next) {
 async function createPublicSessionCookie(env, user) {
   const now = Math.floor(Date.now() / 1000);
   const ttl = Number(env.PUBLIC_SESSION_TTL_SECONDS || PUBLIC_SESSION_TTL_SECONDS) || PUBLIC_SESSION_TTL_SECONDS;
-  const value = await createSignedPayload({
-    email: normalizeEmail(user.email),
-    iat: now,
-    exp: now + ttl,
-  }, publicSessionSecret(env));
+  const value = await createPublicSessionValue(env, user, now + ttl, now);
   return `${PUBLIC_SESSION_COOKIE}=${value}; Path=/; Max-Age=${ttl}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+async function createPublicSessionValue(env, user, expiresAt, issuedAt = Math.floor(Date.now() / 1000)) {
+  return createSignedPayload({
+    email: normalizeEmail(user.email),
+    iat: issuedAt,
+    exp: expiresAt,
+  }, publicSessionSecret(env));
 }
 
 async function readPublicSession(request, env) {
@@ -970,8 +1097,15 @@ async function readPublicSession(request, env) {
   if (!secret) {
     return null;
   }
-  const cookies = parseCookies(request.headers.get("cookie") || "");
-  const value = cookies.get(PUBLIC_SESSION_COOKIE);
+  const authorization = request.headers.get("Authorization");
+  let value = "";
+  if (authorization !== null) {
+    const match = /^Bearer[\t ]+([^\s,]+)[\t ]*$/i.exec(authorization);
+    value = match?.[1] || "";
+  } else {
+    const cookies = parseCookies(request.headers.get("cookie") || "");
+    value = cookies.get(PUBLIC_SESSION_COOKIE) || "";
+  }
   if (!value) {
     return null;
   }
@@ -1093,6 +1227,9 @@ async function handleApiRequest(request, env, ctx, url) {
   try {
     if (request.method === "OPTIONS") {
       return jsonResponse({}, { status: 204 });
+    }
+    if (request.method === "POST" && url.pathname === "/api/native-session") {
+      return handleNativeSessionRequest(request, env);
     }
     const zoovoiceResponse = await handleZoovoiceApiRequest(request, env, url);
     if (zoovoiceResponse) {
@@ -3719,7 +3856,7 @@ function jsonResponse(payload, init = {}) {
   headers.set("Content-Type", "application/json; charset=utf-8");
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   return new Response(init.status === 204 ? null : JSON.stringify(payload), { ...init, headers });
 }
 
