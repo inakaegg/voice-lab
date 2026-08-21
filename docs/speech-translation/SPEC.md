@@ -2,6 +2,16 @@
 
 更新日: 2026-08-18
 
+## English summary
+
+- Normative spec for the Voice Lab web app. The Japanese text below is the source of truth.
+- SpeakLoop is the main public feature. Zoovoice rides on the same Worker behind the `ZOOVOICE_ENABLED` flag.
+- Responsibilities are split across local FastAPI, the Cloudflare Worker, and private GPU backends. Secrets and GPU work stay out of the browser.
+- Defines the official routes and admin authentication (the same Google OAuth session as the public APIs).
+- SpeakLoop spec: recording and languages / repetition ASR / LLM comparison and scoring / heard-text diff / own-voice (Seed-VC) / async jobs.
+- Zoovoice spec: terms / sound catalog and licensing / flow / API responsibilities / Japanese ASR / loudness / LLM animal association.
+- Also fixes execution-environment responsibilities, storage and privacy boundaries, the UI contract, and verification.
+
 ## 目的
 
 Voice Labは、音声を使って発音を学ぶSpeakLoopを公開ポートフォリオの主機能とする。ローカルFastAPI、Cloudflare Worker、RunPod Serverlessの責任を分離し、秘密情報とGPU処理をブラウザへ置かない。この構成はproduction公開環境へ反映済みである。
@@ -15,8 +25,8 @@ Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成
 | `/` | Voice Labポータル | 公開 |
 | `/speakloop` | SpeakLoop | 公開 |
 | `/zoovoice` | Zoovoice | `ZOOVOICE_ENABLED=1` の配備だけ公開 |
-| `/admin` | 総合管理 | 管理者認証必須 |
-| `/speakloop/admin` | SpeakLoop管理 | 管理者認証必須 |
+| `/admin` | 総合管理 | 管理者認証が必須 |
+| `/speakloop/admin` | SpeakLoop管理 | 管理者認証が必須 |
 
 ### 管理者認証
 
@@ -207,7 +217,7 @@ Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない�
 - 応答は種IDと日本語ラベルと音源本数だけを載せ、音源のファイル名は載せない。
 - 自動連想が選べる動物は、この一覧にある音源付きの動物に限る。
 - `POST /api/zoovoice/compose` は録音とアニマル度を受け取る。通常の設定契約は `{intensity}` だけとし、動物と挿入位置はGo APIが決める。受け取った0〜100は5段階へ丸めてから使う。
-- Workerは合成前にTurnstile検証と利用上限判定を行う。
+- Workerは合成前にTurnstile検証と利用上限の判定をする。
 - ASR、動物連想、合成はGoogle Cloud Run上のGo APIが担当する。Workerはprivate Cloud Runへ認証付きで中継し、ブラウザからGo APIへ直接送る経路は持たない。
 
 ### 日本語ASR

@@ -2,6 +2,17 @@
 
 更新日: 2026-08-10
 
+## English summary
+
+- Known limits. The Japanese text below is the source of truth.
+- The public demo depends on OpenAI, RunPod, Google OAuth, and Cloudflare being correctly configured and available.
+- RunPod Serverless has cold starts, model loading, and queue waits; first-generation latency varies.
+- Cost estimates for LLM comparison omit cache-write surcharges, so they can undershoot the actual first-run cost.
+- Voice-conversion quality (Seed-VC) depends on the reference audio; its heavy dependencies make CPU-only execution impractical.
+- Chrome is the baseline; Safari, Firefox, and physical smartphones need continued verification.
+- The public Cloudflare deployment stores no user audio history; environments without D1/R2 bindings fall back to Workers KV.
+- Quotas prevent demo overuse; they are not a billing ledger or a durable workflow engine.
+
 ## 公開デモと外部依存
 
 - Cloudflare Worker・Googleログイン・feature別quota・管理者除外・簡易監査ログは実装済みである。ただし実運用はOpenAI、RunPod、Google OAuth、Cloudflareの各設定と稼働状態に依存する。

@@ -2,6 +2,17 @@
 
 更新日: 2026-08-10
 
+## English summary
+
+- Current deployment architecture. The Japanese text below is the source of truth.
+- One Cloudflare Worker serves SpeakLoop and Zoovoice. Static Assets deliver the UI; the Worker module handles auth, quotas, and API relay.
+- SpeakLoop GPU inference runs on RunPod Serverless. Zoovoice audio processing runs on a private Go service on Google Cloud Run (whisper.cpp / LLM animal association / ffmpeg).
+- Data boundaries: KV for settings and short-lived jobs / D1 for quotas, audit, and counters / R2 for sample blobs. Practice audio is not stored as history.
+- Cloud Run is private (IAM only). The Worker calls it with an ID token from a dedicated invoker service account holding only `roles/run.invoker`.
+- Terraform (`infra/cloudflare/`, `infra/gcp/`) is the source of truth for cloud resources. The Worker script and secrets are managed by wrangler and gcloud.
+- Deploy scripts default to dry-run; remote writes require explicit apply. Cloud Run images are pinned by digest.
+- One check remains manual: a real `POST /api/zoovoice/compose` through production Turnstile needs a human and is not yet verified end to end.
+
 ## 構成
 
 Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopとZoovoiceを配信する。UIはWorker Static Assets、認証・quota・API中継はWorker moduleが担当する。SpeakLoopのGPU推論はRunPod Serverless、Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスが担当する。この構成はproduction公開環境へ反映済みである。
