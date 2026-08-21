@@ -44,7 +44,7 @@ I am a Japanese speaker studying Chinese. Textbook sentences rarely match what I
 3. Record yourself saying that sentence
 4. Compare the model and your repetition, as text and as audio
 
-The model and your repetition are analyzed with timestamp-aligned ASR. The app shows the differences between what was heard and gives phrase-level playback positions. You can alternate playback of the full sentence or replay from the exact phrase you care about.
+The model and your repetition are analyzed with timestamp-aligned ASR. The app shows the heard-word differences between the model and your repetition, with phrase-level playback positions. You can alternate playback of the full sentence or replay from the exact phrase you care about.
 
 With the optional "own voice" mode, the app references only your own recording from the same submission. It converts the model voice into AI-generated audio close to your own voice quality. When conversion is not possible, practice continues with the standard model voice.
 

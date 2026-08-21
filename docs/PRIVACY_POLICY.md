@@ -5,12 +5,14 @@
 ## English summary
 
 - Privacy policy. The Japanese text below is the binding version; this summary is informational.
-- The Google login email is used for sign-in checks and usage limits. Usage records store a SHA-256 identifier instead of the raw address.
+- The Google login email is used for sign-in checks and usage limits. Usage-count records and operation logs store a SHA-256 identifier, not the raw address.
+- The logged-in email address and login time are also stored where the operator can review them, to check usage and investigate misuse.
 - Input audio and text are processed by external services (OpenAI, RunPod, Google Cloud Run) for generation and evaluation.
 - The public deployment does not store user input audio or generated audio as history. Short-lived result data may contain generated audio and expires in one hour.
 - Zoovoice sends a recording once, automatically, when recording stops; canceled or sub-0.5-second recordings are not sent.
 - Only the recognized text goes to OpenAI for animal association; the audio itself does not.
 - Retention: login cookie 30 days / short-lived results 1 hour / daily usage counts deleted within 3 days / operation logs about 90 days.
+- Cumulative usage counts (hashed IDs) and the login email and time records are kept while the public demo operates and deleted when it ends.
 - Transient processing and provider-side logs (Cloudflare, Google) are not guaranteed to be zero.
 
 ## 扱う情報と目的
