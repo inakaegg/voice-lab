@@ -3,57 +3,60 @@
 [![CI](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/ci.yml)
 [![Secret scan](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/inakaegg/voice-lab/actions/workflows/secret-scan.yml)
 
-Voice Labは、発音練習のSpeakLoopと動物鳴き声合成のZoovoiceを持つ音声Webアプリです。
+🇯🇵 日本語ドキュメント: [README.ja.md](README.ja.md)
 
-中心機能のSpeakLoopは、母語で話した「言いたいこと」を、中国語または英語の発音練習へつなげます。録音、学習文と模範音声の生成、復唱、聞き比べまでを1つの流れで進められます。
+Voice Lab is a voice web app with two features: SpeakLoop for pronunciation practice and Zoovoice for animal-call synthesis.
 
-Zoovoiceは、録音した日本語の発話から動物を1種自動で連想し、その鳴き声を発話のすき間へ重ねた音声を返します。
+SpeakLoop, the main feature, turns what you say in your native language into pronunciation practice in Chinese or English. Recording, generation of a study sentence and a model voice, repetition, and comparison all happen in one flow.
 
-**公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
+Zoovoice transcribes a free-form Japanese recording and picks one animal the utterance evokes. It returns your speech with that animal's call layered into the pauses.
 
-> **English:** Voice Lab is a voice web app with two features. SpeakLoop turns what you want to say in your native language into pronunciation practice in Chinese or English. It generates a model sentence and voice, records your repetition, and compares both with timestamp-aligned ASR. Zoovoice (beta) transcribes a Japanese recording, associates it with one animal, and layers that animal's call into the pauses of your speech. Built with React (view layer; the practice-screen state is being migrated from a vanilla JS controller), Cloudflare Workers (auth / quota / API gateway), FastAPI, a private RunPod Serverless GPU backend, and a private Go service on Google Cloud Run (whisper.cpp ASR / LLM-based animal association / ffmpeg mixing). CI runs Python, Worker, Go, and browser tests plus E2E on every pull request.
+**Live demo:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
-## 画面
+## Screens
 
-| ポータル | SpeakLoop練習画面 |
+| Portal | SpeakLoop practice screen |
 | --- | --- |
-| ![Voice Labポータル](docs/images/portal-1440.png) | ![SpeakLoop練習画面](docs/images/speakloop-1440.png) |
+| ![Voice Lab portal](docs/images/portal-1440.png) | ![SpeakLoop practice screen](docs/images/speakloop-1440.png) |
 
+## Demo videos
 
-## デモ動画
+A roughly two-minute demo recorded on a real smartphone. It generates a model voice in "your own voice" from what you said, then compares the practice result as text and audio.
 
-スマートフォン実機での操作を収録した約2分のデモです。話した内容から「自分の声」によるお手本音声を生成し、練習結果を音声と文字で比較します。
-
-**英語**
+**English**
 
 https://github.com/user-attachments/assets/018a157d-28b2-45fd-bac4-ab462f4cee9d
 
-**中国語**
+**Chinese**
 
 https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
-## できること
+## Why I built it
 
-### SpeakLoop — 発音練習
+I am a Japanese speaker studying Chinese. Textbook sentences rarely match what I actually want to say, so I built a practice loop that starts from my own words instead. I use it for my own study, and it doubles as a portfolio piece showing how I design, test, and operate a product end to end.
 
-1. 母語で言いたい内容を録音する
-2. 学習言語の文と模範音声を生成する
-3. その文を発音して録音する
-4. お手本と復唱を文字・音声の両方で比較する
+## What it does
 
-お手本と復唱はtimestamp付きASRで解析し、聞こえた言葉の差分とフレーズ単位の再生位置を表示します。全文の交互再生に加え、気になるフレーズから聞き直せます。
+### SpeakLoop — pronunciation practice
 
-任意の「自分の声」を使うと、同じ送信で最初に録音した本人の音声だけを参照し、模範音声を本人の声質に近づけたAI生成音声へ変換します。変換できない場合も通常のお手本音声で練習を続けられます。
+1. Record what you want to say in your native language
+2. Generate a sentence and a model voice in the language you are learning
+3. Record yourself saying that sentence
+4. Compare the model and your repetition, as text and as audio
 
-### Zoovoice — 動物鳴き声合成
+The model and your repetition are analyzed with timestamp-aligned ASR. The app shows the heard-word differences between the model and your repetition, with phrase-level playback positions. You can alternate playback of the full sentence or replay from the exact phrase you care about.
 
-1. 日本語で自由に話して録音する
-2. 発話内容から動物を1種自動で連想する
-3. 鳴き声を発話のすき間へ重ねた音声を再生・ダウンロードする
+With the optional "own voice" mode, the app references only your own recording from the same submission. It converts the model voice into AI-generated audio close to your own voice quality. When conversion is not possible, practice continues with the standard model voice.
 
-日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はLLM（OpenAI API）が音源のある動物から1種を選びます。同梱する鳴き声はすべて実録音で、無償で商用利用できるものだけを使っています。
+### Zoovoice — animal-call synthesis
 
-## 構成
+1. Record free-form Japanese speech
+2. One animal is automatically associated from what you said
+3. Play or download your speech with the animal's call layered into the pauses
+
+Japanese ASR, animal association, and synthesis run on a private Go service on Google Cloud Run. An LLM (OpenAI API) picks one animal from those with available recordings. All bundled calls are real recordings licensed for free commercial use.
+
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -65,17 +68,27 @@ flowchart LR
     Worker --> D1[D1\nQuota / Audit]
 ```
 
-- ブラウザへOpenAIやRunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
-- 公開版はGoogleログイン、機能別quota、入力上限、簡易監査ログをCloudflare Workerで処理します。
-- 中国語の発音比較と任意の声質変換は、privateなRunPod Serverlessへ必要な音声だけを一時送信します。
-- Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービス（whisper.cpp・OpenAI API・ffmpeg）が担当し、WorkerがGoogle IAM認証付きで中継します。
-- ZoovoiceはCloudflare Turnstileで自動アクセスを抑止し、共通の利用上限をD1で管理します。
-- Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しません。
-- GPU課金が必要な確認と、fake modelで検証できるrequest・job・error処理を分離しています。
+- API keys for OpenAI and RunPod never reach the browser. They live in Worker secrets or server-side environment variables.
+- The public deployment handles Google login, per-feature quotas, input limits, and a simple audit log in the Cloudflare Worker.
+- Chinese pronunciation comparison and optional voice conversion temporarily send only the required audio to a private RunPod Serverless backend.
+- Zoovoice audio processing runs on a private Go service on Google Cloud Run (whisper.cpp, OpenAI API, ffmpeg). The Worker relays to it with Google IAM authentication.
+- Zoovoice uses Cloudflare Turnstile against automated access, with shared usage limits managed in D1.
+- The public Cloudflare deployment does not store user input audio or generated audio as Voice Lab history.
+- Checks that require GPU billing are separated from the request, job, and error handling that a fake model can verify.
 
-## ローカルセットアップ
+## Three engineering decisions
 
-Python 3.11以上とNode.js 22.18以上を使います。UI/APIとfake providerを動かす最小構成は次のとおりです。
+The parts I would walk through first in a code review.
+
+**1. A fake provider keeps GPUs and billing out of tests.** The speech pipeline sits behind a provider interface. Local tests and CI run against a fake provider that returns fixed responses independent of input. Request handling, job state, and error paths are verified without a GPU or an API key. GPU-dependent smoke checks run manually with minimal input, only after the model-independent tests pass.
+
+**2. Secrets scanning runs at three independent stages.** Gitleaks runs at pre-commit on staged diffs and at pre-push on the entire Git history. GitHub Actions re-scans independently on every push and pull request. A hook skipped on one machine still gets caught before anything ships.
+
+**3. The Worker is the privacy boundary.** The browser never receives OpenAI or RunPod API keys. The Cloudflare Worker holds all credentials, enforces auth and quotas, and forwards only the audio a request needs to the private backends. The public deployment keeps no history of user audio.
+
+## Local setup
+
+Use Python 3.11+ and Node.js 22.18+. The minimal setup runs the UI/API with the fake provider:
 
 ```sh
 python3 -m pip install -e ".[dev]"
@@ -83,35 +96,35 @@ npm ci
 PYTHONPATH=src python3 -m uvicorn mo_speech.api:app --host 127.0.0.1 --port 8000
 ```
 
-ブラウザで `http://127.0.0.1:8000/` を開きます。fake providerはUI/API検証用で、入力内容に依存しない固定応答を返します。
+Open `http://127.0.0.1:8000/` in a browser. The fake provider is for UI/API verification and returns fixed responses independent of input.
 
-用途に応じた追加依存:
+Optional extras by purpose:
 
 ```sh
-# ローカルASR・翻訳
+# Local ASR / translation
 python3 -m pip install -e ".[dev,local]"
 
-# OpenAI API経路
+# OpenAI API path
 python3 -m pip install -e ".[dev,openai]"
 cp .env.example .env
 ```
 
-モデル、生成音声、API key、`.env` はgit管理しません。声質変換の依存とモデル配置は [VOICE_CLONE.md](docs/speech-translation/VOICE_CLONE.md) を参照してください。
+Models, generated audio, API keys, and `.env` stay out of Git. For voice-conversion dependencies and model placement, see [VOICE_CLONE.md](docs/speech-translation/VOICE_CLONE.md).
 
-ZoovoiceのローカルUIとAPIはFastAPIを使わず、Wrangler localのWorkerとGoサービスで確認します。手順は [services/zoovoice/README.md](services/zoovoice/README.md) を参照してください。
+The local Zoovoice UI and API do not use FastAPI. Verify them with the Wrangler local Worker and the Go service. See [services/zoovoice/README.md](services/zoovoice/README.md).
 
-## 検証
+## Verification
 
-各worktreeでGitleaksのGit hookを有効にします。
+Enable the gitleaks Git hooks in each worktree:
 
 ```sh
 brew install gitleaks
 ./scripts/install_git_hooks.sh
 ```
 
-`pre-commit`はstaged差分、`pre-push`はGit履歴全体を検査します。全branchへのpushとpull requestでもGitHub Actionsが独立して再検査します。
+`pre-commit` scans staged diffs; `pre-push` scans the entire Git history. GitHub Actions re-scans independently on pushes to all branches and on pull requests.
 
-通常の検証:
+Routine checks:
 
 ```sh
 gitleaks git --redact --log-opts='--all' .
@@ -124,63 +137,63 @@ npm run test:e2e
 cd services/zoovoice && go vet ./... && go test ./...
 ```
 
-RunPod image buildとGPU smokeは費用・実行時間が大きいため、通常CIには含めません。モデル非依存テストが通った後、必要な場合だけ最小入力で手動実行します。
+RunPod image builds and GPU smoke checks cost real money and take time, so routine CI excludes them. They run manually with minimal input, only when needed and after the model-independent tests pass.
 
-## 公開デモ
+## Public demo
 
-Cloudflare Workerは `/` をポータル、`/speakloop` を発音練習画面、`/zoovoice` を動物鳴き声合成画面として配信します。production公開環境にはmerge済みの版を反映済みで、上記routeは公開中です。本branchで追加したUI変更（β表示の削除・使用技術表示・SpeakLoopのGitHub導線）はproduction未反映です。merge後にdeployとdeploy後smokeを実施します。
+The Cloudflare Worker serves `/` as the portal, `/speakloop` as the practice screen, and `/zoovoice` as the animal-call screen. The production environment reflects the merged version and the routes above are live. UI changes added on this branch (beta-label removal, tech-stack display, and the SpeakLoop GitHub link) are not yet in production. Deploy and post-deploy smoke checks follow the merge.
 
-音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。個人情報や機密情報を含む音声は入力しないでください。詳しくは [プライバシーポリシー](docs/PRIVACY_POLICY.md) を確認してください。
+Audio is processed by external services for generation and evaluation, and is not stored as Voice Lab history. Do not record audio containing personal or confidential information. Details: [privacy policy](docs/PRIVACY_POLICY.md).
 
-## 既知の制限
+## Known limits
 
-- RunPod Serverlessはcold start、queue、GPU利用料金の影響を受けます。
-- ZoovoiceのCloud Run合成は、cold startとASR・合成の処理時間の影響を受けます。
-- ASR結果とフレーズ位置は変動します。要因は言語、発音、録音品質、providerの出力です。
-- D1/KV bindingがないローカル・preview環境ではfallbackを使うため、productionと保存先が異なります。
-- Safari、Firefox、スマートフォン実機の録音形式は継続確認が必要です。
+- RunPod Serverless is subject to cold starts, queuing, and GPU pricing.
+- Zoovoice synthesis on Cloud Run is subject to cold starts and ASR/synthesis processing time.
+- ASR results and phrase positions vary with language, pronunciation, recording quality, and provider output.
+- Local and preview environments without D1/KV bindings use fallbacks, so storage differs from production.
+- Recording formats on Safari, Firefox, and physical smartphones need continued verification.
 
-詳細は [KNOWN_LIMITS.md](docs/speech-translation/KNOWN_LIMITS.md) を参照してください。
+Details: [KNOWN_LIMITS.md](docs/speech-translation/KNOWN_LIMITS.md).
 
-## 開発体制
+## How it is developed
 
-個人開発です。実装にはAIコーディングエージェント（Claude Code、Codex）を利用しています。
+This is a solo project. Implementation uses AI coding agents (Claude Code and Codex).
 
-作者が行うこと:
+The author:
 
-- 要件と仕様の決定、設計判断
-- 変更ごとのレビューと、指摘の取捨選択
-- 実データでの検証と、公開範囲・費用の判断
+- decides requirements, specifications, and design
+- reviews every change and triages the findings
+- verifies with real data and makes publication and cost decisions
 
-エージェントが行うこと:
+The agents:
 
-- 設計案の提示、コードとテストの実装
-- 実装とは別contextでのレビュー
+- propose designs, implement code and tests
+- review implementations in a context separate from the implementer
 
-品質は自動テスト、CI、secret scan、文書lint、別モデルによる相互レビューで担保します。運用ルールは [AGENTS.md](AGENTS.md) を参照してください。
+Quality relies on automated tests and CI, secret scanning, docs linting, and cross-review between different models. Operating rules: [AGENTS.md](AGENTS.md).
 
-## セキュリティとライセンス
+## Security and license
 
-脆弱性の連絡方法は [SECURITY.md](SECURITY.md) を参照してください。公開Issueへ秘密情報や個人情報を投稿しないでください。
+For vulnerability reports, see [SECURITY.md](SECURITY.md). Do not post secrets or personal information in public issues.
 
-Voice Lab本体にはオープンソースライセンスを付与していません。ソースコードの閲覧・評価を目的とするポートフォリオ公開を想定していますが、複製、改変、再配布などの許可は [LICENSE](LICENSE) に明記した範囲に限ります。評価・レビュー目的のcloneとローカル実行は、LICENSEの限定的な例外として許可しています。
+Voice Lab itself is not under an open-source license. The repository is public as a portfolio for reading and evaluating the source code. Copying, modification, and redistribution are allowed only within the scope stated in [LICENSE](LICENSE). Cloning and running locally for evaluation and review are permitted as a limited exception in the LICENSE.
 
-依存ライブラリ、モデル、第三者実装にはそれぞれのライセンスと利用条件が適用されます。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
+Dependencies, models, and third-party implementations keep their own licenses and terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## 設計解説
+## Design write-ups
 
-比較再生の再生位置をどう決めているかと、その設計を選んだ理由を図解付きで公開しています。仕様の正本は [全体仕様](docs/speech-translation/SPEC.md) です。
+How comparison playback chooses its playback positions, and why that design was chosen, is published with diagrams. The normative spec is [SPEC.md](docs/speech-translation/SPEC.md) (Japanese, English summary at the top).
 
-- [比較再生: 再生位置の決め方とその理由](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 何が壊れやすいか、なぜこの形にしたか、4つの役割、評価の数値とその限界
+- [Comparison playback: how positions are chosen and why](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) (Japanese). Covers what breaks easily, why this shape, the four roles, and the evaluation numbers with their limits.
 
-## ドキュメント
+## Documentation
 
-詳細文書の入口は [ドキュメント案内](docs/README.md) です。SpeakLoopの仕様、画面、実行経路、provider、公開運用という目的別に全文書を辿れます。
+The documentation index is [docs/README.md](docs/README.md) (Japanese). It organizes all documents by purpose, from the SpeakLoop spec and screens to execution paths, providers, and public operation.
 
-よく参照する文書:
+Frequently used documents (Japanese; the ones marked below carry an English summary at the top):
 
-- [CLI一覧](CLI.md) — 手元で機能を確かめるコマンドと出力例
-- [全体仕様](docs/speech-translation/SPEC.md)
-- [現在のデプロイ構成](docs/deployment/ARCHITECTURE.md)
-- [既知の制限](docs/speech-translation/KNOWN_LIMITS.md)
-- [プライバシーポリシー](docs/PRIVACY_POLICY.md)
+- [CLI.md](CLI.md) — commands to try each feature locally, with example output
+- [Full spec](docs/speech-translation/SPEC.md) — English summary included
+- [Deployment architecture](docs/deployment/ARCHITECTURE.md) — English summary included
+- [Known limits](docs/speech-translation/KNOWN_LIMITS.md) — English summary included
+- [Privacy policy](docs/PRIVACY_POLICY.md) — English summary included
