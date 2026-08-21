@@ -331,11 +331,15 @@ def test_repository_rights_and_third_party_boundaries_are_explicit() -> None:
     license_notice = read_text("LICENSE")
     notices = read_text("THIRD_PARTY_NOTICES.md")
     readme = read_text("README.md")
+    readme_ja = read_text("README.ja.md")
 
     assert "All rights reserved" in license_notice
     assert "No license is granted" in license_notice
-    assert "オープンソースライセンスを付与していません" in readme
+    # READMEは英語が正、日本語はREADME.ja.md。権利境界の明示は両言語で固定する。
+    assert "not under an open-source license" in readme
+    assert "オープンソースライセンスを付与していません" in readme_ja
     assert "THIRD_PARTY_NOTICES.md" in readme
+    assert "THIRD_PARTY_NOTICES.md" in readme_ja
     assert "Seed-VC" in notices
     assert "GPL-3.0" in notices
     assert "bundled dependency licenses" in notices
@@ -429,6 +433,7 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
 
     for relative_path in (
         "README.md",
+        "README.ja.md",
         "docs/UI_STYLE.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
@@ -440,8 +445,9 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "`β版` バッジを表示する" not in document, relative_path
         assert "β版表示" not in document, relative_path
 
+    # 日本語文書はJA定型句で固定する。英語READMEは後続のEN定型句で同じ事実を固定する。
     for relative_path in (
-        "README.md",
+        "README.ja.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/speech-translation/SPEC.md",
@@ -452,12 +458,20 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "deploy後smoke" in document, relative_path
 
     readme = read_text("README.md")
-    assert "production公開環境にはmerge済みの版を反映済み" in readme
-    assert "β表示の削除" in readme
-    assert "使用技術表示" in readme
-    assert "SpeakLoopのGitHub導線" in readme
-    assert "production未反映" in readme
-    assert "merge後にdeployとdeploy後smokeを実施します" in readme
+    assert "The production environment reflects the merged version" in readme
+    assert "beta-label removal" in readme
+    assert "tech-stack display" in readme
+    assert "SpeakLoop GitHub link" in readme
+    assert "not yet in production" in readme
+    assert "post-deploy smoke checks follow the merge" in readme
+
+    readme_ja = read_text("README.ja.md")
+    assert "production公開環境にはmerge済みの版を反映済み" in readme_ja
+    assert "β表示の削除" in readme_ja
+    assert "使用技術表示" in readme_ja
+    assert "SpeakLoopのGitHub導線" in readme_ja
+    assert "production未反映" in readme_ja
+    assert "merge後にdeployとdeploy後smokeを実施します" in readme_ja
 
     roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
     assert "production公開環境にはmerge済みの版を反映済み" in roadmap
