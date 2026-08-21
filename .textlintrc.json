@@ -1,0 +1,19 @@
+{
+  "filters": {
+    "comments": true
+  },
+  "rules": {
+    "preset-ja-technical-writing": {
+      "sentence-length": {
+        "max": 150
+      },
+      "ja-no-mixed-period": false,
+      "no-mix-dearu-desumasu": false,
+      "no-doubled-joshi": false,
+      "arabic-kanji-numbers": false
+    },
+    "prh": {
+      "rulePaths": ["./prh.yaml"]
+    }
+  }
+}
