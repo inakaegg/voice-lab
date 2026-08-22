@@ -55,15 +55,9 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ## 構成
 
-```mermaid
-flowchart LR
-    Browser[Browser\nSpeakLoop / Zoovoice] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
-    Worker --> OpenAI[OpenAI API\nASR / Translation / TTS]
-    Worker --> RunPod[Private RunPod Serverless\nChinese ASR / Voice Conversion]
-    Worker --> CloudRun[Private Google Cloud Run\nZoovoice Go Service\nJapanese ASR / Animal Association / Mixing]
-    Worker --> KV[Workers KV\nSettings / Short-lived Jobs / Fallback]
-    Worker --> D1[D1\nQuota / Audit]
-```
+<img src="docs/diagrams/architecture.ja.svg" alt="Voice Labの構成図。ブラウザはCloudflare Workerと通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。ブラウザはZoovoiceのchallenge用Turnstile widgetとGoogleのOAuthログインにも直接つながる。APIキーはブラウザへ渡さず、WorkerとCloud Runがそれぞれ自分のキーを保持する。" width="100%">
+
+図は [docs/diagrams/architecture.py](docs/diagrams/architecture.py) から生成します。英日の2枚は `uv run --no-project --with diagrams python docs/diagrams/architecture.py` で再生成します。
 
 - ブラウザへOpenAIやRunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
 - 公開版はGoogleログイン、機能別quota、入力上限、簡易監査ログをCloudflare Workerで処理します。
@@ -72,6 +66,123 @@ flowchart LR
 - ZoovoiceはCloudflare Turnstileで自動アクセスを抑止し、共通の利用上限をD1で管理します。
 - Cloudflare公開版は、利用者の入力音声と生成音声をVoice Labの履歴として保存しません。
 - GPU課金が必要な確認と、fake modelで検証できるrequest・job・error処理を分離しています。
+
+### requestの経路
+
+**SpeakLoop**。公開accessを制限した環境では、利用者が先に`GET /auth/google/login`を開いてGoogleサインインを済ませます。Workerは自動ではそこへredirectしません。Workerは各OpenAI・RunPod呼び出しの前にそのsessionを確認し、なければ401を返します。sessionが有効ならD1のquotaも確認し、監査ログへ記録します。quota超過時はWorkerが429を返します。お手本の文とお手本音声はWorkerがOpenAIを呼んで作ります。復唱の比較・採点でもWorkerがOpenAIをもう一度呼びます。任意のown-voiceモードでは、お手本音声を自分の声へ近づける変換を非同期のRunPod Seed-VC jobとして実行します。中国語の復唱ASRも非同期のRunPod jobです。どちらもブラウザがWorkerを完了までpollingし、1回のpollごとにWorkerがRunPodの状態を1回確認します。own-voiceでは、完了時のstatus応答に変換後の音声が含まれます。待ち時間をそのまま進捗として表示できます。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as ブラウザ
+    participant W as Cloudflare Worker
+    participant G as Google OAuth
+    participant D as D1（quota・監査）
+    participant O as OpenAI API
+    participant R as RunPod Serverless
+    opt 公開access制限が有効かつsessionなし
+        B->>W: GET /auth/google/login
+        W-->>B: accounts.google.comへ302
+        B->>G: Googleでsign-inする
+        G-->>B: authorization code付きでWorker callbackへredirect
+        B->>W: authorization code付きのGoogle callback
+        W-->>B: session cookie
+    end
+    B->>W: 母語の録音
+    opt 公開access制限が有効
+        alt sessionがないか無効
+            W-->>B: 401
+        else sessionが有効
+            W->>D: quotaを確認する
+            alt quota超過
+                D-->>W: 超過
+                W-->>B: 429
+            else quota OK
+                D-->>W: OK
+                W->>D: 監査ログへ記録する
+            end
+        end
+    end
+    W->>O: ASR・翻訳・TTS
+    O-->>W: お手本の文と標準のお手本音声
+    alt own-voiceを希望
+        W->>R: 声質変換jobを作る（標準音声＋自分の録音）
+        W-->>B: 標準のお手本音声とjob id
+        loop 完了まで
+            B->>W: 声質変換jobをpollする
+            W->>R: job statusを問い合わせる
+            R-->>W: status（完了時は変換後の音声を含む）
+            alt 実行中
+                W-->>B: 進捗
+            else 完了
+                W-->>B: 変換後のお手本音声
+            end
+        end
+    else 標準音声のまま
+        W-->>B: お手本音声
+    end
+    B->>W: 復唱の録音
+    opt 公開access制限が有効
+        alt sessionが無効
+            W-->>B: 401
+        else sessionあり
+            W->>D: quotaを確認する
+            alt quota超過
+                D-->>W: 超過
+                W-->>B: 429
+            else quota OK
+                D-->>W: OK
+                W->>D: 監査ログへ記録する
+            end
+        end
+    end
+    alt 中国語を学ぶとき
+        W->>R: 非同期jobを作る
+        loop 完了まで
+            B->>W: job statusをpollする
+            W->>R: job statusを問い合わせる
+            R-->>W: status
+            alt 実行中
+                W-->>B: 進捗
+            else 完了
+                W->>O: 復唱を比較・採点する
+                O-->>W: フレーズ整合・score・comment
+                W-->>B: 語ごとの差分・score・フレーズ再生位置
+            end
+        end
+    else 英語を学ぶとき
+        W->>O: timestamp付きASR
+        O-->>W: 語と時刻
+        W->>O: 復唱を比較・採点する
+        O-->>W: フレーズ整合・score・comment
+        W-->>B: 語ごとの差分・score・フレーズ再生位置
+    end
+```
+
+**Zoovoice**。ブラウザはTurnstileのwidget scriptを読み込み、Workerを経由せずCloudflareと直接challengeを完了します。その後Workerがtokenと利用counterを確かめてから中継します。動物の連想はCloud Runが自分のOpenAIキーで呼ぶため、Workerを経由しません。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as ブラウザ
+    participant W as Cloudflare Worker
+    participant T as Turnstile
+    participant D as D1
+    participant C as Cloud Run (private)
+    participant O as OpenAI API
+    B->>T: widget scriptを読み込み、challengeを完了する
+    T-->>B: token
+    B->>W: 録音・アニマル度・Turnstile token
+    W->>T: tokenを検証する
+    W->>D: 日次・月次counterを消費する
+    W->>C: IAM ID tokenを付けて中継する
+    C->>C: 日本語ASR（whisper.cpp）
+    C->>O: 音源のある動物から1種選ぶ
+    O-->>C: 動物と短い理由
+    C->>C: すき間へ鳴き声を重ねる（ffmpeg）
+    C-->>W: 合成音声・ASR本文・連想metadata
+    W-->>B: 再生・ダウンロード
+```
 
 ## ローカルセットアップ
 
