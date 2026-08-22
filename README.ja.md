@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ## 構成
 
-<img src="docs/diagrams/architecture.ja.svg" alt="Voice Labの構成図。ブラウザはCloudflare Workerとだけ通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。APIキーはブラウザへ渡さず、WorkerとCloud Runがそれぞれ自分のキーを保持する。" width="100%">
+<img src="docs/diagrams/architecture.ja.svg" alt="Voice Labの構成図。ブラウザはCloudflare Workerと通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。ブラウザはZoovoiceのchallenge用Turnstile widgetとGoogleのOAuthログインにも直接つながる。APIキーはブラウザへ渡さず、WorkerとCloud Runがそれぞれ自分のキーを保持する。" width="100%">
 
 図は [docs/diagrams/architecture.py](docs/diagrams/architecture.py) から生成します。英日の2枚は `uv run --no-project --with diagrams python docs/diagrams/architecture.py` で再生成します。
 
@@ -69,20 +69,73 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ### requestの経路
 
-**SpeakLoop**。お手本の文とお手本音声はWorkerがOpenAIを呼んで作ります。復唱の比較・採点でもWorkerがOpenAIをもう一度呼びます。中国語の復唱ASRは非同期のRunPod jobで、ブラウザがWorkerを完了までpollingし、1回のpollごとにWorkerがRunPodの状態を1回確認します。待ち時間をそのまま進捗として表示できます。
+**SpeakLoop**。公開accessを制限した環境では、利用者が先に`GET /auth/google/login`を開いてGoogleサインインを済ませます。Workerは自動ではそこへredirectしません。Workerは各OpenAI・RunPod呼び出しの前にそのsessionを確認し、なければ401を返します。sessionが有効ならD1のquotaも確認し、監査ログへ記録します。quota超過時はWorkerが429を返します。お手本の文とお手本音声はWorkerがOpenAIを呼んで作ります。復唱の比較・採点でもWorkerがOpenAIをもう一度呼びます。任意のown-voiceモードでは、お手本音声を自分の声へ近づける変換を非同期のRunPod Seed-VC jobとして実行します。中国語の復唱ASRも非同期のRunPod jobです。どちらもブラウザがWorkerを完了までpollingし、1回のpollごとにWorkerがRunPodの状態を1回確認します。own-voiceでは、完了時のstatus応答に変換後の音声が含まれます。待ち時間をそのまま進捗として表示できます。
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant B as ブラウザ
     participant W as Cloudflare Worker
+    participant G as Google OAuth
+    participant D as D1（quota・監査）
     participant O as OpenAI API
     participant R as RunPod Serverless
+    opt 公開access制限が有効かつsessionなし
+        B->>W: GET /auth/google/login
+        W-->>B: accounts.google.comへ302
+        B->>G: Googleでsign-inする
+        G-->>B: authorization code付きでWorker callbackへredirect
+        B->>W: authorization code付きのGoogle callback
+        W-->>B: session cookie
+    end
     B->>W: 母語の録音
+    opt 公開access制限が有効
+        alt sessionがないか無効
+            W-->>B: 401
+        else sessionが有効
+            W->>D: quotaを確認する
+            alt quota超過
+                D-->>W: 超過
+                W-->>B: 429
+            else quota OK
+                D-->>W: OK
+                W->>D: 監査ログへ記録する
+            end
+        end
+    end
     W->>O: ASR・翻訳・TTS
-    O-->>W: お手本の文とお手本音声
-    W-->>B: お手本音声
+    O-->>W: お手本の文と標準のお手本音声
+    alt own-voiceを希望
+        W->>R: 声質変換jobを作る（標準音声＋自分の録音）
+        W-->>B: 標準のお手本音声とjob id
+        loop 完了まで
+            B->>W: 声質変換jobをpollする
+            W->>R: job statusを問い合わせる
+            R-->>W: status（完了時は変換後の音声を含む）
+            alt 実行中
+                W-->>B: 進捗
+            else 完了
+                W-->>B: 変換後のお手本音声
+            end
+        end
+    else 標準音声のまま
+        W-->>B: お手本音声
+    end
     B->>W: 復唱の録音
+    opt 公開access制限が有効
+        alt sessionが無効
+            W-->>B: 401
+        else sessionあり
+            W->>D: quotaを確認する
+            alt quota超過
+                D-->>W: 超過
+                W-->>B: 429
+            else quota OK
+                D-->>W: OK
+                W->>D: 監査ログへ記録する
+            end
+        end
+    end
     alt 中国語を学ぶとき
         W->>R: 非同期jobを作る
         loop 完了まで
@@ -106,7 +159,7 @@ sequenceDiagram
     end
 ```
 
-**Zoovoice**。WorkerはTurnstile tokenと利用counterを先に確かめてから中継します。動物の連想はCloud Runが自分のOpenAIキーで呼ぶため、Workerを経由しません。
+**Zoovoice**。ブラウザはTurnstileのwidget scriptを読み込み、Workerを経由せずCloudflareと直接challengeを完了します。その後Workerがtokenと利用counterを確かめてから中継します。動物の連想はCloud Runが自分のOpenAIキーで呼ぶため、Workerを経由しません。
 
 ```mermaid
 sequenceDiagram
@@ -117,6 +170,8 @@ sequenceDiagram
     participant D as D1
     participant C as Cloud Run (private)
     participant O as OpenAI API
+    B->>T: widget scriptを読み込み、challengeを完了する
+    T-->>B: token
     B->>W: 録音・アニマル度・Turnstile token
     W->>T: tokenを検証する
     W->>D: 日次・月次counterを消費する

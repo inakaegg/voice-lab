@@ -58,7 +58,7 @@ Japanese ASR, animal association, and synthesis run on a private Go service on G
 
 ## Architecture
 
-<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks only to a Cloudflare Worker, which relays to the OpenAI API, a private RunPod Serverless GPU handler, and a private Google Cloud Run Go service. No API key reaches the browser; the Worker and Cloud Run each hold their own keys." width="100%">
+<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks to the Cloudflare Worker, which relays to the OpenAI API, a private RunPod Serverless GPU handler, and a private Google Cloud Run Go service. The browser also connects directly to the Turnstile widget for the Zoovoice challenge and to Google for OAuth sign-in. No API key reaches the browser; the Worker and Cloud Run each hold their own keys." width="100%">
 
 The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/architecture.py). Regenerate both language versions with `uv run --no-project --with diagrams python docs/diagrams/architecture.py`.
 
@@ -72,20 +72,73 @@ The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/arch
 
 ### Request paths
 
-**SpeakLoop.** The Worker calls OpenAI for the study sentence and the model voice, and again afterward to compare and score your repetition. Chinese repetition ASR runs as an asynchronous RunPod job; the browser polls the Worker until it finishes, and each poll makes the Worker check RunPod once, so the browser can show real progress instead of a spinner.
+**SpeakLoop.** On deployments with public access restricted, you sign in with Google first by opening `GET /auth/google/login`; the Worker does not redirect you there on its own. Before every OpenAI or RunPod call, the Worker checks that session and returns 401 if it is missing or invalid; with a valid session it also checks the D1 quota, logs an audit event, and returns 429 when the quota is exceeded. The Worker calls OpenAI for the study sentence and the model voice, and again afterward to compare and score your repetition. With the optional own-voice mode, the standard model voice is converted toward your recording as an asynchronous RunPod Seed-VC job, and Chinese repetition ASR is also an asynchronous RunPod job; for both, the browser polls the Worker until the job finishes, and each poll makes the Worker check RunPod once and receive a status that includes the converted voice once the job completes, so the browser can show real progress instead of a spinner.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant B as Browser
     participant W as Cloudflare Worker
+    participant G as Google OAuth
+    participant D as D1 (quota / audit)
     participant O as OpenAI API
     participant R as RunPod Serverless
+    opt public access restricted and no session yet
+        B->>W: GET /auth/google/login
+        W-->>B: 302 to accounts.google.com
+        B->>G: sign in with Google
+        G-->>B: redirect to the Worker callback with an authorization code
+        B->>W: Google callback with the authorization code
+        W-->>B: session cookie
+    end
     B->>W: recording in your native language
+    opt public access restricted
+        alt missing or invalid session
+            W-->>B: 401
+        else valid session
+            W->>D: check quota
+            alt quota exceeded
+                D-->>W: exceeded
+                W-->>B: 429
+            else quota ok
+                D-->>W: ok
+                W->>D: log audit
+            end
+        end
+    end
     W->>O: ASR, translation, TTS
-    O-->>W: study sentence and model voice
-    W-->>B: model voice
+    O-->>W: study sentence and standard model voice
+    alt own voice requested
+        W->>R: create a voice-conversion job (standard voice + your recording)
+        W-->>B: standard model voice, plus the job id
+        loop until the job completes
+            B->>W: poll the voice-conversion job
+            W->>R: get job status
+            R-->>W: status (includes the converted voice once complete)
+            alt still running
+                W-->>B: progress
+            else completed
+                W-->>B: converted model voice
+            end
+        end
+    else standard voice
+        W-->>B: model voice
+    end
     B->>W: your repetition
+    opt public access restricted
+        alt invalid session
+            W-->>B: 401
+        else session ok
+            W->>D: check quota
+            alt quota exceeded
+                D-->>W: exceeded
+                W-->>B: 429
+            else quota ok
+                D-->>W: ok
+                W->>D: log audit
+            end
+        end
+    end
     alt learning Chinese
         W->>R: create an async job
         loop until the job completes
@@ -109,7 +162,7 @@ sequenceDiagram
     end
 ```
 
-**Zoovoice.** The Worker verifies the Turnstile token and the usage counter before it relays anything. Cloud Run holds its own OpenAI key, so the animal association never passes through the Worker.
+**Zoovoice.** The browser loads the Turnstile widget script and completes the challenge directly with Cloudflare, outside the Worker. The Worker then verifies that token and the usage counter before it relays anything. Cloud Run holds its own OpenAI key, so the animal association never passes through the Worker.
 
 ```mermaid
 sequenceDiagram
@@ -120,6 +173,8 @@ sequenceDiagram
     participant D as D1
     participant C as Cloud Run (private)
     participant O as OpenAI API
+    B->>T: load widget script, complete challenge
+    T-->>B: token
     B->>W: recording, animal level, Turnstile token
     W->>T: verify the token
     W->>D: consume the daily and monthly counter

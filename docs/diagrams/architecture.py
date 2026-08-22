@@ -26,6 +26,7 @@ try:
     import diagrams
     from diagrams import Cluster, Diagram, Edge
     from diagrams.gcp.compute import Run
+    from diagrams.generic.blank import Blank
     from diagrams.generic.compute import Rack
     from diagrams.generic.database import SQL
     from diagrams.generic.storage import Storage
@@ -84,10 +85,11 @@ TEXT = {
         "boundary": "Cloudflare  (no API key reaches the browser; keys live in Worker and Cloud Run secrets)",
         "worker": ("Cloudflare Worker", "Static Assets serve the UI", "Google login / quota / API relay"),
         "turnstile": ("Turnstile", "blocks automated Zoovoice access"),
+        "google": ("Google", "OAuth sign-in (accounts.google.com)"),
         "storage": "Storage",
         "kv": ("Workers KV", "settings / short-lived jobs"),
         "d1": ("D1", "quota / audit / counters"),
-        "r2": ("R2", "sample audio blobs"),
+        "r2": ("R2", "admin-managed samples (SpeakLoop, VC)"),
         "external": "External API",
         "openai": (
             "OpenAI API",
@@ -101,6 +103,8 @@ TEXT = {
         "cloudrun": ("Zoovoice Go service", "no unauthenticated access", "Japanese ASR → association → mixing"),
         "e_https": "HTTPS",
         "e_verify": "verify token",
+        "e_widget": "widget script + challenge",
+        "e_oauth": "OAuth sign-in",
         "e_openai": "ASR / translation / TTS / scoring",
         "e_runpod": "async job → polling",
         "e_idtoken": "IAM ID token",
@@ -112,10 +116,11 @@ TEXT = {
         "boundary": "Cloudflare（APIキーはブラウザへ渡さず、Worker secretとCloud Run secretで管理）",
         "worker": ("Cloudflare Worker", "Static Assets で画面配信", "Googleログイン・quota・API中継"),
         "turnstile": ("Turnstile", "Zoovoiceの自動アクセス抑止"),
+        "google": ("Google", "OAuthログイン（accounts.google.com）"),
         "storage": "保存層",
         "kv": ("Workers KV", "設定・短期job"),
         "d1": ("D1", "quota・監査・counter"),
-        "r2": ("R2", "sample音声のblob"),
+        "r2": ("R2", "管理者管理のsample（SpeakLoop・VC）"),
         "external": "外部API",
         "openai": (
             "OpenAI API",
@@ -129,12 +134,31 @@ TEXT = {
         "cloudrun": ("Zoovoice Goサービス", "未認証アクセス不可", "日本語ASR → 連想 → 合成"),
         "e_https": "HTTPS",
         "e_verify": "token検証",
+        "e_widget": "widgetスクリプト・challenge",
+        "e_oauth": "OAuthログイン",
         "e_openai": "ASR・翻訳・TTS・採点",
         "e_runpod": "非同期job → polling",
         "e_idtoken": "IAM ID token",
         "e_assoc": "動物を1種選ぶ",
     },
 }
+
+
+def unbranded(cls, title, *sub, color="#1C2420", sub_color=SUB_COLOR):
+    """公式アイコンが同梱されていない対象向けの、枠線だけのノード（diagramsのblank iconは透明で枠が見えないため）。"""
+    rows = [
+        f'<TR><TD><FONT POINT-SIZE="{TITLE_PT}" COLOR="{color}">{html.escape(title)}</FONT></TD></TR>',
+    ]
+    rows += [
+        f'<TR><TD><FONT POINT-SIZE="{SUB_PT}" COLOR="{sub_color}">{html.escape(s)}</FONT></TD></TR>'
+        for s in sub
+    ]
+    label = (
+        '<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8" COLOR="#8E9A94">'
+        + "".join(rows)
+        + "</TABLE>>"
+    )
+    return cls(label, image="", fixedsize="false", width="0", height="0", margin="0")
 
 
 def svc(cls, title, *sub, color="#1C2420", sub_color=SUB_COLOR):
@@ -192,10 +216,12 @@ def build(lang: str) -> Path:
         edge_attr=EDGE,
     ):
         browser = svc(Users, *t["browser"])
+        # diagramsに公式Googleアイコンが同梱されていないため、枠線だけの汎用ノードで代用する。
+        google = unbranded(Blank, *t["google"])
 
         with Cluster(t["boundary"], graph_attr=BOUNDARY_CLUSTER):
-            worker = svc(Cloudflare, *t["worker"])
             turnstile = svc(Cloudflare, *t["turnstile"])
+            worker = svc(Cloudflare, *t["worker"])
 
             with Cluster(t["storage"], graph_attr=CLUSTER):
                 kv = svc(Storage, *t["kv"])
@@ -212,11 +238,15 @@ def build(lang: str) -> Path:
             cloudrun = svc(Run, *t["cloudrun"])
 
         browser >> Edge(label=t["e_https"], color=SHARED, fontcolor=SHARED, penwidth="2") >> worker
+        # Turnstile widgetの読込・challengeはブラウザがCloudflareのchallenge serverと直接通信し、Workerを経由しない。
+        browser >> flow(ZOOVOICE, t["e_widget"]) >> turnstile
+        # Googleログインはredirectで、ブラウザがaccounts.google.comへ直接遷移して戻る。
+        browser >> Edge(label=t["e_oauth"], color=SHARED, fontcolor=SHARED, penwidth="2", dir="both") >> google
 
         worker >> flow(ZOOVOICE, t["e_verify"]) >> turnstile
         worker >> Edge(color=SHARED) >> kv
         worker >> Edge(color=SHARED) >> d1
-        worker >> Edge(color=SHARED) >> r2
+        worker >> flow(SPEAKLOOP, "") >> r2
 
         worker >> flow(SPEAKLOOP, t["e_openai"]) >> openai
         worker >> flow(SPEAKLOOP, t["e_runpod"]) >> runpod
