@@ -17,7 +17,7 @@
 
 Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopとZoovoiceを配信する。UIはWorker Static Assets、認証・quota・API中継はWorker moduleが担当する。SpeakLoopのGPU推論はRunPod Serverless、Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスが担当する。この構成はproduction公開環境へ反映済みである。
 
-<img src="../diagrams/architecture.ja.svg" alt="Voice Labのデプロイ構成。ブラウザはCloudflare Workerとだけ通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。" width="100%">
+<img src="../diagrams/architecture.ja.svg" alt="Voice Labのデプロイ構成。ブラウザはCloudflare Workerと通信するほか、Turnstile challengeとGoogle OAuthへも直接接続する。SpeakLoopのOpenAI APIとRunPod呼び出しはWorkerが中継し、ZoovoiceはprivateなGoogle Cloud Run経由でOpenAI APIを呼ぶ。OpenAIのAPIキーはWorkerとCloud Runがそれぞれ別に保持し、ブラウザには渡らない。" width="100%">
 
 図は [architecture.py](../diagrams/architecture.py) から生成する。英日の2枚は `uv run --no-project --with diagrams python docs/diagrams/architecture.py` で再生成する。
 

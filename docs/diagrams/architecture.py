@@ -88,8 +88,8 @@ TEXT = {
         "google": ("Google", "OAuth sign-in (accounts.google.com)"),
         "storage": "Storage",
         "kv": ("Workers KV", "settings / short-lived jobs"),
-        "d1": ("D1", "quota / audit / counters"),
-        "r2": ("R2", "admin-managed samples (SpeakLoop, VC)"),
+        "d1": ("D1", "quota / audit / counters", "public-sample metadata"),
+        "r2": ("R2", "admin-managed sample blobs (SpeakLoop, VC)"),
         "external": "External API",
         "openai": (
             "OpenAI API",
@@ -119,8 +119,8 @@ TEXT = {
         "google": ("Google", "OAuthログイン（accounts.google.com）"),
         "storage": "保存層",
         "kv": ("Workers KV", "設定・短期job"),
-        "d1": ("D1", "quota・監査・counter"),
-        "r2": ("R2", "管理者管理のsample（SpeakLoop・VC）"),
+        "d1": ("D1", "quota・監査・counter", "公開sample metadata"),
+        "r2": ("R2", "管理者管理のsample音声blob（SpeakLoop・VC）"),
         "external": "外部API",
         "openai": (
             "OpenAI API",
@@ -241,10 +241,10 @@ def build(lang: str) -> Path:
         # Turnstile widgetの読込・challengeはブラウザがCloudflareのchallenge serverと直接通信し、Workerを経由しない。
         browser >> flow(ZOOVOICE, t["e_widget"]) >> turnstile
         # Googleログインはredirectで、ブラウザがaccounts.google.comへ直接遷移して戻る。
-        browser >> Edge(label=t["e_oauth"], color=SHARED, fontcolor=SHARED, penwidth="2", dir="both") >> google
+        browser >> Edge(label=t["e_oauth"], color=SPEAKLOOP, fontcolor=SPEAKLOOP, penwidth="2", dir="both") >> google
 
         worker >> flow(ZOOVOICE, t["e_verify"]) >> turnstile
-        worker >> Edge(color=SHARED) >> kv
+        worker >> Edge(color=SPEAKLOOP) >> kv
         worker >> Edge(color=SHARED) >> d1
         worker >> flow(SPEAKLOOP, "") >> r2
 
