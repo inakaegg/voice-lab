@@ -1,6 +1,6 @@
 # 現在のデプロイ構成
 
-更新日: 2026-08-10
+更新日: 2026-08-22
 
 ## English summary
 
@@ -17,19 +17,9 @@
 
 Voice Labの公開版は、1つのCloudflare WorkerでSpeakLoopとZoovoiceを配信する。UIはWorker Static Assets、認証・quota・API中継はWorker moduleが担当する。SpeakLoopのGPU推論はRunPod Serverless、Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービスが担当する。この構成はproduction公開環境へ反映済みである。
 
-```text
-Browser
-  -> Cloudflare Worker Static Assets
-       /, /speakloop, /zoovoice
-  -> Cloudflare Worker module
-       Google OAuth / admin auth / quota / API gateway / Turnstile / Cloud Run ID token
-       -> OpenAI API: native-language ASR / English practice ASR / translation / TTS
-       -> RunPod Serverless: async dual-audio Chinese practice FunASR / Seed-VC
-       -> Google Cloud Run (private): Zoovoice Japanese ASR / animal association / synthesis
-       -> KV: settings / short-lived jobs / fallback
-       -> D1: quota / audit / public sample metadata / Zoovoice usage counters
-       -> R2: audio blobs
-```
+<img src="../diagrams/architecture.ja.svg" alt="Voice Labのデプロイ構成。ブラウザはCloudflare Workerとだけ通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。" width="100%">
+
+図は [architecture.py](../diagrams/architecture.py) から生成する。英日の2枚は `uv run --no-project --with diagrams python docs/diagrams/architecture.py` で再生成する。
 
 SpeakLoopのローカル版はFastAPIがUIとAPIを配信する。ZoovoiceのローカルUIとAPIはFastAPIを使わず、Wrangler localのWorkerとGoサービスで確認する。
 
@@ -87,18 +77,54 @@ Google Cloud Run上のGoコンテナは、日本語ASR、動物の自動連想�
 
 productionのWorkerは `ZOOVOICE_ORIGIN_MODE="cloud-run"` で動き、専用invoker service accountのkeyから自力でID tokenを取得してCloud Runを呼ぶ。invoker service accountには対象service単位の `roles/run.invoker` だけを付与し、`allUsers` へは付与しない。認証フローとsecret運用の詳細は [CLOUDFLARE.md](CLOUDFLARE.md) を正とする。この認証の実装と契約testは完了している。invoker service accountの作成と権限付与、key発行、Worker secretの登録も完了している。
 
-```text
-Browser
-  -> Cloudflare Worker Static Assets
-       /zoovoice
-  -> Cloudflare Worker module
-       /api/zoovoice/animals: 動物一覧（Cloud Runの /animals を中継）
-       Turnstile検証 / 利用上限 / Cloud Run向けID token
-       -> Cloudflare Turnstile: token検証
-       -> Google Cloud Run: 録音とアニマル度を一時送信
-            日本語ASR -> 動物の自動連想 -> 音声合成
-            <- 合成音声 / ASR本文 / 連想metadata
-       -> D1: Zoovoice共通の日次・月次counter
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as ブラウザ
+    participant W as Cloudflare Worker
+    participant T as Turnstile
+    participant I as Google token endpoint
+    participant D as D1
+    participant C as Cloud Run (private)
+    participant O as OpenAI API
+
+    B->>W: GET /api/zoovoice/animals
+    opt ID tokenのcache miss
+        W->>I: service account JWTを交換
+        I-->>W: Cloud Run向けID token
+    end
+    W->>C: GET /animals（ID token付き）
+    C-->>W: 音源カタログ
+    W-->>B: 200 動物一覧
+
+    B->>W: POST /api/zoovoice/compose（録音・アニマル度・Turnstile token）
+    W->>T: tokenを検証
+    alt token不正または検証基盤を利用不可
+        W-->>B: 403 検証失敗 / 503 検証不可
+    else 検証成功
+        opt ID tokenのcache miss
+            W->>I: service account JWTを交換
+            I-->>W: Cloud Run向けID token
+        end
+        W->>D: 日次・月次counterを消費
+        alt 上限到達またはD1を利用不可
+            W-->>B: 429 上限到達 / 503 counter確認不可
+        else 利用可能
+            W->>C: POST /compose（ID token付き）
+            C->>C: 日本語ASR（whisper.cpp）
+            C->>O: 音源のある動物から1種選ぶ
+            O-->>C: 動物と短い理由
+            C->>C: すき間へ鳴き声を重ねる（ffmpeg）
+            alt 合成成功
+                C-->>W: 200 合成音声・ASR本文・連想metadata
+                W-->>B: 200 結果を中継
+            else Cloud Runまたは連想処理が失敗
+                C-->>W: 4xx / 5xx error JSON
+                W-->>B: statusとerrorを中継
+            end
+        end
+    end
+    Note over W,C: 接続失敗は502、timeoutは504としてWorkerが返す
 ```
 
 ブラウザが送るのは録音とアニマル度だけとする。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。Workerは合成応答を中継し、ASR本文と連想metadataを送信元と同じブラウザへ返す。
