@@ -65,9 +65,16 @@ GRAPH = {
 }
 NODE = {"fontname": FONT}
 EDGE = {"fontname": FONT, "fontsize": "13"}
-CLUSTER = {"fontname": FONT, "fontsize": "15", "bgcolor": "#F7F9F8", "color": "#C7D0CC"}
-BOUNDARY_CLUSTER = {**CLUSTER, "color": SPEAKLOOP, "fontcolor": SPEAKLOOP, "penwidth": "2"}
-PRIVATE_CLUSTER = {**CLUSTER, "style": "dashed", "color": "#8E9A94", "fontcolor": "#5E6B64"}
+NEUTRAL_CLUSTER_FONT = "#1C2420"  # 通常clusterの見出し文字色。boundary/privateの色を子clusterへ継承させない
+CLUSTER = {
+    "fontname": FONT,
+    "fontsize": "15",
+    "bgcolor": "#F7F9F8",
+    "pencolor": "#C7D0CC",
+    "fontcolor": NEUTRAL_CLUSTER_FONT,
+}
+BOUNDARY_CLUSTER = {**CLUSTER, "pencolor": SPEAKLOOP, "fontcolor": SPEAKLOOP, "penwidth": "2"}
+PRIVATE_CLUSTER = {**CLUSTER, "style": "dashed", "pencolor": "#8E9A94", "fontcolor": "#5E6B64"}
 
 # 製品名・サービス名は両言語で原文のまま使い、説明文だけを差し替える。
 TEXT = {
@@ -82,14 +89,19 @@ TEXT = {
         "d1": ("D1", "quota / audit / counters"),
         "r2": ("R2", "sample audio blobs"),
         "external": "External API",
-        "openai": ("OpenAI API", "native ASR / English ASR / translation / TTS", "animal association"),
+        "openai": (
+            "OpenAI API",
+            "native/English ASR, translation, TTS",
+            "comparison / scoring",
+            "animal association",
+        ),
         "runpod_cluster": "private RunPod Serverless",
         "runpod": ("GPU handler", "Chinese ASR (FunASR)", "voice conversion (Seed-VC)"),
         "cloudrun_cluster": "private Google Cloud Run",
         "cloudrun": ("Zoovoice Go service", "no unauthenticated access", "Japanese ASR → association → mixing"),
         "e_https": "HTTPS",
         "e_verify": "verify token",
-        "e_openai": "ASR / translation / TTS",
+        "e_openai": "ASR / translation / TTS / scoring",
         "e_runpod": "async job → polling",
         "e_idtoken": "IAM ID token",
         "e_assoc": "pick one animal",
@@ -105,14 +117,19 @@ TEXT = {
         "d1": ("D1", "quota・監査・counter"),
         "r2": ("R2", "sample音声のblob"),
         "external": "外部API",
-        "openai": ("OpenAI API", "母語ASR・英語ASR・翻訳・TTS", "動物の連想"),
+        "openai": (
+            "OpenAI API",
+            "母語/英語ASR・翻訳・TTS",
+            "比較・採点",
+            "動物の連想",
+        ),
         "runpod_cluster": "private RunPod Serverless",
         "runpod": ("GPU handler", "中国語ASR（FunASR）", "声質変換（Seed-VC）"),
         "cloudrun_cluster": "private Google Cloud Run",
         "cloudrun": ("Zoovoice Goサービス", "未認証アクセス不可", "日本語ASR → 連想 → 合成"),
         "e_https": "HTTPS",
         "e_verify": "token検証",
-        "e_openai": "ASR・翻訳・TTS",
+        "e_openai": "ASR・翻訳・TTS・採点",
         "e_runpod": "非同期job → polling",
         "e_idtoken": "IAM ID token",
         "e_assoc": "動物を1種選ぶ",

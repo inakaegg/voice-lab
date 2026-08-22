@@ -58,7 +58,7 @@ Japanese ASR, animal association, and synthesis run on a private Go service on G
 
 ## Architecture
 
-<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks only to a Cloudflare Worker, which holds every credential and relays to the OpenAI API, a private RunPod Serverless GPU handler, and a private Google Cloud Run Go service." width="100%">
+<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks only to a Cloudflare Worker, which relays to the OpenAI API, a private RunPod Serverless GPU handler, and a private Google Cloud Run Go service. No API key reaches the browser; the Worker and Cloud Run each hold their own keys." width="100%">
 
 The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/architecture.py). Regenerate both language versions with `uv run --no-project --with diagrams python docs/diagrams/architecture.py`.
 
@@ -72,7 +72,7 @@ The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/arch
 
 ### Request paths
 
-**SpeakLoop.** The Worker calls OpenAI for the study sentence and the model voice. Chinese repetition ASR runs as an asynchronous RunPod job that the Worker polls, so the browser can show real progress instead of a spinner.
+**SpeakLoop.** The Worker calls OpenAI for the study sentence and the model voice, and again afterward to compare and score your repetition. Chinese repetition ASR runs as an asynchronous RunPod job; the browser polls the Worker until it finishes, and each poll makes the Worker check RunPod once, so the browser can show real progress instead of a spinner.
 
 ```mermaid
 sequenceDiagram
@@ -88,16 +88,25 @@ sequenceDiagram
     B->>W: your repetition
     alt learning Chinese
         W->>R: create an async job
-        loop until the job finishes
-            W->>R: poll job status
-            R-->>W: progress
+        loop until the job completes
+            B->>W: poll job status
+            W->>R: get job status
+            R-->>W: status
+            alt still running
+                W-->>B: progress
+            else completed
+                W->>O: compare and score the repetition
+                O-->>W: phrase alignment, score, comment
+                W-->>B: word differences, score, and phrase playback positions
+            end
         end
-        R-->>W: timestamped ASR
     else learning English
         W->>O: timestamped ASR
         O-->>W: words with times
+        W->>O: compare and score the repetition
+        O-->>W: phrase alignment, score, comment
+        W-->>B: word differences, score, and phrase playback positions
     end
-    W-->>B: word differences and phrase playback positions
 ```
 
 **Zoovoice.** The Worker verifies the Turnstile token and the usage counter before it relays anything. Cloud Run holds its own OpenAI key, so the animal association never passes through the Worker.
@@ -131,7 +140,7 @@ The parts I would walk through first in a code review.
 
 **2. Secrets scanning runs at three independent stages.** Gitleaks runs at pre-commit on staged diffs and at pre-push on the entire Git history. GitHub Actions re-scans independently on every push and pull request. A hook skipped on one machine still gets caught before anything ships.
 
-**3. The Worker is the privacy boundary.** The browser never receives OpenAI or RunPod API keys. The Cloudflare Worker holds all credentials, enforces auth and quotas, and forwards only the audio a request needs to the private backends. The public deployment keeps no history of user audio.
+**3. No credential reaches the browser.** The browser never receives OpenAI or RunPod API keys. The Cloudflare Worker holds the SpeakLoop credentials, enforces auth and quotas, and forwards only the audio a request needs to the private backends. Zoovoice's OpenAI key lives only in the Cloud Run service and never passes through the Worker. The public deployment keeps no history of user audio.
 
 ## Local setup
 

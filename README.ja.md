@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ## 構成
 
-<img src="docs/diagrams/architecture.ja.svg" alt="Voice Labの構成図。ブラウザはCloudflare Workerとだけ通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。" width="100%">
+<img src="docs/diagrams/architecture.ja.svg" alt="Voice Labの構成図。ブラウザはCloudflare Workerとだけ通信し、WorkerがOpenAI API、privateなRunPod Serverless、privateなGoogle Cloud Runへ中継する。APIキーはブラウザへ渡さず、WorkerとCloud Runがそれぞれ自分のキーを保持する。" width="100%">
 
 図は [docs/diagrams/architecture.py](docs/diagrams/architecture.py) から生成します。英日の2枚は `uv run --no-project --with diagrams python docs/diagrams/architecture.py` で再生成します。
 
@@ -69,7 +69,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 ### requestの経路
 
-**SpeakLoop**。お手本の文とお手本音声はWorkerがOpenAIを呼んで作ります。中国語の復唱ASRは非同期のRunPod jobで、Workerが状態をpollingします。待ち時間をそのまま進捗として表示できます。
+**SpeakLoop**。お手本の文とお手本音声はWorkerがOpenAIを呼んで作ります。復唱の比較・採点でもWorkerがOpenAIをもう一度呼びます。中国語の復唱ASRは非同期のRunPod jobで、ブラウザがWorkerを完了までpollingし、1回のpollごとにWorkerがRunPodの状態を1回確認します。待ち時間をそのまま進捗として表示できます。
 
 ```mermaid
 sequenceDiagram
@@ -86,15 +86,24 @@ sequenceDiagram
     alt 中国語を学ぶとき
         W->>R: 非同期jobを作る
         loop 完了まで
+            B->>W: job statusをpollする
             W->>R: job statusを問い合わせる
-            R-->>W: 進捗
+            R-->>W: status
+            alt 実行中
+                W-->>B: 進捗
+            else 完了
+                W->>O: 復唱を比較・採点する
+                O-->>W: フレーズ整合・score・comment
+                W-->>B: 語ごとの差分・score・フレーズ再生位置
+            end
         end
-        R-->>W: timestamp付きASR
     else 英語を学ぶとき
         W->>O: timestamp付きASR
         O-->>W: 語と時刻
+        W->>O: 復唱を比較・採点する
+        O-->>W: フレーズ整合・score・comment
+        W-->>B: 語ごとの差分・score・フレーズ再生位置
     end
-    W-->>B: 語ごとの差分とフレーズ再生位置
 ```
 
 **Zoovoice**。WorkerはTurnstile tokenと利用counterを先に確かめてから中継します。動物の連想はCloud Runが自分のOpenAIキーで呼ぶため、Workerを経由しません。
