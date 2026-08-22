@@ -58,15 +58,9 @@ Japanese ASR, animal association, and synthesis run on a private Go service on G
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Browser[Browser\nSpeakLoop / Zoovoice] --> Worker[Cloudflare Worker\nStatic Assets / Auth / Quota / API Gateway]
-    Worker --> OpenAI[OpenAI API\nASR / Translation / TTS]
-    Worker --> RunPod[Private RunPod Serverless\nChinese ASR / Voice Conversion]
-    Worker --> CloudRun[Private Google Cloud Run\nZoovoice Go Service\nJapanese ASR / Animal Association / Mixing]
-    Worker --> KV[Workers KV\nSettings / Short-lived Jobs / Fallback]
-    Worker --> D1[D1\nQuota / Audit]
-```
+<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks only to a Cloudflare Worker, which holds every credential and relays to the OpenAI API, a private RunPod Serverless GPU handler, and a private Google Cloud Run Go service." width="100%">
+
+The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/architecture.py). Regenerate both language versions with `uv run --no-project --with diagrams python docs/diagrams/architecture.py`.
 
 - API keys for OpenAI and RunPod never reach the browser. They live in Worker secrets or server-side environment variables.
 - The public deployment handles Google login, per-feature quotas, input limits, and a simple audit log in the Cloudflare Worker.
@@ -75,6 +69,59 @@ flowchart LR
 - Zoovoice uses Cloudflare Turnstile against automated access, with shared usage limits managed in D1.
 - The public Cloudflare deployment does not store user input audio or generated audio as Voice Lab history.
 - Checks that require GPU billing are separated from the request, job, and error handling that a fake model can verify.
+
+### Request paths
+
+**SpeakLoop.** The Worker calls OpenAI for the study sentence and the model voice. Chinese repetition ASR runs as an asynchronous RunPod job that the Worker polls, so the browser can show real progress instead of a spinner.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant W as Cloudflare Worker
+    participant O as OpenAI API
+    participant R as RunPod Serverless
+    B->>W: recording in your native language
+    W->>O: ASR, translation, TTS
+    O-->>W: study sentence and model voice
+    W-->>B: model voice
+    B->>W: your repetition
+    alt learning Chinese
+        W->>R: create an async job
+        loop until the job finishes
+            W->>R: poll job status
+            R-->>W: progress
+        end
+        R-->>W: timestamped ASR
+    else learning English
+        W->>O: timestamped ASR
+        O-->>W: words with times
+    end
+    W-->>B: word differences and phrase playback positions
+```
+
+**Zoovoice.** The Worker verifies the Turnstile token and the usage counter before it relays anything. Cloud Run holds its own OpenAI key, so the animal association never passes through the Worker.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant W as Cloudflare Worker
+    participant T as Turnstile
+    participant D as D1
+    participant C as Cloud Run (private)
+    participant O as OpenAI API
+    B->>W: recording, animal level, Turnstile token
+    W->>T: verify the token
+    W->>D: consume the daily and monthly counter
+    W->>C: relay with an IAM ID token
+    C->>C: Japanese ASR (whisper.cpp)
+    C->>O: pick one animal from the sound catalog
+    O-->>C: animal and a one-line reason
+    C->>C: layer the call into the pauses (ffmpeg)
+    C-->>W: mixed audio, transcript, association
+    W-->>B: play or download
+```
 
 ## Three engineering decisions
 

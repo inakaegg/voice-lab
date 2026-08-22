@@ -42,6 +42,10 @@ openai = [
   "openai>=2.0",
   "websocket-client>=1.8",
 ]
+# docsの構成図を生成するときだけ使う。実行時とCIには要らない（別途Graphvizのdotが要る）。
+docs = [
+  "diagrams>=0.24",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
