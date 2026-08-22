@@ -74,7 +74,7 @@ TEXT = {
     "en": {
         "title": "Voice Lab architecture   green = SpeakLoop   orange = Zoovoice   grey = shared",
         "browser": ("Browser", "/speakloop  ·  /zoovoice"),
-        "boundary": "Cloudflare  (the only secret boundary; no API key leaves it)",
+        "boundary": "Cloudflare  (no API key reaches the browser; keys live in Worker and Cloud Run secrets)",
         "worker": ("Cloudflare Worker", "Static Assets serve the UI", "Google login / quota / API relay"),
         "turnstile": ("Turnstile", "blocks automated Zoovoice access"),
         "storage": "Storage",
@@ -97,7 +97,7 @@ TEXT = {
     "ja": {
         "title": "Voice Lab 構成図　　緑=SpeakLoopの経路　橙=Zoovoiceの経路　灰=共通",
         "browser": ("ブラウザ", "/speakloop  ・  /zoovoice"),
-        "boundary": "Cloudflare（唯一の秘密境界。APIキーはここから外へ出ない）",
+        "boundary": "Cloudflare（APIキーはブラウザへ渡さず、Worker secretとCloud Run secretで管理）",
         "worker": ("Cloudflare Worker", "Static Assets で画面配信", "Googleログイン・quota・API中継"),
         "turnstile": ("Turnstile", "Zoovoiceの自動アクセス抑止"),
         "storage": "保存層",
