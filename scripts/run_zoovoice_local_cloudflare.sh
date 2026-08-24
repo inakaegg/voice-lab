@@ -171,7 +171,7 @@ npx wrangler d1 migrations apply MO_SPEECH_DB --local --persist-to "$persist_dir
 
 if [[ "$mode" == "local" ]]; then
   # go run ではなくビルドした実行ファイルを起動する。署名付きの go 経由だと
-  # DYLD_LIBRARY_PATH が whisper-cli へ渡らず音声認識が起動しないため（CLI.md と同じ理由）。
+  # DYLD_LIBRARY_PATH が whisper-cli へ渡らず音声認識が起動しないため（簡易CLI launcherと同じ理由）。
   # また go run の子プロセスは親を kill しても残るので、実行ファイルを直接持つ。
   api_binary="$repository_root/tmp/zoovoice-local-api"
   (cd "$repository_root/services/zoovoice" && go build -o "$api_binary" .)

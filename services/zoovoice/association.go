@@ -16,7 +16,10 @@ import (
 
 type SelectionStrategy string
 
-const strategyLLM SelectionStrategy = "llm"
+const (
+	strategyLLM      SelectionStrategy = "llm"
+	strategyFixedCLI SelectionStrategy = "fixed_cli"
+)
 
 const (
 	defaultAssociationModel    = "gpt-5.6-luna"
@@ -29,13 +32,20 @@ const (
 // 手元で必ず守れるようにするため。
 const associationReasonMaxRunes = 200
 
-// associationInstructions は「必ず1種選ぶ」プロンプト。
+// associationInstructions は「必ず指定した数だけ選ぶ」プロンプト。
 // 慎重版のプロンプトは候補に無い動物を聞かれると回答を避けたため、遊びの製品意図に合わなかった。
-const associationInstructions = `あなたは日本語の発話から動物を1種連想する担当です。
-候補リストの中から、発話に最もふさわしい動物をかならず1種選んでください。
+func associationInstructions(count int) string {
+	unique := ""
+	if count > 1 {
+		unique = "同じ動物を重ねて選ばないでください。\n"
+	}
+	return fmt.Sprintf(`あなたは日本語の発話から動物を%d種連想する担当です。
+候補リストの中から、発話に最もふさわしい動物をかならず%d種選んでください。
 発話に動物が出てこなくても構いません。語呂合わせ・ことわざ・縁起物・情景・比喩など、
-どんなこじつけでもよいので必ず1種選び、選んだ理由を日本語60文字以内の短文で書いてください。
-「選べない」という回答は禁止です。species には候補リストのidをそのまま使ってください。`
+どんなこじつけでもよいので必ず%d種選び、選んだ理由をそれぞれ日本語60文字以内の短文で書いてください。
+%s「選べない」という回答は禁止です。species には候補リストのidをそのまま使ってください。`,
+		count, count, count, unique)
+}
 
 type AnimalSelection struct {
 	Species  string            `json:"species"`
@@ -44,8 +54,10 @@ type AnimalSelection struct {
 	Strategy SelectionStrategy `json:"strategy"`
 }
 
+// animalAssociator は発話から動物を連想する。countは求める種類数で、
+// 返る件数はそれ以下になり得る（同じ動物を重ねて選ばれた場合など）。
 type animalAssociator interface {
-	Select(context.Context, string, []availableAnimal) (AnimalSelection, error)
+	Select(context.Context, string, []availableAnimal, int) ([]AnimalSelection, error)
 }
 
 type httpDoer interface {
@@ -81,8 +93,9 @@ type associationCandidate struct {
 }
 
 type associationRequest struct {
-	Transcript string                 `json:"transcript"`
-	Candidates []associationCandidate `json:"candidates"`
+	Transcript  string                 `json:"transcript"`
+	AnimalCount int                    `json:"animal_count"`
+	Candidates  []associationCandidate `json:"candidates"`
 }
 
 type associationAnswer struct {
@@ -90,19 +103,27 @@ type associationAnswer struct {
 	Reason  string `json:"reason"`
 }
 
+type associationAnswers struct {
+	Animals []associationAnswer `json:"animals"`
+}
+
 func (a *llmAssociator) Select(
 	ctx context.Context,
 	transcript string,
 	animals []availableAnimal,
-) (AnimalSelection, error) {
+	count int,
+) ([]AnimalSelection, error) {
 	transcript = strings.TrimSpace(transcript)
 	if transcript == "" {
-		return AnimalSelection{}, &APIError{
+		return nil, &APIError{
 			Status: 422, Code: "asr_empty", Message: "音声から発話を認識できませんでした。",
 		}
 	}
 	if len(animals) == 0 {
-		return AnimalSelection{}, fmt.Errorf("no animals are available for association")
+		return nil, fmt.Errorf("no animals are available for association")
+	}
+	if count < 1 {
+		count = 1
 	}
 	labels := make(map[string]string, len(animals))
 	candidates := make([]associationCandidate, 0, len(animals))
@@ -110,44 +131,76 @@ func (a *llmAssociator) Select(
 		labels[animal.ID] = animal.LabelJA
 		candidates = append(candidates, associationCandidate{ID: animal.ID, LabelJA: animal.LabelJA})
 	}
-	answer, err := a.ask(ctx, associationRequest{Transcript: transcript, Candidates: candidates})
+	answers, err := a.ask(ctx, associationRequest{
+		Transcript: transcript, AnimalCount: count, Candidates: candidates,
+	})
 	if err != nil {
-		return AnimalSelection{}, err
+		return nil, err
 	}
-	labelJA, known := labels[answer.Species]
-	if !known {
-		return AnimalSelection{}, associationAPIError(
-			"動物を選べませんでした。",
-			fmt.Errorf("model returned unknown species %q", truncate(answer.Species, 80)),
-		)
-	}
-	reason := strings.TrimSpace(answer.Reason)
-	if reason == "" {
-		return AnimalSelection{}, associationUnavailableError(
-			"連想の理由を受け取れませんでした。", fmt.Errorf("model returned an empty reason"),
-		)
-	}
-	return AnimalSelection{
-		Species:  answer.Species,
-		LabelJA:  labelJA,
-		Reason:   truncateRunes(reason, associationReasonMaxRunes),
-		Strategy: strategyLLM,
-	}, nil
+	return selectionsFromAnswers(answers, labels, count)
 }
 
-func (a *llmAssociator) ask(ctx context.Context, input associationRequest) (associationAnswer, error) {
+// selectionsFromAnswers はモデルの回答を検証して選択結果へ直す。
+// 同じ動物を重ねて選ばれた場合は1件へ潰すので、返る件数は要求より少なくなり得る。
+// 1件も残らない場合だけ失敗させる。
+func selectionsFromAnswers(
+	answers []associationAnswer,
+	labels map[string]string,
+	count int,
+) ([]AnimalSelection, error) {
+	selections := make([]AnimalSelection, 0, count)
+	seen := make(map[string]bool, count)
+	for _, answer := range answers {
+		if len(selections) == count {
+			break
+		}
+		if seen[answer.Species] {
+			continue
+		}
+		labelJA, known := labels[answer.Species]
+		if !known {
+			return nil, associationAPIError(
+				"動物を選べませんでした。",
+				fmt.Errorf("model returned unknown species %q", truncate(answer.Species, 80)),
+			)
+		}
+		reason := strings.TrimSpace(answer.Reason)
+		if reason == "" {
+			return nil, associationUnavailableError(
+				"連想の理由を受け取れませんでした。", fmt.Errorf("model returned an empty reason"),
+			)
+		}
+		seen[answer.Species] = true
+		selections = append(selections, AnimalSelection{
+			Species:  answer.Species,
+			LabelJA:  labelJA,
+			Reason:   truncateRunes(reason, associationReasonMaxRunes),
+			Strategy: strategyLLM,
+		})
+	}
+	if len(selections) == 0 {
+		return nil, associationAPIError(
+			"連想に使うAPIが動物を選びませんでした。", fmt.Errorf("model returned no species"),
+		)
+	}
+	return selections, nil
+}
+
+func (a *llmAssociator) ask(ctx context.Context, input associationRequest) ([]associationAnswer, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return associationAnswer{}, err
+		return nil, err
 	}
 	// 候補外のidを返されるとその回の連想がまるごと失敗するため、選べる値をenumで固定する。
 	speciesIDs := make([]string, 0, len(input.Candidates))
 	for _, candidate := range input.Candidates {
 		speciesIDs = append(speciesIDs, candidate.ID)
 	}
+	// 件数は minItems/maxItems へ書かない。strictな構造化出力が受け付ける制約に依存せず、
+	// 手元の検証で件数を守る。
 	payload, err := json.Marshal(map[string]any{
 		"model":        a.model,
-		"instructions": associationInstructions,
+		"instructions": associationInstructions(input.AnimalCount),
 		"input":        string(inputJSON),
 		"text": map[string]any{
 			"format": map[string]any{
@@ -157,60 +210,70 @@ func (a *llmAssociator) ask(ctx context.Context, input associationRequest) (asso
 				"schema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"species": map[string]any{"type": "string", "enum": speciesIDs},
-						"reason":  map[string]any{"type": "string"},
+						"animals": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"species": map[string]any{"type": "string", "enum": speciesIDs},
+									"reason":  map[string]any{"type": "string"},
+								},
+								"required":             []string{"species", "reason"},
+								"additionalProperties": false,
+							},
+						},
 					},
-					"required":             []string{"species", "reason"},
+					"required":             []string{"animals"},
 					"additionalProperties": false,
 				},
 			},
 		},
 	})
 	if err != nil {
-		return associationAnswer{}, err
+		return nil, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return associationAnswer{}, err
+		return nil, err
 	}
 	request.Header.Set("Authorization", "Bearer "+a.apiKey)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := a.client.Do(request)
 	if err != nil {
-		return associationAnswer{}, associationUnavailableError("連想に使うAPIへ接続できませんでした。", err)
+		return nil, associationUnavailableError("連想に使うAPIへ接続できませんでした。", err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return associationAnswer{}, associationUnavailableError("連想に使うAPIの応答を読めませんでした。", err)
+		return nil, associationUnavailableError("連想に使うAPIの応答を読めませんでした。", err)
 	}
 	if response.StatusCode != http.StatusOK {
 		message := "連想に使うAPIがエラーを返しました。"
 		cause := fmt.Errorf("association API returned HTTP %d: %s", response.StatusCode, truncate(string(body), 300))
 		if isTransientUpstreamStatus(response.StatusCode) {
-			return associationAnswer{}, associationUnavailableError(message, cause)
+			return nil, associationUnavailableError(message, cause)
 		}
-		return associationAnswer{}, associationAPIError(message, cause)
+		return nil, associationAPIError(message, cause)
 	}
 	text := outputTextFromResponses(body)
 	if text == "" {
-		return associationAnswer{}, associationUnavailableError(
+		return nil, associationUnavailableError(
 			"連想に使うAPIが空の応答を返しました。", fmt.Errorf("empty output text"),
 		)
 	}
-	var answer associationAnswer
-	if err := json.Unmarshal([]byte(text), &answer); err != nil {
-		return associationAnswer{}, associationAPIError(
+	var answers associationAnswers
+	if err := json.Unmarshal([]byte(text), &answers); err != nil {
+		return nil, associationAPIError(
 			"連想に使うAPIの応答を解釈できませんでした。",
 			fmt.Errorf("parse model output %q: %w", truncate(text, 300), err),
 		)
 	}
-	if answer.Species == "" {
-		return associationAnswer{}, associationAPIError(
-			"連想に使うAPIが動物を選びませんでした。", fmt.Errorf("model returned an empty species"),
+	if len(answers.Animals) == 0 {
+		return nil, associationAPIError(
+			"連想に使うAPIが動物を選びませんでした。", fmt.Errorf("model returned no species"),
 		)
 	}
-	return answer, nil
+	return answers.Animals, nil
 }
 
 // outputTextFromResponses はOpenAI Responses APIの本文からテキストを取り出す。

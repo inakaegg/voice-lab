@@ -64,7 +64,7 @@ func TestComposeEndpointReturnsWavEnvelope(t *testing.T) {
 		Transcript:            "犬が公園を走っています",
 		SelectedAnimal:        SelectedAnimal{ID: "dog", LabelJA: "犬"},
 		AssociationReason:     "犬が出てくるため",
-		Insertions:            []ResolvedInsertion{{Slot: "opening", Species: "dog", AtSeconds: 0}},
+		Insertions:            []ResolvedInsertion{{Slot: slotWord, Species: "dog", AtSeconds: 1}},
 		SoundCredits:          []soundCredit{{License: "CC0 1.0", Creator: "someone", SourceURL: "https://example.com/dog"}},
 		InputDurationSeconds:  2,
 		OutputDurationSeconds: 2.3,
@@ -173,7 +173,8 @@ func TestParseComposeSettingsAcceptsOnlyIntegerIntensity(t *testing.T) {
 	if apiError != nil {
 		t.Fatal(apiError)
 	}
-	if settings.Intensity != 50 {
+	// animal_count を省略した古い呼び出しも通り、既定の1になる。
+	if settings.Intensity != 50 || settings.AnimalCount != defaultAnimalCount {
 		t.Fatalf("settings = %#v", settings)
 	}
 	for _, payload := range []string{
@@ -183,9 +184,32 @@ func TestParseComposeSettingsAcceptsOnlyIntegerIntensity(t *testing.T) {
 		`{"intensity":101}`,
 		`{"intensity":50,"extra":true}`,
 		`{"arrangement":{"opening":"dog"},"intensity":50}`,
+		`{"intensity":50,"animal_count":0}`,
+		`{"intensity":50,"animal_count":3}`,
+		`{"intensity":50,"animal_count":1.5}`,
 	} {
 		if _, apiError := parseComposeSettings([]byte(payload)); apiError == nil || apiError.Code != "invalid_settings" {
 			t.Errorf("payload %s error = %#v", payload, apiError)
+		}
+	}
+}
+
+// 動物の種類数は画面のトグルで選ぶ。既定は1で、2まで受け付ける。
+func TestParseComposeSettingsAcceptsAnimalCount(t *testing.T) {
+	for _, test := range []struct {
+		payload string
+		want    int
+	}{
+		{payload: `{"intensity":50}`, want: 1},
+		{payload: `{"intensity":50,"animal_count":1}`, want: 1},
+		{payload: `{"intensity":50,"animal_count":2}`, want: 2},
+	} {
+		settings, apiError := parseComposeSettings([]byte(test.payload))
+		if apiError != nil {
+			t.Fatalf("payload %s: %v", test.payload, apiError)
+		}
+		if settings.AnimalCount != test.want {
+			t.Errorf("payload %s animal count = %d, want %d", test.payload, settings.AnimalCount, test.want)
 		}
 	}
 }
@@ -204,7 +228,11 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 	composer := newComposer(
 		catalog,
 		execCommandRunner{},
-		fixedTranscriber{transcript: "鶏が朝に鳴いています"},
+		fixedTranscriber{
+			transcript: "鶏が朝に鳴いています",
+			tokens:     evenTokens("鶏が朝に鳴いています", 0.2, 0.35),
+		},
+		newTestSegmenter(t),
 		fixedAssociator{selection: AnimalSelection{
 			Species: "rooster", LabelJA: "鶏", Reason: "朝の鳴き声といえば鶏", Strategy: strategyLLM,
 		}},
@@ -282,8 +310,16 @@ func TestComposeEndpointWithFFmpegFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Meta.Insertions) != 4 {
-		t.Fatalf("insertions = %#v, want opening, two gaps, and ending", payload.Meta.Insertions)
+	insertions := payload.Meta.Insertions
+	if len(insertions) < 2 {
+		t.Fatalf("insertions = %#v, want word insertions and an ending", insertions)
+	}
+	if insertions[0].Slot != slotWord || insertions[0].AtSeconds <= 0 {
+		t.Fatalf("first insertion = %+v, want a word insertion after the opening", insertions[0])
+	}
+	ending := insertions[len(insertions)-1]
+	if ending.Slot != slotEnding || ending.AtSeconds != payload.Meta.InputDurationSeconds {
+		t.Fatalf("ending insertion = %+v", ending)
 	}
 	if probedDuration <= payload.Meta.InputDurationSeconds ||
 		payload.Meta.OutputDurationSeconds <= payload.Meta.InputDurationSeconds {

@@ -47,7 +47,7 @@ case "${0##*/}:$*" in
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "--output" ]; then
         shift
-        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"association_reason":"%s","insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" > "$1"
+        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"selected_animals":[{"id":"dog","label_ja":"犬","reason":"%s"}],"association_reason":"%s","insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" > "$1"
       fi
       shift || true
     done

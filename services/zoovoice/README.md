@@ -1,8 +1,9 @@
 # Zoovoice 音声合成サービス
 
-更新日: 2026-08-09
+更新日: 2026-08-24
 
-Zoovoice は録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話の無音区間へ重ねるデモです。
+Zoovoice は録音した発話の内容から動物を自動で選び、その鳴き声を言葉の切れ目へ差し込むデモです。
+差し込んだぶん出力音声は長くなります。動物の種類数は利用者が1種か2種かを選べます（既定は1種）。
 このディレクトリには Go 製の API を置いています。鳴き声素材はリポジトリに置かず、実行時とimage build時に外から渡します。
 1リクエストの流れは、日本語ASR、動物の自動連想、音声合成の順です。
 公開のUI・API入り口はCloudflare Workerであり、Workerが有効化した配備ではこのGoサービスをprivateなGoogle Cloud Run上のコンテナとして呼び出します。
@@ -58,33 +59,17 @@ manifestが持つ音声のSHA-256と実ファイルが一致しない場合は�
 
 ## 機能確認CLI
 
-サーバを立てずに、入力テキストまたは入力音声1件で連想から合成までを確認できます。
-機能追加のたびに、製品へ組み込む前の動作確認へ使う想定です。
-
-```sh
-go run . preview -text "夜中に犬が吠えていた"
-go run . preview -audio recording.wav -out composed.wav
-```
-
-表示する内容は次のとおりです。
-
-- 文字起こしの結果（音声入力のとき）
-- 連想した動物と、LLMが返した「連想の理由」の短文
-- 採用した鳴き声ファイルのパスと、その素材のクレジット（ライセンス・作者・出典URL）
-- 合成音声の出力先パス（音声入力のとき。afplay等で再生して確認できます）
-
-`-text` はASRを使わないため、`OPENAI_API_KEY` だけで動きます。
-`-audio` はwhisperの2変数（`ZOOVOICE_WHISPER_COMMAND`・`ZOOVOICE_ASR_MODEL_PATH`）も必要です。
-アニマル度は `-intensity 0〜100`（既定50）、処理ログは `-verbose` で標準エラーへ出せます。
+貼り付けて実行できる `./zoovoice preview` コマンドは、リポジトリ直下の [CLI.md](../../CLI.md) に集約します。
+`-text` で連想と素材を、`-audio` でASRから合成までを確認します。
+`-species` は音源カタログの1種か2種を固定し、LLMと `OPENAI_API_KEY` を不要にします。
+`-animals` と `-species` は同時に指定できません。
+アニマル度は `-intensity 0〜100`（既定50）で指定します。
+`-verbose` は処理ログを標準エラーへ出します。
 
 ### 最終選別セット（tmp1/final）での確認
 
 最終選別した鳴き声セット（`tmp1/final`、Git管理外）で動かす場合は、`ZOOVOICE_SOUNDS_DIR` にそのディレクトリを渡します。
 サーバとCLIのどちらでも有効です。
-
-```sh
-ZOOVOICE_SOUNDS_DIR=<repo>/tmp1/final go run . preview -text "..."
-```
 
 このディレクトリは `manifest.json` を持ち、1動物に複数の鳴き声ファイルと、ファイル単位のクレジット・SHA-256を記録しています。
 小森平（taira-komori）由来の素材は素材そのものの再配布が禁止のため、このセットをリポジトリへコピーしてはいけません（詳細はリポジトリ直下の THIRD_PARTY_NOTICES.md）。
@@ -115,7 +100,7 @@ npm run dev:zoovoice:cloud-run
 | `ZOOVOICE_TIMEOUT_SECONDS` | `85` | ASRとffmpegを含む1リクエストの上限秒数 |
 | `ZOOVOICE_LOG_PATH` | リポジトリ直下の `logs/zoovoice.log` | JST時刻と経過時間を含むサービスログ |
 
-必須の3つは起動時に検査します。
+必須の4つは起動時に検査します。
 ファイルが無い場合やAPIキーが未設定の場合は起動に失敗します。
 
 ## API
@@ -149,16 +134,19 @@ Go API はprivateな内部APIです。
 `multipart/form-data` で次の2フィールドを送ります。
 
 - `audio`: 録音ファイル。上限は10MBかつ60秒です。
-- `settings`: `intensity` だけを持つ JSON 文字列です。
+- `settings`: `intensity` と `animal_count` を持つ JSON 文字列です。
 
 `intensity` はアニマル度を表す0から100までの整数です。
-この値は鳴き声の挿入頻度だけを決めます。
+文中の目標挿入数は `round(入力音声の秒数 × 0.5 × intensity / 100)` です。
+末尾へ必ず入れる1本はこの密度計算に含めません。
+`animal_count` は連想する動物の種類数で、1か2を指定します。
+省略した場合は1として扱うので、この項目を持たない古い呼び出しもそのまま通ります。
 動物の指定、挿入位置の指定、未知のキーは受け付けません。
 
 ```sh
 curl -X POST http://127.0.0.1:8090/compose \
   -F 'audio=@<recording.webm>' \
-  -F 'settings={"intensity":50}'
+  -F 'settings={"intensity":50,"animal_count":1}'
 ```
 
 成功時は合成済み WAV を base64 で返します。
@@ -174,15 +162,19 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
   "meta": {
     "transcript": "夜中に鶏が鳴いていた",
     "selected_animal": {"id": "rooster", "label_ja": "雄鶏"},
+    "selected_animals": [
+      {"id": "rooster", "label_ja": "雄鶏", "reason": "夜中に鳴く鳥といえば鶏"}
+    ],
     "association_reason": "夜中に鳴く鳥といえば鶏",
     "insertions": [
-      {"slot": "opening", "species": "rooster", "at_seconds": 0}
+      {"slot": "word", "species": "rooster", "at_seconds": 1.4, "duration_seconds": 0.8},
+      {"slot": "ending", "species": "rooster", "at_seconds": 3.2, "duration_seconds": 2.5}
     ],
     "sound_credits": [
       {"license": "CC0 1.0", "creator": "someone", "source_url": "https://example.com/1"}
     ],
     "input_duration_seconds": 3.2,
-    "output_duration_seconds": 4.6
+    "output_duration_seconds": 6.5
   }
 }
 ```
@@ -192,13 +184,16 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 | 項目 | 内容 |
 | --- | --- |
 | `transcript` | 日本語ASRの認識本文 |
-| `selected_animal` | 自動で選んだ動物の種IDと日本語ラベル |
-| `association_reason` | その動物を選んだ理由としてLLMが返した日本語の短文 |
-| `insertions` | 挿入した鳴き声の位置。`species` は全件同じ動物 |
+| `selected_animal` | 自動で選んだ動物のうち1件目の種IDと日本語ラベル |
+| `selected_animals` | 選んだ動物の一覧。各件が種ID・日本語ラベル・理由を持つ。1種のときも配列で返す |
+| `association_reason` | 1件目の動物を選んだ理由としてLLMが返した日本語の短文 |
+| `insertions` | 差し込んだ鳴き声の位置と長さ |
 | `sound_credits` | 使った鳴き声素材のクレジット（ライセンス・作者・出典URL）。重複は除く。素材ファイル名は含まない |
 
-`insertions` の `slot` は `opening`・`gaps`・`ending` のいずれかです。
-1回の合成で使う動物は1種だけなので、`species` はすべて `selected_animal.id` と一致します。
+`insertions` の `slot` は `word`（言葉の切れ目）か `ending`（末尾）です。
+先頭には差し込みません。末尾はアニマル度に関わらず必ず1つ入ります。
+`selected_animals` が2件のときは `species` が2種を交互に指し、末尾は1件目の動物になります。
+LLMの結果が1件へまとまった場合は、全件が `selected_animal.id` と一致します。
 
 エラーは `{"error":{"code":"...","message":"..."}}` の形です。
 動物音単体を取得または試聴する API はありません。
@@ -209,8 +204,9 @@ ASRが発話を1つも認識できなかった場合は `422` の `asr_empty` �
 利用者が動物を選ぶ経路はUIにもAPIにもありません。
 
 1. ASR本文と、音源のある動物の一覧（種IDと日本語ラベル）をLLMへ渡す。
-2. LLMは「どんなこじつけでもよいので候補から必ず1種選ぶ」指示に従い、種IDと理由の短文を返す。
+2. LLMは「どんなこじつけでもよいので候補から必ず指定数だけ選ぶ」指示に従い、種IDと理由の短文を返す。
 3. 候補一覧に無い種IDが返った場合はエラーにする。別の動物へ黙って読み替えない。
+4. 同じ動物が重ねて返った場合は1件へまとめる。結果が1件でもエラーにはしない。
 
 辞書・語彙表・意味ベクトルによる連想経路と、当てずっぽうのrandom選択は持ちません。
 辞書方式との比較実測と、この方針に至った経緯は [ZOOVOICE_ASSOCIATION_CASE_STUDY.md](../../docs/speech-translation/ZOOVOICE_ASSOCIATION_CASE_STUDY.md) にあります。
@@ -229,7 +225,7 @@ ASR本文と連想の理由は応答とプロセスのメモリ内だけで扱�
 - 選んだ種ID
 - 入力と出力のbyte数、アニマル度の値
 - 入力音声と出力音声の長さ、発話の合計時間
-- 無音判定の最小秒数、無音区間数、挿入数
+- 形態素の数と挿入候補の数、挿入数、選んだ動物の数
 
 このほか、プロセスの起動時には待受port、利用可能な動物数、timeoutの設定秒数を記録します。
 起動に失敗した理由も記録します。
@@ -289,6 +285,7 @@ whisper.cpp commit、ASRモデルのSHA-256、ライセンス識別子はimage l
 - Goバイナリと`whisper-cli`
 - `ggml-small.bin`
 - whisper.cppのライセンス表示
+- KagomeとKagome辞書のMIT License、mecab-ipadicのNOTICE
 - Debian runtime、CA証明書、ffmpeg
 - `zoovoice_sounds`から取り込んだ鳴き声セット（`/app/sounds`）
 

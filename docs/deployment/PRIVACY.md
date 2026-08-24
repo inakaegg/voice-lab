@@ -1,6 +1,6 @@
 # 公開デモのデータ取扱い境界
 
-更新日: 2026-08-09
+更新日: 2026-08-24
 
 この文書は実装上のデータフローと保存境界を固定する技術文書である。利用者向けの案内は [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を正とし、公開画面の `/privacy` から同じ内容を確認できるようにする。
 
@@ -13,7 +13,7 @@
 | OpenAI | 対象機能の入力音声またはテキスト、Zoovoiceの認識文と動物候補一覧 | ASR、翻訳、テキスト加工、TTS、Zoovoiceの動物連想 |
 | RunPod Serverless | SpeakLoopの本人録音、模範TTS、復唱・お手本音声 | FunASR、Seed-VC |
 | Cloudflare Turnstile | Zoovoiceの検証tokenとclient IP | 自動化された大量利用の抑止 |
-| Google Cloud Run | Zoovoiceの録音音声とアニマル度 | 日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成 |
+| Google Cloud Run | Zoovoiceの録音音声、アニマル度、動物の種類数 | 日本語ASR、動物の自動連想、鳴き声を言葉の切れ目へ差し込んだ音声の合成 |
 
 Cloudflare TurnstileとGoogle Cloud Runの行はZoovoice専用である。この2つの送信は `ZOOVOICE_ENABLED=1` の配備でだけ発生する。公開環境の配備はこの値を設定している。ZoovoiceがOpenAIへ渡すのはASRの認識文だけであり、録音音声そのものは渡さない。
 
@@ -50,21 +50,22 @@ Zoovoiceは `ZOOVOICE_ENABLED=1` の配備だけで公開routeとAPIを提供す
 
 ### 用語
 
-- アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
-- 動物の自動連想とは、ASR本文から動物1種を自動で選ぶ処理を指す。
+- アニマル度とは、鳴き声の挿入頻度を決める設定を指す。
+- 動物の種類数とは、連想する動物を1種にするか2種にするかの設定を指す。通常UIで利用者が変えられる設定は、アニマル度と動物の種類数の2つだけとする。
+- 動物の自動連想とは、ASR本文から動物を指定数だけ自動で選ぶ処理を指す。
 - 連想metadataとは、選ばれた動物と、その動物を選んだ理由の短文を指す。
 
 ### 送信経路と処理
 
 `/zoovoice` のページは、config取得後のページ表示時からTurnstileのscriptとwidgetをCloudflareから読み込む。録音しない訪問でも、この読み込みでブラウザからCloudflareへの接触が起きる。
 
-compose用の録音とアニマル度は、ブラウザからCloudflare Workerへ送る。送信は録音の手動停止または60秒の自動停止の直後に、自動で1回だけ行う。録音中に取消した音声と500ms未満の録音はWorkerへ送らない。追加の送信は、retry可能な失敗の後に利用者が「もう一度生成」を押した場合だけ発生する。
+compose用の録音、アニマル度、動物の種類数は、ブラウザからCloudflare Workerへ送る。送信は録音の手動停止または60秒の自動停止の直後に、自動で1回だけ行う。録音中に取消した音声と500ms未満の録音はWorkerへ送らない。追加の送信は、retry可能な失敗の後に利用者が「もう一度生成」を押した場合だけ発生する。
 
-Workerは受け取った録音とアニマル度をGoogle Cloud Runへ一時送信する。Cloud Runは日本語ASR、動物の自動連想、鳴き声を重ねた音声の合成を担当する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。
+Workerは受け取った録音と2つの設定をGoogle Cloud Runへ一時送信する。Cloud Runは日本語ASR、動物の自動連想、鳴き声を差し込んだ音声の合成を担当する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。
 
 productionのWorkerは、専用invoker service accountのkeyで署名したJWTをGoogleのtoken endpointで短期ID tokenへ交換し、そのtokenを付けてCloud Runを呼ぶ。ID tokenはisolate内のmemoryだけへ短期cacheし、KV・D1・R2へ保存しない。service account key、JWT、ID tokenは応答とlogへ含めない。この認証は実装済みであり、実keyのWorker secret登録とCloud Runへのdeployも完了している。deploy済みのCloud Runが認証なしのrequestを403で拒否することは、実環境で確認済みである。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す。
 
-WorkerはTurnstileをserver-sideで検証する。検証はcompose requestごとに行う。ブラウザは使ったtokenを成功・失敗の後にresetし、次のtokenを取得する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesとアニマル度の設定JSONだけである。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。
+WorkerはTurnstileをserver-sideで検証する。検証はcompose requestごとに行う。ブラウザは使ったtokenを成功・失敗の後にresetし、次のtokenを取得する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesと、アニマル度・動物の種類数の設定JSONだけである。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。
 
 入力上限と利用上限は合成前に判定する。音声ファイルは10MB以下、設定JSONは64KB以下とする。利用上限はUTC日次100件、UTC月次1,200件とする。この上限は利用者ごとではなく、Zoovoice全体の合計へ適用する。
 
@@ -85,7 +86,7 @@ ASR本文、録音、生成音声は応答の生成に必要な間だけ扱う�
 - 選んだ種ID
 - 入力と出力のbyte数、アニマル度の値
 - 入力音声と出力音声の長さ、発話の合計時間
-- 無音判定の最小秒数、無音区間数、挿入数
+- 形態素の数と挿入候補の数、挿入数、選んだ動物の数
 
 このほか、プロセスの起動時には待受port、利用可能な動物数、timeoutの設定秒数を記録する。起動に失敗した理由も記録する。
 

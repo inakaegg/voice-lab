@@ -36,6 +36,7 @@ func main() {
 		catalog,
 		execCommandRunner{},
 		runtimeDependencies.transcriber,
+		runtimeDependencies.segmenter,
 		runtimeDependencies.associator,
 		rand.New(rand.NewSource(time.Now().UnixNano())),
 		timeout,

@@ -124,6 +124,36 @@ def read_text(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def test_cli_entry_contains_only_paste_ready_command_table() -> None:
+    cli = read_text("CLI.md")
+    nonempty_lines = [line for line in cli.splitlines() if line.strip()]
+
+    assert nonempty_lines
+    assert all(line.startswith("|") for line in nonempty_lines)
+    assert nonempty_lines[0] == "| 操作 | コマンド |"
+    assert "```" not in cli
+    assert "<" not in cli
+    for required in (
+        "./zoovoice preview",
+        "-species",
+        "-audio",
+        "-intensity",
+    ):
+        assert required in cli
+    for internal_detail in (
+        "export ",
+        "DYLD_LIBRARY_PATH",
+        "ZOOVOICE_SOUNDS_DIR",
+        "go build",
+        "npm run",
+        "./zoovoice setup",
+        "<SOUNDS_DIR>",
+        "<WHISPER_BUILD_DIR>",
+        "<ASR_MODEL_PATH>",
+    ):
+        assert internal_detail not in cli
+
+
 def test_public_docs_carry_an_update_date_near_the_top() -> None:
     # AGENTS.md「現状説明を持つ文書には更新日を置く」をdocs/配下へ機械検査する。
     date_line = re.compile(r"^(最終)?更新日[:：]\s*\S+")
