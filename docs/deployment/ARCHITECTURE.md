@@ -103,11 +103,11 @@ sequenceDiagram
     Note over W,C: 接続失敗は502、timeoutは504としてWorkerが返す
 ```
 
-WorkerはCloud Runの応答形を厳密に検証するため、両者を同じcommitから続けてdeployする。二形状を同時に受理する互換層は持たない。
+WorkerはCloud Runの応答形を厳密に検証するため、二形状を同時に受理する互換層は持たない。応答形を変える場合は、受理側のWorkerを先に反映する。
 
-直近のUI変更（β版バッジの削除）はproduction未反映である。feature branchのmerge後にWorker deployとdeploy後smokeを実施する。
+反映経路は2つに分かれる。Cloudflare Workerは、mainへのpushでCIが成功した場合だけ `Deploy Cloudflare Production` が自動で反映する。Cloud Runのimageは手動で、`scripts/deploy_zoovoice_cloud_run.sh` を明示applyで実行する。手順は [CLOUDFLARE.md](CLOUDFLARE.md) と [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
 
-未確認として残るのはWorker経由の実 `POST /api/zoovoice/compose` 1件である。この経路にはproduction Turnstileの人間操作が必要であり、CAPTCHAは回避しないため自動smokeの対象にしない。確認済み・未確認の内訳は [services/zoovoice/README.md](../../services/zoovoice/README.md) の「外部操作の状況」を正とする。
+どこまで実地確認したかは [services/zoovoice/README.md](../../services/zoovoice/README.md) の「外部操作の状況」を正とする。この文書には個々のdeployの状況を書かない。
 
 ## IaC（Terraform）
 

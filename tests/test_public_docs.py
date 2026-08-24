@@ -475,45 +475,22 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "`β版` バッジを表示する" not in document, relative_path
         assert "β版表示" not in document, relative_path
 
-    # 日本語文書はJA定型句で固定する。英語READMEは後続のEN定型句で同じ事実を固定する。
+    # deployの状況は公開docsへ書かない。正本はservices/zoovoice/README.mdの「外部操作の状況」とする。
     for relative_path in (
+        "README.md",
         "README.ja.md",
         "docs/deployment/PUBLIC_DEMO_ROADMAP.md",
         "docs/deployment/ARCHITECTURE.md",
         "docs/speech-translation/SPEC.md",
     ):
         document = read_text(relative_path)
-        assert "production未反映" in document, relative_path
-        assert "merge後に" in document, relative_path
-        assert "deploy後smoke" in document, relative_path
+        assert "production未反映" not in document, relative_path
+        assert "not yet in production" not in document, relative_path
 
-    readme = read_text("README.md")
-    assert "The production environment reflects the merged version" in readme
-    assert "beta-label removal" in readme
-    assert "tech-stack display" in readme
-    assert "SpeakLoop GitHub link" in readme
-    assert "not yet in production" in readme
-    assert "post-deploy smoke checks follow the merge" in readme
-
-    readme_ja = read_text("README.ja.md")
-    assert "production公開環境にはmerge済みの版を反映済み" in readme_ja
-    assert "β表示の削除" in readme_ja
-    assert "使用技術表示" in readme_ja
-    assert "SpeakLoopのGitHub導線" in readme_ja
-    assert "production未反映" in readme_ja
-    assert "merge後にdeployとdeploy後smokeを実施します" in readme_ja
-
-    roadmap = read_text("docs/deployment/PUBLIC_DEMO_ROADMAP.md")
-    assert "production公開環境にはmerge済みの版を反映済み" in roadmap
-    assert "本branchのUI変更" in roadmap
-    assert "β表示の削除" in roadmap
-    assert "使用技術表示" in roadmap
-    assert "SpeakLoopのGitHub導線" in roadmap
-    assert "production未反映" in roadmap
-    assert "merge後にdeployとdeploy後smokeを実施する" in roadmap
-    assert "Zoovoiceのproduction有効化とWorker deployは完了している" in roadmap
-    assert "Zoovoiceをproductionへ有効化" in roadmap
-    assert "公開route・公開Zoovoice API・Turnstile表示のsmokeを確認した" in roadmap
+    # 反映経路の違い（Workerは自動、Cloud Runは手動）は変わらない仕組みなので固定する。
+    architecture = read_text("docs/deployment/ARCHITECTURE.md")
+    assert "Deploy Cloudflare Production" in architecture
+    assert "deploy_zoovoice_cloud_run.sh" in architecture
 
 
 def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> None:

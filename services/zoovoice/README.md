@@ -355,43 +355,35 @@ CPU 2とメモリ2GiBの上限付きでnon-root起動し、`/healthz`がreadyに
 `whisper-cli`はDockerfileの`-DBUILD_SHARED_LIBS=OFF`により、whisper/ggmlのlibraryをstaticに組み込んでbuildしています。
 libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではありません。
 
-現在のimageの実測値はまだありません。
-以前ここに載せていた表は、連想をLLMへ移す前のimageの値だったため削除しました。
-当時のimageはConceptNet indexを同梱し、鳴き声素材を同梱していませんでした。
-上のCPU 2とメモリ2GiBは、現在は実測の裏付けを持たない設定値として読んでください。
+実測値は次のとおりです。localはApple Silicon上のlinux/amd64 emulationで、Cloud Runと同じCPU 2・メモリ2GiBの上限を課した値です。
 
-再測定にはlinux/amd64 emulationでのimage buildと、課金の発生するLLM呼び出しが1回必要です。
-測定するかどうかは別途決めます。
+| 測定 | 条件 | 値 |
+| --- | --- | --- |
+| 起動（cold start） | local container | 1.7秒 |
+| `/compose` 1回 | local container、日本語fixture | 30.6秒 |
+| `/compose` 1回 | Cloud Run、入力3.9秒の実音声 | 36.0秒 |
+
+emulationのlocal値はCloud Runの実CPU上の値より遅くなり得ます。再測定にはimage buildと、課金の発生するLLM呼び出しが1回必要です。
 
 ### 外部操作の状況
 
 production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker service accountのkeyによるID token取得方式です。
-方式の決定とWorker側の実装、契約testは完了しています。
 認証フローとsecret運用の詳細は[CLOUDFLARE.md](../../docs/deployment/CLOUDFLARE.md)を参照してください。
 
-次のremote操作は完了しています。
+Cloudflare Workerはmainへのpushで自動反映します。Cloud Runのimageだけが手動で、mainのHEADから`./scripts/deploy_zoovoice_cloud_run.sh`を明示applyで実行します。
+Cloud Runへ反映したら、次のsmokeで反映結果を確認します。
 
-- privateなArtifact Registryへのimage push
-- GCP projectでのCloud Run resource作成とdeploy実行
-- production用invoker service accountの作成とservice単位の `roles/run.invoker` 付与
-- invoker service account keyの発行とWorker secret登録
-- 本番D1へのZoovoice counter migration適用
-- 有効化varsを含むproduction Workerのdeploy
-
-実環境smokeで確認済みなのは次の範囲です。
-
-- 公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答
-- 公開 `/zoovoice` とZoovoice用JS assetの200配信
-- 実ブラウザでのUI表示とproduction Turnstile widgetの表示
-- 認証付きrequestでのprivate Cloud Runの `/animals` と実音声の `POST /compose` の200応答
 - 認証なしのCloud Run直接requestが403で拒否されること
+- smoke専用service accountを借用した`GET /animals`の200応答
+- 同じ認証での実音声の`POST /compose`の200応答と、挿入位置・選んだ動物の妥当性
+- 公開側は`python3 scripts/smoke_cloudflare_deployment.py --base-url https://voice-lab.inakaegg.workers.dev`
 
-Cloud Runの `/healthz` は認証付きrequestでもGoogle側で404になるため、remote smokeの確認先には使いません。
+Cloud Runの`/healthz`は認証付きrequestでもGoogle側で404になるため、remote smokeの確認先には使いません。
 local containerでは同じpathが200を返します。
 
-Worker経由の実 `POST /api/zoovoice/compose` は未確認です。
-この確認にはproduction Turnstileの人間操作が必要であり、CAPTCHAは回避しません。
-この1件を終えるまで、公開経路全体を実地確認済みとしては扱いません。
+Worker経由の実`POST /api/zoovoice/compose`は、常に未確認のまま残ります。
+この確認にはproduction Turnstileの人間操作が必要であり、CAPTCHAは回避しないためです。
+自動smokeの対象にはせず、必要なときにブラウザで`/zoovoice`を開いて確かめます。
 
 ## 検証
 

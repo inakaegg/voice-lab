@@ -269,7 +269,7 @@ RunPod image builds and GPU smoke checks cost real money and take time, so routi
 
 ## Public demo
 
-The Cloudflare Worker serves `/` as the portal, `/speakloop` as the practice screen, and `/zoovoice` as the animal-call screen. The production environment reflects the merged version and the routes above are live. UI changes added on this branch (beta-label removal, tech-stack display, and the SpeakLoop GitHub link) are not yet in production. Deploy and post-deploy smoke checks follow the merge.
+The Cloudflare Worker serves `/` as the portal, `/speakloop` as the practice screen, and `/zoovoice` as the animal-call screen. The routes above are live in the production environment.
 
 Audio is processed by external services for generation and evaluation, and is not stored as Voice Lab history. Do not record audio containing personal or confidential information. Details: [privacy policy](docs/PRIVACY_POLICY.md).
 

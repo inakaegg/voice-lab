@@ -1,6 +1,6 @@
 # Voice Lab Webアプリ仕様
 
-更新日: 2026-08-22
+更新日: 2026-08-24
 
 ## English summary
 
@@ -132,7 +132,7 @@ Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成
 
 Zoovoiceは、録音した発話の内容から動物を自動で選び、その鳴き声を言葉の切れ目へ差し込む機能である。挿入したぶん出力音声は長くなる。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
 
-Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない。バッジ削除は本branchで追加した変更であり、production未反映である。merge後にWorker deployとdeploy後smokeを実施する。連想精度と音源の拡充は今後も継続する。
+Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない。連想精度と音源の拡充は今後も継続する。
 
 この節の自動連想と1画面UIはリポジトリの現在のコードに実装済みである。既存構成のCloud Runとproduction Workerへのdeployは完了しており、公開環境でZoovoiceのrouteは有効である。
 
@@ -283,17 +283,12 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 
 ### productionの扱い
 
-- production `wrangler.toml` は有効化varsを設定済みである。実際の値は `wrangler.toml` を正とする。
-- production Workerの認証は、専用invoker service accountのkeyによるID token取得方式とする。方式の決定と実装は完了しており、詳細は [CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする。
+- productionの有効化varsは `wrangler.toml` を正とする。
+- production Workerの認証は、専用invoker service accountのkeyによるID token取得方式とする。詳細は [CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする。
 - production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
-- 外部deployとproduction有効化は別のgateで扱う。privateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行は完了している。
 - 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
-- CPU 2とメモリ2GiBは現在の設定値である。現在のimageでのlocal build、起動、処理時間の実測値は未取得であり、測定条件は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
-- local測定はApple Silicon上のlinux/amd64 emulationで行う。Cloud Runの実CPU上の処理時間も未確認である。
-- 本番D1へのcounter migration適用と、有効化varsを含むproduction Workerのdeployは完了している。
-- 実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答を確認した。公開 `/zoovoice` は実ブラウザでUIとproduction Turnstileの表示を確認した。
-- private Cloud Runへは、認証付きrequestで `/animals` と実音声の `POST /compose` の200応答を確認した。認証なしの直接requestは403だった。
-- Worker経由の実 `POST /api/zoovoice/compose` は未確認である。この確認にはproduction Turnstileの人間操作が必要であり、CAPTCHAは回避しない。この1件を終えるまで、公開経路全体を実地確認済みとして扱わない。
+- Cloud RunのCPU 2とメモリ2GiBは現在の設定値である。測定条件と実測値は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
+- 何をどこまで実地確認したかは [services/zoovoice/README.md](../../services/zoovoice/README.md) の「外部操作の状況」を正とする。この文書には個々のdeployの状況を書かない。
 
 ## 実行環境の責任
 
