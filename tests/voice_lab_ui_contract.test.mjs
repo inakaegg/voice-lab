@@ -137,8 +137,8 @@ test("Zoovoice keeps Turnstile mounted and stops recording into automatic compos
   assert.match(zoovoiceMain, /config\?\.turnstile_required && <TurnstileWidget/);
   assert.match(zoovoiceMain, /composeRecording\(attempt\.blob, attempt\.intensity/);
   assert.match(zoovoiceMain, /state\.phase !== "finalizing"/);
-  assert.match(zoovoiceOrb, /aria-label=\{t\("zoovoice\.orb\.cancel"\)\}/);
-  assert.match(i18nMessages, /"zoovoice\.orb\.cancel": "録音をキャンセル"/);
+  assert.match(zoovoiceOrb, /aria-label=\{t\("shared\.cancelRecording"\)\}/);
+  assert.match(i18nMessages, /"shared\.cancelRecording": "録音をキャンセル"/);
   assert.match(zoovoiceTurnstile, /"refresh-expired": "auto"/);
   assert.match(zoovoiceTurnstile, /"refresh-timeout": "auto"/);
   assert.match(zoovoiceTurnstile, /retry: "auto"/);

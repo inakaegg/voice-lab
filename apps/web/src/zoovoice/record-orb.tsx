@@ -88,8 +88,8 @@ export function RecordOrb({
       </button>
       {isRecording && <button
         type="button"
-        aria-label={t("zoovoice.orb.cancel")}
-        title={t("zoovoice.orb.cancel")}
+        aria-label={t("shared.cancelRecording")}
+        title={t("shared.cancelRecording")}
         onClick={onCancel}
         className="absolute -right-3 -top-2 z-[3] inline-flex size-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition hover:-translate-y-0.5 hover:border-red-500 hover:text-red-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-500/25 dark:hover:text-red-300 motion-reduce:transition-none"
         style={{
@@ -107,7 +107,7 @@ export function RecordOrb({
       </button>}
     </div>
     <strong className={`text-xs ${isRecording ? "text-red-700 dark:text-red-300" : "text-foreground"}`}>
-      {t(isRecording ? "zoovoice.orb.recording" : isProcessing ? "zoovoice.orb.generating" : "zoovoice.orb.tapToSpeak")}
+      {t(isRecording ? "zoovoice.orb.recording" : isProcessing ? "zoovoice.orb.generating" : "shared.tapToSpeak")}
     </strong>
     <span data-testid="zoovoice-orb-time" className="text-[0.68rem] tabular-nums text-muted-foreground">
       {formatMilliseconds(isProcessing ? processingMilliseconds : durationMilliseconds)}

@@ -131,10 +131,11 @@ test("SpeakLoop provides a Chinese script segmented control backed by OpenCC", (
 
 test("SpeakLoop exposes an opt-in Seed-VC model voice control with hover and focus help", () => {
   assert.match(speakloop, /id="practice-own-voice-toggle"/);
-  assert.match(speakloop, /自分の声/);
+  assert.match(speakloop, /t\("speakloop\.ownVoice"\)/);
+  assert.match(messages, /"speakloop\.ownVoice": "自分の声"/);
   assert.match(speakloop, /practice-own-voice-control/);
   assert.match(speakloop, /role="tooltip"/);
-  assert.match(speakloop, /「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。/);
+  assert.match(messages, /"speakloop\.ownVoiceTooltip": "「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。"/);
   assert.doesNotMatch(speakloop, /practice-own-voice-help-button|practice-own-voice-disclosure/);
   assert.doesNotMatch(speakloop, /CircleHelp|useState/);
   assert.doesNotMatch(speakloop, /通常のお手本音声で練習を続けられます/);
@@ -146,7 +147,8 @@ test("SpeakLoop keeps comparison playback simple without an auto-play preference
   assert.doesNotMatch(speakloop, /practice-auto-play-comparison|練習終了後すぐ再生/);
   assert.match(speakloop, /practice-play-model-button/);
   assert.match(speakloop, /practice-play-model-only-button/);
-  assert.match(speakloop, /お手本だけ再生/);
+  assert.match(speakloop, /t\("speakloop\.playModelOnly"\)/);
+  assert.match(messages, /"speakloop\.playModelOnly": "お手本だけ再生"/);
   assert.match(speakloop, /practice-speed-slider/);
 });
 
@@ -159,19 +161,24 @@ test("SpeakLoop keeps local developer settings hidden until runtime capability i
   assert.match(speakloop, /id="practice-comparison-model-select"[\s\S]*defaultValue="gpt-5\.6-terra"/);
   assert.match(speakloop, /id="practice-playback-padding-slider"[\s\S]*min="0"[\s\S]*max="0\.5"[\s\S]*step="0\.05"[\s\S]*defaultValue="0\.3"/);
   assert.match(speakloop, /id="practice-history-preview"[\s\S]*hidden/);
-  assert.match(speakloop, /過去の結果で表示確認/);
+  assert.match(speakloop, /t\("speakloop\.historyPreview"\)/);
+  assert.match(messages, /"speakloop\.historyPreview": "過去の結果で表示確認"/);
   assert.match(speakloop, /id="practice-saved-result-notice"/);
   assert.match(speakloop, /id="practice-history-preview-source-select"[\s\S]*defaultValue="saved"/);
-  assert.match(speakloop, /<option value="recomputed">現行ロジックで再計算<\/option>/);
-  assert.match(speakloop, /前後余白/);
-  assert.match(speakloop, /LLM採点/);
+  assert.match(speakloop, /<option value="recomputed">\{t\("speakloop\.comparisonRecomputed"\)\}<\/option>/);
+  assert.match(messages, /"speakloop\.comparisonRecomputed": "現行ロジックで再計算"/);
+  assert.match(speakloop, /t\("speakloop\.playbackPadding"\)/);
+  assert.match(messages, /"speakloop\.playbackPadding": "前後余白"/);
+  assert.match(speakloop, /t\("speakloop\.gradeBadge"\)/);
+  assert.match(messages, /"speakloop\.gradeBadge": "LLM採点"/);
   assert.doesNotMatch(speakloop, /99\.5%以上/);
 });
 
 test("SpeakLoop exposes recording cancel controls for both recording actions", () => {
   assert.match(speakloop, /id="practice-native-cancel-button"/);
   assert.match(speakloop, /id="practice-repeat-cancel-button"/);
-  assert.match(speakloop, /function CancelRecordingButton[\s\S]*aria-label="録音をキャンセル"/);
+  assert.match(speakloop, /function CancelRecordingButton[\s\S]*aria-label=\{t\("shared\.cancelRecording"\)\}/);
+  assert.match(messages, /"shared\.cancelRecording": "録音をキャンセル"/);
   assert.match(styles, /\.practice-record-cancel-button/);
 });
 

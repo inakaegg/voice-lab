@@ -52,21 +52,39 @@ test("every message key the sources use exists in both dictionaries", async () =
     read("apps/web/src/zoovoice/record-orb.tsx"),
     read("apps/web/src/zoovoice/result-player.tsx"),
     read("apps/web/src/zoovoice/turnstile-widget.tsx"),
+    read("apps/web/src/speakloop/main.tsx"),
+    // React外のスクリプトも同じ辞書を引く。取りこぼすと生のキーが画面へ出るので同じ検査にかける。
+    read("src/mo_speech/web/app_practice.js"),
   ]);
-  // t("...") の呼び出しと、キーを変数へ置く箇所(status / error / api / turnstile)を拾う。
-  // ファイル名のような "zoovoice.wav" を巻き込まないよう、後者は3セグメント以上に限る。
-  const keyPatterns = [
-    /\bt\(\s*"((?:shared|zoovoice)\.[A-Za-z][A-Za-z.]*)"/g,
-    /"(zoovoice\.[a-z]+\.[A-Za-z]+)"/g,
-  ];
+  // 呼び出しの形ではなく「辞書の名前空間で始まる文字列リテラル」を拾う。t( の直後だけを見る形や
+  // セグメント数で絞る形は、三項式の中のキーのように隙間が残るため採らない。
+  const keyPattern = /"((?:shared|zoovoice|speakloop)\.[A-Za-z][A-Za-z0-9.]*)"/g;
+  // 名前空間と同じ綴りで始まるが辞書キーではない文字列。増えたらここへ足す。
+  const notDictionaryKeys = new Set(["zoovoice.wav"]);
   const used = new Set<string>();
   for (const source of sources) {
-    for (const pattern of keyPatterns) {
-      for (const match of source.matchAll(pattern)) used.add(match[1]);
+    for (const match of source.matchAll(keyPattern)) {
+      if (!notDictionaryKeys.has(match[1])) used.add(match[1]);
     }
   }
-  assert.ok(used.size > 40, `only ${used.size} keys were found in the sources`);
+  assert.ok(used.size > 90, `only ${used.size} keys were found in the sources`);
   for (const key of used) {
+    for (const locale of locales) {
+      assert.ok(dictionaries[locale][key], `${locale} is missing ${key}`);
+    }
+  }
+});
+
+test("keys that contain digits are covered by the source scan", async () => {
+  const speakloopSource = await read("apps/web/src/speakloop/main.tsx");
+  const digitKeys = [...new Set(locales.flatMap((locale) => Object.keys(dictionaries[locale])))]
+    .filter((key) => /\d/.test(key));
+  assert.ok(digitKeys.length > 0, "the dictionary no longer has a key with a digit; drop this test");
+  for (const key of digitKeys) {
+    assert.ok(
+      speakloopSource.includes(`t("${key}")`),
+      `${key} is in the dictionary but no source calls it`,
+    );
     for (const locale of locales) {
       assert.ok(dictionaries[locale][key], `${locale} is missing ${key}`);
     }

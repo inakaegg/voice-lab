@@ -57,6 +57,8 @@ const comparisonNote = document.querySelector("#practice-comparison-note");
 const overallComment = document.querySelector("#practice-overall-comment");
 const phraseFeedback = document.querySelector("#practice-phrase-feedback");
 const savedResultNotice = document.querySelector("#practice-saved-result-notice");
+const t = (key, params) => window.voiceLabI18n?.t(key, params) ?? key;
+
 const playbackContract = window.voiceLabPracticePlayback;
 
 const languageLabels = {
@@ -216,7 +218,7 @@ async function toggleRecording(slot) {
 
 async function startRecording(slot) {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-    showError("このブラウザでは録音を使えません。");
+    showError(t("speakloop.practice.recorderUnsupported"));
     return;
   }
   pausePlaybackForRecording();
@@ -232,13 +234,13 @@ async function startRecording(slot) {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (error) {
-    showError(error instanceof Error ? error.message : "マイクを使えません。");
+    showError(error instanceof Error ? error.message : t("speakloop.practice.micUnavailable"));
     return;
   }
   if (isSavedHistoryPreview && historyPreviewSourceSelect.value === "recomputed") {
     const diagnostics = currentHistoryPreviewEntry?.metadata?.practice_diagnostics;
     restoreCurrentSavedComparison(
-      `録音を開始したため、保存時の比較区間へ戻しました。保存時の余白は${formatSavedPadding(diagnostics?.playback_padding_seconds)}です。`,
+      t("speakloop.practice.paddingResetOnRecord", { padding: formatSavedPadding(diagnostics?.playback_padding_seconds) }),
     );
   }
   const mimeType = preferredRecordingMimeType();
@@ -256,11 +258,7 @@ async function startRecording(slot) {
   mediaRecorder.start();
   startLevelMeter(stream, levelForRecordSlot(slot));
   setRecordingVisual(slot, true);
-  setStatus(
-    currentTargetText
-      ? "録音中です。"
-      : "録音中です / Recording / 录音中",
-  );
+  setStatus(t("speakloop.practice.recording"));
 }
 
 async function handleRecordingStopped() {
@@ -273,13 +271,13 @@ async function handleRecordingStopped() {
   recordingCancelled = false;
   if (cancelled) {
     processingKind = "";
-    setStatus("録音をキャンセルしました。");
+    setStatus(t("speakloop.practice.recordingCancelled"));
     clearError();
     return;
   }
   processingKind = kind;
   if (!blob.size) {
-    showError("録音できませんでした。");
+    showError(t("speakloop.practice.recordingFailed"));
     return;
   }
   try {
@@ -303,8 +301,8 @@ async function submitPracticeRecording(blob, kind) {
   setBusy(
     true,
     recordingIntent === "attempt"
-      ? "発音を確認しています。"
-      : "お手本を作っています。",
+      ? t("speakloop.practice.checkingPronunciation")
+      : t("speakloop.practice.buildingModel"),
     recordingIntent === "attempt" ? 88 : 72,
     kind,
   );
@@ -333,13 +331,13 @@ async function submitPracticeRecording(blob, kind) {
   if (recordingIntent === "attempt") {
     if (!currentModelAsrAudioBlob) {
       setBusy(false, "");
-      throw new Error("お手本の解析用音声が見つかりません。もう一度お手本を作ってください。");
+      throw new Error(t("speakloop.practice.modelAudioMissing"));
     }
     renderPracticeJobStatus({
       status: "running",
       current_stage: {
         stage: "transcribing_attempt",
-        label: "録音を確認しています",
+        label: t("speakloop.practice.checkingRecording"),
       },
       metrics: {},
     });
@@ -357,7 +355,7 @@ async function submitPracticeRecording(blob, kind) {
         !["queued", "running", "succeeded", "failed"].includes(submittedStatus) ||
         (activeSubmission && !submitted?.job_id)
       ) {
-        throw new Error("比較結果を作成できませんでした。もう一度お試しください。");
+        throw new Error(t("speakloop.practice.comparisonFailed"));
       }
     } catch (error) {
       clearPracticeJobStatus();
@@ -371,7 +369,7 @@ async function submitPracticeRecording(blob, kind) {
       console.error("[SpeakLoop job] attempt failed", completed);
       throw new Error(apiErrorMessage(
         completed,
-        "比較結果を作成できませんでした。もう一度お試しください。",
+        t("speakloop.practice.comparisonFailed"),
       ));
     }
     setRepeatAudio(blob);
@@ -392,7 +390,7 @@ async function submitPracticeRecording(blob, kind) {
       console.error("[SpeakLoop job] prompt failed", completed);
       throw new Error(apiErrorMessage(
         completed,
-        "お手本を作成できませんでした。もう一度お試しください。",
+        t("speakloop.practice.modelFailed"),
       ));
     }
     payload = completed.result;
@@ -406,7 +404,7 @@ async function submitPracticeRecording(blob, kind) {
     const completed = await waitForPracticeVoiceJob(voiceJob);
     if (completed.status !== "succeeded" || !completed.result?.audio_base64) {
       console.error("[SpeakLoop job] voice conversion failed", completed);
-      throw new Error("お手本の音声処理を完了できませんでした。しばらくしてからもう一度お試しください。");
+      throw new Error(t("speakloop.practice.modelAudioFailed"));
     }
     setModelAudio(
       completed.result.audio_base64,
@@ -428,10 +426,10 @@ async function waitForPracticePromptJob(initialSnapshot) {
   let consecutiveErrors = 0;
   while (snapshot?.status === "queued" || snapshot?.status === "running") {
     if (!snapshot.job_id) {
-      throw new Error("お手本の作成を開始できませんでした。");
+      throw new Error(t("speakloop.practice.modelStartFailed"));
     }
     if (Date.now() >= deadline) {
-      throw new Error("お手本の作成が30分以内に完了しませんでした。");
+      throw new Error(t("speakloop.practice.modelTimedOut"));
     }
     await sleep(snapshot.status === "queued" ? 1200 : 850);
     try {
@@ -452,7 +450,7 @@ async function waitForPracticePromptJob(initialSnapshot) {
         ...snapshot,
         current_stage: {
           ...(snapshot.current_stage || {}),
-          label: "処理状況を再確認しています",
+          label: t("speakloop.practice.recheckingJob"),
           detail: error instanceof Error ? error.message : String(error),
         },
       });
@@ -468,10 +466,10 @@ async function waitForPracticeVoiceJob(initialSnapshot) {
   let consecutiveErrors = 0;
   while (snapshot?.status === "queued" || snapshot?.status === "running") {
     if (!snapshot.job_id) {
-      throw new Error("お手本の音声処理を開始できませんでした。");
+      throw new Error(t("speakloop.practice.voiceStartFailed"));
     }
     if (Date.now() >= deadline) {
-      throw new Error("自分の声への変換が30分以内に完了しませんでした。");
+      throw new Error(t("speakloop.practice.voiceTimedOut"));
     }
     await sleep(snapshot.status === "queued" ? 1200 : 850);
     try {
@@ -492,7 +490,7 @@ async function waitForPracticeVoiceJob(initialSnapshot) {
         ...snapshot,
         current_stage: {
           ...(snapshot.current_stage || {}),
-          label: "処理状況を再確認しています",
+          label: t("speakloop.practice.recheckingJob"),
           detail: error instanceof Error ? error.message : String(error),
         },
       });
@@ -508,10 +506,10 @@ async function waitForPracticeAttemptJob(initialSnapshot) {
   let consecutiveErrors = 0;
   while (snapshot?.status === "queued" || snapshot?.status === "running") {
     if (!snapshot.job_id) {
-      throw new Error("発音比較を開始できませんでした。");
+      throw new Error(t("speakloop.practice.compareStartFailed"));
     }
     if (Date.now() >= deadline) {
-      throw new Error("発音比較が30分以内に完了しませんでした。");
+      throw new Error(t("speakloop.practice.compareTimedOut"));
     }
     await sleep(snapshot.status === "queued" ? 1200 : 850);
     try {
@@ -532,7 +530,7 @@ async function waitForPracticeAttemptJob(initialSnapshot) {
         ...snapshot,
         current_stage: {
           ...(snapshot.current_stage || {}),
-          label: "処理状況を再確認しています",
+          label: t("speakloop.practice.recheckingJob"),
           detail: error instanceof Error ? error.message : String(error),
         },
       });
@@ -565,10 +563,10 @@ function renderPracticeJobStatus(snapshot) {
     details.push(rawStageDetail);
   }
   if (Number.isFinite(Number(metrics.delay_time_ms))) {
-    details.push(`待機 ${formatDurationMilliseconds(Number(metrics.delay_time_ms))}`);
+    details.push(t("speakloop.practice.queueWait", { duration: formatDurationMilliseconds(Number(metrics.delay_time_ms)) }));
   }
   if (Number.isFinite(Number(metrics.execution_time_ms))) {
-    details.push(`処理 ${formatDurationMilliseconds(Number(metrics.execution_time_ms))}`);
+    details.push(t("speakloop.practice.queueRun", { duration: formatDurationMilliseconds(Number(metrics.execution_time_ms)) }));
   }
   jobStatus.hidden = false;
   jobStatus.dataset.state = state;
@@ -584,38 +582,38 @@ function renderPracticeJobStatus(snapshot) {
 function publicPracticeStageLabel(stage, state) {
   switch (String(stage?.stage || "")) {
     case "gpu_wait":
-      return "GPUサーバーの準備を待っています";
+      return t("speakloop.practice.stepGpuWaiting");
     case "initializing":
-      return "GPUサーバーを準備しています";
+      return t("speakloop.practice.stepGpuStarting");
     case "loading_model":
-      return "音声認識を準備しています";
+      return t("speakloop.practice.stepAsrPreparing");
     case "transcribing_prompt":
-      return "録音を文字にしています";
+      return t("speakloop.practice.stepTranscribing");
     case "translating_prompt":
-      return "学習言語へ翻訳しています";
+      return t("speakloop.practice.stepTranslating");
     case "synthesizing_prompt":
-      return "お手本音声を作っています";
+      return t("speakloop.practice.stepSynthesizing");
     case "transcribing_model":
-      return "お手本音声を確認しています";
+      return t("speakloop.practice.stepCheckingModelAudio");
     case "transcribing_attempt":
-      return "録音を確認しています";
+      return t("speakloop.practice.checkingRecording");
     case "evaluating_comparison":
-      return "比較結果を作っています";
+      return t("speakloop.practice.stepBuildingComparison");
     case "loading_seed_vc_model":
-      return "お手本の声を調整する準備をしています";
+      return t("speakloop.practice.stepVoicePreparing");
     case "voice_conversion":
-      return "お手本の声を調整しています";
+      return t("speakloop.practice.stepVoiceConverting");
     case "finalizing":
-      return "比較結果を準備しています";
+      return t("speakloop.practice.stepComparisonPreparing");
     case "complete":
-      return "完了しました";
+      return t("speakloop.practice.stepDone");
     case "failed":
-      return "処理に失敗しました";
+      return t("speakloop.practice.stepFailed");
     default:
-      if (state === "failed") return "処理に失敗しました";
-      if (state === "succeeded") return "完了しました";
-      if (state === "queued") return "GPUサーバーの準備を待っています";
-      return "音声を処理しています";
+      if (state === "failed") return t("speakloop.practice.stepFailed");
+      if (state === "succeeded") return t("speakloop.practice.stepDone");
+      if (state === "queued") return t("speakloop.practice.stepGpuWaiting");
+      return t("speakloop.practice.stepProcessingAudio");
   }
 }
 
@@ -635,7 +633,7 @@ function formatDurationMilliseconds(milliseconds) {
   if (milliseconds < 1000) {
     return `${Math.max(0, Math.round(milliseconds))}ms`;
   }
-  return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)}秒`;
+  return t("speakloop.practice.seconds", { value: (milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0) });
 }
 
 function renderPromptResult(payload, { deferModelAudio = false } = {}) {
@@ -727,12 +725,12 @@ function renderAttemptResult(payload) {
     scoreFill.style.width = "0%";
     overallComment.textContent = "";
     phraseFeedback.replaceChildren();
-    recognizedText.textContent = payload.message || "音声を検出できませんでした。もう一度録音してください。";
+    recognizedText.textContent = payload.message || t("speakloop.practice.noSpeechDetected");
   } else {
     const percent = Math.round(Number(payload.overall_score || 0));
-    gradeBadge.textContent = "LLM採点";
+    gradeBadge.textContent = t("speakloop.gradeBadge");
     gradeBadge.dataset.grade = "llm";
-    scoreText.textContent = `${percent}点`;
+    scoreText.textContent = t("speakloop.practice.score", { value: percent });
     scoreFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
     renderLlmFeedbackText(payload);
   }
@@ -751,7 +749,7 @@ function renderPhraseFeedback(phrases) {
     const text = document.createElement("strong");
     text.textContent = displayChineseText(phrase.target_text || "");
     const score = document.createElement("span");
-    score.textContent = `${Math.round(Number(phrase.score || 0))}点`;
+    score.textContent = t("speakloop.practice.score", { value: Math.round(Number(phrase.score || 0)) });
     const comment = document.createElement("p");
     comment.textContent = phrase.comment || "";
     heading.append(text, score);
@@ -928,7 +926,7 @@ function syncPlayButton() {
     const repeatIsPlaying = !repeatAudio.paused;
     playModelButton.disabled = !repeatAudio.src || isBusy;
     playModelButton.classList.toggle("is-playing", repeatIsPlaying);
-    playModelButton.querySelector("span:last-child").textContent = repeatIsPlaying ? "停止" : "復唱音声を再生";
+    playModelButton.querySelector("span:last-child").textContent = repeatIsPlaying ? t("speakloop.practice.stop") : t("speakloop.practice.playAttempt");
     playModelOnlyButton.hidden = true;
     syncComparisonNote();
     return;
@@ -938,19 +936,19 @@ function syncPlayButton() {
   const primaryButtonIsPlaying = isComparisonPlaying || (comparisonPlan.mode === "model" && isModelOnlyPlaying);
   playModelButton.classList.toggle("is-playing", primaryButtonIsPlaying);
   playModelButton.querySelector("span:last-child").textContent = primaryButtonIsPlaying
-    ? "停止"
+    ? t("speakloop.practice.stop")
     : comparisonPlan.label;
   playModelOnlyButton.hidden = !["whole", "phrase", "partial_phrase"].includes(comparisonPlan.mode);
   playModelOnlyButton.classList.toggle("is-playing", isModelOnlyPlaying);
   playModelOnlyButton.querySelector("span:last-child").textContent = isModelOnlyPlaying
-    ? "停止"
-    : "お手本だけ再生";
+    ? t("speakloop.practice.stop")
+    : t("speakloop.playModelOnly");
   syncComparisonNote();
 }
 
 function syncComparisonNote() {
   if (isRepeatOnlyPreview()) {
-    comparisonNote.textContent = "この履歴のお手本音声が残っていないため、比較再生は利用できません。復唱音声だけを再生できます。";
+    comparisonNote.textContent = t("speakloop.practice.modelAudioGoneForHistory");
     comparisonNote.dataset.mode = "saved_attempt";
     comparisonNote.hidden = false;
     return;
@@ -1009,7 +1007,7 @@ function handleModelAudioLoadError() {
   // 応答待ちの再計算を無効にし、selectorと比較区間も保存値へ戻す。
   // お手本音声を失った後に再計算状態だけ残ると、表示と再生内容が一致しない。
   restoreCurrentSavedComparison(
-    "保存済みの結果を表示しました。お手本音声を読み込めなかったため、比較再生はできません。",
+    t("speakloop.practice.savedResultNoModelAudio"),
   );
 }
 
@@ -1026,7 +1024,7 @@ function handleSpeedChange() {
 function handlePlaybackPaddingChange() {
   const padding = normalizedPlaybackPadding(playbackPaddingSlider.value);
   playbackPaddingSlider.value = String(padding);
-  playbackPaddingValue.textContent = `${padding.toFixed(2)}秒`;
+  playbackPaddingValue.textContent = t("speakloop.practice.seconds", { value: padding.toFixed(2) });
   savePracticeSettings();
   // 再計算は「画面で選んでいる余白を使う」契約なので、余白を変えたら計算し直す。
   if (isSavedHistoryPreview
@@ -1049,7 +1047,7 @@ async function selectChineseScript(script) {
     try {
       await window.voiceLabChineseScript?.loadTraditional();
     } catch (_error) {
-      showError("繁体字表示を読み込めませんでした。");
+      showError(t("speakloop.practice.traditionalUnavailable"));
       return;
     }
   }
@@ -1089,7 +1087,7 @@ function renderTargetSubtext(hasPinyinRuby = false) {
   let secondaryText = currentTargetSecondaryText;
   if (selectedTargetLanguage === "zh-CN" && pinyinToggle.checked) {
     secondaryText = hasPinyinRuby ? "" : currentTargetPinyinText || (
-      currentTargetPinyinStatus === "unavailable" ? "ピンインを生成できませんでした" : ""
+      currentTargetPinyinStatus === "unavailable" ? t("speakloop.practice.pinyinUnavailable") : ""
     );
   }
   targetSubtext.hidden = !secondaryText;
@@ -1484,7 +1482,7 @@ function setRecordingVisual(slot, recording) {
   button.classList.remove("is-processing");
   if (recording) {
     recordingStartedAt = performance.now();
-    button.setAttribute("aria-label", "録音中");
+    button.setAttribute("aria-label", t("speakloop.practice.recordingShort"));
     startRecordTimer(button);
   } else {
     stopRecordTimer(button);
@@ -1633,9 +1631,9 @@ function publicPracticeErrorMessage(error) {
   const message = error instanceof Error ? error.message : String(error || "");
   if (/runpod|whisper|funasr|seed-vc|openai|billing|残高|job(?:_|\s)?id|job status|model_transcription|provider|backend/i.test(message)) {
     console.error("[SpeakLoop job] technical error", error);
-    return "音声処理を完了できませんでした。しばらくしてからもう一度お試しください。";
+    return t("speakloop.practice.audioProcessingFailedRetry");
   }
-  return message || "音声処理を完了できませんでした。";
+  return message || t("speakloop.practice.audioProcessingFailed");
 }
 
 function clearError() {
@@ -1657,7 +1655,7 @@ function loadPracticeSettings({ developerSettings = false } = {}) {
   playbackPaddingSlider.value = String(developerSettings
     ? normalizedPlaybackPadding(settings.playback_padding_seconds)
     : defaultPlaybackPaddingSeconds);
-  playbackPaddingValue.textContent = `${normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2)}秒`;
+  playbackPaddingValue.textContent = t("speakloop.practice.seconds", { value: normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2) });
   speedSlider.value = String(normalizedPlaybackSpeed(settings.speed));
   targetLanguageSelect.value = selectedTargetLanguage;
   syncPinyinSettingVisibility();
@@ -1672,7 +1670,7 @@ function loadPracticeSettings({ developerSettings = false } = {}) {
           renderLlmFeedbackText(currentAttemptPayload);
         }
       })
-      .catch(() => showError("繁体字表示を読み込めませんでした。"));
+      .catch(() => showError(t("speakloop.practice.traditionalUnavailable")));
   }
 }
 
@@ -1741,13 +1739,13 @@ async function initializePracticeDeveloperUi() {
 }
 
 async function loadPracticeHistoryPreview() {
-  historyPreviewStatus.textContent = "履歴を読み込んでいます。";
+  historyPreviewStatus.textContent = t("speakloop.historyLoading");
   historyPreviewButton.disabled = true;
   try {
     const response = await fetch("/api/practice-history");
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(apiErrorMessage(payload, "履歴を読み込めませんでした。"));
+      throw new Error(apiErrorMessage(payload, t("speakloop.practice.historyLoadFailed")));
     }
     practiceHistoryPreviewEntries = (Array.isArray(payload.recordings) ? payload.recordings : [])
       .filter((entry) => {
@@ -1765,23 +1763,23 @@ async function loadPracticeHistoryPreview() {
       historyPreviewSelect.append(option);
     });
     if (!practiceHistoryPreviewEntries.length) {
-      historyPreviewStatus.textContent = "表示できる成功済みの復唱履歴がありません。";
+      historyPreviewStatus.textContent = t("speakloop.practice.historyEmpty");
       return;
     }
-    historyPreviewStatus.textContent = `${practiceHistoryPreviewEntries.length}件の保存結果を表示できます。`;
+    historyPreviewStatus.textContent = t("speakloop.practice.savedResultCount", { count: practiceHistoryPreviewEntries.length });
     syncHistoryPreviewButton();
   } catch (error) {
     practiceHistoryPreviewEntries = [];
     historyPreviewSelect.replaceChildren();
-    historyPreviewStatus.textContent = error instanceof Error ? error.message : "履歴を読み込めませんでした。";
+    historyPreviewStatus.textContent = error instanceof Error ? error.message : t("speakloop.practice.historyLoadFailed");
   }
 }
 
 function practiceHistoryPreviewLabel(entry, diagnostics) {
-  const language = languageLabels[diagnostics.target_language] || diagnostics.target_language || "言語不明";
+  const language = languageLabels[diagnostics.target_language] || diagnostics.target_language || t("speakloop.practice.languageUnknown");
   const score = Number.isFinite(Number(diagnostics.overall_score))
-    ? `${Math.round(Number(diagnostics.overall_score))}点`
-    : "採点なし";
+    ? t("speakloop.practice.score", { value: Math.round(Number(diagnostics.overall_score)) })
+    : t("speakloop.practice.notScored");
   const target = String(diagnostics.target_text || entry.text_preview || "").trim();
   const preview = target.length > 36 ? `${target.slice(0, 36)}…` : target;
   return `${language}・${score}${preview ? `・${preview}` : ""}`;
@@ -1836,8 +1834,8 @@ function displaySelectedPracticeHistory() {
   renderAttemptResult(diagnostics);
   savedResultNotice.hidden = false;
   historyPreviewStatus.textContent = entry.model_audio_url
-    ? "保存済みの結果を表示しました。比較再生も確認できます。外部APIや音声処理は呼び出していません。"
-    : "保存済みの結果を表示しました。お手本音声が残っていないため比較再生はできません。";
+    ? t("speakloop.practice.savedResultShown")
+    : t("speakloop.practice.savedResultNoModel");
   if (historyPreviewSourceSelect.value === "recomputed") {
     applyRecomputedComparison(entry);
   }
@@ -1858,7 +1856,7 @@ function handleHistoryPreviewSourceChange() {
       diagnostics.comparison_alignment || null,
       diagnostics.model_comparison_alignment || null,
     );
-    historyPreviewStatus.textContent = `保存時の比較区間を表示しています。保存時の余白は${formatSavedPadding(diagnostics.playback_padding_seconds)}です。`;
+    historyPreviewStatus.textContent = t("speakloop.practice.savedRangeShown", { padding: formatSavedPadding(diagnostics.playback_padding_seconds) });
     return;
   }
   applyRecomputedComparison(entry);
@@ -1868,10 +1866,10 @@ function handleHistoryPreviewSourceChange() {
 // 数値変換の前にnull・undefined・空文字を落とす。
 function formatSavedPadding(value) {
   if (value === null || value === undefined || value === "") {
-    return "記録なし";
+    return t("speakloop.practice.notRecorded");
   }
   const padding = Number(value);
-  return Number.isFinite(padding) ? `${padding.toFixed(2)}秒` : "記録なし";
+  return Number.isFinite(padding) ? t("speakloop.practice.seconds", { value: padding.toFixed(2) }) : t("speakloop.practice.notRecorded");
 }
 
 // 保存済みの再生区間を差し替え、diff表示と再生ボタンを現在の区間へ合わせ直す。
@@ -1895,7 +1893,7 @@ async function applyRecomputedComparison(entry) {
   const diagnostics = entry.metadata.practice_diagnostics;
   if (isRepeatOnlyPreview()) {
     restoreSavedComparisonAlignments(diagnostics);
-    historyPreviewStatus.textContent = "お手本音声を読み込めなかったため、比較区間を計算し直しても確認できません。";
+    historyPreviewStatus.textContent = t("speakloop.practice.recomputeUnavailable");
     return;
   }
   const padding = normalizedPlaybackPadding(playbackPaddingSlider.value).toFixed(2);
@@ -1907,7 +1905,7 @@ async function applyRecomputedComparison(entry) {
     && !isBusy
     && mediaRecorder?.state !== "recording"
     && !isRepeatOnlyPreview();
-  historyPreviewStatus.textContent = "現在の実装で比較区間を計算し直しています。";
+  historyPreviewStatus.textContent = t("speakloop.practice.recomputing");
   try {
     const response = await fetch(
       `/api/practice-history/recordings/${encodeURIComponent(entry.filename)}/recomputed-comparison`
@@ -1918,25 +1916,25 @@ async function applyRecomputedComparison(entry) {
       return;
     }
     if (!response.ok) {
-      throw new Error(apiErrorMessage(payload, "比較区間を計算し直せませんでした。"));
+      throw new Error(apiErrorMessage(payload, t("speakloop.practice.recomputeFailed")));
     }
     if (!payload.available) {
       // selectorだけ戻すと、直前の再計算結果がglobal stateに残り、表示と再生がずれる。
       restoreSavedComparisonAlignments(diagnostics);
-      historyPreviewStatus.textContent = payload.unavailable_reason || "この履歴は再計算できません。";
+      historyPreviewStatus.textContent = payload.unavailable_reason || t("speakloop.practice.recomputeNotSupported");
       return;
     }
     applyPracticeComparisonAlignments(
       payload.comparison_alignment || null,
       payload.model_comparison_alignment || null,
     );
-    historyPreviewStatus.textContent = `現在の実装で計算し直した比較区間を表示しています。余白は${Number(payload.playback_padding_seconds).toFixed(2)}秒、保存時は${formatSavedPadding(payload.saved_playback_padding_seconds)}です。`;
+    historyPreviewStatus.textContent = t("speakloop.practice.recomputedRangeShown", { padding: Number(payload.playback_padding_seconds).toFixed(2), saved: formatSavedPadding(payload.saved_playback_padding_seconds) });
   } catch (error) {
     if (!isCurrentRequest()) {
       return;
     }
     restoreSavedComparisonAlignments(diagnostics);
-    historyPreviewStatus.textContent = error instanceof Error ? error.message : "比較区間を計算し直せませんでした。";
+    historyPreviewStatus.textContent = error instanceof Error ? error.message : t("speakloop.practice.recomputeFailed");
   }
 }
 
@@ -2010,9 +2008,9 @@ function renderNativeLabels() {
 }
 
 function syncPracticeRecordMode() {
-  recordTitle.textContent = "言いたいことを話す";
-  nativeRecordButton.setAttribute("aria-label", "言いたいことを録音");
-  repeatRecordButton.setAttribute("aria-label", "練習を録音");
+  recordTitle.textContent = t("speakloop.step1Title");
+  nativeRecordButton.setAttribute("aria-label", t("speakloop.recordNative"));
+  repeatRecordButton.setAttribute("aria-label", t("speakloop.recordRepeat"));
   syncRecordSlotVisuals();
 }
 
@@ -2056,8 +2054,8 @@ function renderRecognizedDiff(payload) {
 }
 
 const practiceDiffCellTitles = {
-  delete: "抜けたフレーズを比較再生",
-  tone: "発音は近いですが声調が違います。タップで比較再生",
+  delete: t("speakloop.practice.playMissingPhrase"),
+  tone: t("speakloop.practice.playToneMismatch"),
 };
 
 function renderPracticeDiffCell(cell) {
@@ -2073,7 +2071,7 @@ function renderPracticeDiffCell(cell) {
   const element = document.createElement(comparisonRange ? "button" : "span");
   if (element instanceof HTMLButtonElement) {
     element.type = "button";
-    element.title = practiceDiffCellTitles[cell.type] || "このフレーズを比較再生";
+    element.title = practiceDiffCellTitles[cell.type] || t("speakloop.practice.playThisPhrase");
     element.addEventListener("click", () => {
       playComparisonAudios({ targetOffset: cell.targetOffset }).catch((error) => showError(error.message));
     });
