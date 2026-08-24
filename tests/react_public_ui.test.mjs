@@ -13,6 +13,8 @@ const [portal, speakloop, privacy, shared, styles, worker, pkg, viteConfig, port
   read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/privacy.html"),
   read("apps/web/public/github-invertocat-black.svg"), read("apps/web/public/github-invertocat-white.svg"),
 ]);
+// 表示文言はcomponents.tsxから辞書へ移した。契約は「どのキーを使うか」と「辞書に何が入っているか」で見る。
+const messages = await read("apps/web/src/shared/i18n-messages.ts");
 
 test("public portal, SpeakLoop, and privacy policy are React TypeScript entries", () => {
   assert.match(portal, /mountPublicPage\(<Portal/);
@@ -65,7 +67,8 @@ test("portal links to the GitHub repository with hover and focus help", () => {
   assert.match(shared, /target="_blank"/);
   assert.match(shared, /rel="noopener noreferrer"/);
   assert.match(shared, /aria-describedby=\{tooltipId\}/);
-  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*実際の動作を動画で確認できます/);
+  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*t\("shared\.githubTooltip"\)/);
+  assert.match(messages, /"shared\.githubTooltip": "実際の動作を/);
 });
 
 test("SpeakLoop reuses the portal GitHub repository link", () => {
@@ -74,14 +77,15 @@ test("SpeakLoop reuses the portal GitHub repository link", () => {
   assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
   assert.match(shared, /target="_blank"/);
   assert.match(shared, /rel="noopener noreferrer"/);
-  assert.match(shared, /実際の動作を動画で確認できます/);
+  assert.match(messages, /"shared\.githubTooltip": "実際の動作を/);
   assert.match(speakloop, /<ProductHeader[\s\S]*githubLink/);
 });
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {
   assert.match(shared, /export function PrivacyNotice[\s\S]*<footer className="react-workflow-privacy-note" data-public-privacy-notice>/);
-  assert.match(shared, /音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。/);
-  assert.match(shared, /href="\/privacy"[\s\S]*プライバシーポリシー/);
+  assert.match(messages, /"shared\.privacyNotice": "音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。/);
+  assert.match(shared, /href="\/privacy">\{t\("shared\.privacyPolicy"\)\}/);
+  assert.match(messages, /"shared\.privacyPolicy": "プライバシーポリシー"/);
   assert.equal((speakloop.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
   assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
   assert.doesNotMatch(speakloop, /外部の音声処理サービスで一時処理/);
@@ -187,9 +191,9 @@ test("public React routes use the staged Tailwind and shadcn migration boundary"
 
 test("public UI finalizes the compact layout and exposes theme settings", () => {
   assert.match(shared, /function ThemeSettings/);
-  assert.match(shared, /明色/);
-  assert.match(shared, /暗色/);
-  assert.match(shared, /システム/);
+  assert.match(messages, /"shared\.themeLight": "明色"/);
+  assert.match(messages, /"shared\.themeDark": "暗色"/);
+  assert.match(messages, /"shared\.themeSystem": "システム"/);
   assert.match(shared, /mo-speech-theme/);
   assert.match(shared, /stroke="currentColor"/);
   assert.match(shared, /strokeLinecap="round"/);

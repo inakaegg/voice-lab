@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { useT } from "../shared/i18n";
+
 type RecordOrbProps = {
   disabled: boolean;
   durationMilliseconds: number;
@@ -21,7 +23,8 @@ export function RecordOrb({
 }: RecordOrbProps) {
   const processingMilliseconds = useProcessingElapsed(isProcessing);
   const progressDegrees = Math.min(360, Math.max(0, durationMilliseconds / 60_000 * 360));
-  const label = isRecording ? "録音を止める" : "録音する";
+  const t = useT();
+  const label = t(isRecording ? "zoovoice.orb.stopRecording" : "zoovoice.orb.record");
   const orbBackground = isProcessing
     ? "linear-gradient(135deg, #0284c7, #6366f1 54%, #f59e0b)"
     : isRecording ? "#b91c1c" : "#ef4444";
@@ -61,7 +64,7 @@ export function RecordOrb({
         {isProcessing
           ? <span className="size-9 animate-spin rounded-full border-[5px] border-white/40 border-t-white motion-reduce:animate-none" aria-hidden="true" />
           : isRecording
-            ? <span className="flex h-[48%] w-[58%] items-end justify-center gap-1" aria-label="マイク入力レベル">
+            ? <span className="flex h-[48%] w-[58%] items-end justify-center gap-1" aria-label={t("zoovoice.orb.micLevel")}>
                 {levels.map((level, index) => <span
                   key={index}
                   className="w-1 flex-1 rounded-full bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.34)] transition-[height,opacity] duration-100"
@@ -85,8 +88,8 @@ export function RecordOrb({
       </button>
       {isRecording && <button
         type="button"
-        aria-label="録音をキャンセル"
-        title="録音をキャンセル"
+        aria-label={t("zoovoice.orb.cancel")}
+        title={t("zoovoice.orb.cancel")}
         onClick={onCancel}
         className="absolute -right-3 -top-2 z-[3] inline-flex size-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition hover:-translate-y-0.5 hover:border-red-500 hover:text-red-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-500/25 dark:hover:text-red-300 motion-reduce:transition-none"
         style={{
@@ -104,7 +107,7 @@ export function RecordOrb({
       </button>}
     </div>
     <strong className={`text-xs ${isRecording ? "text-red-700 dark:text-red-300" : "text-foreground"}`}>
-      {isRecording ? "録音中" : isProcessing ? "生成中" : "タップして話す"}
+      {t(isRecording ? "zoovoice.orb.recording" : isProcessing ? "zoovoice.orb.generating" : "zoovoice.orb.tapToSpeak")}
     </strong>
     <span data-testid="zoovoice-orb-time" className="text-[0.68rem] tabular-nums text-muted-foreground">
       {formatMilliseconds(isProcessing ? processingMilliseconds : durationMilliseconds)}

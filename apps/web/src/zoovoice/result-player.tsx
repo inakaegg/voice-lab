@@ -1,6 +1,8 @@
 import { Download, Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useT } from "../shared/i18n";
+
 export function ResultPlayer({
   source,
   fallbackDuration,
@@ -11,6 +13,7 @@ export function ResultPlayer({
   autoPlay?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const t = useT();
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(fallbackDuration);
@@ -57,13 +60,13 @@ export function ResultPlayer({
       <button
         type="button"
         className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/45 motion-reduce:transition-none"
-        aria-label={playing ? "結果を一時停止" : "結果を再生"}
+        aria-label={t(playing ? "zoovoice.player.pause" : "zoovoice.player.play")}
         onClick={() => void toggle()}
       >
         {playing ? <Pause className="size-5" aria-hidden="true" /> : <Play className="ml-0.5 size-5" aria-hidden="true" />}
       </button>
       <label className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-xs font-semibold text-muted-foreground">
-        <span className="sr-only">再生位置</span>
+        <span className="sr-only">{t("zoovoice.player.position")}</span>
         <input
           type="range"
           min="0"
@@ -86,7 +89,7 @@ export function ResultPlayer({
       className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-bold text-foreground no-underline transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/45"
     >
       <Download className="size-4" aria-hidden="true" />
-      WAVを保存
+      {t("zoovoice.player.saveWav")}
     </a>
   </div>;
 }

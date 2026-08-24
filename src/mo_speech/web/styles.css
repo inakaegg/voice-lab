@@ -1543,6 +1543,9 @@ audio {
 .public-privacy-notice a {
   color: inherit;
   font-weight: 650;
+  /* 英語では本文の句点の直後にリンクが並び ".Privacy policy" と密着して見える。
+     日本語でもリンクが分かれて読みやすくなるため、言語を問わず前に余白を置く。 */
+  margin-left: 0.25em;
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
@@ -3186,6 +3189,11 @@ button.practice-diff-cell:focus-visible {
 .react-public-body .react-theme-menu button { background: transparent; border: 0; border-radius: 8px; color: #465268; cursor: pointer; font: inherit; min-height: 36px; padding: 8px 10px; text-align: left; }
 .react-public-body .react-theme-menu button:hover { background: #f3f3f1; }
 .react-public-body .react-theme-menu button[aria-checked="true"] { background: #263142; color: #fff; font-weight: 800; }
+
+/* Language settings: 見た目は配色設定と共有する。歯車は回して意味があるが、
+   地球のアイコンが傾くと理由のない動きに見えるため、回転だけ打ち消す。 */
+.react-public-body .react-language-settings summary:hover,
+.react-public-body .react-language-settings[open] summary { transform: none; }
 
 html[data-theme="dark"] { color-scheme: dark; }
 html[data-theme="dark"] .react-public-body.practice-body {

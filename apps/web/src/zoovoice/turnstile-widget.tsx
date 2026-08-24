@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useLocale, useT } from "../shared/i18n";
+
 type TurnstileWidgetId = string;
 
 type TurnstileApi = {
@@ -29,7 +31,7 @@ export function TurnstileWidget({
   siteKey: string;
   resetVersion: number;
   onToken: (token: string) => void;
-  onUnavailable: (message: string) => void;
+  onUnavailable: (messageKey: string) => void;
   onInteractionChange: (interactive: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -40,7 +42,9 @@ export function TurnstileWidget({
   const onInteractionChangeRef = useRef(onInteractionChange);
   // 待機中・完了・自動更新中は文言を出さない。Cloudflareのwidgetだけで足りるため、
   // 利用者の操作が必要なときと失敗したときだけ説明を表示する。
-  const [status, setStatus] = useState("");
+  const t = useT();
+  const locale = useLocale();
+  const [statusKey, setStatusKey] = useState("");
   onTokenRef.current = onToken;
   onUnavailableRef.current = onUnavailable;
   onInteractionChangeRef.current = onInteractionChange;
@@ -48,10 +52,10 @@ export function TurnstileWidget({
   useEffect(() => {
     let active = true;
     if (!siteKey) {
-      const message = "不正利用防止の確認を準備できませんでした。ページを再読み込みしてください。";
-      setStatus(message);
+      const messageKey = "zoovoice.turnstile.setupFailed";
+      setStatusKey(messageKey);
       onTokenRef.current("");
-      onUnavailableRef.current(message);
+      onUnavailableRef.current(messageKey);
       return undefined;
     }
     void loadTurnstile()
@@ -61,6 +65,8 @@ export function TurnstileWidget({
           sitekey: siteKey,
           action: "zoovoice-compose",
           theme: "auto",
+          // widget内の文言はCloudflare側が描くので、表示言語をここで渡さないと切り替えても追随しない。
+          language: locale,
           retry: "auto",
           "refresh-expired": "auto",
           "refresh-timeout": "auto",
@@ -68,36 +74,36 @@ export function TurnstileWidget({
             if (!active) return;
             onTokenRef.current(token);
             onInteractionChangeRef.current(false);
-            setStatus("");
+            setStatusKey("");
           },
           "expired-callback": () => {
             if (!active) return;
             onTokenRef.current("");
-            setStatus("");
+            setStatusKey("");
           },
           "error-callback": () => {
             if (!active) return;
             onTokenRef.current("");
-            setStatus("不正利用防止の確認を再試行しています。");
+            setStatusKey("zoovoice.turnstile.retrying");
           },
           "before-interactive-callback": () => {
             if (!active) return;
             onInteractionChangeRef.current(true);
-            setStatus("表示されている確認を完了してください。");
+            setStatusKey("zoovoice.turnstile.completeCheck");
           },
           "after-interactive-callback": () => {
             if (!active) return;
             onInteractionChangeRef.current(false);
-            setStatus("");
+            setStatusKey("");
           },
         });
       })
       .catch(() => {
         if (!active) return;
-        const message = "不正利用防止の確認を準備できませんでした。ページを再読み込みしてください。";
+        const messageKey = "zoovoice.turnstile.setupFailed";
         onTokenRef.current("");
-        setStatus(message);
-        onUnavailableRef.current(message);
+        setStatusKey(messageKey);
+        onUnavailableRef.current(messageKey);
       });
     return () => {
       active = false;
@@ -107,22 +113,22 @@ export function TurnstileWidget({
       widgetIdRef.current = null;
       onInteractionChangeRef.current(false);
     };
-  }, [siteKey]);
+  }, [siteKey, locale]);
 
   useEffect(() => {
     if (previousResetVersion.current === resetVersion) return;
     previousResetVersion.current = resetVersion;
     onTokenRef.current("");
-    setStatus("");
+    setStatusKey("");
     if (widgetIdRef.current && window.turnstile) {
       window.turnstile.reset(widgetIdRef.current);
     }
   }, [resetVersion]);
 
   return <div className="grid justify-items-center gap-2 rounded-xl border border-border/80 bg-muted/35 px-3 py-3">
-    <div ref={containerRef} aria-label="不正利用防止の確認" className="min-h-[65px] max-w-full" />
-    {status
-      ? <p role="status" className="text-center text-xs leading-5 text-muted-foreground">{status}</p>
+    <div ref={containerRef} aria-label={t("zoovoice.turnstile.label")} className="min-h-[65px] max-w-full" />
+    {statusKey
+      ? <p role="status" className="text-center text-xs leading-5 text-muted-foreground">{t(statusKey)}</p>
       : null}
   </div>;
 }

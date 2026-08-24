@@ -22,6 +22,8 @@ const zoovoiceOrb = await read("apps/web/src/zoovoice/record-orb.tsx");
 const zoovoiceTurnstile = await read("apps/web/src/zoovoice/turnstile-widget.tsx");
 const speakloopMain = await read("apps/web/src/speakloop/main.tsx");
 const sharedComponents = await read("apps/web/src/shared/components.tsx");
+// 表示文言は辞書へ移したので、文言そのものは辞書ファイルで確かめる。
+const i18nMessages = await read("apps/web/src/shared/i18n-messages.ts");
 
 test("Voice Lab is the application and package brand without renaming the Python namespace", () => {
   assert.equal(JSON.parse(pkgText).name, "voice-lab");
@@ -135,10 +137,14 @@ test("Zoovoice keeps Turnstile mounted and stops recording into automatic compos
   assert.match(zoovoiceMain, /config\?\.turnstile_required && <TurnstileWidget/);
   assert.match(zoovoiceMain, /composeRecording\(attempt\.blob, attempt\.intensity/);
   assert.match(zoovoiceMain, /state\.phase !== "finalizing"/);
-  assert.match(zoovoiceOrb, /aria-label="録音をキャンセル"/);
+  assert.match(zoovoiceOrb, /aria-label=\{t\("zoovoice\.orb\.cancel"\)\}/);
+  assert.match(i18nMessages, /"zoovoice\.orb\.cancel": "録音をキャンセル"/);
   assert.match(zoovoiceTurnstile, /"refresh-expired": "auto"/);
   assert.match(zoovoiceTurnstile, /"refresh-timeout": "auto"/);
   assert.match(zoovoiceTurnstile, /retry: "auto"/);
+  // widget内の文言はCloudflareが描く。表示言語を渡し、localeが変わったら描き直す契約を固定する。
+  assert.match(zoovoiceTurnstile, /language: locale,/);
+  assert.match(zoovoiceTurnstile, /\}, \[siteKey, locale\]\);/);
   assert.doesNotMatch(zoovoiceMain, />生成する</);
   assert.doesNotMatch(zoovoiceMain, /録り直す/);
   assert.doesNotMatch(zoovoiceMain, /styles\.css|record-orb\.css|practice-record-orb/);
@@ -156,7 +162,8 @@ test("no product carries a beta label any more", () => {
 test("public pages disclose the tech stack with a shared always-visible footnote", () => {
   assert.match(sharedComponents, /export function TechStackNote/);
   assert.match(sharedComponents, /data-tech-note/);
-  assert.match(sharedComponents, /使用技術/);
+  assert.match(sharedComponents, /t\("shared\.techStack"\)/);
+  assert.match(i18nMessages, /"shared\.techStack": "使用技術"/);
   assert.match(portalMain, /TechStackNote/);
   assert.match(portalMain, /"Google Cloud Run"/);
   assert.match(zoovoiceMain, /TechStackNote/);
