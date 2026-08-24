@@ -312,7 +312,7 @@ Dependencies, models, and third-party implementations keep their own licenses an
 
 How comparison playback chooses its playback positions, and why that design was chosen, is published with diagrams. The normative spec is [SPEC.md](docs/speech-translation/SPEC.md) (Japanese, English summary at the top).
 
-- [Comparison playback: how positions are chosen and why](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) (Japanese). Covers what breaks easily, why this shape, the four roles, and the evaluation numbers with their limits.
+- [Comparison playback: how positions are chosen and why](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) (Japanese). Covers what makes it hard, why this shape, the four roles, and the evaluation numbers with their limits.
 
 ## Documentation
 

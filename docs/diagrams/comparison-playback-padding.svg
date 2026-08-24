@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif">
+<rect x="0" y="0" width="960" height="380" rx="14" fill="#ffffff"/>
+<text x="24" y="38" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="17" fill="#1f2937" font-weight="bold" text-anchor="start">再生の余白: 前後0.30秒を足し、隣の認識単位の時刻で止める</text>
+<line x1="24" y1="200" x2="936" y2="200" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="150" y="183.37" width="3.2" height="33.2601" rx="1.6" fill="#8f9ac4"/>
+<rect x="156.5" y="186.616" width="3.2" height="26.7671" rx="1.6" fill="#8f9ac4"/>
+<rect x="163" y="188.014" width="3.2" height="23.9728" rx="1.6" fill="#8f9ac4"/>
+<rect x="169.5" y="171.861" width="3.2" height="56.2776" rx="1.6" fill="#8f9ac4"/>
+<rect x="176" y="179.117" width="3.2" height="41.767" rx="1.6" fill="#8f9ac4"/>
+<rect x="182.5" y="176.693" width="3.2" height="46.6137" rx="1.6" fill="#8f9ac4"/>
+<rect x="189" y="179.654" width="3.2" height="40.6922" rx="1.6" fill="#8f9ac4"/>
+<rect x="195.5" y="183.315" width="3.2" height="33.3691" rx="1.6" fill="#8f9ac4"/>
+<rect x="202" y="175.797" width="3.2" height="48.4062" rx="1.6" fill="#8f9ac4"/>
+<rect x="208.5" y="179.149" width="3.2" height="41.7017" rx="1.6" fill="#8f9ac4"/>
+<rect x="215" y="174.726" width="3.2" height="50.5483" rx="1.6" fill="#8f9ac4"/>
+<rect x="221.5" y="177.31" width="3.2" height="45.3803" rx="1.6" fill="#8f9ac4"/>
+<rect x="228" y="173.471" width="3.2" height="53.0577" rx="1.6" fill="#8f9ac4"/>
+<rect x="234.5" y="182.109" width="3.2" height="35.7818" rx="1.6" fill="#8f9ac4"/>
+<rect x="241" y="188.251" width="3.2" height="23.4981" rx="1.6" fill="#8f9ac4"/>
+<rect x="247.5" y="188.364" width="3.2" height="23.2729" rx="1.6" fill="#8f9ac4"/>
+<rect x="254" y="175.98" width="3.2" height="48.0409" rx="1.6" fill="#8f9ac4"/>
+<rect x="260.5" y="187.982" width="3.2" height="24.0365" rx="1.6" fill="#8f9ac4"/>
+<rect x="267" y="177.459" width="3.2" height="45.0811" rx="1.6" fill="#8f9ac4"/>
+<rect x="273.5" y="178.191" width="3.2" height="43.6174" rx="1.6" fill="#8f9ac4"/>
+<rect x="280" y="190.315" width="3.2" height="19.3704" rx="1.6" fill="#8f9ac4"/>
+<rect x="286.5" y="174.659" width="3.2" height="50.6824" rx="1.6" fill="#8f9ac4"/>
+<rect x="293" y="190.887" width="3.2" height="18.2259" rx="1.6" fill="#8f9ac4"/>
+<rect x="299.5" y="172.875" width="3.2" height="54.2497" rx="1.6" fill="#8f9ac4"/>
+<rect x="306" y="173.433" width="3.2" height="53.1332" rx="1.6" fill="#8f9ac4"/>
+<rect x="312.5" y="186.937" width="3.2" height="26.1257" rx="1.6" fill="#8f9ac4"/>
+<rect x="319" y="175.913" width="3.2" height="48.1735" rx="1.6" fill="#8f9ac4"/>
+<rect x="325.5" y="175.781" width="3.2" height="48.4371" rx="1.6" fill="#8f9ac4"/>
+<line x1="330" y1="154" x2="330" y2="246" stroke="#6f7684" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 4"/>
+<text x="322" y="144" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="end">直前の認識単位の終了</text>
+<rect x="400" y="148" width="300" height="104" rx="8" fill="#e3e7f8" fill-opacity="0.7" stroke="#3b52c4" stroke-width="2.5"/>
+<text x="550" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14.5" fill="#3b52c4" font-weight="bold" text-anchor="middle">選んだフレーズ</text>
+<rect x="408" y="173.346" width="3.2" height="53.3079" rx="1.6" fill="#8f9ac4"/>
+<rect x="414.5" y="189.272" width="3.2" height="21.4566" rx="1.6" fill="#8f9ac4"/>
+<rect x="421" y="182.791" width="3.2" height="34.4175" rx="1.6" fill="#8f9ac4"/>
+<rect x="427.5" y="184.134" width="3.2" height="31.7312" rx="1.6" fill="#8f9ac4"/>
+<rect x="434" y="170.831" width="3.2" height="58.3387" rx="1.6" fill="#8f9ac4"/>
+<rect x="440.5" y="172.38" width="3.2" height="55.2401" rx="1.6" fill="#8f9ac4"/>
+<rect x="447" y="166.795" width="3.2" height="66.4106" rx="1.6" fill="#8f9ac4"/>
+<rect x="453.5" y="187.667" width="3.2" height="24.6669" rx="1.6" fill="#8f9ac4"/>
+<rect x="460" y="178.984" width="3.2" height="42.0324" rx="1.6" fill="#8f9ac4"/>
+<rect x="466.5" y="189.148" width="3.2" height="21.7047" rx="1.6" fill="#8f9ac4"/>
+<rect x="473" y="184.253" width="3.2" height="31.4942" rx="1.6" fill="#8f9ac4"/>
+<rect x="479.5" y="176.821" width="3.2" height="46.3576" rx="1.6" fill="#8f9ac4"/>
+<rect x="486" y="189.232" width="3.2" height="21.5356" rx="1.6" fill="#8f9ac4"/>
+<rect x="492.5" y="184.766" width="3.2" height="30.4677" rx="1.6" fill="#8f9ac4"/>
+<rect x="499" y="173.075" width="3.2" height="53.85" rx="1.6" fill="#8f9ac4"/>
+<rect x="505.5" y="175.795" width="3.2" height="48.4098" rx="1.6" fill="#8f9ac4"/>
+<rect x="512" y="184.206" width="3.2" height="31.5876" rx="1.6" fill="#8f9ac4"/>
+<rect x="518.5" y="174.646" width="3.2" height="50.7075" rx="1.6" fill="#8f9ac4"/>
+<rect x="525" y="168.94" width="3.2" height="62.1209" rx="1.6" fill="#8f9ac4"/>
+<rect x="531.5" y="189.752" width="3.2" height="20.4969" rx="1.6" fill="#8f9ac4"/>
+<rect x="538" y="169.033" width="3.2" height="61.9337" rx="1.6" fill="#8f9ac4"/>
+<rect x="544.5" y="171.824" width="3.2" height="56.3515" rx="1.6" fill="#8f9ac4"/>
+<rect x="551" y="181.101" width="3.2" height="37.7986" rx="1.6" fill="#8f9ac4"/>
+<rect x="557.5" y="185.89" width="3.2" height="28.2201" rx="1.6" fill="#8f9ac4"/>
+<rect x="564" y="165.109" width="3.2" height="69.7819" rx="1.6" fill="#8f9ac4"/>
+<rect x="570.5" y="181.195" width="3.2" height="37.6091" rx="1.6" fill="#8f9ac4"/>
+<rect x="577" y="187.516" width="3.2" height="24.9679" rx="1.6" fill="#8f9ac4"/>
+<rect x="583.5" y="187.413" width="3.2" height="25.1738" rx="1.6" fill="#8f9ac4"/>
+<rect x="590" y="167.953" width="3.2" height="64.0941" rx="1.6" fill="#8f9ac4"/>
+<rect x="596.5" y="174.271" width="3.2" height="51.4572" rx="1.6" fill="#8f9ac4"/>
+<rect x="603" y="168.999" width="3.2" height="62.0015" rx="1.6" fill="#8f9ac4"/>
+<rect x="609.5" y="171.005" width="3.2" height="57.9893" rx="1.6" fill="#8f9ac4"/>
+<rect x="616" y="176.021" width="3.2" height="47.9581" rx="1.6" fill="#8f9ac4"/>
+<rect x="622.5" y="164.697" width="3.2" height="70.6063" rx="1.6" fill="#8f9ac4"/>
+<rect x="629" y="180.108" width="3.2" height="39.7832" rx="1.6" fill="#8f9ac4"/>
+<rect x="635.5" y="175.611" width="3.2" height="48.7778" rx="1.6" fill="#8f9ac4"/>
+<rect x="642" y="168.422" width="3.2" height="63.1563" rx="1.6" fill="#8f9ac4"/>
+<rect x="648.5" y="173.888" width="3.2" height="52.2241" rx="1.6" fill="#8f9ac4"/>
+<rect x="655" y="167.585" width="3.2" height="64.8309" rx="1.6" fill="#8f9ac4"/>
+<rect x="661.5" y="174.955" width="3.2" height="50.0899" rx="1.6" fill="#8f9ac4"/>
+<rect x="668" y="171.657" width="3.2" height="56.685" rx="1.6" fill="#8f9ac4"/>
+<rect x="674.5" y="188.732" width="3.2" height="22.5355" rx="1.6" fill="#8f9ac4"/>
+<rect x="681" y="184.013" width="3.2" height="31.9742" rx="1.6" fill="#8f9ac4"/>
+<rect x="687.5" y="182.419" width="3.2" height="35.1619" rx="1.6" fill="#8f9ac4"/>
+<rect x="330" y="148" width="70" height="104" rx="6" fill="#def0e8" fill-opacity="0.8" stroke="#0e7a55" stroke-width="1.8"/>
+<line x1="304" y1="262" x2="400" y2="262" stroke="#c2402a" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 5"/>
+<line x1="304" y1="256" x2="304" y2="268" stroke="#c2402a" stroke-width="2" stroke-linecap="round"/>
+<text x="352" y="284" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#c2402a" font-weight="normal" text-anchor="middle">0.30秒に届く前にクランプ</text>
+<rect x="700" y="148" width="96" height="104" rx="6" fill="#def0e8" fill-opacity="0.8" stroke="#0e7a55" stroke-width="1.8"/>
+<text x="748" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13.5" fill="#0e7a55" font-weight="bold" text-anchor="middle">余白0.30秒</text>
+<line x1="830" y1="100" x2="800" y2="142" stroke="#6f7684" stroke-width="2" stroke-linecap="round"/>
+<polygon points="800,142 795,133 805,133" fill="#6f7684"/>
+<text x="838" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="start">両端に30msのfade</text>
+<text x="24" y="344" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">余白の上限は隣の認識単位の時刻と音声全体の長さ。無音の位置は見ないため、余白が必ず無音側へ広がる保証はない。</text>
+</svg>

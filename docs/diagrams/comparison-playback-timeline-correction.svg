@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif">
+<rect x="0" y="0" width="960" height="560" rx="14" fill="#ffffff"/>
+<text x="24" y="38" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="17" fill="#1f2937" font-weight="bold" text-anchor="start">時刻が段階的に実際の発話へ合っていく(模式図)</text>
+<rect x="300" y="96" width="260" height="374" rx="10" fill="#e4e8ef" stroke="#c6ccda" stroke-width="1.2"/>
+<rect x="620" y="96" width="260" height="374" rx="10" fill="#e4e8ef" stroke="#c6ccda" stroke-width="1.2"/>
+<rect x="440" y="72" width="22" height="14" rx="3" fill="#e4e8ef" stroke="#c6ccda" stroke-width="1.2"/>
+<text x="470" y="84" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="start">= 実際の発話の位置(発話島)</text>
+<text x="24" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#c2402a" font-weight="bold" text-anchor="start">1. ASRの時刻のまま</text>
+<text x="24" y="164" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="start">最大1〜2秒ずれることがある</text>
+<line x1="260" y1="168" x2="936" y2="168" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="239" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="301" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="363" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="425" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="629" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="691" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="753" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<rect x="815" y="146" width="56" height="44" rx="6" fill="#fbe9e4" fill-opacity="0.85" stroke="#c2402a" stroke-width="1.6"/>
+<text x="24" y="274" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#3b52c4" font-weight="bold" text-anchor="start">2. fa-zhで求め直す</text>
+<text x="24" y="296" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="start">ほぼ合うが端が少し早い</text>
+<line x1="260" y1="300" x2="936" y2="300" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="291" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="353" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="415" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="477" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="619" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="681" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="743" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<rect x="805" y="278" width="56" height="44" rx="6" fill="#e3e7f8" fill-opacity="0.85" stroke="#3b52c4" stroke-width="1.6"/>
+<text x="24" y="406" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#0e7a55" font-weight="bold" text-anchor="start">3. VADスナップ</text>
+<text x="24" y="428" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="start">端の差(±0.35秒以内)を合わせる</text>
+<line x1="260" y1="432" x2="936" y2="432" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="300" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="366.5" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="433" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="499.5" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="620" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="686.5" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="753" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<rect x="819.5" y="410" width="60.5" height="44" rx="6" fill="#def0e8" fill-opacity="0.85" stroke="#0e7a55" stroke-width="1.6"/>
+<text x="24" y="536" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">同じ認識単位の列が、段階を経て実際の発話位置と重なっていく。位置は模式値で、実測の一例は前後比較の図を参照。</text>
+</svg>

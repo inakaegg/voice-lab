@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 434" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif">
+<rect x="0" y="0" width="960" height="434" rx="14" fill="#ffffff"/>
+<text x="24" y="38" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="17" fill="#1f2937" font-weight="bold" text-anchor="start">位置番号契約: LLMは番号だけを返し、時刻はアプリが表から引く</text>
+<text x="24" y="70" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">ASRの認識単位(中国語ではほぼ漢字1文字)と、その時刻表</text>
+<rect x="90" y="104" width="68" height="60" rx="8" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.5"/>
+<text x="124" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="middle">0</text>
+<text x="124" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#1f2937" font-weight="normal" text-anchor="middle">已</text>
+<text x="124" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">1.00秒</text>
+<rect x="168" y="104" width="68" height="60" rx="8" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.5"/>
+<text x="202" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="middle">1</text>
+<text x="202" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#1f2937" font-weight="normal" text-anchor="middle">经</text>
+<text x="202" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">1.24秒</text>
+<rect x="246" y="104" width="68" height="60" rx="8" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.5"/>
+<text x="280" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="middle">2</text>
+<text x="280" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#1f2937" font-weight="normal" text-anchor="middle">晚</text>
+<text x="280" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">1.48秒</text>
+<rect x="324" y="104" width="68" height="60" rx="8" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.5"/>
+<text x="358" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="middle">3</text>
+<text x="358" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#1f2937" font-weight="normal" text-anchor="middle">上</text>
+<text x="358" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">1.72秒</text>
+<rect x="402" y="104" width="68" height="60" rx="8" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.5"/>
+<text x="436" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#6f7684" font-weight="normal" text-anchor="middle">4</text>
+<text x="436" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#1f2937" font-weight="normal" text-anchor="middle">了</text>
+<text x="436" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">1.96秒</text>
+<rect x="480" y="104" width="68" height="60" rx="8" fill="#e3e7f8" stroke="#3b52c4" stroke-width="2"/>
+<text x="514" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#3b52c4" font-weight="bold" text-anchor="middle">5</text>
+<text x="514" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#3b52c4" font-weight="normal" text-anchor="middle">再</text>
+<text x="514" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">2.20秒</text>
+<rect x="558" y="104" width="68" height="60" rx="8" fill="#e3e7f8" stroke="#3b52c4" stroke-width="2"/>
+<text x="592" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#3b52c4" font-weight="bold" text-anchor="middle">6</text>
+<text x="592" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#3b52c4" font-weight="normal" text-anchor="middle">过</text>
+<text x="592" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">2.44秒</text>
+<rect x="636" y="104" width="68" height="60" rx="8" fill="#e3e7f8" stroke="#3b52c4" stroke-width="2"/>
+<text x="670" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#3b52c4" font-weight="bold" text-anchor="middle">7</text>
+<text x="670" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#3b52c4" font-weight="normal" text-anchor="middle">一</text>
+<text x="670" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">2.68秒</text>
+<rect x="714" y="104" width="68" height="60" rx="8" fill="#e3e7f8" stroke="#3b52c4" stroke-width="2"/>
+<text x="748" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#3b52c4" font-weight="bold" text-anchor="middle">8</text>
+<text x="748" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#3b52c4" font-weight="normal" text-anchor="middle">会</text>
+<text x="748" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">2.92秒</text>
+<rect x="792" y="104" width="68" height="60" rx="8" fill="#e3e7f8" stroke="#3b52c4" stroke-width="2"/>
+<text x="826" y="94" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#3b52c4" font-weight="bold" text-anchor="middle">9</text>
+<text x="826" y="142" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="22" fill="#3b52c4" font-weight="normal" text-anchor="middle">儿</text>
+<text x="826" y="184" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="11.5" fill="#6f7684" font-weight="normal" text-anchor="middle">3.16秒</text>
+<line x1="476" y1="196" x2="864" y2="196" stroke="#3b52c4" stroke-width="2.5" stroke-linecap="round"/>
+<line x1="476" y1="196" x2="476" y2="188" stroke="#3b52c4" stroke-width="2.5" stroke-linecap="round"/>
+<line x1="864" y1="196" x2="864" y2="188" stroke="#3b52c4" stroke-width="2.5" stroke-linecap="round"/>
+<rect x="60" y="250" width="400" height="118" rx="8" fill="#ffffff" stroke="#3b52c4" stroke-width="2"/>
+<text x="80" y="282" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#3b52c4" font-weight="bold" text-anchor="start">LLMが返すもの(番号だけ)</text>
+<text x="80" y="312" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#1f2937" font-weight="normal" text-anchor="start">フレーズ2 = 単位5〜9</text>
+<text x="80" y="340" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13.5" fill="#6f7684" font-weight="normal" text-anchor="start">ほかに到達状態・点数・コメント</text>
+<line x1="260" y1="250" x2="260" y2="236" stroke="#3b52c4" stroke-width="2" stroke-linecap="round"/>
+<line x1="260" y1="236" x2="600" y2="236" stroke="#3b52c4" stroke-width="2" stroke-linecap="round"/>
+<line x1="600" y1="236" x2="600" y2="202" stroke="#3b52c4" stroke-width="2" stroke-linecap="round"/>
+<polygon points="600,202 595,211 605,211" fill="#3b52c4"/>
+<rect x="510" y="250" width="400" height="118" rx="8" fill="#ffffff" stroke="#0e7a55" stroke-width="2"/>
+<text x="530" y="282" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#0e7a55" font-weight="bold" text-anchor="start">アプリが計算するもの(時刻)</text>
+<text x="530" y="312" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14.5" fill="#1f2937" font-weight="normal" text-anchor="start">開始 = 単位5の開始時刻(時刻表から)</text>
+<text x="530" y="340" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14.5" fill="#1f2937" font-weight="normal" text-anchor="start">終了 = 単位9の終了時刻(時刻表から)</text>
+<line x1="710" y1="250" x2="710" y2="202" stroke="#0e7a55" stroke-width="2" stroke-linecap="round"/>
+<polygon points="710,202 705,211 715,211" fill="#0e7a55"/>
+<text x="24" y="414" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">時刻や文字列をLLMに書き写させると、1か所の写し間違いで比較全体が失敗する。写し得る情報を番号だけに絞っている。</text>
+</svg>

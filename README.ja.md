@@ -299,7 +299,7 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 比較再生の再生位置をどう決めているかと、その設計を選んだ理由を図解付きで公開しています。仕様の正本は [全体仕様](docs/speech-translation/SPEC.md) です。
 
-- [比較再生: 再生位置の決め方とその理由](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 何が壊れやすいか、なぜこの形にしたか、4つの役割、評価の数値とその限界
+- [比較再生: 再生位置の決め方とその理由](docs/speech-translation/COMPARISON_PLAYBACK_CASE_STUDY.md) — 何が難しいか、なぜこの形にしたか、4つの役割、評価の数値とその限界
 
 ## ドキュメント
 
