@@ -58,21 +58,25 @@ Japanese ASR, animal association, and synthesis run on a private Go service on G
 
 ## Architecture
 
-<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks to the Cloudflare Worker, which relays to the OpenAI API, a private RunPod Serverless GPU handler, and a private Google Cloud Run Go service. The browser also connects directly to the Turnstile widget for the Zoovoice challenge and to Google for OAuth sign-in. No API key reaches the browser; the Worker and Cloud Run each hold their own keys." width="100%">
+<img src="docs/diagrams/architecture.svg" alt="Voice Lab architecture. The browser talks to the Cloudflare Worker, the Turnstile widget for the Zoovoice challenge, and Google for OAuth sign-in. The Worker relays SpeakLoop calls to OpenAI and private RunPod Serverless. It calls private Google Cloud Run with a Google-issued ID token; on a token-cache miss, it exchanges a signed service-account JWT at Google's token endpoint. Cloud Run calls OpenAI for Zoovoice. No API key reaches the browser; the Worker and Cloud Run each hold their own keys." width="100%">
 
 The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/architecture.py). Regenerate both language versions with `uv run --no-project --with diagrams python docs/diagrams/architecture.py`.
 
 - API keys for OpenAI and RunPod never reach the browser. They live in Worker secrets or server-side environment variables.
 - The public deployment handles Google login, per-feature quotas, input limits, and a simple audit log in the Cloudflare Worker.
 - Chinese pronunciation comparison and optional voice conversion temporarily send only the required audio to a private RunPod Serverless backend.
-- Zoovoice audio processing runs on a private Go service on Google Cloud Run (whisper.cpp, OpenAI API, ffmpeg). The Worker relays to it with Google IAM authentication.
+- Zoovoice audio processing runs on a private Go service on Google Cloud Run (whisper.cpp, OpenAI API, ffmpeg). The Worker relays with a Google-issued ID token. On a token-cache miss, it exchanges a signed service-account JWT for a new ID token at Google's token endpoint.
 - Zoovoice uses Cloudflare Turnstile against automated access, with shared usage limits managed in D1.
 - The public Cloudflare deployment does not store user input audio or generated audio as Voice Lab history.
 - Checks that require GPU billing are separated from the request, job, and error handling that a fake model can verify.
 
 ### Request paths
 
-**SpeakLoop.** On deployments with public access restricted, you sign in with Google first by opening `GET /auth/google/login`; the Worker does not redirect you there on its own. Before every OpenAI or RunPod call, the Worker checks that session and returns 401 if it is missing or invalid; with a valid session it also checks the D1 quota, logs an audit event, and returns 429 when the quota is exceeded. The Worker calls OpenAI for the study sentence and the model voice, and again afterward to compare and score your repetition. With the optional own-voice mode, the standard model voice is converted toward your recording as an asynchronous RunPod Seed-VC job, and Chinese repetition ASR is also an asynchronous RunPod job; for both, the browser polls the Worker until the job finishes, and each poll makes the Worker check RunPod once and receive a status that includes the converted voice once the job completes, so the browser can show real progress instead of a spinner.
+**SpeakLoop.** On deployments with public access restricted, you sign in with Google first by opening `GET /auth/google/login`; the Worker does not redirect you there on its own. Each prompt or attempt submission checks access before any OpenAI or RunPod call. A missing session returns 401. A regular user consumes D1 quota and writes an audit event; an exceeded quota returns 429. An admin writes a quota-exempt audit event instead. Rejected submissions never reach a provider. Status polling only rechecks the session, so it neither consumes quota nor writes an audit event.
+
+Every comparison submission sends both your repetition and the model audio to the Worker. OpenAI for English or RunPod for Chinese always transcribes the repetition. On a reference-ASR cache miss, the provider also receives and transcribes the model audio. On a cache hit for the same audio, language, and provider model, the Worker reuses the reference transcription and does not send the model audio to the provider. After ASR, the Worker calls OpenAI to compare and score the repetition.
+
+The Worker calls OpenAI for the study sentence and standard model voice. Optional own-voice conversion runs as an asynchronous RunPod Seed-VC job, and Chinese repetition ASR also runs as an asynchronous RunPod job. For both jobs, the browser polls the Worker until completion. Each poll makes one RunPod status request and returns real progress or the completed result.
 
 ```mermaid
 sequenceDiagram
@@ -93,17 +97,18 @@ sequenceDiagram
     end
     B->>W: recording in your native language
     opt public access restricted
-        alt missing or invalid session
+        break missing or invalid session
             W-->>B: 401
-        else valid session
-            W->>D: check quota
-            alt quota exceeded
+        end
+        alt admin session
+            W->>D: log quota-exempt audit event
+        else regular user session
+            W->>D: check and consume quota, then log audit event
+            break quota exceeded
                 D-->>W: exceeded
                 W-->>B: 429
-            else quota ok
-                D-->>W: ok
-                W->>D: log audit
             end
+            D-->>W: accepted
         end
     end
     W->>O: ASR, translation, TTS
@@ -124,23 +129,29 @@ sequenceDiagram
     else standard voice
         W-->>B: model voice
     end
-    B->>W: your repetition
+    B->>W: your repetition, plus the model audio
     opt public access restricted
-        alt invalid session
+        break invalid session
             W-->>B: 401
-        else session ok
-            W->>D: check quota
-            alt quota exceeded
+        end
+        alt admin session
+            W->>D: log quota-exempt audit event
+        else regular user session
+            W->>D: check and consume quota, then log audit event
+            break quota exceeded
                 D-->>W: exceeded
                 W-->>B: 429
-            else quota ok
-                D-->>W: ok
-                W->>D: log audit
             end
+            D-->>W: accepted
         end
     end
     alt learning Chinese
-        W->>R: create an async job
+        alt model audio ASR cached
+            Note over W: reuse the cached model transcription
+            W->>R: create an async job (repetition audio only)
+        else model audio ASR not cached
+            W->>R: create an async job (repetition audio + model audio)
+        end
         loop until the job completes
             B->>W: poll job status
             W->>R: get job status
@@ -154,7 +165,13 @@ sequenceDiagram
             end
         end
     else learning English
-        W->>O: timestamped ASR
+        alt model audio ASR cached
+            Note over W: reuse the cached model transcription
+        else model audio ASR not cached
+            W->>O: transcribe the model audio
+            O-->>W: words with times
+        end
+        W->>O: timestamped ASR of the repetition
         O-->>W: words with times
         W->>O: compare and score the repetition
         O-->>W: phrase alignment, score, comment

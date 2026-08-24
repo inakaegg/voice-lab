@@ -81,11 +81,12 @@ PRIVATE_CLUSTER = {**CLUSTER, "style": "dashed", "pencolor": "#8E9A94", "fontcol
 TEXT = {
     "en": {
         "title": "Voice Lab architecture   green = SpeakLoop   orange = Zoovoice   grey = shared",
-        "browser": ("Browser", "/speakloop  ·  /zoovoice"),
+        "browser": ("Browser", "/  ·  /speakloop  ·  /zoovoice"),
         "boundary": "Cloudflare  (no API key reaches the browser; keys live in Worker and Cloud Run secrets)",
         "worker": ("Cloudflare Worker", "Static Assets serve the UI", "Google login / quota / API relay"),
         "turnstile": ("Turnstile", "blocks automated Zoovoice access"),
         "google": ("Google", "OAuth sign-in (accounts.google.com)"),
+        "google_token": ("Google token endpoint", "oauth2.googleapis.com/token", "ID-token cache miss only"),
         "storage": "Storage",
         "kv": ("Workers KV", "settings / short-lived jobs"),
         "d1": ("D1", "quota / audit / counters", "public-sample metadata"),
@@ -107,16 +108,18 @@ TEXT = {
         "e_oauth": "OAuth sign-in",
         "e_openai": "ASR / translation / TTS / scoring",
         "e_runpod": "async job → polling",
-        "e_idtoken": "IAM ID token",
+        "e_idtoken": "call with ID token",
+        "e_gtoken": "signed JWT ↔ ID token",
         "e_assoc": "pick one animal",
     },
     "ja": {
         "title": "Voice Lab 構成図　　緑=SpeakLoopの経路　橙=Zoovoiceの経路　灰=共通",
-        "browser": ("ブラウザ", "/speakloop  ・  /zoovoice"),
+        "browser": ("ブラウザ", "/  ・  /speakloop  ・  /zoovoice"),
         "boundary": "Cloudflare（APIキーはブラウザへ渡さず、Worker secretとCloud Run secretで管理）",
         "worker": ("Cloudflare Worker", "Static Assets で画面配信", "Googleログイン・quota・API中継"),
         "turnstile": ("Turnstile", "Zoovoiceの自動アクセス抑止"),
         "google": ("Google", "OAuthログイン（accounts.google.com）"),
+        "google_token": ("Google token endpoint", "oauth2.googleapis.com/token", "ID tokenのcache miss時だけ利用"),
         "storage": "保存層",
         "kv": ("Workers KV", "設定・短期job"),
         "d1": ("D1", "quota・監査・counter", "公開sample metadata"),
@@ -138,7 +141,8 @@ TEXT = {
         "e_oauth": "OAuthログイン",
         "e_openai": "ASR・翻訳・TTS・採点",
         "e_runpod": "非同期job → polling",
-        "e_idtoken": "IAM ID token",
+        "e_idtoken": "ID token付きrequest",
+        "e_gtoken": "署名付きJWT ↔ ID token",
         "e_assoc": "動物を1種選ぶ",
     },
 }
@@ -218,6 +222,9 @@ def build(lang: str) -> Path:
         browser = svc(Users, *t["browser"])
         # diagramsに公式Googleアイコンが同梱されていないため、枠線だけの汎用ノードで代用する。
         google = unbranded(Blank, *t["google"])
+        # ブラウザ用のGoogle OAuthノードとは別に、Workerがサーバー側でCloud Run用ID tokenを
+        # 取得するGoogle token endpointを分けて表す（productionCloudRunIdToken）。
+        google_token = unbranded(Blank, *t["google_token"])
 
         with Cluster(t["boundary"], graph_attr=BOUNDARY_CLUSTER):
             turnstile = svc(Cloudflare, *t["turnstile"])
@@ -250,6 +257,15 @@ def build(lang: str) -> Path:
 
         worker >> flow(SPEAKLOOP, t["e_openai"]) >> openai
         worker >> flow(SPEAKLOOP, t["e_runpod"]) >> runpod
+        # Cloud Runはprivateなので、Workerはcache missの際に署名付きservice account JWTを
+        # Google token endpointへ送ってID tokenを受け取ってから中継する（productionCloudRunIdToken）。
+        worker >> Edge(
+            label=t["e_gtoken"],
+            color=ZOOVOICE,
+            fontcolor=ZOOVOICE,
+            penwidth="2",
+            dir="both",
+        ) >> google_token
         worker >> flow(ZOOVOICE, t["e_idtoken"]) >> cloudrun
         # 動物連想のAPIキーはCloud Runのsecretで、Workerを経由しない（services/zoovoice/association.go）
         cloudrun >> flow(ZOOVOICE, t["e_assoc"]) >> openai
