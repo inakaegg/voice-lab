@@ -17,10 +17,12 @@ usage() {
 
 validate_runtime_paths() {
   [[ -f "$sounds_dir/manifest.json" ]] || fail "鳴き声ディレクトリにmanifest.jsonがありません: $sounds_dir"
+  ((needs_whisper)) || return 0
   [[ -x "$whisper_build_dir/bin/whisper-cli" ]] || fail "whisper-cliが見つからないか実行できません: $whisper_build_dir/bin/whisper-cli"
   [[ -f "$asr_model_path" ]] || fail "ASRモデルが見つかりません: $asr_model_path"
 }
 
+# -textの合成はASRを通らないため、whisperの設定と実体は-audioのときだけ要求する。
 load_config() {
   [[ -f "$config_path" ]] || fail "内部設定ファイルがありません: $config_path"
 
@@ -39,8 +41,10 @@ load_config() {
   done < "$config_path"
 
   [[ -n "$sounds_dir" ]] || fail "ローカル設定にSOUNDS_DIRがありません"
-  [[ -n "$whisper_build_dir" ]] || fail "ローカル設定にWHISPER_BUILD_DIRがありません"
-  [[ -n "$asr_model_path" ]] || fail "ローカル設定にASR_MODEL_PATHがありません"
+  if ((needs_whisper)); then
+    [[ -n "$whisper_build_dir" ]] || fail "ローカル設定にWHISPER_BUILD_DIRがありません"
+    [[ -n "$asr_model_path" ]] || fail "ローカル設定にASR_MODEL_PATHがありません"
+  fi
   validate_runtime_paths
 }
 
@@ -83,19 +87,30 @@ write_whisper_wrapper() {
 }
 
 preview() {
+  local argument
+  needs_whisper=0
+  for argument in "$@"; do
+    case "$argument" in
+      -audio|--audio|-audio=*|--audio=*) needs_whisper=1 ;;
+    esac
+  done
   load_config
   command -v go >/dev/null 2>&1 || fail "goが見つかりません"
 
   local binary_path="$repository_dir/tmp/zoovoice-cli"
   local whisper_wrapper="$repository_dir/tmp/zoovoice-whisper-cli"
   mkdir -p -- "$repository_dir/tmp"
-  write_whisper_wrapper "$whisper_wrapper"
+  local -a runtime_environment=("ZOOVOICE_SOUNDS_DIR=$sounds_dir")
+  if ((needs_whisper)); then
+    write_whisper_wrapper "$whisper_wrapper"
+    runtime_environment+=(
+      "ZOOVOICE_WHISPER_COMMAND=$whisper_wrapper"
+      "ZOOVOICE_ASR_MODEL_PATH=$asr_model_path"
+    )
+  fi
   (cd -- "$repository_dir/services/zoovoice" && go build -o "$binary_path" .)
 
-  ZOOVOICE_SOUNDS_DIR="$sounds_dir" \
-  ZOOVOICE_WHISPER_COMMAND="$whisper_wrapper" \
-  ZOOVOICE_ASR_MODEL_PATH="$asr_model_path" \
-    "$binary_path" preview "$@"
+  env "${runtime_environment[@]}" "$binary_path" preview "$@"
 }
 
 case "${1:-}" in

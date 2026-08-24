@@ -121,6 +121,40 @@ test("Zoovoice launcher uses ignored internal paths and forwards only preview ar
   }
 });
 
+test("Zoovoice launcher previews text without the ASR setup", () => {
+  // -textの合成はASRを通らない。whisper一式のない環境でも動かせることを固定する。
+  const fixture = createLauncherFixture(true, false);
+  try {
+    rmSync(fixture.whisperBuild, { recursive: true, force: true });
+    const previewed = spawnSync(
+      fixture.launcher,
+      ["preview", "-text", "屋根の上で何かが鳴いていました"],
+      {
+        cwd: fixture.root,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${fixture.fakeBin}${delimiter}${process.env.PATH || ""}`,
+          ZOOVOICE_FAKE_BINARY_TEMPLATE: fixture.fakeBinary,
+          ZOOVOICE_TEST_CAPTURE: fixture.capture,
+        },
+      },
+    );
+
+    assert.equal(previewed.status, 0, previewed.stderr);
+    const capture = readFileSync(fixture.capture, "utf8");
+    assert.match(
+      capture,
+      new RegExp(`^args=preview -text 屋根の上で何かが鳴いていました$`, "m"),
+    );
+    assert.match(capture, new RegExp(`^sounds=${escapeRegExp(fixture.sounds)}$`, "m"));
+    assert.match(capture, /^model=$/m);
+    assert.match(capture, /^whisper=$/m);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("Zoovoice launcher reports its ignored internal config when local paths are absent", () => {
   const fixture = createLauncherFixture(false);
   try {
@@ -138,7 +172,7 @@ test("Zoovoice launcher reports its ignored internal config when local paths are
   }
 });
 
-function createLauncherFixture(withConfig = true) {
+function createLauncherFixture(withConfig = true, withWhisper = true) {
   const root = realpathSync(
     mkdtempSync(join(tmpdir(), "zoovoice-cli-launcher-")),
   );
@@ -181,8 +215,9 @@ function createLauncherFixture(withConfig = true) {
       config,
       [
         `SOUNDS_DIR=${sounds}`,
-        `WHISPER_BUILD_DIR=${whisperBuild}`,
-        `ASR_MODEL_PATH=${model}`,
+        ...(withWhisper
+          ? [`WHISPER_BUILD_DIR=${whisperBuild}`, `ASR_MODEL_PATH=${model}`]
+          : []),
         "",
       ].join("\n"),
       { mode: 0o600 },
@@ -218,8 +253,8 @@ function createLauncherFixture(withConfig = true) {
       "{",
       "  printf 'args=%s\\n' \"$*\"",
       "  printf 'sounds=%s\\n' \"$ZOOVOICE_SOUNDS_DIR\"",
-      "  printf 'model=%s\\n' \"$ZOOVOICE_ASR_MODEL_PATH\"",
-      "  printf 'whisper=%s\\n' \"$ZOOVOICE_WHISPER_COMMAND\"",
+      "  printf 'model=%s\\n' \"${ZOOVOICE_ASR_MODEL_PATH:-}\"",
+      "  printf 'whisper=%s\\n' \"${ZOOVOICE_WHISPER_COMMAND:-}\"",
       "} > \"$ZOOVOICE_TEST_CAPTURE\"",
       "",
     ].join("\n"),

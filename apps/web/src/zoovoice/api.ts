@@ -24,6 +24,16 @@ export type ComposeResponse = {
   };
 };
 
+// 2種を選んでもアニマル度0や短い録音では末尾の1本だけになり、鳴るのは1種目だけになる。
+// 画面には連想した動物ではなく実際に差し込んだ動物を出す。
+export function insertedAnimalLabels(meta: ComposeResponse["meta"]): string[] {
+  const inserted = new Set(meta.insertions.map((insertion) => insertion.species));
+  const labels = meta.selected_animals
+    .filter((animal) => inserted.has(animal.id))
+    .map((animal) => animal.label_ja);
+  return labels.length > 0 ? labels : meta.selected_animals.map((animal) => animal.label_ja);
+}
+
 // 連想した動物。1種のときも配列で返るので、画面側は件数で分岐しなくてよい。
 export type AssociatedAnimal = {
   id: string;

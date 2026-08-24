@@ -7,6 +7,9 @@ const DEFAULT_AUDIO_MAX_BYTES = 10_000_000;
 const DEFAULT_SETTINGS_MAX_BYTES = 64 * 1024;
 const DEFAULT_RESPONSE_MAX_BYTES = 8_000_000;
 const DEFAULT_ORIGIN_TIMEOUT_MS = 90_000;
+// originは文中へ round(入力秒数 × 0.5 × アニマル度/100) 本、末尾へ必ず1本入れる。
+// 入力上限60秒・アニマル度100で30本＋1本になるため、その上限へ合わせる。
+const MAX_INSERTIONS = 31;
 const DEFAULT_DAILY_LIMIT = 100;
 const DEFAULT_MONTHLY_LIMIT = 1_200;
 const ID_TOKEN_REFRESH_SECONDS = 300;
@@ -230,7 +233,7 @@ function isValidComposeResponse(payload) {
     || !isBoundedString(meta.selected_animal.label_ja, 1, 80)
     || !isBoundedString(meta.association_reason, 1, 400)
     || !Array.isArray(meta.insertions)
-    || meta.insertions.length > 10
+    || meta.insertions.length > MAX_INSERTIONS
     || !isPositiveFiniteNumber(meta.input_duration_seconds)
     || !isPositiveFiniteNumber(meta.output_duration_seconds)
     || meta.output_duration_seconds < meta.input_duration_seconds

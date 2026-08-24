@@ -823,6 +823,37 @@ test("Cloudflare worker validates every Zoovoice success metadata field", async 
   }
 });
 
+test("Cloudflare worker accepts the densest arrangement the origin can produce", async () => {
+  // originは入力上限60秒・アニマル度100で文中30本＋末尾1本まで作る。
+  // gatewayの上限がこれを下回ると、正当な応答がquota消費後に502になる。
+  const insertionsOf = (count) =>
+    Array.from({ length: count }, (_, index) => ({
+      slot: index === count - 1 ? "ending" : "word",
+      species: "cat",
+      at_seconds: index * 2,
+      duration_seconds: index === count - 1 ? 2.5 : 0.8,
+    }));
+
+  for (const [count, expectedStatus] of [[31, 200], [32, 502]]) {
+    const base = validZoovoiceOriginResponse();
+    const payload = {
+      ...base,
+      meta: { ...base.meta, insertions: insertionsOf(count), input_duration_seconds: 60, output_duration_seconds: 90 },
+    };
+    const env = await zoovoiceEnv(async (url) => {
+      if (String(url).includes("siteverify")) {
+        return json({ success: true, action: "zoovoice-compose", hostname: "example.com" });
+      }
+      return json(payload);
+    });
+    const response = await handleRequest(zoovoiceComposeRequest(), env);
+    assert.equal(response.status, expectedStatus, `insertions=${count}`);
+    if (expectedStatus === 502) {
+      assert.equal((await response.json()).error.code, "zoovoice_invalid_origin_response");
+    }
+  }
+});
+
 test("Cloudflare worker serves Zoovoice animals from the running origin catalog", async () => {
   const requested = [];
   const env = await zoovoiceEnv(async (url) => {
