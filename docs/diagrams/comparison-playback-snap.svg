@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 396" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif">
+<rect x="0" y="0" width="960" height="396" rx="14" fill="#ffffff"/>
+<text x="24" y="38" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="17" fill="#1f2937" font-weight="bold" text-anchor="start">VADスナップ: 発話島の端から±0.35秒以内の時刻だけを端へ差し替える</text>
+<text x="40" y="84" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#1f2937" font-weight="bold" text-anchor="start">差し替えられる例</text>
+<line x1="40" y1="210" x2="460" y2="210" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="230" y="158" width="210" height="104" rx="10" fill="#eceef3" stroke="#c3c9d9" stroke-width="1.5"/>
+<rect x="238" y="199.602" width="3.2" height="20.7965" rx="1.6" fill="#8f9ac4"/>
+<rect x="244.5" y="197.007" width="3.2" height="25.9868" rx="1.6" fill="#8f9ac4"/>
+<rect x="251" y="189.738" width="3.2" height="40.5247" rx="1.6" fill="#8f9ac4"/>
+<rect x="257.5" y="182.194" width="3.2" height="55.6115" rx="1.6" fill="#8f9ac4"/>
+<rect x="264" y="196.325" width="3.2" height="27.3497" rx="1.6" fill="#8f9ac4"/>
+<rect x="270.5" y="197.005" width="3.2" height="25.9891" rx="1.6" fill="#8f9ac4"/>
+<rect x="277" y="193.912" width="3.2" height="32.1766" rx="1.6" fill="#8f9ac4"/>
+<rect x="283.5" y="180.283" width="3.2" height="59.4336" rx="1.6" fill="#8f9ac4"/>
+<rect x="290" y="196.099" width="3.2" height="27.8013" rx="1.6" fill="#8f9ac4"/>
+<rect x="296.5" y="180.722" width="3.2" height="58.5556" rx="1.6" fill="#8f9ac4"/>
+<rect x="303" y="182.757" width="3.2" height="54.4867" rx="1.6" fill="#8f9ac4"/>
+<rect x="309.5" y="196.38" width="3.2" height="27.2402" rx="1.6" fill="#8f9ac4"/>
+<rect x="316" y="186.036" width="3.2" height="47.9287" rx="1.6" fill="#8f9ac4"/>
+<rect x="322.5" y="188.314" width="3.2" height="43.3714" rx="1.6" fill="#8f9ac4"/>
+<rect x="329" y="189.226" width="3.2" height="41.5476" rx="1.6" fill="#8f9ac4"/>
+<rect x="335.5" y="174.095" width="3.2" height="71.8105" rx="1.6" fill="#8f9ac4"/>
+<rect x="342" y="197.507" width="3.2" height="24.9869" rx="1.6" fill="#8f9ac4"/>
+<rect x="348.5" y="199.392" width="3.2" height="21.2158" rx="1.6" fill="#8f9ac4"/>
+<rect x="355" y="175.56" width="3.2" height="68.8793" rx="1.6" fill="#8f9ac4"/>
+<rect x="361.5" y="189.476" width="3.2" height="41.0487" rx="1.6" fill="#8f9ac4"/>
+<rect x="368" y="194.775" width="3.2" height="30.4501" rx="1.6" fill="#8f9ac4"/>
+<rect x="374.5" y="191.358" width="3.2" height="37.2832" rx="1.6" fill="#8f9ac4"/>
+<rect x="381" y="190.462" width="3.2" height="39.0761" rx="1.6" fill="#8f9ac4"/>
+<rect x="387.5" y="175.163" width="3.2" height="69.673" rx="1.6" fill="#8f9ac4"/>
+<rect x="394" y="194.468" width="3.2" height="31.0636" rx="1.6" fill="#8f9ac4"/>
+<rect x="400.5" y="194.297" width="3.2" height="31.4054" rx="1.6" fill="#8f9ac4"/>
+<rect x="407" y="184.759" width="3.2" height="50.4813" rx="1.6" fill="#8f9ac4"/>
+<rect x="413.5" y="185.732" width="3.2" height="48.5363" rx="1.6" fill="#8f9ac4"/>
+<rect x="420" y="175.199" width="3.2" height="69.602" rx="1.6" fill="#8f9ac4"/>
+<rect x="426.5" y="178.181" width="3.2" height="63.6373" rx="1.6" fill="#8f9ac4"/>
+<text x="335" y="286" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="middle">発話島(無音で区切られた発話)</text>
+<rect x="174" y="152" width="112" height="12" rx="4" fill="#def0e8" stroke="none" stroke-width="1.5"/>
+<text x="230" y="144" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#0e7a55" font-weight="normal" text-anchor="middle">±0.35秒</text>
+<line x1="206" y1="168" x2="206" y2="252" stroke="#c2402a" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 5"/>
+<text x="206" y="122" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#c2402a" font-weight="bold" text-anchor="middle">fa-zhの時刻(0.15秒手前)</text>
+<line x1="212" y1="210" x2="226" y2="210" stroke="#0e7a55" stroke-width="2.5" stroke-linecap="round"/>
+<polygon points="226,210 217,205 217,215" fill="#0e7a55"/>
+<line x1="230" y1="164" x2="230" y2="256" stroke="#0e7a55" stroke-width="3" stroke-linecap="round"/>
+<text x="238" y="180" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#0e7a55" font-weight="bold" text-anchor="start">端へ差し替え</text>
+<text x="500" y="84" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#1f2937" font-weight="bold" text-anchor="start">差し替えられない例</text>
+<line x1="500" y1="210" x2="920" y2="210" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="690" y="158" width="210" height="104" rx="10" fill="#eceef3" stroke="#c3c9d9" stroke-width="1.5"/>
+<rect x="698" y="197.913" width="3.2" height="24.1735" rx="1.6" fill="#8f9ac4"/>
+<rect x="704.5" y="194.383" width="3.2" height="31.2339" rx="1.6" fill="#8f9ac4"/>
+<rect x="711" y="192.063" width="3.2" height="35.8742" rx="1.6" fill="#8f9ac4"/>
+<rect x="717.5" y="176.586" width="3.2" height="66.8271" rx="1.6" fill="#8f9ac4"/>
+<rect x="724" y="187.057" width="3.2" height="45.8857" rx="1.6" fill="#8f9ac4"/>
+<rect x="730.5" y="181.251" width="3.2" height="57.4973" rx="1.6" fill="#8f9ac4"/>
+<rect x="737" y="197.322" width="3.2" height="25.3562" rx="1.6" fill="#8f9ac4"/>
+<rect x="743.5" y="186.729" width="3.2" height="46.5428" rx="1.6" fill="#8f9ac4"/>
+<rect x="750" y="178.068" width="3.2" height="63.8649" rx="1.6" fill="#8f9ac4"/>
+<rect x="756.5" y="186.369" width="3.2" height="47.2619" rx="1.6" fill="#8f9ac4"/>
+<rect x="763" y="175.433" width="3.2" height="69.1333" rx="1.6" fill="#8f9ac4"/>
+<rect x="769.5" y="177.064" width="3.2" height="65.8725" rx="1.6" fill="#8f9ac4"/>
+<rect x="776" y="190.305" width="3.2" height="39.3906" rx="1.6" fill="#8f9ac4"/>
+<rect x="782.5" y="199.901" width="3.2" height="20.1987" rx="1.6" fill="#8f9ac4"/>
+<rect x="789" y="180.343" width="3.2" height="59.3131" rx="1.6" fill="#8f9ac4"/>
+<rect x="795.5" y="196.643" width="3.2" height="26.7131" rx="1.6" fill="#8f9ac4"/>
+<rect x="802" y="199.676" width="3.2" height="20.6479" rx="1.6" fill="#8f9ac4"/>
+<rect x="808.5" y="180.981" width="3.2" height="58.0387" rx="1.6" fill="#8f9ac4"/>
+<rect x="815" y="178.074" width="3.2" height="63.8529" rx="1.6" fill="#8f9ac4"/>
+<rect x="821.5" y="178.236" width="3.2" height="63.5282" rx="1.6" fill="#8f9ac4"/>
+<rect x="828" y="175.207" width="3.2" height="69.5861" rx="1.6" fill="#8f9ac4"/>
+<rect x="834.5" y="194.693" width="3.2" height="30.6146" rx="1.6" fill="#8f9ac4"/>
+<rect x="841" y="197.808" width="3.2" height="24.385" rx="1.6" fill="#8f9ac4"/>
+<rect x="847.5" y="196.79" width="3.2" height="26.4197" rx="1.6" fill="#8f9ac4"/>
+<rect x="854" y="174.577" width="3.2" height="70.8463" rx="1.6" fill="#8f9ac4"/>
+<rect x="860.5" y="197.019" width="3.2" height="25.9622" rx="1.6" fill="#8f9ac4"/>
+<rect x="867" y="195.785" width="3.2" height="28.4307" rx="1.6" fill="#8f9ac4"/>
+<rect x="873.5" y="199.399" width="3.2" height="21.202" rx="1.6" fill="#8f9ac4"/>
+<rect x="880" y="198.641" width="3.2" height="22.7174" rx="1.6" fill="#8f9ac4"/>
+<rect x="886.5" y="198.928" width="3.2" height="22.1437" rx="1.6" fill="#8f9ac4"/>
+<text x="795" y="286" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="middle">発話島(無音で区切られた発話)</text>
+<rect x="634" y="152" width="112" height="12" rx="4" fill="#def0e8" stroke="none" stroke-width="1.5"/>
+<text x="690" y="144" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#0e7a55" font-weight="normal" text-anchor="middle">±0.35秒</text>
+<line x1="594" y1="168" x2="594" y2="252" stroke="#c2402a" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 5"/>
+<text x="594" y="122" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#c2402a" font-weight="bold" text-anchor="middle">fa-zhの時刻(0.60秒手前)</text>
+<text x="594" y="276" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#c2402a" font-weight="bold" text-anchor="middle">0.35秒超 → 動かさない</text>
+<text x="24" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">対象は発話島ごとの先頭単位の開始時刻と末尾単位の終了時刻だけ。大づかみの位置はfa-zhが決め、スナップは端の微調整に限る。</text>
+</svg>

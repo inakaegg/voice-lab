@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif">
+<rect x="0" y="0" width="960" height="470" rx="14" fill="#ffffff"/>
+<text x="24" y="38" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="17" fill="#1f2937" font-weight="bold" text-anchor="start">対応表: 同じフレーズでも、お手本と復唱で切り出す範囲は違う(模式図)</text>
+<text x="24" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#1f2937" font-weight="bold" text-anchor="start">お手本</text>
+<rect x="250" y="104" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="278" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">已</text>
+<text x="278" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">0</text>
+<rect x="314" y="104" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="342" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">经</text>
+<text x="342" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">1</text>
+<rect x="378" y="104" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="406" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">晚</text>
+<text x="406" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">2</text>
+<rect x="442" y="104" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="470" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">上</text>
+<text x="470" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">3</text>
+<rect x="506" y="104" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="534" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">了</text>
+<text x="534" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">4</text>
+<rect x="570" y="104" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="598" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">再</text>
+<text x="598" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">5</text>
+<rect x="634" y="104" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="662" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">过</text>
+<text x="662" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">6</text>
+<rect x="698" y="104" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="726" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">一</text>
+<text x="726" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">7</text>
+<rect x="762" y="104" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="790" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">会</text>
+<text x="790" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">8</text>
+<rect x="826" y="104" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="854" y="136" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">儿</text>
+<text x="854" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">9</text>
+<text x="24" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#1f2937" font-weight="bold" text-anchor="start">復唱(「儿」を言い落とした例)</text>
+<rect x="250" y="344" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="278" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">已</text>
+<text x="278" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">0</text>
+<rect x="314" y="344" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="342" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">经</text>
+<text x="342" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">1</text>
+<rect x="378" y="344" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="406" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">晚</text>
+<text x="406" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">2</text>
+<rect x="442" y="344" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="470" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">上</text>
+<text x="470" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">3</text>
+<rect x="506" y="344" width="56" height="48" rx="7" fill="#f4f5f8" stroke="#c3c9d9" stroke-width="1.4"/>
+<text x="534" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#1f2937" font-weight="normal" text-anchor="middle">了</text>
+<text x="534" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#6f7684" font-weight="normal" text-anchor="middle">4</text>
+<rect x="570" y="344" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="598" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">再</text>
+<text x="598" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">5</text>
+<rect x="634" y="344" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="662" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">过</text>
+<text x="662" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">6</text>
+<rect x="698" y="344" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="726" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">一</text>
+<text x="726" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">7</text>
+<rect x="762" y="344" width="56" height="48" rx="7" fill="#e3e7f8" stroke="#3b52c4" stroke-width="1.8"/>
+<text x="790" y="376" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="19" fill="#3b52c4" font-weight="normal" text-anchor="middle">会</text>
+<text x="790" y="410" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12" fill="#3b52c4" font-weight="bold" text-anchor="middle">8</text>
+<rect x="250" y="210" width="620" height="90" rx="8" fill="#ffffff" stroke="#1f2937" stroke-width="1.6"/>
+<text x="274" y="244" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14.5" fill="#1f2937" font-weight="bold" text-anchor="start">LLMが返す対応表(抜粋)</text>
+<text x="274" y="274" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#1f2937" font-weight="normal" text-anchor="start">フレーズ2 = お手本 単位5〜9 / 復唱 単位5〜8 / 点数82</text>
+<line x1="726" y1="210" x2="726" y2="170" stroke="#3b52c4" stroke-width="2" stroke-linecap="round"/>
+<polygon points="726,170 721,179 731,179" fill="#3b52c4"/>
+<line x1="694" y1="300" x2="694" y2="336" stroke="#3b52c4" stroke-width="2" stroke-linecap="round"/>
+<polygon points="694,336 689,327 699,327" fill="#3b52c4"/>
+<text x="24" y="446" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">範囲は音声ごとの番号で持つ。復唱に言い落としがあると、同じフレーズでも単位の数と番号は一致しない。点数は模式値。</text>
+</svg>

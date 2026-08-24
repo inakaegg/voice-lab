@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 484" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif">
+<rect x="0" y="0" width="960" height="484" rx="14" fill="#ffffff"/>
+<text x="24" y="38" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="17" fill="#1f2937" font-weight="bold" text-anchor="start">実データの前後比較: 記録された時刻が実際の発話より約1.4秒早かった例</text>
+<text x="24" y="96" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#c2402a" font-weight="bold" text-anchor="start">改善前 — ASRの時刻をそのまま使う</text>
+<line x1="24" y1="152" x2="936" y2="152" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="200" y="108" width="240" height="88" rx="10" fill="#eceef3" stroke="#c3c9d9" stroke-width="1.5"/>
+<rect x="208" y="138.34" width="3.2" height="27.32" rx="1.6" fill="#8f9ac4"/>
+<rect x="214.5" y="132.752" width="3.2" height="38.4954" rx="1.6" fill="#8f9ac4"/>
+<rect x="221" y="140.102" width="3.2" height="23.7957" rx="1.6" fill="#8f9ac4"/>
+<rect x="227.5" y="125.862" width="3.2" height="52.2768" rx="1.6" fill="#8f9ac4"/>
+<rect x="234" y="138.602" width="3.2" height="26.7965" rx="1.6" fill="#8f9ac4"/>
+<rect x="240.5" y="131.67" width="3.2" height="40.6606" rx="1.6" fill="#8f9ac4"/>
+<rect x="247" y="123.591" width="3.2" height="56.8186" rx="1.6" fill="#8f9ac4"/>
+<rect x="253.5" y="135.017" width="3.2" height="33.9668" rx="1.6" fill="#8f9ac4"/>
+<rect x="260" y="122.694" width="3.2" height="58.6119" rx="1.6" fill="#8f9ac4"/>
+<rect x="266.5" y="127.8" width="3.2" height="48.3996" rx="1.6" fill="#8f9ac4"/>
+<rect x="273" y="131.761" width="3.2" height="40.4786" rx="1.6" fill="#8f9ac4"/>
+<rect x="279.5" y="130.015" width="3.2" height="43.9695" rx="1.6" fill="#8f9ac4"/>
+<rect x="286" y="130.941" width="3.2" height="42.118" rx="1.6" fill="#8f9ac4"/>
+<rect x="292.5" y="135.819" width="3.2" height="32.3616" rx="1.6" fill="#8f9ac4"/>
+<rect x="299" y="122.071" width="3.2" height="59.8582" rx="1.6" fill="#8f9ac4"/>
+<rect x="305.5" y="134.876" width="3.2" height="34.2482" rx="1.6" fill="#8f9ac4"/>
+<rect x="312" y="122.349" width="3.2" height="59.3021" rx="1.6" fill="#8f9ac4"/>
+<rect x="318.5" y="125.184" width="3.2" height="53.6312" rx="1.6" fill="#8f9ac4"/>
+<rect x="325" y="142.988" width="3.2" height="18.0245" rx="1.6" fill="#8f9ac4"/>
+<rect x="331.5" y="138.023" width="3.2" height="27.9543" rx="1.6" fill="#8f9ac4"/>
+<rect x="338" y="133.28" width="3.2" height="37.4394" rx="1.6" fill="#8f9ac4"/>
+<rect x="344.5" y="126.005" width="3.2" height="51.9906" rx="1.6" fill="#8f9ac4"/>
+<rect x="351" y="139.763" width="3.2" height="24.4737" rx="1.6" fill="#8f9ac4"/>
+<rect x="357.5" y="130.298" width="3.2" height="43.4043" rx="1.6" fill="#8f9ac4"/>
+<rect x="364" y="135.668" width="3.2" height="32.6634" rx="1.6" fill="#8f9ac4"/>
+<rect x="370.5" y="126.629" width="3.2" height="50.7413" rx="1.6" fill="#8f9ac4"/>
+<rect x="377" y="123.589" width="3.2" height="56.8216" rx="1.6" fill="#8f9ac4"/>
+<rect x="383.5" y="127.138" width="3.2" height="49.7235" rx="1.6" fill="#8f9ac4"/>
+<rect x="390" y="139.425" width="3.2" height="25.1502" rx="1.6" fill="#8f9ac4"/>
+<rect x="396.5" y="127.178" width="3.2" height="49.6444" rx="1.6" fill="#8f9ac4"/>
+<rect x="403" y="134.136" width="3.2" height="35.7286" rx="1.6" fill="#8f9ac4"/>
+<rect x="409.5" y="125.516" width="3.2" height="52.968" rx="1.6" fill="#8f9ac4"/>
+<rect x="416" y="133.445" width="3.2" height="37.1093" rx="1.6" fill="#8f9ac4"/>
+<rect x="422.5" y="124.017" width="3.2" height="55.967" rx="1.6" fill="#8f9ac4"/>
+<rect x="429" y="122.299" width="3.2" height="59.4024" rx="1.6" fill="#8f9ac4"/>
+<text x="320" y="222" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="middle">実際の発話: フレーズ2</text>
+<rect x="520" y="108" width="240" height="88" rx="10" fill="#eceef3" stroke="#c3c9d9" stroke-width="1.5"/>
+<rect x="528" y="122.468" width="3.2" height="59.0649" rx="1.6" fill="#8f9ac4"/>
+<rect x="534.5" y="142.422" width="3.2" height="19.1554" rx="1.6" fill="#8f9ac4"/>
+<rect x="541" y="127.926" width="3.2" height="48.1486" rx="1.6" fill="#8f9ac4"/>
+<rect x="547.5" y="133.149" width="3.2" height="37.7028" rx="1.6" fill="#8f9ac4"/>
+<rect x="554" y="123.259" width="3.2" height="57.4824" rx="1.6" fill="#8f9ac4"/>
+<rect x="560.5" y="134.812" width="3.2" height="34.3761" rx="1.6" fill="#8f9ac4"/>
+<rect x="567" y="123.744" width="3.2" height="56.5113" rx="1.6" fill="#8f9ac4"/>
+<rect x="573.5" y="140.162" width="3.2" height="23.6752" rx="1.6" fill="#8f9ac4"/>
+<rect x="580" y="122.113" width="3.2" height="59.7745" rx="1.6" fill="#8f9ac4"/>
+<rect x="586.5" y="134.68" width="3.2" height="34.6407" rx="1.6" fill="#8f9ac4"/>
+<rect x="593" y="139.644" width="3.2" height="24.712" rx="1.6" fill="#8f9ac4"/>
+<rect x="599.5" y="136.124" width="3.2" height="31.7515" rx="1.6" fill="#8f9ac4"/>
+<rect x="606" y="129.975" width="3.2" height="44.0504" rx="1.6" fill="#8f9ac4"/>
+<rect x="612.5" y="142.861" width="3.2" height="18.2772" rx="1.6" fill="#8f9ac4"/>
+<rect x="619" y="135.237" width="3.2" height="33.5263" rx="1.6" fill="#8f9ac4"/>
+<rect x="625.5" y="143.36" width="3.2" height="17.2797" rx="1.6" fill="#8f9ac4"/>
+<rect x="632" y="142.102" width="3.2" height="19.7967" rx="1.6" fill="#8f9ac4"/>
+<rect x="638.5" y="139.922" width="3.2" height="24.1567" rx="1.6" fill="#8f9ac4"/>
+<rect x="645" y="138.618" width="3.2" height="26.7631" rx="1.6" fill="#8f9ac4"/>
+<rect x="651.5" y="137.674" width="3.2" height="28.6525" rx="1.6" fill="#8f9ac4"/>
+<rect x="658" y="126.792" width="3.2" height="50.4157" rx="1.6" fill="#8f9ac4"/>
+<rect x="664.5" y="134.614" width="3.2" height="34.7712" rx="1.6" fill="#8f9ac4"/>
+<rect x="671" y="125.079" width="3.2" height="53.8413" rx="1.6" fill="#8f9ac4"/>
+<rect x="677.5" y="124.192" width="3.2" height="55.6151" rx="1.6" fill="#8f9ac4"/>
+<rect x="684" y="124.263" width="3.2" height="55.473" rx="1.6" fill="#8f9ac4"/>
+<rect x="690.5" y="123.13" width="3.2" height="57.7396" rx="1.6" fill="#8f9ac4"/>
+<rect x="697" y="131.161" width="3.2" height="41.6774" rx="1.6" fill="#8f9ac4"/>
+<rect x="703.5" y="129.103" width="3.2" height="45.7948" rx="1.6" fill="#8f9ac4"/>
+<rect x="710" y="124.56" width="3.2" height="54.881" rx="1.6" fill="#8f9ac4"/>
+<rect x="716.5" y="131.856" width="3.2" height="40.288" rx="1.6" fill="#8f9ac4"/>
+<rect x="723" y="140.527" width="3.2" height="22.9468" rx="1.6" fill="#8f9ac4"/>
+<rect x="729.5" y="132.358" width="3.2" height="39.283" rx="1.6" fill="#8f9ac4"/>
+<rect x="736" y="132.15" width="3.2" height="39.7005" rx="1.6" fill="#8f9ac4"/>
+<rect x="742.5" y="139.72" width="3.2" height="24.5609" rx="1.6" fill="#8f9ac4"/>
+<rect x="749" y="141.597" width="3.2" height="20.8051" rx="1.6" fill="#8f9ac4"/>
+<text x="640" y="222" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="middle">フレーズ3</text>
+<rect x="296" y="100" width="240" height="104" rx="10" fill="#fbe9e4" fill-opacity="0.6" stroke="#c2402a" stroke-width="2.5" stroke-dasharray="7 5"/>
+<text x="416" y="88" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13.5" fill="#c2402a" font-weight="bold" text-anchor="middle">記録時刻で切り出した「フレーズ3」</text>
+<line x1="516" y1="62" x2="300" y2="62" stroke="#c2402a" stroke-width="2" stroke-linecap="round"/>
+<polygon points="300,62 309,57 309,67" fill="#c2402a"/>
+<text x="408" y="52" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13" fill="#c2402a" font-weight="bold" text-anchor="middle">約1.4秒早い</text>
+<text x="296" y="244" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13.5" fill="#c2402a" font-weight="normal" text-anchor="start">→ 前のフレーズの途中から再生が始まってしまう</text>
+<text x="24" y="292" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="15" fill="#0e7a55" font-weight="bold" text-anchor="start">改善後 — fa-zhで求め直し、VADスナップで端を整える</text>
+<line x1="24" y1="348" x2="936" y2="348" stroke="#b8bfd8" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+<rect x="200" y="304" width="240" height="88" rx="10" fill="#eceef3" stroke="#c3c9d9" stroke-width="1.5"/>
+<rect x="208" y="334.34" width="3.2" height="27.32" rx="1.6" fill="#8f9ac4"/>
+<rect x="214.5" y="328.752" width="3.2" height="38.4954" rx="1.6" fill="#8f9ac4"/>
+<rect x="221" y="336.102" width="3.2" height="23.7957" rx="1.6" fill="#8f9ac4"/>
+<rect x="227.5" y="321.862" width="3.2" height="52.2768" rx="1.6" fill="#8f9ac4"/>
+<rect x="234" y="334.602" width="3.2" height="26.7965" rx="1.6" fill="#8f9ac4"/>
+<rect x="240.5" y="327.67" width="3.2" height="40.6606" rx="1.6" fill="#8f9ac4"/>
+<rect x="247" y="319.591" width="3.2" height="56.8186" rx="1.6" fill="#8f9ac4"/>
+<rect x="253.5" y="331.017" width="3.2" height="33.9668" rx="1.6" fill="#8f9ac4"/>
+<rect x="260" y="318.694" width="3.2" height="58.6119" rx="1.6" fill="#8f9ac4"/>
+<rect x="266.5" y="323.8" width="3.2" height="48.3996" rx="1.6" fill="#8f9ac4"/>
+<rect x="273" y="327.761" width="3.2" height="40.4786" rx="1.6" fill="#8f9ac4"/>
+<rect x="279.5" y="326.015" width="3.2" height="43.9695" rx="1.6" fill="#8f9ac4"/>
+<rect x="286" y="326.941" width="3.2" height="42.118" rx="1.6" fill="#8f9ac4"/>
+<rect x="292.5" y="331.819" width="3.2" height="32.3616" rx="1.6" fill="#8f9ac4"/>
+<rect x="299" y="318.071" width="3.2" height="59.8582" rx="1.6" fill="#8f9ac4"/>
+<rect x="305.5" y="330.876" width="3.2" height="34.2482" rx="1.6" fill="#8f9ac4"/>
+<rect x="312" y="318.349" width="3.2" height="59.3021" rx="1.6" fill="#8f9ac4"/>
+<rect x="318.5" y="321.184" width="3.2" height="53.6312" rx="1.6" fill="#8f9ac4"/>
+<rect x="325" y="338.988" width="3.2" height="18.0245" rx="1.6" fill="#8f9ac4"/>
+<rect x="331.5" y="334.023" width="3.2" height="27.9543" rx="1.6" fill="#8f9ac4"/>
+<rect x="338" y="329.28" width="3.2" height="37.4394" rx="1.6" fill="#8f9ac4"/>
+<rect x="344.5" y="322.005" width="3.2" height="51.9906" rx="1.6" fill="#8f9ac4"/>
+<rect x="351" y="335.763" width="3.2" height="24.4737" rx="1.6" fill="#8f9ac4"/>
+<rect x="357.5" y="326.298" width="3.2" height="43.4043" rx="1.6" fill="#8f9ac4"/>
+<rect x="364" y="331.668" width="3.2" height="32.6634" rx="1.6" fill="#8f9ac4"/>
+<rect x="370.5" y="322.629" width="3.2" height="50.7413" rx="1.6" fill="#8f9ac4"/>
+<rect x="377" y="319.589" width="3.2" height="56.8216" rx="1.6" fill="#8f9ac4"/>
+<rect x="383.5" y="323.138" width="3.2" height="49.7235" rx="1.6" fill="#8f9ac4"/>
+<rect x="390" y="335.425" width="3.2" height="25.1502" rx="1.6" fill="#8f9ac4"/>
+<rect x="396.5" y="323.178" width="3.2" height="49.6444" rx="1.6" fill="#8f9ac4"/>
+<rect x="403" y="330.136" width="3.2" height="35.7286" rx="1.6" fill="#8f9ac4"/>
+<rect x="409.5" y="321.516" width="3.2" height="52.968" rx="1.6" fill="#8f9ac4"/>
+<rect x="416" y="329.445" width="3.2" height="37.1093" rx="1.6" fill="#8f9ac4"/>
+<rect x="422.5" y="320.017" width="3.2" height="55.967" rx="1.6" fill="#8f9ac4"/>
+<rect x="429" y="318.299" width="3.2" height="59.4024" rx="1.6" fill="#8f9ac4"/>
+<text x="320" y="418" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="middle">実際の発話: フレーズ2</text>
+<rect x="520" y="304" width="240" height="88" rx="10" fill="#eceef3" stroke="#c3c9d9" stroke-width="1.5"/>
+<rect x="528" y="318.468" width="3.2" height="59.0649" rx="1.6" fill="#8f9ac4"/>
+<rect x="534.5" y="338.422" width="3.2" height="19.1554" rx="1.6" fill="#8f9ac4"/>
+<rect x="541" y="323.926" width="3.2" height="48.1486" rx="1.6" fill="#8f9ac4"/>
+<rect x="547.5" y="329.149" width="3.2" height="37.7028" rx="1.6" fill="#8f9ac4"/>
+<rect x="554" y="319.259" width="3.2" height="57.4824" rx="1.6" fill="#8f9ac4"/>
+<rect x="560.5" y="330.812" width="3.2" height="34.3761" rx="1.6" fill="#8f9ac4"/>
+<rect x="567" y="319.744" width="3.2" height="56.5113" rx="1.6" fill="#8f9ac4"/>
+<rect x="573.5" y="336.162" width="3.2" height="23.6752" rx="1.6" fill="#8f9ac4"/>
+<rect x="580" y="318.113" width="3.2" height="59.7745" rx="1.6" fill="#8f9ac4"/>
+<rect x="586.5" y="330.68" width="3.2" height="34.6407" rx="1.6" fill="#8f9ac4"/>
+<rect x="593" y="335.644" width="3.2" height="24.712" rx="1.6" fill="#8f9ac4"/>
+<rect x="599.5" y="332.124" width="3.2" height="31.7515" rx="1.6" fill="#8f9ac4"/>
+<rect x="606" y="325.975" width="3.2" height="44.0504" rx="1.6" fill="#8f9ac4"/>
+<rect x="612.5" y="338.861" width="3.2" height="18.2772" rx="1.6" fill="#8f9ac4"/>
+<rect x="619" y="331.237" width="3.2" height="33.5263" rx="1.6" fill="#8f9ac4"/>
+<rect x="625.5" y="339.36" width="3.2" height="17.2797" rx="1.6" fill="#8f9ac4"/>
+<rect x="632" y="338.102" width="3.2" height="19.7967" rx="1.6" fill="#8f9ac4"/>
+<rect x="638.5" y="335.922" width="3.2" height="24.1567" rx="1.6" fill="#8f9ac4"/>
+<rect x="645" y="334.618" width="3.2" height="26.7631" rx="1.6" fill="#8f9ac4"/>
+<rect x="651.5" y="333.674" width="3.2" height="28.6525" rx="1.6" fill="#8f9ac4"/>
+<rect x="658" y="322.792" width="3.2" height="50.4157" rx="1.6" fill="#8f9ac4"/>
+<rect x="664.5" y="330.614" width="3.2" height="34.7712" rx="1.6" fill="#8f9ac4"/>
+<rect x="671" y="321.079" width="3.2" height="53.8413" rx="1.6" fill="#8f9ac4"/>
+<rect x="677.5" y="320.192" width="3.2" height="55.6151" rx="1.6" fill="#8f9ac4"/>
+<rect x="684" y="320.263" width="3.2" height="55.473" rx="1.6" fill="#8f9ac4"/>
+<rect x="690.5" y="319.13" width="3.2" height="57.7396" rx="1.6" fill="#8f9ac4"/>
+<rect x="697" y="327.161" width="3.2" height="41.6774" rx="1.6" fill="#8f9ac4"/>
+<rect x="703.5" y="325.103" width="3.2" height="45.7948" rx="1.6" fill="#8f9ac4"/>
+<rect x="710" y="320.56" width="3.2" height="54.881" rx="1.6" fill="#8f9ac4"/>
+<rect x="716.5" y="327.856" width="3.2" height="40.288" rx="1.6" fill="#8f9ac4"/>
+<rect x="723" y="336.527" width="3.2" height="22.9468" rx="1.6" fill="#8f9ac4"/>
+<rect x="729.5" y="328.358" width="3.2" height="39.283" rx="1.6" fill="#8f9ac4"/>
+<rect x="736" y="328.15" width="3.2" height="39.7005" rx="1.6" fill="#8f9ac4"/>
+<rect x="742.5" y="335.72" width="3.2" height="24.5609" rx="1.6" fill="#8f9ac4"/>
+<rect x="749" y="337.597" width="3.2" height="20.8051" rx="1.6" fill="#8f9ac4"/>
+<text x="640" y="418" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="12.5" fill="#6f7684" font-weight="normal" text-anchor="middle">フレーズ3</text>
+<rect x="520" y="296" width="240" height="104" rx="10" fill="#def0e8" fill-opacity="0.55" stroke="#0e7a55" stroke-width="2.5"/>
+<text x="640" y="284" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13.5" fill="#0e7a55" font-weight="bold" text-anchor="middle">求め直した「フレーズ3」</text>
+<text x="520" y="440" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="13.5" fill="#0e7a55" font-weight="normal" text-anchor="start">→ 選んだフレーズどおりに再生される</text>
+<text x="24" y="466" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic Medium',sans-serif" font-size="14" fill="#6f7684" font-weight="normal" text-anchor="start">時刻は1本のお手本音声の実測値。ズレ幅は音声ごとに違い、確認した4本では0秒から2秒近くまでばらついた。</text>
+</svg>
