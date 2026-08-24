@@ -35,7 +35,7 @@ export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
 
 ## 使い方
 
-各ディレクトリで `terraform init` の後、`terraform plan` で実物との差分を確認する。既存資産の取り込み定義は `imports.tf` にあり、stateへの取り込みは `terraform import` で行う。planまでは自由に実行してよい。`terraform apply` はクラウド設定の変更にあたるため、そのターンの明示許可を必要とする。
+各ディレクトリで `terraform init` の後、`terraform plan` で実物との差分を確認する。既存資産の取り込み定義は `imports.tf` の宣言的な `import` blockで持つ。これは `terraform import` コマンドではなくplanへ現れ、`terraform apply` が実行する。planまでは自由に実行してよい。`terraform apply` はクラウド設定の変更にあたるため、そのターンの明示許可を必要とする。
 
 `infra/gcp/` は変数 `smoke_invoker_principal` を必要とする。これはsmoke用service accountの短期tokenを取れる開発者のprincipalであり、値は `infra/gcp/terraform.tfvars` へ書く。個人アカウントを公開リポジトリへ残さないため、`*.tfvars` はgitで管理しない。
 

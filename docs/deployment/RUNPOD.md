@@ -194,7 +194,14 @@ Network Volumeの作成先は `runpodctl datacenter list` で確認する。一�
 
 ## smoke確認
 
-`scripts/runpod_smoke_serverless.py` でoperation別にhandlerを直接確認する。共通で `RUNPOD_ENDPOINT_ID` と `RUNPOD_API_KEY` を環境変数で渡す。既定でレスポンス中の `audio_base64` は長さ表示に置き換える。
+`scripts/runpod_smoke_serverless.py` でoperation別にhandlerを直接確認する。既定でレスポンス中の `audio_base64` は長さ表示に置き換える。
+
+scriptは `.runpod.env` を読まないため、以降の例の前に認証情報をshellへ読み込む。
+
+```sh
+export RUNPOD_ENDPOINT_ID=$(grep '^RUNPOD_ENDPOINT_ID=' .runpod.env | cut -d= -f2-)
+export RUNPOD_API_KEY=$(grep '^RUNPOD_API_KEY=' .runpod.env | cut -d= -f2-)
+```
 
 workerのwarmup（Seed-VC preload込み）:
 
