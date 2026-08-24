@@ -219,6 +219,7 @@ Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない�
 - 自動連想が選べる動物は、この一覧にある音源付きの動物に限る。
 - `POST /api/zoovoice/compose` は録音と2つの設定を受け取る。設定契約は `{intensity, animal_count}` とし、どの動物を選ぶかと挿入位置はGo APIが決める。`animal_count` を省いた要求は1種として扱う。
 - 文中の目標挿入数は `round(入力音声長 × 0.5 × intensity / 100)` とする。intensity=100は入力2秒あたり文中1本、既定50は入力4秒あたり文中1本に相当する。末尾へ必ず入れる1本はこの密度計算に含めない。
+- Workerは、この密度契約が生む上限（入力上限60秒・アニマル度100で文中30本と末尾1本）を超える挿入数の応答を受け取らない。
 - Workerは合成前にTurnstile検証と利用上限の判定をする。
 - ASR、動物連想、合成はGoogle Cloud Run上のGo APIが担当する。Workerはprivate Cloud Runへ認証付きで中継し、ブラウザからGo APIへ直接送る経路は持たない。
 

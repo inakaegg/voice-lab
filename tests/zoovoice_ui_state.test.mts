@@ -195,6 +195,38 @@ test("zoovoice compose preserves the association reason", async () => {
   }
 });
 
+test("zoovoice result names only the animals whose calls were inserted", () => {
+  const meta = (insertions: zoovoiceApi.ComposeResponse["meta"]["insertions"]) => ({
+    transcript: "屋根で何かが鳴いた",
+    selected_animal: { id: "cat", label_ja: "猫" },
+    selected_animals: [
+      { id: "cat", label_ja: "猫", reason: "猫が出てくるため" },
+      { id: "dog", label_ja: "犬", reason: "犬も連想したため" },
+    ],
+    association_reason: "猫が出てくるため",
+    insertions,
+    input_duration_seconds: 4,
+    output_duration_seconds: 6,
+  });
+
+  // アニマル度0や短い録音では末尾の1本だけになり、鳴るのは1種目だけになる。
+  assert.deepEqual(
+    zoovoiceApi.insertedAnimalLabels(
+      meta([{ slot: "ending", species: "cat", at_seconds: 4, duration_seconds: 2.5 }]),
+    ),
+    ["猫"],
+  );
+  assert.deepEqual(
+    zoovoiceApi.insertedAnimalLabels(
+      meta([
+        { slot: "word", species: "dog", at_seconds: 1.2, duration_seconds: 0.8 },
+        { slot: "ending", species: "cat", at_seconds: 4, duration_seconds: 2.5 },
+      ]),
+    ),
+    ["猫", "犬"],
+  );
+});
+
 test("zoovoice API errors retain gateway code message and HTTP status", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({

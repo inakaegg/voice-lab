@@ -11,6 +11,7 @@ import {
   isRetryableZoovoiceError,
   wavBlobFromBase64,
   type ComposeResponse,
+  insertedAnimalLabels,
   type SoundCredit,
   type ZoovoiceConfig,
 } from "./api";
@@ -472,7 +473,7 @@ function ResultDetails({ result }: { result: ResultState }) {
     </dl>
     <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} autoPlay />
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
-      {meta.insertions.length}か所に「{meta.selected_animals.map((animal) => animal.label_ja).join("」と「")}」の鳴き声を差し込みました。
+      {meta.insertions.length}か所に「{insertedAnimalLabels(meta).join("」と「")}」の鳴き声を差し込みました。
     </p>
     <SoundCredits credits={meta.sound_credits ?? []} />
   </>;
