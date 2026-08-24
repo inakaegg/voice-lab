@@ -28,6 +28,17 @@ COPY services/zoovoice/go.mod services/zoovoice/go.sum ./
 RUN go mod download
 COPY services/zoovoice/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/zoovoice .
+# 形態素解析のkagomeとIPA辞書は配布imageへ入るため、そのLICENSEと
+# mecab-ipadicのNOTICEを一緒に取り出す。NOTICEは再配布の条件そのものである。
+RUN install -d /out/licenses \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/ikawaha/kagome/v2)/LICENSE" \
+        /out/licenses/LICENSE-kagome \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/ikawaha/kagome-dict)/LICENSE" \
+        /out/licenses/LICENSE-kagome-dict \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/ikawaha/kagome-dict/ipa)/LICENSE" \
+        /out/licenses/LICENSE-kagome-dict-ipa \
+    && cp "$(go list -m -f '{{.Dir}}' github.com/ikawaha/kagome-dict/ipa)/NOTICE.txt" \
+        /out/licenses/NOTICE-mecab-ipadic.txt
 
 FROM debian:bookworm-slim
 
@@ -44,6 +55,7 @@ WORKDIR /app
 COPY --from=service-builder /out/zoovoice /usr/local/bin/zoovoice
 COPY --from=whisper-builder /src/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper_source LICENSE /app/licenses/LICENSE-whisper.cpp
+COPY --from=service-builder /out/licenses/ /app/licenses/
 COPY --from=zoovoice_runtime --chmod=0444 ggml-small.bin /app/models/ggml-small.bin
 # 鳴き声素材はリポジトリに置かず、build時に zoovoice_sounds context から取り込む。
 COPY --from=zoovoice_sounds . /app/sounds
@@ -51,7 +63,7 @@ COPY --from=zoovoice_sounds . /app/sounds
 RUN chmod -R a=rX /app/sounds
 RUN printf '%s  %s\n' "$ZOOVOICE_ASR_MODEL_SHA256" /app/models/ggml-small.bin | sha256sum --check --strict
 
-LABEL org.opencontainers.image.licenses="MIT, CC0-1.0, CC-BY-4.0, LicenseRef-Taira-Komori" \
+LABEL org.opencontainers.image.licenses="MIT, CC0-1.0, CC-BY-4.0, LicenseRef-Taira-Komori, LicenseRef-mecab-ipadic" \
     io.voicelab.zoovoice.whisper.commit="$WHISPER_SOURCE_COMMIT" \
     io.voicelab.zoovoice.asr-model.sha256="$ZOOVOICE_ASR_MODEL_SHA256"
 

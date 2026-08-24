@@ -1,6 +1,6 @@
 # Voice Lab Webアプリ仕様
 
-更新日: 2026-08-18
+更新日: 2026-08-22
 
 ## English summary
 
@@ -130,7 +130,7 @@ Zoovoiceは同じWorkerへ載せる別機能であり、音声認識から合成
 
 ## Zoovoice
 
-Zoovoiceは、録音した発話の内容から動物を1種だけ自動で選び、その鳴き声を発話のすき間へ重ねる機能である。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
+Zoovoiceは、録音した発話の内容から動物を自動で選び、その鳴き声を言葉の切れ目へ差し込む機能である。挿入したぶん出力音声は長くなる。SpeakLoopとはUIとAPIを分け、GoogleログインとSpeakLoop用quotaの対象にしない。データ境界は [公開デモのデータ取扱い境界](../deployment/PRIVACY.md) を正とする。
 
 Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない。バッジ削除は本branchで追加した変更であり、production未反映である。merge後にWorker deployとdeploy後smokeを実施する。連想精度と音源の拡充は今後も継続する。
 
@@ -138,11 +138,12 @@ Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない�
 
 ### 用語
 
-- 動物連想とは、ASR本文をLLMへ渡し、音源のある動物1種を必ず選ばせる処理を指す。
+- 動物連想とは、ASR本文をLLMへ渡し、音源のある動物を指定数だけ必ず選ばせる処理を指す。
 - 音源カタログとは、動物の種ID・日本語ラベル・鳴き声ファイル・出典の対応を持つmanifestを指す。
 - 連想の理由とは、その動物を選んだ理由としてLLMが返す日本語の短文を指す。
-- アニマル度とは、鳴き声の挿入頻度を決める設定を指す。通常UIで利用者が変えられる設定はこれだけとする。
-- アニマル度の段階とは、0〜100の入力を20刻みで丸めた1〜5の値を指す。挿入の上限件数と無音とみなす下限秒数は段階ごとの固定値とする。
+- アニマル度とは、入力音声1秒あたりの文中挿入密度を0〜100で調整する設定を指す。
+- 動物の種類数とは、連想する動物を1種にするか2種にするかの設定を指す。通常UIで利用者が変えられる設定は、アニマル度と動物の種類数の2つだけとする。
+- 公開UIはアニマル度を5段階で選ばせる。Go APIは受け取った0〜100を入力音声長へ掛け、固定本数表へ丸めない。
 
 ### 音源カタログ
 
@@ -216,7 +217,9 @@ Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない�
 - `GET /api/zoovoice/animals` はGo APIの `/animals` を中継して返す。実際に合成で使う音源カタログと必ず同じ内容になる。ビルド時に作った静的JSONは持たない。
 - 応答は種IDと日本語ラベルと音源本数だけを載せ、音源のファイル名は載せない。
 - 自動連想が選べる動物は、この一覧にある音源付きの動物に限る。
-- `POST /api/zoovoice/compose` は録音とアニマル度を受け取る。通常の設定契約は `{intensity}` だけとし、動物と挿入位置はGo APIが決める。受け取った0〜100は5段階へ丸めてから使う。
+- `POST /api/zoovoice/compose` は録音と2つの設定を受け取る。設定契約は `{intensity, animal_count}` とし、どの動物を選ぶかと挿入位置はGo APIが決める。`animal_count` を省いた要求は1種として扱う。
+- 文中の目標挿入数は `round(入力音声長 × 0.5 × intensity / 100)` とする。intensity=100は入力2秒あたり文中1本、既定50は入力4秒あたり文中1本に相当する。末尾へ必ず入れる1本はこの密度計算に含めない。
+- Workerは、この密度契約が生む上限（入力上限60秒・アニマル度100で文中30本と末尾1本）を超える挿入数の応答を受け取らない。
 - Workerは合成前にTurnstile検証と利用上限の判定をする。
 - ASR、動物連想、合成はGoogle Cloud Run上のGo APIが担当する。Workerはprivate Cloud Runへ認証付きで中継し、ブラウザからGo APIへ直接送る経路は持たない。
 
@@ -232,16 +235,19 @@ Zoovoiceは通常公開とする。公開UIへβ版バッジは表示しない�
 - 合成した音声はEBU R128で測り、モノラル向けの `-19 LUFS` を上限とする。これより静かな音声は持ち上げない。
 - true peakが `-1.5 dBTP` を超える場合はピーク安全性を優先し、`-19 LUFS` より静かにする。
 - 調整は完成音声の全体へ掛ける静的gainだけで行う。limiterは使わない。
-- 鳴き声を1本も挿入しなかった音声にも同じ調整を掛ける。人間の発話と鳴き声の聞こえの大きさはこの段でそろう。
+- 末尾へ必ず挿入する鳴き声を含め、完成音声の全体へ同じ調整を掛ける。人間の発話と鳴き声の聞こえの大きさはこの段でそろう。
 
 ### 動物の自動連想
 
 - 連想はLLM（既定 `gpt-5.6-luna`）へ一本化する。辞書・語彙表・意味ベクトルによる連想経路と、当てずっぽうのrandom選択は持たない。判断の根拠は [ZOOVOICE_ASSOCIATION_CASE_STUDY.md](ZOOVOICE_ASSOCIATION_CASE_STUDY.md) を参照。
 - Go APIはASR本文と音源カタログの候補一覧（種IDと日本語ラベル）をLLMへ渡す。
-- プロンプトは「どんなこじつけでもよいので候補から必ず1種選ぶ」方式とする。「選べない」という回答は許さない。Zoovoiceは遊びの製品であり、手がかりの薄い発話にも動物を返すことを優先する。
+- プロンプトは「どんなこじつけでもよいので候補から必ず指定数だけ選ぶ」方式とする。「選べない」という回答は許さない。Zoovoiceは遊びの製品であり、手がかりの薄い発話にも動物を返すことを優先する。
 - LLMは選んだ種IDと、選んだ理由の日本語短文を返す。
 - 候補一覧に無い種IDが返った場合はエラーとする。別の動物へ黙って読み替えない。
-- 1回の合成で使う動物は1種だけとし、すべての挿入位置へ同じ動物を配置する。複数候補を利用者へ提示しない。
+- 動物の種類数は利用者が1種か2種かを選ぶ。既定は1種とする。APIでは `settings.animal_count` で受け取る。
+- 1種のときはすべての挿入位置へ同じ動物を配置する。2種のときは挿入位置へ交互に配置し、末尾は1件目の動物とする。
+- 同じ動物が重ねて返った場合は1件へまとめる。結果が1種になってもエラーにしない。
+- 鳴き声は無音区間ではなく、ASR本文を形態素解析して得た単語の切れ目へ差し込む。先頭へは差し込まない。末尾はアニマル度に関わらず必ず1つ差し込む。
 - 合成応答のmetadataはASR本文と選ばれた動物、連想の理由を返す。あわせて素材のクレジットと挿入位置、入出力の長さも返す。
 - UIは連想の理由と、使った鳴き声素材のクレジットを利用者へ表示する。CC BY素材の帰属表示が利用条件であるためである。
 - ASRモデル、必要な外部command、LLMのAPIキーのいずれかが欠けた場合は起動しない。LLMの呼び出しに失敗した合成はエラーを返し、固定の動物へ黙って切り替えない。
@@ -282,8 +288,8 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 - production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
 - 外部deployとproduction有効化は別のgateで扱う。privateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行は完了している。
 - 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
-- ASRモデルを含むimageは、CPU 2とメモリ2GiBの上限付きでlocal buildと起動を実測済みである。実測値と測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
-- 実測はApple Silicon上のlinux/amd64 emulationで行っており、Cloud Runの実CPU上の処理時間は未確認である。
+- CPU 2とメモリ2GiBは現在の設定値である。現在のimageでのlocal build、起動、処理時間の実測値は未取得であり、測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
+- local測定はApple Silicon上のlinux/amd64 emulationで行う。Cloud Runの実CPU上の処理時間も未確認である。
 - 本番D1へのcounter migration適用と、有効化varsを含むproduction Workerのdeployは完了している。
 - 実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答を確認した。公開 `/zoovoice` は実ブラウザでUIとproduction Turnstileの表示を確認した。
 - private Cloud Runへは、認証付きrequestで `/animals` と実音声の `POST /compose` の200応答を確認した。認証なしの直接requestは403だった。
@@ -301,7 +307,7 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 | quota・監査・サンプルmetadata | ローカルファイル | D1、bindingなし時のみfallback | — | — |
 | 音声履歴 | ローカルファイル | 保存しない | 保存しない | 保存しない |
 | 公開サンプル音声blob | ローカルファイル | R2、bindingなし時のみfallback | — | — |
-| Zoovoice動物一覧 | 担当しない | Static AssetsのJSONを返す | — | — |
+| Zoovoice動物一覧 | 担当しない | Go APIの `/animals` を認証付きで中継 | — | 音源manifestから一覧を返す |
 | Zoovoice ASR・動物連想 | 担当しない | 担当しない | — | ○ |
 | Zoovoice合成 | 担当しない | Turnstile検証、利用上限、認証付き中継 | — | ○ |
 | Zoovoice利用上限counter | 担当しない | D1 | — | — |

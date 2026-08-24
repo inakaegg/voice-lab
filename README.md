@@ -9,7 +9,7 @@ Voice Lab is a voice web app with two features: SpeakLoop for pronunciation prac
 
 SpeakLoop, the main feature, turns what you say in your native language into pronunciation practice in Chinese or English. Recording, generation of a study sentence and a model voice, repetition, and comparison all happen in one flow.
 
-Zoovoice transcribes a free-form Japanese recording and picks one animal the utterance evokes. It returns your speech with that animal's call layered into the pauses.
+Zoovoice transcribes a free-form Japanese recording and picks one or two animals the utterance evokes. It returns your speech with their calls spliced in at word boundaries.
 
 **Live demo:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
@@ -51,10 +51,10 @@ With the optional "own voice" mode, the app references only your own recording f
 ### Zoovoice — animal-call synthesis
 
 1. Record free-form Japanese speech
-2. One animal is automatically associated from what you said
-3. Play or download your speech with the animal's call layered into the pauses
+2. One or two animals are automatically associated from what you said
+3. Play or download your speech with the animal's call spliced in at word boundaries
 
-Japanese ASR, animal association, and synthesis run on a private Go service on Google Cloud Run. An LLM (OpenAI API) picks one animal from those with available recordings. All bundled calls are real recordings licensed for free commercial use.
+Japanese ASR, animal association, and synthesis run on a private Go service on Google Cloud Run. An LLM (OpenAI API) picks the animals from those with available recordings. All bundled calls are real recordings licensed for free commercial use.
 
 ## Architecture
 
@@ -192,15 +192,15 @@ sequenceDiagram
     participant O as OpenAI API
     B->>T: load widget script, complete challenge
     T-->>B: token
-    B->>W: recording, animal level, Turnstile token
+    B->>W: recording, animal level, animal count, Turnstile token
     W->>T: verify the token
     W->>D: consume the daily and monthly counter
     W->>C: relay with an IAM ID token
     C->>C: Japanese ASR (whisper.cpp)
-    C->>O: pick one animal from the sound catalog
-    O-->>C: animal and a one-line reason
-    C->>C: layer the call into the pauses (ffmpeg)
-    C-->>W: mixed audio, transcript, association
+    C->>O: pick the requested count from the sound catalog
+    O-->>C: up to two animals and one-line reasons
+    C->>C: splice calls at morphological boundaries (ffmpeg)
+    C-->>W: spliced audio, transcript, association
     W-->>B: play or download
 ```
 
@@ -320,7 +320,7 @@ The documentation index is [docs/README.md](docs/README.md) (Japanese). It organ
 
 Frequently used documents (Japanese; the ones marked below carry an English summary at the top):
 
-- [CLI.md](CLI.md) — commands to try each feature locally, with example output
+- [CLI.md](CLI.md) — copy-ready Zoovoice commands for local verification
 - [Full spec](docs/speech-translation/SPEC.md) — English summary included
 - [Deployment architecture](docs/deployment/ARCHITECTURE.md) — English summary included
 - [Known limits](docs/speech-translation/KNOWN_LIMITS.md) — English summary included
