@@ -1,6 +1,6 @@
 # Google Cloud側のIaC正本。stateはローカル（git管理外）。
 # 認証は gcloud のaccess token（GOOGLE_OAUTH_ACCESS_TOKEN）。
-# 取得方法は docs/deployment/ARCHITECTURE.md を参照。
+# 取得方法は infra/README.md を参照。
 
 terraform {
   required_version = ">= 1.10"

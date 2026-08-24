@@ -287,8 +287,8 @@ ZoovoiceのFastAPI routeとproxyは廃止対象であり、ローカル確認の
 - production Workerの認証は、専用invoker service accountのkeyによるID token取得方式とする。方式の決定と実装は完了しており、詳細は [CLOUDFLARE.md](../deployment/CLOUDFLARE.md) を正とする。
 - production向け設定（`ZOOVOICE_ORIGIN_MODE="cloud-run"`）のWorkerは、ローカル確認用flagの配備とloopbackからのrequestを拒否する。ローカル確認用のcredentialをproduction hostnameで使わない。条件が揃わない場合はCloud Runを呼ばずfail closedにする。
 - 外部deployとproduction有効化は別のgateで扱う。privateなArtifact Registryへのimage push、GCP resource作成、IAM設定と実key発行は完了している。
-- 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
-- CPU 2とメモリ2GiBは現在の設定値である。現在のimageでのlocal build、起動、処理時間の実測値は未取得であり、測定条件は [ARCHITECTURE.md](../deployment/ARCHITECTURE.md) を正とする。
+- 配備scriptはdry-run、local-only verification、明示applyの3modeを持つ。remote writeを行うのは明示applyだけとする。配備契約は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
+- CPU 2とメモリ2GiBは現在の設定値である。現在のimageでのlocal build、起動、処理時間の実測値は未取得であり、測定条件は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
 - local測定はApple Silicon上のlinux/amd64 emulationで行う。Cloud Runの実CPU上の処理時間も未確認である。
 - 本番D1へのcounter migration適用と、有効化varsを含むproduction Workerのdeployは完了している。
 - 実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` の200応答を確認した。公開 `/zoovoice` は実ブラウザでUIとproduction Turnstileの表示を確認した。

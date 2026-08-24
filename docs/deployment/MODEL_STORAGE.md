@@ -1,6 +1,6 @@
 # モデル保存とデプロイ方針
 
-更新日: 2026-08-04
+更新日: 2026-08-24
 
 ## 現在の保存方針
 
@@ -31,15 +31,11 @@ RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のと
 
 動物音もgit管理せず、ASRモデルと同じくリポジトリ外へ置き、build時に `zoovoice_sounds` named contextからimageへ取り込む。出所と採用hashはそのセットの `manifest.json` を正とし、Goサービスが起動時にSHA-256を照合する。
 
-このimageのlocal buildと起動は実測済みである。linux/amd64のimageをCPU 2とメモリ2GiBの上限付きでnon-root起動し、image size 1,053,233,511 bytes、compose完了後の観測メモリ359.4 MiB / 2 GiBを得た。ASRモデルはnon-rootの実行ユーザーから読める。この実測は動物音の同梱前かつConceptNet indexを含んでいた頃のimageに対するものであり、現在のimageでは再測定していない。
-
-取り込んだ `whisper-cli` はDockerfileの `-DBUILD_SHARED_LIBS=OFF` により、whisper/ggmlのlibraryをstaticに組み込んでbuildしている。この確認では、`whisper-cli` がwhisper/ggmlを共有libraryとして要求しないことを確かめた。libstdc++・libm・libgcc_s・libc・動的loaderへは動的にlinkするため、完全なstatic binaryではない。
-
-この測定はApple Silicon上のlinux/amd64 emulationで行っている。上記の値はいずれもCloud Run実機では未確認である。測定条件と処理時間の詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
+imageの実測値と測定条件、whisper-cliのlink構成は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
 
 ## モデル候補の容量目安
 
-モデル保存方式を選ぶため、候補モデルのおおよその容量を記録する。以下はHugging Faceのモデルメタデータを元にした概算であり、完全な実行時使用容量ではない。モデル更新や依存関係により変わるため、実装時に再確認する。
+モデル保存方式を選ぶため、候補モデルのおおよその容量を記録する。以下はHugging Faceのモデルメタデータを元にした概算であり、実行時の使用容量の全体ではない。モデル更新や依存関係により変わるため、実装時に再確認する。
 
 | モデル | 概算容量 | メモ |
 | --- | ---: | --- |
@@ -47,7 +43,7 @@ RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のと
 | `Systran/faster-whisper-large-v3` | 3.09 GB | MVP後に比較するASR候補。 |
 | `pfnet/plamo-2-translate` | 19.07 GB | 日本語/英語翻訳モデル。licenseと商用条件の確認が必要。 |
 | `Qwen/Qwen3-4B` | 約7.5 GiB | 既定のローカルLLM翻訳候補。 |
-| `Qwen/Qwen3-8B` | 要再確認 | 翻訳品質比較候補。 |
+| `Qwen/Qwen3-8B` | 要再確認 | 翻訳品質の比較候補。 |
 | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | 2.52 GB | 速度比較用の軽量TTS候補。 |
 | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | 約4.5 GB | 既定のQwen3-TTS候補。 |
 | `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | 4.52 GB | 声色制御を比較するQwen3-TTS候補。 |
@@ -66,8 +62,6 @@ RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のと
 低アクセスMVPでは、ワーカーを0までスケールダウンでき、ワーカー実行中だけ計算リソース課金されるRunPod Serverlessが有力。ただし、永続モデル保存の費用は残る。
 
 公開MVPでは、静的UI配信とGPU推論APIを分ける。Web UIはCloudflare Worker Static Assets、API gatewayはWorker moduleとする。RunPodは中国語練習用FunASRとSeed-VCのGPU推論APIとして扱う。詳細は [ARCHITECTURE.md](ARCHITECTURE.md) を参照する。
-
-初回のGPUスモーク確認では、Web UIとAPIを含むFastAPIをRunPod Podで一体起動する。これはモデルロード、GPU利用、録音またはファイルアップロードから音声出力までを先に確認するための検証構成であり、公開MVPの本番構成ではない。RunPod CLI手順は [RUNPOD.md](RUNPOD.md) を参照する。
 
 推奨するRunPod構成:
 
@@ -89,17 +83,3 @@ RunPodで最初に使うモデル配置:
 | 声質変換 | Seed-VC checkpoint | `/runpod-volume/huggingface/hub` または `SEED_VC_CHECKPOINT` で指定したpath |
 
 初回取得後は、モデル更新による挙動差を避けるため、必要に応じて `FASTER_WHISPER_LOCAL_FILES_ONLY=1` と `QWEN_TRANSLATION_LOCAL_FILES_ONLY=1` に切り替える。
-
-## Modal方針
-
-実装がPython中心で、Pythonコード内でインフラ定義まで寄せたい場合はModalも比較対象にする。Modal Volumeはモデル重み保存とGPU functionへのattachに向く。Python中心のPoCではRunPodより簡単になる可能性があるが、Docker/REST/CLI中心のRunPodとは運用スタイルが異なる。
-
-## 初期プラットフォーム判断
-
-ローカルパイプラインで1つのモデル構成が動くまでは、最終プラットフォームを固定しない。最初のデプロイ実験では以下を比較する。
-
-- コールドスタート。
-- モデル読み込み時間。
-- endpoint更新手順。
-- 月額storage費用。
-- スクリプトまたはGitHub Actionsからの自動化しやすさ。

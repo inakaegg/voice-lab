@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-09
+更新日: 2026-08-24
 
 ## 目的
 
@@ -8,7 +8,7 @@
 
 公開Worker名は `voice-lab`、公開URLは `https://voice-lab.inakaegg.workers.dev/` とする。D1 database、R2 bucket、KV namespaceは既存データを引き継ぐため、Workerのブランド変更とは分けて既存resourceを継続利用する。
 
-KV・D1・R2とTurnstile widgetの構成はTerraform（`infra/cloudflare/`）を正本とする。Workerスクリプト本体とsecretはTerraformの対象外で、`wrangler deploy` と `wrangler secret` が正である。使い方は [ARCHITECTURE.md](ARCHITECTURE.md) のIaC節を参照する。
+KV・D1・R2とTurnstile widgetの構成はTerraform（`infra/cloudflare/`）を正本とする。Workerスクリプト本体とsecretはTerraformの対象外で、`wrangler deploy` と `wrangler secret` が正である。使い方は [infra/README.md](../../infra/README.md) を参照する。
 
 日次quotaと監査ログの期限切れ削除は、`wrangler.toml` のCron Triggerで毎日03:17 UTCに実行する。48時間を超えた日次quotaと90日を超えた監査ログを削除するため、日次実行の間隔を含む実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaは利用上限維持のため公開デモの運用中に保持する。
 
@@ -66,8 +66,6 @@ invoker service accountには対象service単位の `roles/run.invoker` だけ�
 
 取得したID tokenはisolate内のmemoryだけへcacheし、token payloadの `exp` の300秒前まで再利用する。KV・D1・R2・Cache APIへtokenを保存しない。service account key、JWT、ID tokenはresponseとlogへ含めない。
 
-この認証の実装とfake token endpointによる契約testは完了している。実keyの発行、Worker secretへの登録、Cloud Run deployも完了している。
-
 ローカルのTurnstile確認は、Cloudflare公式のalways-pass test site key・secret keyだけを使う。このtest key組はproduction設定と混在させない。
 
 production用のTurnstile managed widgetは作成済みである。allowed hostnamesは公開Worker hostnameとloopbackの2系統に限る。
@@ -84,7 +82,7 @@ flagと公開設定は `[vars]` へ置く。Zoovoiceを有効にする配備のv
 
 現在の `wrangler.toml` はこの5つを `[vars]` へ設定している。実際の値は `wrangler.toml` を正とし、docsへ二重に書かない。有効・無効の切り替えは常に `wrangler.toml` のcommitとdeployで行う。dashboardやCLIの一時的なvar設定だけで有効化しない。一時設定だけでは、次のdeployで設定が失われるためである。
 
-本番D1への `migrations/0004_zoovoice_usage_counters.sql` の適用と、有効化varsを含むproduction Workerのdeployは完了している。deploy後の実環境smokeでは、公開 `GET /api/zoovoice/config` と `GET /api/zoovoice/animals` が200を返すことを確認した。公開 `/zoovoice` の実ブラウザ表示とproduction Turnstile widgetの表示も確認した。Worker経由の実 `POST /api/zoovoice/compose` は、production Turnstileの人間操作が必要なため未確認である。
+deploy済みの範囲と実環境smokeの結果は [services/zoovoice/README.md](../../services/zoovoice/README.md) の「外部操作の状況」を正とする。
 
 #### `ZOOVOICE_GCP_SA_KEY` の登録手順
 
@@ -111,7 +109,7 @@ key漏洩の疑いがある場合は、機能flagのrollbackだけでは直接�
 3. 認証なしのdirect requestと旧keyでのdirect requestが、いずれも401または403で拒否されることを確認する。
 4. 新しいkeyを発行し、`wrangler secret put ZOOVOICE_GCP_SA_KEY` でsecretを更新する。
 
-Cloud Run側の準備は別の外部操作gateであり、us-central1へのdeployは完了している。region、サービス契約、IAM方針、配備scriptの詳細は [ARCHITECTURE.md](ARCHITECTURE.md) と `services/zoovoice/README.md` を参照する。
+Cloud Run側のregion、サービス契約、IAM方針、配備scriptは [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
 
 ### Worker名変更時の移行
 
@@ -146,7 +144,7 @@ Workerは次の主要なAPI互換エンドポイントを提供する。
 
 Zoovoice用に `GET /api/zoovoice/config`、`GET /api/zoovoice/animals`、`POST /api/zoovoice/compose` も同じmoduleが処理する。動物一覧と合成は `ZOOVOICE_ENABLED=1` の配備だけで動き、それ以外では503を返す。configは無効な配備でもflagの状態を返す。この3つはGoogleログインとSpeakLoop用quotaの対象外であり、Turnstile検証とZoovoice共通の利用上限で保護する。
 
-Seed-VC・warmup・SpeakLoopの中国語復唱比較はRunPod Serverlessの非同期jobへ中継する。RunPodのjob IDをUI向けjob IDとして返し、status pollingで `queued`・`running`・`succeeded`・`failed` 形式へ変換する。中国語比較では、お手本と復唱の両音声を1つのRunPod jobへ送る。progress updateと `/health` を使ってUIへ返す状態は、worker割り当て待ち・worker初期化・FunASRモデル読込・両音声の解析・完了／失敗である。status pollingはquotaを追加消費しない。
+Seed-VC・warmup・SpeakLoopの中国語の復唱比較はRunPod Serverlessの非同期jobへ中継する。RunPodのjob IDをUI向けjob IDとして返し、status pollingで `queued`・`running`・`succeeded`・`failed` 形式へ変換する。中国語比較では、お手本と復唱の両音声を1つのRunPod jobへ送る。progress updateと `/health` を使ってUIへ返す状態は、worker割り当て待ち・worker初期化・FunASRモデル読込・両音声の解析・完了／失敗である。status pollingはquotaを追加消費しない。
 
 SpeakLoopの英語復唱比較はWorkerがお手本と復唱の両音声をOpenAI `whisper-1` で並列解析し、同じjob snapshot形式の完了結果をPOSTのレスポンスで直接返す。
 
@@ -177,7 +175,7 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 
 - Googleログイン必須のON/OFF
 - 管理画面へのアクセスを許可するGoogle email
-- SpeakLoopの日次/累計回数、録音最大byte数、対象文最大文字数
+- SpeakLoopの日次/累計回数、録音最大byte数、対象文の最大文字数
 - Seed-VCの日次/累計回数、source/reference音声最大byte数
 
 入力上限は生成前に検証する。上限超過はquotaを消費しない。quota消費は入力検証後、外部APIやRunPodへ送る直前にD1で更新する。この構成は公開デモの過剰利用防止を目的とし、厳密な課金制御ではない。課金水準の強い同時更新保証が必要になった場合はDurable Objectsを検討する。
