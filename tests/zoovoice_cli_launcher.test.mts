@@ -83,22 +83,38 @@ test("Zoovoice launcher uses ignored internal paths and forwards only preview ar
 
     const whisperWrapper = capture.match(/^whisper=(.+)$/m)?.[1];
     assert.ok(whisperWrapper);
-    const whisperCapture = join(fixture.root, "whisper-capture.txt");
-    const whispered = spawnSync(whisperWrapper, ["--version"], {
-      cwd: fixture.root,
-      encoding: "utf8",
-      env: { ...process.env, ZOOVOICE_WHISPER_CAPTURE: whisperCapture },
-    });
-    assert.equal(whispered.status, 0, whispered.stderr);
     const libraryPath = [
       join(fixture.whisperBuild, "src"),
       join(fixture.whisperBuild, "ggml", "src"),
       join(fixture.whisperBuild, "ggml", "src", "ggml-blas"),
       join(fixture.whisperBuild, "ggml", "src", "ggml-metal"),
     ].join(":");
+
+    // wrapperは呼び出し元のlibrary pathを保持して前置する。呼び出し元の値を
+    // 明示しないと、CIのようにLD_LIBRARY_PATHが設定済みの環境で結果が変わる。
+    const runWrapper = (captureName: string, inherited: string) => {
+      const whisperCapture = join(fixture.root, captureName);
+      const whispered = spawnSync(whisperWrapper, ["--version"], {
+        cwd: fixture.root,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ZOOVOICE_WHISPER_CAPTURE: whisperCapture,
+          LD_LIBRARY_PATH: inherited,
+          DYLD_LIBRARY_PATH: inherited,
+        },
+      });
+      assert.equal(whispered.status, 0, whispered.stderr);
+      return readFileSync(whisperCapture, "utf8");
+    };
+
     assert.equal(
-      readFileSync(whisperCapture, "utf8"),
+      runWrapper("whisper-capture.txt", ""),
       `args=--version\nlib=${libraryPath}\n`,
+    );
+    assert.equal(
+      runWrapper("whisper-capture-inherited.txt", "/opt/example/lib"),
+      `args=--version\nlib=${libraryPath}:/opt/example/lib\n`,
     );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
