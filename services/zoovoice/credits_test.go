@@ -115,7 +115,7 @@ func TestPreviewTextPrintsSelectionReasonAndCredits(t *testing.T) {
 		Species: "dog", LabelJA: "犬", Reason: "散歩といえば犬", Strategy: strategyLLM,
 	}}
 	var output bytes.Buffer
-	if err := previewText(context.Background(), "犬の散歩に行った", catalog, associator, &output); err != nil {
+	if err := previewText(context.Background(), "犬の散歩に行った", catalog, newTestSegmenter(t), associator, 1, &output); err != nil {
 		t.Fatal(err)
 	}
 	text := output.String()

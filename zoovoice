@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repository_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+config_path="$repository_dir/.env.zoovoice"
+
+fail() {
+  printf 'zoovoice: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  printf '%s\n' \
+    'usage:' \
+    '  ./zoovoice preview (-audio <input.wav> | -text <text>) [preview options]'
+}
+
+validate_runtime_paths() {
+  [[ -f "$sounds_dir/manifest.json" ]] || fail "鳴き声ディレクトリにmanifest.jsonがありません: $sounds_dir"
+  [[ -x "$whisper_build_dir/bin/whisper-cli" ]] || fail "whisper-cliが見つからないか実行できません: $whisper_build_dir/bin/whisper-cli"
+  [[ -f "$asr_model_path" ]] || fail "ASRモデルが見つかりません: $asr_model_path"
+}
+
+load_config() {
+  [[ -f "$config_path" ]] || fail "内部設定ファイルがありません: $config_path"
+
+  sounds_dir=''
+  whisper_build_dir=''
+  asr_model_path=''
+  local key value
+  while IFS='=' read -r key value || [[ -n "$key$value" ]]; do
+    case "$key" in
+      '') ;;
+      SOUNDS_DIR) sounds_dir=$value ;;
+      WHISPER_BUILD_DIR) whisper_build_dir=$value ;;
+      ASR_MODEL_PATH) asr_model_path=$value ;;
+      *) fail "ローカル設定に不明な項目があります: $key" ;;
+    esac
+  done < "$config_path"
+
+  [[ -n "$sounds_dir" ]] || fail "ローカル設定にSOUNDS_DIRがありません"
+  [[ -n "$whisper_build_dir" ]] || fail "ローカル設定にWHISPER_BUILD_DIRがありません"
+  [[ -n "$asr_model_path" ]] || fail "ローカル設定にASR_MODEL_PATHがありません"
+  validate_runtime_paths
+}
+
+whisper_library_path() {
+  local path result=''
+  for path in \
+    "$whisper_build_dir/src" \
+    "$whisper_build_dir/ggml/src" \
+    "$whisper_build_dir/ggml/src/ggml-blas" \
+    "$whisper_build_dir/ggml/src/ggml-metal"
+  do
+    [[ -d "$path" ]] || continue
+    if [[ -n "$result" ]]; then
+      result="$result:$path"
+    else
+      result=$path
+    fi
+  done
+  printf '%s\n' "$result"
+}
+
+write_whisper_wrapper() {
+  local wrapper_path=$1
+  local library_path temporary_wrapper
+  library_path=$(whisper_library_path)
+  temporary_wrapper=$(mktemp "$repository_dir/tmp/zoovoice-whisper-cli.tmp.XXXXXX")
+  trap 'rm -f -- "${temporary_wrapper:-}"' EXIT
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'library_path=%q\n' "$library_path"
+    printf 'export DYLD_LIBRARY_PATH="$library_path${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"\n'
+    printf 'export LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
+    printf 'exec %q "$@"\n' "$whisper_build_dir/bin/whisper-cli"
+  } > "$temporary_wrapper"
+  chmod 700 "$temporary_wrapper"
+  mv -- "$temporary_wrapper" "$wrapper_path"
+  temporary_wrapper=''
+  trap - EXIT
+}
+
+preview() {
+  load_config
+  command -v go >/dev/null 2>&1 || fail "goが見つかりません"
+
+  local binary_path="$repository_dir/tmp/zoovoice-cli"
+  local whisper_wrapper="$repository_dir/tmp/zoovoice-whisper-cli"
+  mkdir -p -- "$repository_dir/tmp"
+  write_whisper_wrapper "$whisper_wrapper"
+  (cd -- "$repository_dir/services/zoovoice" && go build -o "$binary_path" .)
+
+  ZOOVOICE_SOUNDS_DIR="$sounds_dir" \
+  ZOOVOICE_WHISPER_COMMAND="$whisper_wrapper" \
+  ZOOVOICE_ASR_MODEL_PATH="$asr_model_path" \
+    "$binary_path" preview "$@"
+}
+
+case "${1:-}" in
+  preview)
+    shift
+    preview "$@"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

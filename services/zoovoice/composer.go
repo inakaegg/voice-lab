@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -20,9 +21,13 @@ const speechDetectionMinSilenceSeconds = 0.05
 var errDurationUnavailable = errors.New("audio duration metadata is unavailable")
 
 type ComposeResult struct {
-	AudioBase64           string
-	Transcript            string
+	AudioBase64 string
+	Transcript  string
+	// Words は文字起こしを形態素へ割った結果。挿入位置が単語の切れ目かをCLIで確かめるために持つ。
+	Words []string
+	// SelectedAnimal と AssociationReason は1件目。既存の利用側のために残している。
 	SelectedAnimal        SelectedAnimal
+	SelectedAnimals       []AnimalChoice
 	AssociationReason     string
 	Insertions            []ResolvedInsertion
 	SoundCredits          []soundCredit
@@ -38,6 +43,7 @@ type composer struct {
 	catalog     *assetCatalog
 	runner      commandRunner
 	transcriber transcriber
+	segmenter   wordSegmenter
 	associator  animalAssociator
 	rng         *rand.Rand
 	rngMu       sync.Mutex
@@ -49,6 +55,7 @@ func newComposer(
 	catalog *assetCatalog,
 	runner commandRunner,
 	transcriber transcriber,
+	segmenter wordSegmenter,
 	associator animalAssociator,
 	rng *rand.Rand,
 	timeout time.Duration,
@@ -58,6 +65,7 @@ func newComposer(
 		catalog:     catalog,
 		runner:      runner,
 		transcriber: transcriber,
+		segmenter:   segmenter,
 		associator:  associator,
 		rng:         rng,
 		timeout:     timeout,
@@ -75,8 +83,7 @@ func (c *composer) Compose(
 	if int64(len(audio)) > maxAudioBytes {
 		return ComposeResult{}, validateAudioLimits(int64(len(audio)), 0, minSpeechSeconds)
 	}
-	intensity, err := mapIntensity(settings.Intensity)
-	if err != nil {
+	if err := validateIntensity(settings.Intensity); err != nil {
 		return ComposeResult{}, &APIError{
 			Status:  400,
 			Code:    "invalid_settings",
@@ -103,7 +110,7 @@ func (c *composer) Compose(
 	}
 
 	logProgress(c.logger, started, "probe", "start", "")
-	inputDuration, err := c.probeDuration(contextWithTimeout, inputPath)
+	sourceDuration, err := c.probeDuration(contextWithTimeout, inputPath)
 	durationMetadataAvailable := err == nil
 	if err != nil && !errors.Is(err, errDurationUnavailable) {
 		return ComposeResult{}, c.commandAPIError(
@@ -116,18 +123,18 @@ func (c *composer) Compose(
 			err,
 		)
 	}
-	if durationMetadataAvailable && inputDuration <= 0 {
+	if durationMetadataAvailable && !(sourceDuration > 0) {
 		return ComposeResult{}, &APIError{
 			Status:  422,
 			Code:    "invalid_audio",
 			Message: "音声ファイルを読み取れませんでした。",
 		}
 	}
-	if durationMetadataAvailable && inputDuration > maxAudioSeconds {
-		return ComposeResult{}, validateAudioLimits(int64(len(audio)), inputDuration, minSpeechSeconds)
+	if durationMetadataAvailable && sourceDuration > maxAudioSeconds {
+		return ComposeResult{}, validateAudioLimits(int64(len(audio)), sourceDuration, minSpeechSeconds)
 	}
 	if durationMetadataAvailable {
-		logProgress(c.logger, started, "probe", "complete", "duration_seconds=%.3f", inputDuration)
+		logProgress(c.logger, started, "probe", "complete", "duration_seconds=%.3f", sourceDuration)
 	} else {
 		logProgress(c.logger, started, "probe", "metadata_unavailable", "")
 	}
@@ -146,35 +153,34 @@ func (c *composer) Compose(
 	}
 	logProgress(c.logger, started, "normalize", "complete", "")
 
-	if !durationMetadataAvailable {
-		logProgress(c.logger, started, "normalized_probe", "start", "")
-		inputDuration, err = c.probeDuration(contextWithTimeout, normalizedPath)
-		if err != nil || inputDuration <= 0 {
-			if err == nil {
-				err = errors.New("normalized audio duration must be positive")
-			}
-			return ComposeResult{}, c.commandAPIError(
-				contextWithTimeout,
-				started,
-				"normalized_probe",
-				422,
-				"invalid_audio",
-				"音声ファイルを読み取れませんでした。",
-				err,
-			)
+	// splice位置と密度の正本は、container metadataではなく実際にspliceする正規化済みWAVの長さにする。
+	logProgress(c.logger, started, "normalized_probe", "start", "")
+	inputDuration, err := c.probeDuration(contextWithTimeout, normalizedPath)
+	if err != nil || !(inputDuration > 0) {
+		if err == nil {
+			err = errors.New("normalized audio duration must be positive")
 		}
-		if inputDuration > maxAudioSeconds {
-			return ComposeResult{}, validateAudioLimits(int64(len(audio)), inputDuration, minSpeechSeconds)
-		}
-		logProgress(
-			c.logger,
+		return ComposeResult{}, c.commandAPIError(
+			contextWithTimeout,
 			started,
 			"normalized_probe",
-			"complete",
-			"duration_seconds=%.3f",
-			inputDuration,
+			422,
+			"invalid_audio",
+			"音声ファイルを読み取れませんでした。",
+			err,
 		)
 	}
+	if inputDuration > maxAudioSeconds {
+		return ComposeResult{}, validateAudioLimits(int64(len(audio)), inputDuration, minSpeechSeconds)
+	}
+	logProgress(
+		c.logger,
+		started,
+		"normalized_probe",
+		"complete",
+		"duration_seconds=%.3f",
+		inputDuration,
+	)
 
 	logProgress(c.logger, started, "speech_check", "start", "")
 	speechSilences, err := c.detectSilences(
@@ -201,33 +207,6 @@ func (c *composer) Compose(
 	}
 	logProgress(c.logger, started, "speech_check", "complete", "speech_seconds=%.3f", speechDuration)
 
-	logProgress(
-		c.logger,
-		started,
-		"silence_detect",
-		"start",
-		"minimum_seconds=%.3f",
-		intensity.MinSilenceSeconds,
-	)
-	gaps, err := c.detectSilences(
-		contextWithTimeout,
-		normalizedPath,
-		inputDuration,
-		intensity.MinSilenceSeconds,
-	)
-	if err != nil {
-		return ComposeResult{}, c.commandAPIError(
-			contextWithTimeout,
-			started,
-			"silence_detect",
-			500,
-			"audio_processing_failed",
-			"無音区間を検出できませんでした。",
-			err,
-		)
-	}
-	logProgress(c.logger, started, "silence_detect", "complete", "gap_count=%d", len(gaps))
-
 	logProgress(c.logger, started, "asr_audio", "start", "")
 	if err := c.prepareASRAudio(contextWithTimeout, normalizedPath, asrPath); err != nil {
 		return ComposeResult{}, c.privateStageAPIError(
@@ -237,7 +216,7 @@ func (c *composer) Compose(
 	logProgress(c.logger, started, "asr_audio", "complete", "")
 
 	logProgress(c.logger, started, "asr", "start", "")
-	transcript, err := c.transcriber.Transcribe(contextWithTimeout, asrPath)
+	transcription, err := c.transcriber.Transcribe(contextWithTimeout, asrPath)
 	if err != nil {
 		code := "asr_failed"
 		message := "音声を文字に変換できませんでした。"
@@ -253,15 +232,25 @@ func (c *composer) Compose(
 	}
 	logProgress(c.logger, started, "asr", "complete", "")
 
+	// 日本語は一息で話しても無音がほとんど出ないため、挿入位置は無音ではなく単語の切れ目から選ぶ。
+	words := c.segmenter.SplitWords(transcription.Text)
+	boundaries := insertionBoundaries(words, transcription.Tokens, inputDuration)
+	logProgress(
+		c.logger, started, "word_split", "complete",
+		"word_count=%d boundary_count=%d", len(words), len(boundaries),
+	)
+
 	var insertions []ResolvedInsertion
-	selection, err := c.associator.Select(contextWithTimeout, transcript, c.catalog.Animals)
+	selections, err := c.associator.Select(
+		contextWithTimeout, transcription.Text, c.catalog.Animals, animalCount(settings),
+	)
 	if err == nil {
 		c.rngMu.Lock()
 		insertions, err = resolveArrangement(
 			c.catalog,
-			selection.Species,
+			speciesIDs(selections),
 			settings.Intensity,
-			gaps,
+			boundaries,
 			inputDuration,
 			c.rng,
 		)
@@ -282,13 +271,27 @@ func (c *composer) Compose(
 			apiError,
 		)
 	}
-	logProgress(c.logger, started, "association", "complete", "species=%s", selection.Species)
+	logProgress(
+		c.logger, started, "association", "complete",
+		"species=%s count=%d", selections[0].Species, len(selections),
+	)
 
 	finalPath := normalizedPath
 	outputDuration := inputDuration
 	if len(insertions) > 0 {
 		logProgress(c.logger, started, "compose", "start", "insertion_count=%d", len(insertions))
-		if err := c.mix(contextWithTimeout, normalizedPath, outputPath, insertions); err != nil {
+		if err := c.resolveInsertionDurations(contextWithTimeout, insertions); err != nil {
+			return ComposeResult{}, c.commandAPIError(
+				contextWithTimeout,
+				started,
+				"compose",
+				500,
+				"audio_processing_failed",
+				"動物の鳴き声を確認できませんでした。",
+				err,
+			)
+		}
+		if err := c.mix(contextWithTimeout, normalizedPath, outputPath, insertions, inputDuration); err != nil {
 			return ComposeResult{}, c.commandAPIError(
 				contextWithTimeout,
 				started,
@@ -342,14 +345,42 @@ func (c *composer) Compose(
 	logProgress(c.logger, started, "request", "complete", "output_bytes=%d", len(outputAudio))
 	return ComposeResult{
 		AudioBase64:           base64.StdEncoding.EncodeToString(outputAudio),
-		Transcript:            transcript,
-		SelectedAnimal:        SelectedAnimal{ID: selection.Species, LabelJA: selection.LabelJA},
-		AssociationReason:     selection.Reason,
+		Transcript:            transcription.Text,
+		Words:                 words,
+		SelectedAnimal:        SelectedAnimal{ID: selections[0].Species, LabelJA: selections[0].LabelJA},
+		SelectedAnimals:       animalChoices(selections),
+		AssociationReason:     selections[0].Reason,
 		Insertions:            insertions,
 		SoundCredits:          c.catalog.creditsForPaths(insertionPaths),
 		InputDurationSeconds:  roundSeconds(inputDuration),
 		OutputDurationSeconds: roundSeconds(outputDuration),
 	}, nil
+}
+
+// animalCount は設定から動物の種類数を読む。未指定（0）は既定の1にする。
+func animalCount(settings ComposeSettings) int {
+	if settings.AnimalCount < 1 {
+		return defaultAnimalCount
+	}
+	return settings.AnimalCount
+}
+
+func speciesIDs(selections []AnimalSelection) []string {
+	species := make([]string, 0, len(selections))
+	for _, selection := range selections {
+		species = append(species, selection.Species)
+	}
+	return species
+}
+
+func animalChoices(selections []AnimalSelection) []AnimalChoice {
+	choices := make([]AnimalChoice, 0, len(selections))
+	for _, selection := range selections {
+		choices = append(choices, AnimalChoice{
+			ID: selection.Species, LabelJA: selection.LabelJA, Reason: selection.Reason,
+		})
+	}
+	return choices
 }
 
 func (c *composer) prepareASRAudio(ctx context.Context, normalizedPath, outputPath string) error {
@@ -431,6 +462,29 @@ func (c *composer) probeDuration(ctx context.Context, path string) (float64, err
 	return duration, nil
 }
 
+// resolveInsertionDurations はslotごとの上限と素材実長の短い方を、応答とfilter graphが
+// 共通で使うDurationSecondsへ確定する。同じ素材は1request中に1回だけ測る。
+func (c *composer) resolveInsertionDurations(ctx context.Context, insertions []ResolvedInsertion) error {
+	durationsByPath := make(map[string]float64, len(insertions))
+	for index := range insertions {
+		assetPath := insertions[index].AssetPath
+		assetDuration, known := durationsByPath[assetPath]
+		if !known {
+			var err error
+			assetDuration, err = c.probeDuration(ctx, assetPath)
+			if err != nil {
+				return fmt.Errorf("probe insertion audio %q: %w", filepath.Base(assetPath), err)
+			}
+			durationsByPath[assetPath] = assetDuration
+		}
+		insertions[index].DurationSeconds = roundSeconds(math.Min(
+			insertions[index].DurationSeconds,
+			assetDuration,
+		))
+	}
+	return nil
+}
+
 func (c *composer) normalize(ctx context.Context, inputPath, outputPath string) error {
 	output, err := c.runner.Run(
 		ctx,
@@ -483,6 +537,7 @@ func (c *composer) mix(
 	normalizedPath string,
 	outputPath string,
 	insertions []ResolvedInsertion,
+	inputDuration float64,
 ) error {
 	args := []string{"-nostdin", "-y", "-v", "error", "-i", normalizedPath}
 	for _, insertion := range insertions {
@@ -490,7 +545,7 @@ func (c *composer) mix(
 	}
 	args = append(
 		args,
-		"-filter_complex", buildFilterGraph(insertions),
+		"-filter_complex", buildFilterGraph(insertions, inputDuration),
 		"-map", "[out]",
 		"-ar", "24000",
 		"-ac", "1",

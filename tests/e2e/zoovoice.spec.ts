@@ -14,7 +14,7 @@ test.use({
   },
 });
 
-test("zoovoice records, sends only intensity, and explains the selected animal", async ({ page }, testInfo) => {
+test("zoovoice records, sends the settings, and explains the selected animal", async ({ page }, testInfo) => {
   let composeBody = "";
   await installZoovoiceApi(page, {
     turnstileRequired: true,
@@ -57,7 +57,8 @@ test("zoovoice records, sends only intensity, and explains the selected animal",
   await captureIfRequested(page, testInfo, "processing-light");
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
 
-  assertMultipartField(composeBody, "settings", JSON.stringify({ intensity: 75 }));
+  // 動物の数は既定の1種のまま送る。
+  assertMultipartField(composeBody, "settings", JSON.stringify({ intensity: 75, animal_count: 1 }));
   assertMultipartField(composeBody, "turnstile_token", "browser-turnstile-token-1");
   expect(composeBody).not.toContain("arrangement");
   await expect.poll(() => page.evaluate(() => Number((window as typeof window & { __zoovoicePlayAttempts?: number }).__zoovoicePlayAttempts || 0))).toBe(1);
@@ -265,12 +266,18 @@ test("zoovoice retries a transient compose failure only after explicit retry", a
   await page.waitForTimeout(250);
   expect(composeBodies).toHaveLength(1);
   await page.locator("#zoovoice-intensity").fill("100");
+  await page.getByTestId("zoovoice-animal-count").getByText("2種", { exact: true }).click();
   await page.getByRole("button", { name: "もう一度生成" }).click();
   await expect(page.getByText("できあがりました。自動再生を開始します。")).toBeVisible();
   expect(composeBodies).toHaveLength(2);
   assertMultipartField(composeBodies[0], "turnstile_token", "browser-turnstile-token-1");
   assertMultipartField(composeBodies[1], "turnstile_token", "browser-turnstile-token-2");
-  assertMultipartField(composeBodies[1], "settings", JSON.stringify({ intensity: 100 }));
+  // 1種/2種のトグルは再生成にも反映される。
+  assertMultipartField(
+    composeBodies[1],
+    "settings",
+    JSON.stringify({ intensity: 100, animal_count: 2 }),
+  );
 });
 
 test("zoovoice keeps manual playback available when autoplay is rejected", async ({ page }) => {
@@ -508,6 +515,7 @@ test("zoovoice keeps initial and recorded Turnstile states in one desktop viewpo
 
 async function recordOnce(page: Page) {
   await page.getByRole("button", { name: "録音する" }).click();
+  await expect(page.getByText("REC", { exact: true })).toBeVisible();
   await page.waitForTimeout(650);
   await page.getByRole("button", { name: "録音を止める" }).click();
 }
@@ -690,11 +698,15 @@ async function installZoovoiceApi(
           meta: {
             transcript: options.transcript || "猫が窓辺で眠っています",
             selected_animal: selectedAnimal,
+            selected_animals: [{
+              ...selectedAnimal,
+              reason: options.associationReason || "猫が出てくるため",
+            }],
             association_reason: options.associationReason || "猫が出てくるため",
             insertions: [
-              { slot: "opening", species: selectedAnimal.id, at_seconds: 0 },
-              { slot: "gaps", species: selectedAnimal.id, at_seconds: 1.2 },
-              { slot: "ending", species: selectedAnimal.id, at_seconds: 2.4 },
+              { slot: "word", species: selectedAnimal.id, at_seconds: 0.6, duration_seconds: 0.8 },
+              { slot: "word", species: selectedAnimal.id, at_seconds: 1.2, duration_seconds: 0.8 },
+              { slot: "ending", species: selectedAnimal.id, at_seconds: 2.4, duration_seconds: 2.5 },
             ],
             sound_credits: options.soundCredits ?? [
               { license: "CC BY 4.0", creator: "dobroide", source_url: "https://freesound.org/people/dobroide/sounds/17353" },

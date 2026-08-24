@@ -185,18 +185,30 @@ function isFileLike(value) {
   return Boolean(value && typeof value === "object" && typeof value.size === "number" && typeof value.arrayBuffer === "function");
 }
 
+// animal_count は後から足した設定なので、省略された古い呼び出しもそのまま通す。
+const ALLOWED_SETTINGS_KEYS = new Set(["intensity", "animal_count"]);
+const MAX_ANIMAL_COUNT = 2;
+
 function validateComposeSettings(value) {
   try {
     const parsed = JSON.parse(value);
     if (
       !isPlainObject(parsed)
-      || Object.keys(parsed).length !== 1
       || !Object.hasOwn(parsed, "intensity")
+      || !Object.keys(parsed).every((key) => ALLOWED_SETTINGS_KEYS.has(key))
       || !Number.isInteger(parsed.intensity)
       || parsed.intensity < 0
       || parsed.intensity > 100
     ) {
       throw new Error("invalid intensity");
+    }
+    if (
+      Object.hasOwn(parsed, "animal_count")
+      && (!Number.isInteger(parsed.animal_count)
+        || parsed.animal_count < 1
+        || parsed.animal_count > MAX_ANIMAL_COUNT)
+    ) {
+      throw new Error("invalid animal count");
     }
   } catch (_error) {
     throw new ZoovoiceGatewayError(400, "zoovoice_invalid_settings", "アニマル度の設定を確認してください。");
@@ -227,13 +239,32 @@ function isValidComposeResponse(payload) {
   // 鳴き声素材のクレジットは画面へそのまま出すため、形の合わないものは通さない。
   // 旧いorigin imageとの互換のため、項目そのものが無い場合だけは許す。
   if (meta.sound_credits !== undefined && !isValidSoundCredits(meta.sound_credits)) return false;
+  if (!isValidSelectedAnimals(meta.selected_animals, meta.selected_animal)) return false;
 
+  // 動物は最大2種まで選べるので、挿入の動物はそのどれかであればよい。
+  const species = new Set((meta.selected_animals ?? []).map((animal) => animal.id));
+  species.add(meta.selected_animal.id);
   return meta.insertions.every((insertion) => (
     isPlainObject(insertion)
-    && ["opening", "gaps", "ending"].includes(insertion.slot)
-    && insertion.species === meta.selected_animal.id
+    && ["word", "ending"].includes(insertion.slot)
+    && species.has(insertion.species)
     && isNonNegativeFiniteNumber(insertion.at_seconds)
+    && isPositiveFiniteNumber(insertion.duration_seconds)
   ));
+}
+
+// selected_animals は1種のときも配列で返る。1件目は selected_animal と一致する。
+function isValidSelectedAnimals(value, primary) {
+  return Array.isArray(value)
+    && value.length >= 1
+    && value.length <= MAX_ANIMAL_COUNT
+    && value.every((animal) => (
+      isPlainObject(animal)
+      && isBoundedIdentifier(animal.id, 80)
+      && isBoundedString(animal.label_ja, 1, 80)
+      && isBoundedString(animal.reason, 1, 400)
+    ))
+    && value[0].id === primary.id;
 }
 
 function isValidSoundCredits(value) {

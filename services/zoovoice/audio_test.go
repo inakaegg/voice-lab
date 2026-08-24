@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -28,53 +30,104 @@ func TestParseSilenceDetectClosesTrailingSilenceAtAudioEnd(t *testing.T) {
 	}
 }
 
-func TestBuildFilterGraphDelaysEachAnimalAndKeepsOriginalVolume(t *testing.T) {
+// 差し込み（concat）で組むため、出力は発話＋鳴き声の長さになる。重ね合わせではない。
+func TestBuildFilterGraphSplicesAnimalsBetweenSpeechChunks(t *testing.T) {
 	insertions := []ResolvedInsertion{
-		{AtSeconds: 0},
-		{AtSeconds: 1.2345},
+		{Slot: slotWord, AtSeconds: 1.0, DurationSeconds: 0.8},
+		{Slot: slotEnding, AtSeconds: 4.0, DurationSeconds: 2.5},
 	}
 
-	got := buildFilterGraph(insertions)
-	want := "[0:a]asetpts=PTS-STARTPTS[base];" +
-		"[1:a]afade=t=in:st=0:d=0.01,areverse,afade=t=in:st=0:d=0.01,areverse,adelay=0[s1];" +
-		"[2:a]afade=t=in:st=0:d=0.01,areverse,afade=t=in:st=0:d=0.01,areverse,adelay=1235[s2];" +
-		"[base][s1][s2]amix=inputs=3:normalize=0:duration=longest[out]"
+	got := buildFilterGraph(insertions, 4.0)
+	const format = "aformat=sample_fmts=s16:sample_rates=24000:channel_layouts=mono"
+	const edgeFade = ",afade=t=in:st=0:d=0.010,afade=t=out:st=%s:d=0.010"
+	want := "[0:a]asplit=2[p0][p1];" +
+		"[p0]atrim=start=0.000:end=1.000,asetpts=N/SR/TB" +
+		fmt.Sprintf(edgeFade, "0.990") + "," + format + "[b0];" +
+		"[p1]atrim=start=1.000:end=4.000,asetpts=N/SR/TB" +
+		fmt.Sprintf(edgeFade, "2.990") + "," + format + "[b1];" +
+		"[1:a]atrim=end=0.800,asetpts=N/SR/TB,afade=t=in:st=0:d=0.010," +
+		"areverse,afade=t=in:st=0:d=0.010,areverse," + format + "[s1];" +
+		"[2:a]atrim=end=2.500,asetpts=N/SR/TB,afade=t=in:st=0:d=0.010," +
+		"areverse,afade=t=in:st=0:d=0.010,areverse," + format + "[s2];" +
+		"[b0][s1][b1][s2]concat=n=4:v=0:a=1[out]"
 
 	if got != want {
 		t.Fatalf("filter graph:\n got: %s\nwant: %s", got, want)
 	}
 }
 
-func TestMapIntensityRoundsToFiveStages(t *testing.T) {
+// 末尾より手前で音声が終わる区間が残る場合は、最後に発話の残りを繋ぐ。
+func TestBuildFilterGraphKeepsTrailingSpeechAfterTheLastInsertion(t *testing.T) {
+	got := buildFilterGraph([]ResolvedInsertion{
+		{Slot: slotWord, AtSeconds: 1.0, DurationSeconds: 0.8},
+	}, 3.0)
+	if !strings.HasSuffix(got, "[b0][s1][b1]concat=n=3:v=0:a=1[out]") {
+		t.Fatalf("filter graph = %s", got)
+	}
+	if !strings.Contains(got, "atrim=start=1.000:end=3.000") {
+		t.Fatalf("filter graph = %s", got)
+	}
+}
+
+// 挿入が1つで発話がその位置で終わる場合は、分岐せずに1区間だけを切る。
+func TestBuildFilterGraphSkipsSplitForASingleSpeechChunk(t *testing.T) {
+	got := buildFilterGraph([]ResolvedInsertion{
+		{Slot: slotEnding, AtSeconds: 2.0, DurationSeconds: 2.5},
+	}, 2.0)
+	if strings.Contains(got, "asplit") {
+		t.Fatalf("filter graph = %s", got)
+	}
+	if !strings.HasPrefix(got, "[0:a]atrim=start=0.000:end=2.000,asetpts=N/SR/TB,afade=t=in") {
+		t.Fatalf("filter graph = %s", got)
+	}
+}
+
+// 短すぎる区間にはfadeを掛けない。fade 2つぶんの長さが取れないため。
+func TestSpliceEdgeFadeSkipsVeryShortChunks(t *testing.T) {
+	if fade := spliceEdgeFade(0.02); fade != "" {
+		t.Fatalf("fade = %q", fade)
+	}
+	if fade := spliceEdgeFade(1.0); fade != ",afade=t=in:st=0:d=0.010,afade=t=out:st=0.990:d=0.010" {
+		t.Fatalf("fade = %q", fade)
+	}
+}
+
+func TestTargetWordInsertionCountScalesWithDurationAndIntensity(t *testing.T) {
 	tests := []struct {
-		intensity     int
-		minSilence    float64
-		maxInsertions int
+		duration  float64
+		intensity int
+		want      int
 	}{
-		{intensity: 0, minSilence: 1.2, maxInsertions: 2},
-		{intensity: 19, minSilence: 1.2, maxInsertions: 2},
-		{intensity: 20, minSilence: 0.975, maxInsertions: 3},
-		{intensity: 40, minSilence: 0.75, maxInsertions: 6},
-		{intensity: 50, minSilence: 0.75, maxInsertions: 6},
-		{intensity: 59, minSilence: 0.75, maxInsertions: 6},
-		{intensity: 60, minSilence: 0.525, maxInsertions: 8},
-		{intensity: 80, minSilence: 0.3, maxInsertions: 10},
-		{intensity: 100, minSilence: 0.3, maxInsertions: 10},
+		{duration: 3.908, intensity: 0, want: 0},
+		{duration: 3.908, intensity: 50, want: 1},
+		{duration: 3.908, intensity: 100, want: 2},
+		{duration: 20, intensity: 50, want: 5},
+		{duration: 60, intensity: 50, want: 15},
+		// 候補決定に使わなかった長さでも、同じ密度で比例する。
+		{duration: 1, intensity: 50, want: 0},
+		{duration: 1, intensity: 100, want: 1},
+		{duration: 5, intensity: 50, want: 1},
+		{duration: 5, intensity: 100, want: 3},
+		{duration: 15, intensity: 50, want: 4},
+		{duration: 15, intensity: 100, want: 8},
+		{duration: 45, intensity: 50, want: 11},
+		{duration: 45, intensity: 100, want: 23},
 	}
 
 	for _, test := range tests {
-		got, err := mapIntensity(test.intensity)
-		if err != nil {
-			t.Fatalf("mapIntensity(%d): %v", test.intensity, err)
-		}
-		if got.MinSilenceSeconds != test.minSilence || got.MaxInsertions != test.maxInsertions {
-			t.Errorf("mapIntensity(%d) = %#v, want d=%v max=%d", test.intensity, got, test.minSilence, test.maxInsertions)
+		if got := targetWordInsertionCount(test.duration, test.intensity); got != test.want {
+			t.Errorf("targetWordInsertionCount(%v, %d) = %d, want %d", test.duration, test.intensity, got, test.want)
 		}
 	}
+	if got := targetWordInsertionCount(0, 100); got != 0 {
+		t.Errorf("targetWordInsertionCount(0, 100) = %d, want 0", got)
+	}
+}
 
+func TestValidateIntensityRejectsOutOfRange(t *testing.T) {
 	for _, intensity := range []int{-1, 101} {
-		if _, err := mapIntensity(intensity); err == nil {
-			t.Errorf("mapIntensity(%d) accepted an out-of-range value", intensity)
+		if err := validateIntensity(intensity); err == nil {
+			t.Errorf("validateIntensity(%d) accepted an out-of-range value", intensity)
 		}
 	}
 }

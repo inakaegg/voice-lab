@@ -87,6 +87,7 @@ func (api *httpAPI) compose(writer http.ResponseWriter, request *http.Request) {
 		"meta": map[string]any{
 			"transcript":              result.Transcript,
 			"selected_animal":         result.SelectedAnimal,
+			"selected_animals":        result.SelectedAnimals,
 			"association_reason":      result.AssociationReason,
 			"insertions":              result.Insertions,
 			"sound_credits":           result.SoundCredits,
@@ -202,6 +203,8 @@ func readLimitedPart(part *multipart.Part, maximum int64) ([]byte, error) {
 func parseComposeSettings(payload []byte) (ComposeSettings, *APIError) {
 	var wire struct {
 		Intensity *int `json:"intensity"`
+		// animal_count は後から足した設定なので、省略された場合は既定の1で続ける。
+		AnimalCount *int `json:"animal_count"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(payload)))
 	decoder.DisallowUnknownFields()
@@ -214,10 +217,17 @@ func parseComposeSettings(payload []byte) (ComposeSettings, *APIError) {
 	if wire.Intensity == nil {
 		return ComposeSettings{}, invalidSettingsError(errors.New("intensity is required"))
 	}
-	if _, err := mapIntensity(*wire.Intensity); err != nil {
+	if err := validateIntensity(*wire.Intensity); err != nil {
 		return ComposeSettings{}, invalidSettingsError(err)
 	}
-	return ComposeSettings{Intensity: *wire.Intensity}, nil
+	animals := defaultAnimalCount
+	if wire.AnimalCount != nil {
+		animals = *wire.AnimalCount
+	}
+	if err := validateAnimalCount(animals); err != nil {
+		return ComposeSettings{}, invalidSettingsError(err)
+	}
+	return ComposeSettings{Intensity: *wire.Intensity, AnimalCount: animals}, nil
 }
 
 func invalidMultipartError(err error) *APIError {

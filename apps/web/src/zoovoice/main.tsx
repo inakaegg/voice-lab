@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles } from "lucide-react";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
@@ -15,6 +15,10 @@ import {
   type ZoovoiceConfig,
 } from "./api";
 import { defaultIntensity, intensityStage, intensityStageCount, intensityStageValues } from "./intensity";
+
+// 動物の種類数。既定は1種で、2種にすると2種類の鳴き声が交互に入る。
+const defaultAnimalCount = 1;
+const animalCountChoices = [1, 2];
 import { RecordOrb } from "./record-orb";
 import { ResultPlayer } from "./result-player";
 import {
@@ -42,6 +46,7 @@ type RecordingState = {
   id: number;
   blob: Blob;
   intensity: number;
+  animalCount: number;
 };
 
 type ComposeAttempt = RecordingState & {
@@ -57,6 +62,7 @@ type TurnstileToken = {
 function Zoovoice() {
   const [state, dispatch] = useReducer(zoovoiceReducer, initialZoovoiceState);
   const [intensity, setIntensity] = useState(defaultIntensity);
+  const [animalCount, setAnimalCount] = useState(defaultAnimalCount);
   const [result, setResult] = useState<ResultState | null>(null);
   const [config, setConfig] = useState<ZoovoiceConfig | null>(null);
   const [recording, setRecording] = useState<RecordingState | null>(null);
@@ -69,7 +75,7 @@ function Zoovoice() {
   const recorder = useRecorder();
   const recordingIdRef = useRef(0);
   const attemptIdRef = useRef(0);
-  const activeRecordingRef = useRef<{ id: number; intensity: number } | null>(null);
+  const activeRecordingRef = useRef<{ id: number; intensity: number; animalCount: number } | null>(null);
   const sentAttemptsRef = useRef(new Set<number>());
   const resetStaleTokensRef = useRef(new Set<string>());
   const verificationAttemptRef = useRef(0);
@@ -124,6 +130,7 @@ function Zoovoice() {
       id: active.id,
       blob: recorder.blob,
       intensity: active.intensity,
+      animalCount: active.animalCount,
     };
     const nextAttempt: ComposeAttempt = {
       ...nextRecording,
@@ -179,7 +186,7 @@ function Zoovoice() {
     setAttempt({ ...attempt, status: "sent" });
     dispatch({ type: "compose_started" });
 
-    void composeRecording(attempt.blob, attempt.intensity, turnstileToken.value)
+    void composeRecording(attempt.blob, attempt.intensity, attempt.animalCount, turnstileToken.value)
       .then((payload) => {
         const url = URL.createObjectURL(wavBlobFromBase64(payload.audio.base64));
         setResult({ payload, url });
@@ -264,7 +271,7 @@ function Zoovoice() {
     }
     if (recorder.isStarting || recorder.isFinalizing) return;
     const id = ++recordingIdRef.current;
-    activeRecordingRef.current = { id, intensity };
+    activeRecordingRef.current = { id, intensity, animalCount };
     recorder.clear();
     setRecording(null);
     setAttempt(null);
@@ -298,10 +305,11 @@ function Zoovoice() {
     const nextAttempt: ComposeAttempt = {
       ...recording,
       intensity,
+      animalCount,
       attemptId: ++attemptIdRef.current,
       status: "armed",
     };
-    setRecording({ ...recording, intensity });
+    setRecording({ ...recording, intensity, animalCount });
     setAttempt(nextAttempt);
     if (!isComposeReady(
       config?.turnstile_required === true,
@@ -326,7 +334,7 @@ function Zoovoice() {
         <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-[var(--react-muted)]">Record · Associate · Play</p>
         <h2 className="text-balance text-[clamp(1.45rem,3vw,2.25rem)] font-bold leading-tight tracking-[-0.04em] text-[var(--react-ink)]">話すだけで、ぴったりの動物を。</h2>
       </div>
-      <p className="max-w-[34rem] text-xs leading-5 text-[var(--react-muted)] sm:text-right sm:text-sm">話した内容から動物を1種選び、同じ鳴き声を声のすき間へ重ねます。</p>
+      <p className="max-w-[34rem] text-xs leading-5 text-[var(--react-muted)] sm:text-right sm:text-sm">話した内容から動物を選び、その鳴き声を言葉の切れ目へ差し込みます。</p>
     </section>
 
     <main data-testid="zoovoice-workspace" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
@@ -366,6 +374,28 @@ function Zoovoice() {
             </datalist>
             <span className="flex justify-between gap-3 text-[0.65rem] font-medium text-muted-foreground"><span>ひかえめ</span><span>{controls.retryVisible ? "次の再生成にも反映" : "次の録音に反映"}</span><span>にぎやか</span></span>
           </label>
+
+          {/* legend は互換layerの素の要素selectorが色と字を上書きするため、この route では使わない。 */}
+          <div data-testid="zoovoice-animal-count" role="radiogroup" aria-label="動物の数" className="grid gap-1.5">
+            <span className="text-sm font-bold text-foreground">動物の数</span>
+            <div className="grid grid-cols-2 gap-2">
+              {animalCountChoices.map((value) => <label
+                key={value}
+                className={`inline-flex min-h-11 cursor-pointer items-center justify-center rounded-xl border px-3 py-2 text-sm font-bold transition-colors ${animalCount === value ? "border-foreground bg-foreground text-background" : "border-border bg-background text-foreground hover:bg-muted"} has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-55 has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/45`}
+              >
+                <input
+                  type="radio"
+                  name="zoovoice-animal-count"
+                  value={value}
+                  checked={animalCount === value}
+                  disabled={!controls.sliderEnabled}
+                  onChange={() => setAnimalCount(value)}
+                  className="sr-only"
+                />
+                {value}種
+              </label>)}
+            </div>
+          </div>
 
           {config?.turnstile_required && <TurnstileWidget
             siteKey={config.turnstile_site_key}
@@ -426,19 +456,23 @@ function Zoovoice() {
 function ResultDetails({ result }: { result: ResultState }) {
   const meta = result.payload.meta;
   return <>
-    <div data-testid="zoovoice-animal-figure" className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3">
-      <span aria-hidden="true" className="text-[2.75rem] leading-none">{animalEmoji(meta.selected_animal.id)}</span>
-      <span className="min-w-0 break-words text-xl font-bold tracking-[-0.02em] text-foreground">{meta.selected_animal.label_ja}</span>
+    <div data-testid="zoovoice-animal-figure" className="grid gap-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3">
+      {meta.selected_animals.map((animal) => <span key={animal.id} className="flex items-center gap-3.5">
+        <span aria-hidden="true" className="text-[2.75rem] leading-none">{animalEmoji(animal.id)}</span>
+        <span className="min-w-0 break-words text-xl font-bold tracking-[-0.02em] text-foreground">{animal.label_ja}</span>
+      </span>)}
     </div>
     <dl className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3 text-xs leading-5">
       <dt className="font-semibold text-muted-foreground">聞き取った言葉</dt>
       <dd className="min-w-0 break-words text-foreground">{meta.transcript}</dd>
-      <dt className="font-semibold text-muted-foreground">連想の理由</dt>
-      <dd className="min-w-0 break-words text-foreground">{meta.association_reason}</dd>
+      {meta.selected_animals.map((animal) => <Fragment key={animal.id}>
+        <dt className="font-semibold text-muted-foreground">{animal.label_ja}を選んだ理由</dt>
+        <dd className="min-w-0 break-words text-foreground">{animal.reason}</dd>
+      </Fragment>)}
     </dl>
     <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} autoPlay />
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
-      {meta.insertions.length}か所に「{meta.selected_animal.label_ja}」の鳴き声を追加しました。
+      {meta.insertions.length}か所に「{meta.selected_animals.map((animal) => animal.label_ja).join("」と「")}」の鳴き声を差し込みました。
     </p>
     <SoundCredits credits={meta.sound_credits ?? []} />
   </>;

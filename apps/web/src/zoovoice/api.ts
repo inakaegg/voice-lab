@@ -5,20 +5,30 @@ export type ComposeResponse = {
   };
   meta: {
     transcript: string;
+    // selected_animal と association_reason は1種目。1種だけ選んだ場合と同じ値になる。
     selected_animal: {
       id: string;
       label_ja: string;
     };
+    selected_animals: AssociatedAnimal[];
     association_reason: string;
     insertions: Array<{
-      slot: "opening" | "gaps" | "ending";
+      slot: "word" | "ending";
       species: string;
       at_seconds: number;
+      duration_seconds: number;
     }>;
     sound_credits?: SoundCredit[];
     input_duration_seconds: number;
     output_duration_seconds: number;
   };
+};
+
+// 連想した動物。1種のときも配列で返るので、画面側は件数で分岐しなくてよい。
+export type AssociatedAnimal = {
+  id: string;
+  label_ja: string;
+  reason: string;
 };
 
 // 鳴き声素材の出典表示。CC BY素材では表示が利用条件になるため、必ず画面へ出す。
@@ -97,11 +107,12 @@ export async function fetchZoovoiceConfig(signal?: AbortSignal): Promise<Zoovoic
 export async function composeRecording(
   recording: Blob,
   intensity: number,
+  animalCount: number,
   turnstileToken = "",
 ): Promise<ComposeResponse> {
   const form = new FormData();
   form.append("audio", recording, recordingFilename(recording.type));
-  form.append("settings", JSON.stringify({ intensity }));
+  form.append("settings", JSON.stringify({ intensity, animal_count: animalCount }));
   if (turnstileToken) form.append("turnstile_token", turnstileToken);
   const response = await fetchResponse("/api/zoovoice/compose", {
     method: "POST",
@@ -117,6 +128,8 @@ export async function composeRecording(
     || !payload.audio.base64
     || !payload.meta?.transcript
     || !payload.meta.selected_animal?.id
+    || !Array.isArray(payload.meta.selected_animals)
+    || payload.meta.selected_animals.length === 0
   ) {
     throw new ZoovoiceApiError(
       "zoovoice_invalid_response",

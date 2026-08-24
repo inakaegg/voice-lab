@@ -101,7 +101,7 @@ TEXT = {
         "runpod_cluster": "private RunPod Serverless",
         "runpod": ("GPU handler", "Chinese ASR (FunASR)", "voice conversion (Seed-VC)"),
         "cloudrun_cluster": "private Google Cloud Run",
-        "cloudrun": ("Zoovoice Go service", "no unauthenticated access", "Japanese ASR → association → mixing"),
+        "cloudrun": ("Zoovoice Go service", "no unauthenticated access", "Japanese ASR → association → word splice"),
         "e_https": "HTTPS",
         "e_verify": "verify token",
         "e_widget": "widget script + challenge",
@@ -110,7 +110,7 @@ TEXT = {
         "e_runpod": "async job → polling",
         "e_idtoken": "call with ID token",
         "e_gtoken": "signed JWT ↔ ID token",
-        "e_assoc": "pick one animal",
+        "e_assoc": "pick requested animals",
     },
     "ja": {
         "title": "Voice Lab 構成図　　緑=SpeakLoopの経路　橙=Zoovoiceの経路　灰=共通",
@@ -134,7 +134,7 @@ TEXT = {
         "runpod_cluster": "private RunPod Serverless",
         "runpod": ("GPU handler", "中国語ASR（FunASR）", "声質変換（Seed-VC）"),
         "cloudrun_cluster": "private Google Cloud Run",
-        "cloudrun": ("Zoovoice Goサービス", "未認証アクセス不可", "日本語ASR → 連想 → 合成"),
+        "cloudrun": ("Zoovoice Goサービス", "未認証アクセス不可", "日本語ASR → 連想 → 単語境界splice"),
         "e_https": "HTTPS",
         "e_verify": "token検証",
         "e_widget": "widgetスクリプト・challenge",
@@ -143,7 +143,7 @@ TEXT = {
         "e_runpod": "非同期job → polling",
         "e_idtoken": "ID token付きrequest",
         "e_gtoken": "署名付きJWT ↔ ID token",
-        "e_assoc": "動物を1種選ぶ",
+        "e_assoc": "動物を指定数選ぶ",
     },
 }
 

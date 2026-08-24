@@ -105,12 +105,13 @@ test("Turnstile token freshness rejects empty stale and boundary-age tokens", ()
   assert.equal(isComposeReady(true, "token", now - 1_000, now), true);
 });
 
-test("zoovoice exposes only the animal intensity setting", async () => {
+test("zoovoice exposes only the supported user settings", async () => {
   const source = await readFile("apps/web/src/zoovoice/main.tsx", "utf8");
   for (const removed of ["<select", "にわとり牧場", "feel lucky", "<details", "SlotSelect", "Arrangement"]) {
     assert.doesNotMatch(source, new RegExp(removed, "i"));
   }
   assert.equal(source.match(/アニマル度/g)?.length, 1);
+  assert.equal(source.match(/動物の数/g)?.length, 2);
 });
 
 test("zoovoice public config distinguishes local and Turnstile gateways", async () => {
@@ -145,6 +146,7 @@ test("zoovoice compose sends the current single-use Turnstile token", async () =
       meta: {
         transcript: "猫が眠っています",
         selected_animal: { id: "cat", label_ja: "猫" },
+        selected_animals: [{ id: "cat", label_ja: "猫", reason: "猫が出てくるため" }],
         association_reason: "猫が出てくるため",
         insertions: [],
         input_duration_seconds: 1,
@@ -156,10 +158,14 @@ test("zoovoice compose sends the current single-use Turnstile token", async () =
     await zoovoiceApi.composeRecording(
       new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
       40,
+      1,
       "single-use-turnstile-token",
     );
     assert.equal(submittedForm?.get("turnstile_token"), "single-use-turnstile-token");
-    assert.equal(submittedForm?.get("settings"), JSON.stringify({ intensity: 40 }));
+    assert.equal(
+      submittedForm?.get("settings"),
+      JSON.stringify({ intensity: 40, animal_count: 1 }),
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -173,6 +179,7 @@ test("zoovoice compose preserves the association reason", async () => {
     meta: {
       transcript: "ぞうきんを絞る",
       selected_animal: { id: "elephant", label_ja: "象" },
+      selected_animals: [{ id: "elephant", label_ja: "象", reason }],
       association_reason: reason,
       insertions: [],
       input_duration_seconds: 1,
@@ -180,8 +187,9 @@ test("zoovoice compose preserves the association reason", async () => {
     },
   });
   try {
-    const response = await zoovoiceApi.composeRecording(new Blob(["audio"]), 50);
+    const response = await zoovoiceApi.composeRecording(new Blob(["audio"]), 50, 1);
     assert.equal(response.meta.association_reason, reason);
+    assert.equal(response.meta.selected_animals[0]?.reason, reason);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -282,4 +290,39 @@ test("gateway error codes use an explicit retry allowlist and fail closed", () =
     zoovoiceApi.isRetryableZoovoiceError(new zoovoiceApi.ZoovoiceApiError("future_unknown_code", 503, "unknown")),
     false,
   );
+});
+
+test("zoovoice compose sends the selected animal count", async () => {
+  const originalFetch = globalThis.fetch;
+  let submittedForm: FormData | null = null;
+  globalThis.fetch = async (_input, init) => {
+    submittedForm = init?.body as FormData;
+    return Response.json({
+      audio: { format: "wav", base64: "UklGRg==" },
+      meta: {
+        transcript: "夜の屋根で鳴いていた",
+        selected_animal: { id: "cat", label_ja: "猫" },
+        selected_animals: [
+          { id: "cat", label_ja: "猫", reason: "夜の屋根といえば猫" },
+          { id: "owl", label_ja: "フクロウ", reason: "夜に鳴く鳥だから" },
+        ],
+        association_reason: "夜の屋根といえば猫",
+        insertions: [],
+        input_duration_seconds: 1,
+        output_duration_seconds: 1,
+      },
+    });
+  };
+  try {
+    const response = await zoovoiceApi.composeRecording(new Blob(["audio"]), 60, 2);
+    assert.equal(
+      submittedForm?.get("settings"),
+      JSON.stringify({ intensity: 60, animal_count: 2 }),
+    );
+    assert.equal(response.meta.selected_animals.length, 2);
+    // 1件目は selected_animal と同じものになる。
+    assert.equal(response.meta.selected_animals[0]?.id, response.meta.selected_animal.id);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

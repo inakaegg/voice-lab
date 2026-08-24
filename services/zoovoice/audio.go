@@ -113,61 +113,118 @@ func clampSeconds(value, duration float64) float64 {
 	return value
 }
 
-func buildFilterGraph(insertions []ResolvedInsertion) string {
-	var graph strings.Builder
-	graph.WriteString("[0:a]asetpts=PTS-STARTPTS[base];")
+// 鳴き声の前後に掛けるfade。切り貼りの継ぎ目のノイズを消すためだけの短いもの。
+const (
+	insertionFadeInSeconds  = 0.01
+	insertionFadeOutSeconds = 0.01
+)
+
+// 合成後の音声形式。concatは全ての入力が同じ形式であることを要求する。
+const spliceSampleFormat = "aformat=sample_fmts=s16:sample_rates=24000:channel_layouts=mono"
+
+// 発話を切った両端へ掛ける極短いfade。
+// 切り口の波形が途中の値のまま鳴き声へ切り替わると、継ぎ目でプツッと鳴るため。
+const spliceEdgeFadeSeconds = 0.01
+
+// spliceEdgeFade は発話の区間へ掛ける両端のfadeを組み立てる。
+// fadeを2つ入れる余裕が無いほど短い区間には掛けない。
+func spliceEdgeFade(chunkSeconds float64) string {
+	if chunkSeconds <= 2*spliceEdgeFadeSeconds {
+		return ""
+	}
+	return fmt.Sprintf(
+		",afade=t=in:st=0:d=%.3f,afade=t=out:st=%.3f:d=%.3f",
+		spliceEdgeFadeSeconds,
+		chunkSeconds-spliceEdgeFadeSeconds,
+		spliceEdgeFadeSeconds,
+	)
+}
+
+// buildFilterGraph は発話を挿入位置で切り、間へ鳴き声を挟んで繋ぎ直すfilter graphを作る。
+// 重ね合わせ（amix）ではなく差し込み（concat）なので、出力は挿入したぶんだけ長くなる。
+// 入力0が発話、入力1以降が insertions と同じ順の鳴き声素材である。
+func buildFilterGraph(insertions []ResolvedInsertion, inputDuration float64) string {
+	type speechChunk struct {
+		startSeconds float64
+		endSeconds   float64
+	}
+	chunks := make([]speechChunk, 0, len(insertions)+1)
+	order := make([]string, 0, 2*len(insertions)+1)
+	position := 0.0
 	for index, insertion := range insertions {
-		inputIndex := index + 1
-		delayMilliseconds := int64(math.Round(math.Max(0, insertion.AtSeconds) * 1000))
+		atSeconds := clampSeconds(insertion.AtSeconds, inputDuration)
+		if atSeconds > position {
+			order = append(order, fmt.Sprintf("[b%d]", len(chunks)))
+			chunks = append(chunks, speechChunk{startSeconds: position, endSeconds: atSeconds})
+			position = atSeconds
+		}
+		order = append(order, fmt.Sprintf("[s%d]", index+1))
+	}
+	if position < inputDuration {
+		order = append(order, fmt.Sprintf("[b%d]", len(chunks)))
+		chunks = append(chunks, speechChunk{startSeconds: position, endSeconds: inputDuration})
+	}
+
+	var graph strings.Builder
+	if len(chunks) > 1 {
+		graph.WriteString("[0:a]asplit=" + strconv.Itoa(len(chunks)))
+		for index := range chunks {
+			fmt.Fprintf(&graph, "[p%d]", index)
+		}
+		graph.WriteString(";")
+	}
+	for index, chunk := range chunks {
+		source := "[0:a]"
+		if len(chunks) > 1 {
+			source = fmt.Sprintf("[p%d]", index)
+		}
 		fmt.Fprintf(
 			&graph,
-			"[%d:a]afade=t=in:st=0:d=0.01,areverse,afade=t=in:st=0:d=0.01,areverse,adelay=%d[s%d];",
-			inputIndex,
-			delayMilliseconds,
-			inputIndex,
+			"%satrim=start=%.3f:end=%.3f,asetpts=N/SR/TB%s,%s[b%d];",
+			source,
+			chunk.startSeconds,
+			chunk.endSeconds,
+			spliceEdgeFade(chunk.endSeconds-chunk.startSeconds),
+			spliceSampleFormat,
+			index,
 		)
 	}
-	graph.WriteString("[base]")
-	for index := range insertions {
-		fmt.Fprintf(&graph, "[s%d]", index+1)
+	for index, insertion := range insertions {
+		// 素材は中央値2.3秒・最長5.4秒あるので、差し込む長さまで切り詰める。
+		// 終端のfadeは素材の長さを知らずに掛けたいので、反転して先頭へ掛けてから戻す。
+		fmt.Fprintf(
+			&graph,
+			"[%d:a]atrim=end=%.3f,asetpts=N/SR/TB,afade=t=in:st=0:d=%.3f,"+
+				"areverse,afade=t=in:st=0:d=%.3f,areverse,%s[s%d];",
+			index+1,
+			math.Max(0, insertion.DurationSeconds),
+			insertionFadeInSeconds,
+			insertionFadeOutSeconds,
+			spliceSampleFormat,
+			index+1,
+		)
 	}
-	fmt.Fprintf(
-		&graph,
-		"amix=inputs=%d:normalize=0:duration=longest[out]",
-		len(insertions)+1,
-	)
+	graph.WriteString(strings.Join(order, ""))
+	fmt.Fprintf(&graph, "concat=n=%d:v=0:a=1[out]", len(order))
 	return graph.String()
 }
 
-// アニマル度は0〜100の入力を20刻みで5段階へ丸めてから使う。
-// APIの入力形式は0〜100のまま変えない。
-const intensityStageCount = 5
+// アニマル度100では、入力音声2秒あたり文中へ1本を目標にする。
+// 末尾の1本は密度計算へ含めず、resolveArrangementが別に追加する。
+const maximumWordInsertionsPerSecond = 0.5
 
-// 段階ごとの最大挿入数と無音検出の下限秒数。
-// 端（段階1・5）と中央（段階3）は従来の一次式と同じ値になる。
-var (
-	intensityMaxInsertions = [intensityStageCount]int{2, 3, 6, 8, 10}
-	intensityMinSilence    = [intensityStageCount]float64{1.2, 0.975, 0.75, 0.525, 0.3}
-)
-
-// intensityStage は0〜100のアニマル度を0始まりの段階番号へ丸める。
-func intensityStage(intensity int) int {
-	stage := intensity / 20
-	if stage >= intensityStageCount {
-		stage = intensityStageCount - 1
+func validateIntensity(intensity int) error {
+	if intensity < 0 || intensity > 100 {
+		return fmt.Errorf("intensity must be between 0 and 100")
 	}
-	return stage
+	return nil
 }
 
-func mapIntensity(intensity int) (IntensityConfig, error) {
-	if intensity < 0 || intensity > 100 {
-		return IntensityConfig{}, fmt.Errorf("intensity must be between 0 and 100")
+func targetWordInsertionCount(inputDuration float64, intensity int) int {
+	if inputDuration <= 0 || intensity <= 0 {
+		return 0
 	}
-	stage := intensityStage(intensity)
-	return IntensityConfig{
-		MinSilenceSeconds: intensityMinSilence[stage],
-		MaxInsertions:     intensityMaxInsertions[stage],
-	}, nil
+	return int(math.Round(inputDuration * maximumWordInsertionsPerSecond * float64(intensity) / 100))
 }
 
 func validateAudioLimits(size int64, duration, speechDuration float64) error {

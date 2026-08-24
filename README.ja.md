@@ -7,7 +7,7 @@ Voice Labは、発音練習のSpeakLoopと動物鳴き声合成のZoovoiceを持
 
 中心機能のSpeakLoopは、母語で話した「言いたいこと」を、中国語または英語の発音練習へつなげます。録音、学習文と模範音声の生成、復唱、聞き比べまでを1つの流れで進められます。
 
-Zoovoiceは、録音した日本語の発話から動物を1種自動で連想し、その鳴き声を発話のすき間へ重ねた音声を返します。
+Zoovoiceは、録音した日本語の発話から動物を連想し、その鳴き声を言葉の切れ目へ差し込んだ音声を返します。
 
 **公開デモ:** [https://voice-lab.inakaegg.workers.dev/](https://voice-lab.inakaegg.workers.dev/)
 
@@ -48,10 +48,10 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 ### Zoovoice — 動物鳴き声合成
 
 1. 日本語で自由に話して録音する
-2. 発話内容から動物を1種自動で連想する
-3. 鳴き声を発話のすき間へ重ねた音声を再生・ダウンロードする
+2. 発話内容から動物を自動で連想する（1種か2種かを選べる）
+3. 鳴き声を言葉の切れ目へ差し込んだ音声を再生・ダウンロードする
 
-日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はLLM（OpenAI API）が音源のある動物から1種を選びます。同梱する鳴き声はすべて実録音で、無償で商用利用できるものだけを使っています。
+日本語ASR、動物の自動連想、音声合成は、privateなGoogle Cloud Run上のGoサービスが担当します。連想はLLM（OpenAI API）が音源のある動物から選びます。同梱する鳴き声はすべて実録音で、無償で商用利用できるものだけを使っています。
 
 ## 構成
 
@@ -189,15 +189,15 @@ sequenceDiagram
     participant O as OpenAI API
     B->>T: widget scriptを読み込み、challengeを完了する
     T-->>B: token
-    B->>W: 録音・アニマル度・Turnstile token
+    B->>W: 録音・アニマル度・動物の種類数・Turnstile token
     W->>T: tokenを検証する
     W->>D: 日次・月次counterを消費する
     W->>C: IAM ID tokenを付けて中継する
     C->>C: 日本語ASR（whisper.cpp）
-    C->>O: 音源のある動物から1種選ぶ
-    O-->>C: 動物と短い理由
-    C->>C: すき間へ鳴き声を重ねる（ffmpeg）
-    C-->>W: 合成音声・ASR本文・連想metadata
+    C->>O: 音源のある動物から指定数を選ぶ
+    O-->>C: 最大2種の動物と短い理由
+    C->>C: 形態素境界へ鳴き声を差し込む（ffmpeg）
+    C-->>W: 差し込み音声・ASR本文・連想metadata
     W-->>B: 再生・ダウンロード
 ```
 
@@ -307,7 +307,7 @@ Voice Lab本体にはオープンソースライセンスを付与していま�
 
 よく参照する文書:
 
-- [CLI一覧](CLI.md) — 手元で機能を確かめるコマンドと出力例
+- [CLI一覧](CLI.md) — そのまま実行できるZoovoiceのローカル確認コマンド
 - [全体仕様](docs/speech-translation/SPEC.md)
 - [現在のデプロイ構成](docs/deployment/ARCHITECTURE.md)
 - [既知の制限](docs/speech-translation/KNOWN_LIMITS.md)

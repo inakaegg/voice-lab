@@ -10,6 +10,7 @@ import (
 
 type runtimeDependencies struct {
 	transcriber transcriber
+	segmenter   wordSegmenter
 	associator  animalAssociator
 }
 
@@ -18,11 +19,20 @@ func loadRuntimeDependencies(runner commandRunner) (*runtimeDependencies, error)
 	if err != nil {
 		return nil, err
 	}
+	// 形態素辞書の読み込みは重いので、起動時に1つ作って使い回す。
+	segmenter, err := newKagomeSegmenter()
+	if err != nil {
+		return nil, err
+	}
 	associator, err := loadAssociatorFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return &runtimeDependencies{transcriber: activeTranscriber, associator: associator}, nil
+	return &runtimeDependencies{
+		transcriber: activeTranscriber,
+		segmenter:   segmenter,
+		associator:  associator,
+	}, nil
 }
 
 // loadTranscriberFromEnv はwhisperによるASRを組み立てる。音声入力にだけ要る。
