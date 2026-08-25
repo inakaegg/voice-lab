@@ -1,3 +1,8 @@
+// このファイルは <script> で読まれ、他の同種スクリプトとグローバルスコープを共有する。
+// 同名の識別子を置くと2本目以降がSyntaxErrorで止まるため、名前をファイルごとに分ける。
+// node:test は直接importするので window ではなく globalThis から引く（ブラウザでは同一）。
+const sampleAudioText = (key, params) => globalThis.voiceLabI18n?.t(key, params) ?? key;
+
 const publicSampleAudioSections = [...document.querySelectorAll("[data-public-sample-feature]")];
 
 if (publicSampleAudioSections.length > 0) {
@@ -35,7 +40,7 @@ function renderPublicSampleAudio(section, sample) {
   const title = section.querySelector("[data-public-sample-title]");
   const description = section.querySelector("[data-public-sample-description]");
   if (title && section.dataset.publicSampleFixedTitle !== "true") {
-    title.textContent = sample.title || "サンプル音声";
+    title.textContent = sample.title || sampleAudioText("shared.sampleAudioLabel");
   }
   if (description) {
     description.textContent = sample.description || "";
@@ -43,6 +48,6 @@ function renderPublicSampleAudio(section, sample) {
   }
   audio.src = `data:${sample.audio_mime_type || "audio/wav"};base64,${sample.audio_base64}`;
   if (audio.hasAttribute("data-sample-audio-custom")) {
-    window.ensureSampleAudioControl?.(audio, title?.textContent || "サンプル音声");
+    window.ensureSampleAudioControl?.(audio, title?.textContent || sampleAudioText("shared.sampleAudioLabel"));
   }
 }

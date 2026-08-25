@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { translateWith } from "../apps/web/src/shared/i18n-messages.ts";
+
+// このモジュールは表示文言を辞書から引く。ブラウザでは bootstrap が橋渡しを置くので、
+// ここでも同じ形で日本語辞書を与え、キーではなく実際の文言で契約を確かめる。
+globalThis.voiceLabI18n = {
+  t: (key, params) => translateWith(key, "ja", params),
+  getLocale: () => "ja",
+  subscribe: () => () => {},
+};
+
 await import("../src/mo_speech/web/practice_playback.js");
 
 const {

@@ -55,6 +55,9 @@ test("every message key the sources use exists in both dictionaries", async () =
     read("apps/web/src/speakloop/main.tsx"),
     // React外のスクリプトも同じ辞書を引く。取りこぼすと生のキーが画面へ出るので同じ検査にかける。
     read("src/mo_speech/web/app_practice.js"),
+    read("src/mo_speech/web/practice_playback.js"),
+    read("src/mo_speech/web/app_public_session.js"),
+    read("src/mo_speech/web/app_public_sample_audio.js"),
   ]);
   // 呼び出しの形ではなく「辞書の名前空間で始まる文字列リテラル」を拾う。t( の直後だけを見る形や
   // セグメント数で絞る形は、三項式の中のキーのように隙間が残るため採らない。

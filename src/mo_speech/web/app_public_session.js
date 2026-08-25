@@ -1,3 +1,8 @@
+// このファイルは <script> で読まれ、他の同種スクリプトとグローバルスコープを共有する。
+// 同名の識別子を置くと2本目以降がSyntaxErrorで止まるため、名前をファイルごとに分ける。
+// node:test は直接importするので window ではなく globalThis から引く（ブラウザでは同一）。
+const sessionText = (key, params) => globalThis.voiceLabI18n?.t(key, params) ?? key;
+
 const publicAuthPanels = [...document.querySelectorAll("[data-public-auth-panel]")];
 
 if (publicAuthPanels.length > 0) {
@@ -29,14 +34,14 @@ function renderPublicAuthPanel(panel, session) {
   const logout = panel.querySelector("[data-public-auth-logout]");
   panel.hidden = false;
   if (!session.google_login_configured) {
-    renderText(status, "Googleログイン設定が未完了です。");
+    renderText(status, sessionText("speakloop.session.loginNotConfigured"));
     if (login) login.hidden = true;
     if (logout) logout.hidden = true;
     return;
   }
   const next = `${window.location.pathname}${window.location.search}`;
   if (session.authenticated) {
-    renderText(status, `${session.email}${session.is_admin ? "（管理者・制限なし）" : ""}`);
+    renderText(status, `${session.email}${session.is_admin ? sessionText("speakloop.session.adminSuffix") : ""}`);
     if (login) login.hidden = true;
     if (logout) {
       logout.hidden = false;
@@ -44,7 +49,7 @@ function renderPublicAuthPanel(panel, session) {
     }
     return;
   }
-  renderText(status, "生成にはGoogleログインが必要です。");
+  renderText(status, sessionText("speakloop.session.loginRequired"));
   if (login) {
     login.hidden = false;
     login.href = `/auth/google/login?next=${encodeURIComponent(next)}`;

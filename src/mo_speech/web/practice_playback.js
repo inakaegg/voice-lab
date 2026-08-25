@@ -1,3 +1,8 @@
+// このファイルは <script> で読まれ、他の同種スクリプトとグローバルスコープを共有する。
+// 同名の識別子を置くと2本目以降がSyntaxErrorで止まるため、名前をファイルごとに分ける。
+// node:test は直接importするので window ではなく globalThis から引く（ブラウザでは同一）。
+const playbackText = (key, params) => globalThis.voiceLabI18n?.t(key, params) ?? key;
+
 (function practicePlaybackContract(global) {
   function availableRanges(alignment) {
     const entries = Array.isArray(alignment?.phrases) ? alignment.phrases : [];
@@ -29,9 +34,9 @@
   }
 
   function comparisonPlaybackPlan(options) {
-    if (!options.modelReady) return { mode: "none", label: "お手本を再生", description: "", ranges: [] };
+    if (!options.modelReady) return { mode: "none", label: playbackText("speakloop.playModel"), description: "", ranges: [] };
     if (options.outcome === "no_speech" || !options.repeatReady || !options.resultVisible) {
-      return { mode: "model", label: "お手本を再生", description: "", ranges: [] };
+      return { mode: "model", label: playbackText("speakloop.playModel"), description: "", ranges: [] };
     }
     const modelDuration = Number(options.modelDuration);
     const repeatDuration = Number(options.repeatDuration);
@@ -42,8 +47,8 @@
     ) {
       return {
         mode: "whole",
-        label: "全体比較再生",
-        description: "フレーズの区切りを確認できなかったため、全体を比較します。",
+        label: playbackText("speakloop.playback.compareWhole"),
+        description: playbackText("speakloop.playback.compareWholeReason"),
         ranges: [],
       };
     }
@@ -56,8 +61,8 @@
     if (!ranges.length) {
       return {
         mode: "whole",
-        label: "全体比較再生",
-        description: "フレーズの区切りを確認できなかったため、全体を比較します。",
+        label: playbackText("speakloop.playback.compareWhole"),
+        description: playbackText("speakloop.playback.compareWholeReason"),
         ranges: [],
       };
     }
@@ -71,10 +76,10 @@
       (!targetCount || ranges.length === targetCount);
     return {
       mode: complete ? "phrase" : "partial_phrase",
-      label: complete ? "フレーズごと比較再生" : "一部フレーズ比較再生",
+      label: complete ? playbackText("speakloop.playback.comparePhrases") : playbackText("speakloop.playback.comparePartial"),
       description: complete
-        ? `${ranges.length}/${targetCount || ranges.length}フレーズを順番に比較できます。`
-        : `確認できた${ranges.length}/${targetCount || ranges.length}フレーズを順番に比較します。`,
+        ? playbackText("speakloop.playback.phraseCount", { count: ranges.length, total: targetCount || ranges.length })
+        : playbackText("speakloop.playback.phraseCountPartial", { count: ranges.length, total: targetCount || ranges.length }),
       ranges,
     };
   }
@@ -254,7 +259,7 @@
       cells.push({ type: "insert", correction: "", heard: recognizedChar || "_", targetOffset: targetIndex });
       recognizedIndex += 1;
     }
-    return cells.length ? cells : [{ type: "insert", correction: "", heard: "（聞き取れませんでした）" }];
+    return cells.length ? cells : [{ type: "insert", correction: "", heard: playbackText("speakloop.playback.notHeard") }];
   }
 
   // equalの連続に加え、substitute/tone/deleteなど同種の不一致セルが連続する場合もまとめる。
