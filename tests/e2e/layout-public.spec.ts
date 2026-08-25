@@ -30,7 +30,7 @@ for (const route of publicRoutes) {
     await assertNoHorizontalOverflow(page);
     await assertVisibleControlsInsideViewport(page);
     if ((page.viewportSize()?.width || 0) <= 820) {
-      const themeControl = page.getByLabel("配色設定");
+      const themeControl = page.getByLabel("表示設定");
       const themeBox = await themeControl.boundingBox();
       expect(themeBox?.width || 0).toBeGreaterThanOrEqual(40);
       expect((themeBox?.x || 0) + (themeBox?.width || 0)).toBeGreaterThanOrEqual((page.viewportSize()?.width || 0) - 24);
@@ -241,7 +241,7 @@ test("SpeakLoop GitHub link supports hover, keyboard focus, theme, and opening t
 
 test("public theme menu is keyboard reachable and persists dark mode", async ({ page }) => {
   await page.goto("/speakloop");
-  const settings = page.getByLabel("配色設定");
+  const settings = page.getByLabel("表示設定");
   await settings.focus();
   await expect(settings).toBeFocused();
   await page.keyboard.press("Enter");
@@ -255,7 +255,7 @@ test("public theme menu closes on outside click and Escape", async ({ page }, te
   await page.addInitScript(() => localStorage.setItem("mo-speech-theme", "light"));
   await page.goto("/speakloop");
   const settings = page.locator(".react-theme-settings");
-  const summary = page.getByLabel("配色設定");
+  const summary = page.getByLabel("表示設定");
 
   await summary.click();
   await expect(settings).toHaveAttribute("open", "");

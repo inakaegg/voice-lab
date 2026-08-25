@@ -18,7 +18,7 @@ const messages = await read("apps/web/src/shared/i18n-messages.ts");
 
 test("public portal, SpeakLoop, and privacy policy are React TypeScript entries", () => {
   assert.match(portal, /mountPublicPage\(<Portal/);
-  assert.match(speakloop, /mountPublicPage\(<SpeakLoop/);
+  assert.match(speakloop, /mountPublicPage\(\s*<SpeakLoop/);
   assert.match(privacy, /mountPublicPage\(<PrivacyPolicy/);
   assert.match(shared, /function ProductHeader/);
   assert.match(shared, /activateCompactLayout/);
@@ -197,7 +197,7 @@ test("public React routes use the staged Tailwind and shadcn migration boundary"
 });
 
 test("public UI finalizes the compact layout and exposes theme settings", () => {
-  assert.match(shared, /function ThemeSettings/);
+  assert.match(shared, /function DisplaySettings/);
   assert.match(messages, /"shared\.themeLight": "明色"/);
   assert.match(messages, /"shared\.themeDark": "暗色"/);
   assert.match(messages, /"shared\.themeSystem": "システム"/);

@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, ThemeSettings } from "../shared/components";
+import { activateCompactLayout, DisplaySettings } from "../shared/components";
 
 activateCompactLayout();
 
@@ -12,7 +12,7 @@ function PrivacyPolicy() {
         <ArrowLeft className="size-4" aria-hidden="true" />
         Voice Lab
       </a>
-      <ThemeSettings />
+      <DisplaySettings />
     </header>
 
     <article className="mx-auto w-full max-w-4xl px-5 pb-16 pt-8 sm:px-8 sm:pt-12">

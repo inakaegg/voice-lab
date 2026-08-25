@@ -11,28 +11,31 @@ test.describe("pages that are not localized yet stay Japanese", () => {
     await installUiApiFixtures(page);
   });
 
-  test("an English browser still gets Japanese on SpeakLoop", async ({ page }) => {
-    await page.goto("/speakloop");
+  test("an English browser still gets Japanese on the portal", async ({ page }) => {
+    await page.goto("/");
 
     await expect(page.locator("html")).toHaveAttribute("lang", "ja");
-    await expect(page.getByText("使用技術")).toBeVisible();
-    await expect(page.getByRole("link", { name: "プライバシーポリシー" })).toBeVisible();
-    // 辞書化していない画面には切り替えの入口を出さない。
-    await expect(page.getByLabel("表示言語の設定")).toHaveCount(0);
+    // 辞書化していない画面の設定メニューには、表示言語のセクションを出さない。
+    await page.getByLabel("表示設定").click();
+    await expect(page.getByRole("radiogroup", { name: "表示言語" })).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "配色" })).toBeVisible();
   });
 
-  test("an English choice saved on another page does not leak in", async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem("voice-lab-locale", "en"));
-    await page.goto("/speakloop");
-
-    await expect(page.locator("html")).toHaveAttribute("lang", "ja");
-    await expect(page.getByText("使用技術")).toBeVisible();
-  });
-
-  test("the portal stays Japanese for an English browser", async ({ page }) => {
+  test("an English choice saved on another page does not leak into the portal", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("voice-lab-locale", "en"));
     await page.goto("/");
 
     await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+  });
+
+  test("the privacy page stays Japanese for an English browser", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("voice-lab-locale", "en"));
+    await page.goto("/privacy");
+
+    await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+    // portal と同じ契約で見る。設定メニュー自体は残り、言語セクションだけが出ない。
+    await page.getByLabel("表示設定").click();
+    await expect(page.getByRole("radiogroup", { name: "表示言語" })).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "配色" })).toBeVisible();
   });
 });

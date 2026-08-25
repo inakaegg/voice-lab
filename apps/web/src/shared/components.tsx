@@ -36,7 +36,7 @@ export function ProductHeader({ product, title, badge, back = true, githubLink =
   const t = useT();
   return <header className="react-product-header">
     <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label={t("shared.backToVoiceLab")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg></a>}<div><p className="react-eyebrow">{product}</p><h1>{title}{badge && <span className="ml-2 inline-block whitespace-nowrap rounded-full border border-[var(--react-border)] px-2 py-0.5 align-middle text-[0.62rem] font-bold tracking-[0.08em] text-[var(--react-muted)]">{badge}</span>}</h1></div></div>
-    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><div className="react-header-actions">{githubLink && <GitHubRepositoryLink tooltipId={`${product.toLowerCase()}-github-tooltip`} />}{languageSwitch && <LanguageSettings/>}<ThemeSettings/></div></div>
+    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><div className="react-header-actions">{githubLink && <GitHubRepositoryLink tooltipId={`${product.toLowerCase()}-github-tooltip`} />}<DisplaySettings language={languageSwitch}/></div></div>
   </header>;
 }
 
@@ -66,25 +66,27 @@ function useDetailsAutoClose(detailsRef: RefObject<HTMLDetailsElement | null>): 
   }, [detailsRef]);
 }
 
-// 表示言語の切り替え。見た目は配色設定と同じdetailsなので、スタイルは
-// react-theme-settings / react-theme-menu を共有し、固有の調整だけ
-// react-language-settings / react-language-menu で足す。
-export function LanguageSettings() {
-  const t = useT();
-  const locale = useLocale();
-  const detailsRef = useRef<HTMLDetailsElement>(null);
-  useDetailsAutoClose(detailsRef);
-  const options: ReadonlyArray<[Locale, string]> = [["ja", t("shared.languageJa")], ["en", t("shared.languageEn")]];
-  return <details ref={detailsRef} className="react-theme-settings react-language-settings">
-    <summary aria-label={t("shared.languageSettings")} title={t("shared.languageSettings")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z"/></svg></summary>
-    <div className="react-theme-menu react-language-menu" role="radiogroup" aria-label={t("shared.language")}>
-      {options.map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={locale === value} onClick={() => setLocale(value)}>{label}</button>)}
-    </div>
-  </details>;
+// vanilla JS層は進行中(録音中・処理中)をbodyのdata属性で伝える。表示言語を変えると
+// その画面はページを読み直すため、進行中は切り替えさせない。
+function usePracticeBusy(): boolean {
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const update = () => setBusy(document.body.dataset.practiceBusy === "1");
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(document.body, { attributes: true, attributeFilter: ["data-practice-busy"] });
+    return () => observer.disconnect();
+  }, []);
+  return busy;
 }
 
-export function ThemeSettings() {
+// 表示に関する設定を1つのメニューへまとめる。画面右上にアイコンを増やすと、狭い幅で
+// 見出しが折り返して戻るボタンのタップ領域まで圧迫するため、GitHubリンクと設定の2つに保つ。
+// language は文言を辞書へ移し終えた画面だけ true にする。
+export function DisplaySettings({ language = false }: { language?: boolean }) {
   const t = useT();
+  const locale = useLocale();
+  const busy = usePracticeBusy();
   const [preference, setPreference] = useState<ThemePreference>(() => storedThemePreference());
   const detailsRef = useRef<HTMLDetailsElement>(null);
   useDetailsAutoClose(detailsRef);
@@ -103,10 +105,24 @@ export function ThemeSettings() {
     setPreference(next);
     try { window.localStorage.setItem(themeStorageKey, next); } catch { /* 配色変更自体は継続する。 */ }
   };
-  return <details ref={detailsRef} className="react-theme-settings">
-    <summary aria-label={t("shared.themeSettings")} title={t("shared.themeSettings")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/></svg></summary>
-    <div className="react-theme-menu" role="radiogroup" aria-label={t("shared.theme")}>
-      {([['light', t("shared.themeLight")], ['dark', t("shared.themeDark")], ['system', t("shared.themeSystem")]] as const).map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={preference === value} onClick={() => selectTheme(value)}>{label}</button>)}
+  const languageOptions: ReadonlyArray<[Locale, string]> = [["ja", t("shared.languageJa")], ["en", t("shared.languageEn")]];
+  return <details ref={detailsRef} className="react-theme-settings react-display-settings">
+    <summary aria-label={t("shared.displaySettings")} title={t("shared.displaySettings")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/></svg></summary>
+    <div className="react-theme-menu react-display-menu">
+      {language && <div className="react-display-section">
+        <p className="react-display-heading">{t("shared.language")}</p>
+        <div role="radiogroup" aria-label={t("shared.language")}>
+          {languageOptions.map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={locale === value} disabled={busy} onClick={() => setLocale(value)}>{label}</button>)}
+        </div>
+        {/* 表示言語を変えるとこの画面は読み直すので、進行中は変えさせない。配色は無害なので止めない。 */}
+        {busy && <p className="react-display-note">{t("speakloop.languageLockedWhileBusy")}</p>}
+      </div>}
+      <div className="react-display-section">
+        <p className="react-display-heading">{t("shared.theme")}</p>
+        <div role="radiogroup" aria-label={t("shared.theme")}>
+          {([['light', t("shared.themeLight")], ['dark', t("shared.themeDark")], ['system', t("shared.themeSystem")]] as const).map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={preference === value} onClick={() => selectTheme(value)}>{label}</button>)}
+        </div>
+      </div>
     </div>
   </details>;
 }

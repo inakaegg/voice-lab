@@ -2,7 +2,7 @@ import { ArrowUpRight, AudioWaveform, Mic2, PawPrint } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { mountPublicPage } from "../shared/bootstrap";
-import { activateCompactLayout, GitHubRepositoryLink, TechStackNote, ThemeSettings } from "../shared/components";
+import { activateCompactLayout, GitHubRepositoryLink, TechStackNote, DisplaySettings } from "../shared/components";
 import { fetchZoovoiceConfig } from "../zoovoice/api";
 
 import "./styles.css";
@@ -43,7 +43,7 @@ function Portal({ zoovoiceEnabled }: { zoovoiceEnabled: boolean }) {
       </div>
       <div className="flex items-center gap-2">
         <GitHubRepositoryLink tooltipId="portal-github-tooltip" />
-        <ThemeSettings />
+        <DisplaySettings />
       </div>
     </header>
 

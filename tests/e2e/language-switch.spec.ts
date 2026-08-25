@@ -28,7 +28,7 @@ test.describe("English display language", () => {
     await expect(page.getByRole("link", { name: "Privacy policy" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Back to Voice Lab" })).toBeVisible();
 
-    await page.getByLabel("Display language settings").click();
+    await page.getByLabel("Display settings").click();
     await page.getByRole("radio", { name: "日本語" }).click();
 
     await expect(page.locator("html")).toHaveAttribute("lang", "ja");

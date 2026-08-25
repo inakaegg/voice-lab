@@ -520,4 +520,4 @@ function failureFrom(error: unknown, fallbackKey: string): { messageKey: string;
   return { messageKey: fallbackKey };
 }
 
-mountPublicPage(<Zoovoice />, [], { localized: true });
+mountPublicPage(<Zoovoice />, [], { localized: true, titleKey: "zoovoice.pageTitle" });

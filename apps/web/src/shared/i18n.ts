@@ -53,8 +53,26 @@ export function subscribeLocale(listener: () => void): () => void {
 
 // html要素のlang属性も切り替える。読み上げソフトと自動翻訳がこの属性を見るため、
 // 本文だけ英語にして lang="ja" が残ると読み方が崩れる。
+// タブのタイトルは利用者が直接見るので追随させる。metaとJSON-LDはクローラ向けで
+// ランタイム変更の効果が薄いため、静的な日本語のまま据え置く。
+let documentTitleKey = "";
+
 export function applyLocaleToDocument(locale: Locale = getLocale()): void {
   document.documentElement.lang = locale;
+  if (documentTitleKey) document.title = translateWith(documentTitleKey, locale);
+}
+
+export function setDocumentTitleKey(key: string): void {
+  documentTitleKey = key;
+}
+
+// vanilla JS層を持つ画面は、切り替えたときに読み直さないと既に描かれた文言が古い言語のまま残る。
+// 書き込み箇所ごとに再適用の責務を配ると漏れるので、漏れが構造的に起きない方を選ぶ。
+// Reactで完結する画面には不要なので、画面ごとに指定する。
+let reloadOnLocaleChange = false;
+
+export function setReloadOnLocaleChange(value: boolean): void {
+  reloadOnLocaleChange = value;
 }
 
 export function setLocale(next: Locale): void {
@@ -67,6 +85,7 @@ export function setLocale(next: Locale): void {
   }
   applyLocaleToDocument(next);
   for (const listener of listeners) listener();
+  if (reloadOnLocaleChange) window.location.reload();
 }
 
 // 画面を段階的に辞書化する間、まだ移していない画面の表示を固定するために使う。

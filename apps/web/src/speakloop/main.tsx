@@ -33,7 +33,7 @@ function CancelRecordingButton({ id }: { id: string }) {
 function SpeakLoop() {
   const t = useT();
   return <PageShell className="practice-shell react-practice-shell">
-    <ProductHeader product="SpeakLoop" title={t("speakloop.headerTitle")} githubLink />
+    <ProductHeader product="SpeakLoop" title={t("speakloop.headerTitle")} githubLink languageSwitch />
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>{t("speakloop.tagline")}</h2><p>{t("speakloop.lead")}</p></div>
     </section>
@@ -75,4 +75,9 @@ function SpeakLoop() {
   </PageShell>;
 }
 
-mountPublicPage(<SpeakLoop />, ["/static/app_public_session.js", "/static/app_public_sample_audio.js", "/static/practice_playback.js", "/static/app_practice.js"]);
+// vanilla JS層が既に描いた文言は切り替えでは戻せないため、この画面は読み直して反映する。
+mountPublicPage(
+  <SpeakLoop />,
+  ["/static/app_public_session.js", "/static/app_public_sample_audio.js", "/static/practice_playback.js", "/static/app_practice.js"],
+  { localized: true, titleKey: "speakloop.pageTitle", reloadOnLocaleChange: true },
+);
