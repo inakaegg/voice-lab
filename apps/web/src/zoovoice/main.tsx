@@ -4,14 +4,17 @@ import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "
 
 import { mountPublicPage } from "../shared/bootstrap";
 import { activateCompactLayout, PageShell, PrivacyNotice, ProductHeader, TechStackNote } from "../shared/components";
+import { useLocale, useT } from "../shared/i18n";
 import { animalEmoji } from "./animal-emoji";
+import { animalName } from "./animal-name";
 import {
   composeRecording,
   fetchZoovoiceConfig,
   isRetryableZoovoiceError,
   wavBlobFromBase64,
+  ZoovoiceApiError,
   type ComposeResponse,
-  insertedAnimalLabels,
+  insertedAnimals,
   type SoundCredit,
   type ZoovoiceConfig,
 } from "./api";
@@ -61,6 +64,7 @@ type TurnstileToken = {
 };
 
 function Zoovoice() {
+  const t = useT();
   const [state, dispatch] = useReducer(zoovoiceReducer, initialZoovoiceState);
   const [intensity, setIntensity] = useState(defaultIntensity);
   const [animalCount, setAnimalCount] = useState(defaultAnimalCount);
@@ -89,7 +93,7 @@ function Zoovoice() {
       .then((loadedConfig) => {
         setConfig(loadedConfig);
         if (!loadedConfig.enabled) {
-          dispatch({ type: "failed", kind: "setup_failed", message: "Zoovoiceは現在利用できません。" });
+          dispatch({ type: "failed", kind: "setup_failed", messageKey: "zoovoice.error.unavailable" });
           return;
         }
         dispatch({ type: "config_loaded" });
@@ -99,7 +103,7 @@ function Zoovoice() {
         dispatch({
           type: "failed",
           kind: "setup_failed",
-          message: messageFromError(error, "Zoovoiceを準備できませんでした。"),
+          ...failureFrom(error, "zoovoice.error.setupFailed"),
         });
       });
     return () => controller.abort();
@@ -197,7 +201,7 @@ function Zoovoice() {
         dispatch({
           type: "failed",
           kind: isRetryableZoovoiceError(error) ? "compose_retryable" : "compose_terminal",
-          message: messageFromError(error, "音声を生成できませんでした。もう一度お試しください。"),
+          ...failureFrom(error, "zoovoice.error.composeFailed"),
         });
       })
       .finally(() => {
@@ -220,7 +224,7 @@ function Zoovoice() {
       dispatch({
         type: "failed",
         kind: "verify_timeout",
-        message: "不正利用防止の確認を完了できませんでした。ページを再読み込みするか、もう一度録音してください。",
+        messageKey: "zoovoice.error.verifyTimeout",
       });
     };
 
@@ -255,9 +259,9 @@ function Zoovoice() {
     setTurnstileToken({ value: token, issuedAt: token ? Date.now() : 0 });
   }, []);
 
-  const handleTurnstileUnavailable = useCallback((message: string) => {
+  const handleTurnstileUnavailable = useCallback((messageKey: string) => {
     setTurnstileUnavailable(true);
-    dispatch({ type: "failed", kind: "setup_failed", message });
+    dispatch({ type: "failed", kind: "setup_failed", messageKey });
   }, []);
 
   const handleTurnstileInteraction = useCallback((interactive: boolean) => {
@@ -285,9 +289,9 @@ function Zoovoice() {
       dispatch({
         type: "failed",
         kind: "mic_denied",
-        message: error instanceof DOMException && error.name === "NotAllowedError"
-          ? "マイクを使用できません。ブラウザの権限を確認してください。"
-          : "マイクを使用できません。ブラウザの設定を確認してください。",
+        messageKey: error instanceof DOMException && error.name === "NotAllowedError"
+          ? "zoovoice.error.micDenied"
+          : "zoovoice.error.micUnavailable",
       });
     }
   };
@@ -329,21 +333,21 @@ function Zoovoice() {
   const isProcessing = state.phase === "processing";
 
   return <PageShell className="zoovoice-shell max-w-[1120px]">
-    <ProductHeader product="zoovoice" title="声から動物を連想する" />
+    <ProductHeader product="zoovoice" title={t("zoovoice.headerTitle")} languageSwitch />
     <section className="mb-3 flex flex-col gap-1.5 border-l-[3px] border-[var(--react-ink)] pl-4 sm:mb-4 sm:flex-row sm:items-end sm:justify-between sm:gap-5">
       <div>
         <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-[var(--react-muted)]">Record · Associate · Play</p>
-        <h2 className="text-balance text-[clamp(1.45rem,3vw,2.25rem)] font-bold leading-tight tracking-[-0.04em] text-[var(--react-ink)]">話すだけで、ぴったりの動物を。</h2>
+        <h2 className="text-balance text-[clamp(1.45rem,3vw,2.25rem)] font-bold leading-tight tracking-[-0.04em] text-[var(--react-ink)]">{t("zoovoice.tagline")}</h2>
       </div>
-      <p className="max-w-[34rem] text-xs leading-5 text-[var(--react-muted)] sm:text-right sm:text-sm">話した内容から動物を選び、その鳴き声を言葉の切れ目へ差し込みます。</p>
+      <p className="max-w-[34rem] text-xs leading-5 text-[var(--react-muted)] sm:text-right sm:text-sm">{t("zoovoice.lead")}</p>
     </section>
 
     <main data-testid="zoovoice-workspace" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
       <Card className="min-w-0 gap-0 overflow-visible rounded-[1.35rem] border-border/80 py-0 shadow-sm">
         <CardHeader className="gap-1 border-b border-border/70 px-4 py-3.5 sm:px-5">
           <p className="text-[0.65rem] font-bold uppercase tracking-[0.15em] text-muted-foreground">01 · Record</p>
-          <CardTitle className="text-lg tracking-[-0.025em]">声を録音する</CardTitle>
-          <CardDescription className="text-xs leading-5">停止すると自動で生成を開始します。60秒で自動停止した場合も送信します。</CardDescription>
+          <CardTitle className="text-lg tracking-[-0.025em]">{t("zoovoice.recordTitle")}</CardTitle>
+          <CardDescription className="text-xs leading-5">{t("zoovoice.recordDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3.5 p-4 sm:p-5">
           <RecordOrb
@@ -357,7 +361,7 @@ function Zoovoice() {
           />
 
           <label className="grid gap-1.5 text-sm font-bold text-foreground">
-            <span className="flex items-center justify-between gap-4"><span>アニマル度</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensityStage(intensity)} / {intensityStageCount}</output></span>
+            <span className="flex items-center justify-between gap-4"><span>{t("zoovoice.intensityLabel")}</span><output htmlFor="zoovoice-intensity" className="tabular-nums text-muted-foreground">{intensityStage(intensity)} / {intensityStageCount}</output></span>
             <input
               id="zoovoice-intensity"
               type="range"
@@ -373,12 +377,12 @@ function Zoovoice() {
             <datalist id="zoovoice-intensity-stages">
               {intensityStageValues.map((value) => <option key={value} value={value} />)}
             </datalist>
-            <span className="flex justify-between gap-3 text-[0.65rem] font-medium text-muted-foreground"><span>ひかえめ</span><span>{controls.retryVisible ? "次の再生成にも反映" : "次の録音に反映"}</span><span>にぎやか</span></span>
+            <span className="flex justify-between gap-3 text-[0.65rem] font-medium text-muted-foreground"><span>{t("zoovoice.intensityLow")}</span><span>{t(controls.retryVisible ? "zoovoice.intensityAppliesNextRetry" : "zoovoice.intensityAppliesNextRecording")}</span><span>{t("zoovoice.intensityHigh")}</span></span>
           </label>
 
           {/* legend は互換layerの素の要素selectorが色と字を上書きするため、この route では使わない。 */}
-          <div data-testid="zoovoice-animal-count" role="radiogroup" aria-label="動物の数" className="grid gap-1.5">
-            <span className="text-sm font-bold text-foreground">動物の数</span>
+          <div data-testid="zoovoice-animal-count" role="radiogroup" aria-label={t("zoovoice.animalCount")} className="grid gap-1.5">
+            <span className="text-sm font-bold text-foreground">{t("zoovoice.animalCount")}</span>
             <div className="grid grid-cols-2 gap-2">
               {animalCountChoices.map((value) => <label
                 key={value}
@@ -393,7 +397,7 @@ function Zoovoice() {
                   onChange={() => setAnimalCount(value)}
                   className="sr-only"
                 />
-                {value}種
+                {t("zoovoice.animalCountOption", { count: value })}
               </label>)}
             </div>
           </div>
@@ -413,7 +417,7 @@ function Zoovoice() {
               className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-5 py-2.5 text-sm font-bold text-background shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40 motion-reduce:transition-none"
             >
               <Sparkles className="size-4" aria-hidden="true" />
-              もう一度生成
+              {t("zoovoice.regenerate")}
             </button>}
             <p
               role="status"
@@ -427,7 +431,7 @@ function Zoovoice() {
                     : "text-muted-foreground"
               }`}
             >
-              {state.message}
+              {state.serverText ?? (state.messageKey ? t(state.messageKey) : "")}
             </p>
           </div>
         </CardContent>
@@ -436,15 +440,15 @@ function Zoovoice() {
       <Card className="min-w-0 gap-0 overflow-hidden rounded-[1.35rem] border-border/80 py-0 shadow-sm">
         <CardHeader className="gap-1 border-b border-border/70 px-4 py-3.5 sm:px-5">
           <p className="text-[0.65rem] font-bold uppercase tracking-[0.15em] text-muted-foreground">02 · Result</p>
-          <CardTitle className="text-lg tracking-[-0.025em]">連想された動物</CardTitle>
-          <CardDescription className="text-xs leading-5">聞き取った言葉と選んだ理由も確認できます。</CardDescription>
+          <CardTitle className="text-lg tracking-[-0.025em]">{t("zoovoice.resultTitle")}</CardTitle>
+          <CardDescription className="text-xs leading-5">{t("zoovoice.resultDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="grid min-h-[20rem] content-center gap-3.5 p-4 sm:p-5">
           {result
             ? <ResultDetails result={result} />
             : <div className="grid justify-items-center gap-2 text-center text-muted-foreground">
               <Sparkles className="size-7 opacity-45" strokeWidth={1.5} aria-hidden="true" />
-              <p className="max-w-[28rem] text-sm leading-6">録音を止めると、選ばれた動物と鳴き声入り音声をここに表示します。</p>
+              <p className="max-w-[28rem] text-sm leading-6">{t("zoovoice.resultPlaceholder")}</p>
             </div>}
         </CardContent>
       </Card>
@@ -455,25 +459,31 @@ function Zoovoice() {
 }
 
 function ResultDetails({ result }: { result: ResultState }) {
+  const t = useT();
+  const locale = useLocale();
   const meta = result.payload.meta;
+  const nameOf = (animal: { id: string; label_ja: string }) => animalName(animal.id, animal.label_ja, locale);
   return <>
     <div data-testid="zoovoice-animal-figure" className="grid gap-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3">
       {meta.selected_animals.map((animal) => <span key={animal.id} className="flex items-center gap-3.5">
         <span aria-hidden="true" className="text-[2.75rem] leading-none">{animalEmoji(animal.id)}</span>
-        <span className="min-w-0 break-words text-xl font-bold tracking-[-0.02em] text-foreground">{animal.label_ja}</span>
+        <span className="min-w-0 break-words text-xl font-bold tracking-[-0.02em] text-foreground">{nameOf(animal)}</span>
       </span>)}
     </div>
     <dl className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border border-border/70 bg-muted/35 px-3.5 py-3 text-xs leading-5">
-      <dt className="font-semibold text-muted-foreground">聞き取った言葉</dt>
+      <dt className="font-semibold text-muted-foreground">{t("zoovoice.heardWords")}</dt>
       <dd className="min-w-0 break-words text-foreground">{meta.transcript}</dd>
       {meta.selected_animals.map((animal) => <Fragment key={animal.id}>
-        <dt className="font-semibold text-muted-foreground">{animal.label_ja}を選んだ理由</dt>
+        <dt className="font-semibold text-muted-foreground">{t("zoovoice.animalReason", { animal: nameOf(animal) })}</dt>
         <dd className="min-w-0 break-words text-foreground">{animal.reason}</dd>
       </Fragment>)}
     </dl>
     <ResultPlayer source={result.url} fallbackDuration={meta.output_duration_seconds} autoPlay />
     <p className="break-words text-[0.68rem] leading-5 text-muted-foreground">
-      {meta.insertions.length}か所に「{insertedAnimalLabels(meta).join("」と「")}」の鳴き声を差し込みました。
+      {t("zoovoice.insertionSummary", {
+        count: meta.insertions.length,
+        animals: insertedAnimals(meta).map(nameOf).join(t("zoovoice.animalJoiner")),
+      })}
     </p>
     <SoundCredits credits={meta.sound_credits ?? []} />
   </>;
@@ -482,23 +492,32 @@ function ResultDetails({ result }: { result: ResultState }) {
 // 鳴き声素材の出典表示。CC BYの素材は表示が利用条件なので、使った素材を必ず並べる。
 // 素材はいずれも無音除去とトリム、音量調整を経ているため、改変した旨も添える。
 function SoundCredits({ credits }: { credits: SoundCredit[] }) {
+  const t = useT();
   if (credits.length === 0) return null;
   return <div data-testid="zoovoice-sound-credits" className="grid gap-1 border-t border-border/70 pt-2.5 text-[0.68rem] leading-5 text-muted-foreground">
-    <p className="font-semibold">鳴き声素材の出典（無音除去・トリム・音量調整を実施）</p>
+    <p className="font-semibold">{t("zoovoice.soundCreditsHeading")}</p>
     <ul className="grid gap-0.5">
       {credits.map((credit) => <li key={`${credit.license}/${credit.creator ?? ""}/${credit.source_url ?? ""}`} className="break-words">
         {credit.license}
         {credit.creator ? ` / ${credit.creator}` : ""}
         {credit.source_url
-          ? <> / <a href={credit.source_url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">出典</a></>
+          ? <> / <a href={credit.source_url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">{t("zoovoice.soundCreditSource")}</a></>
           : null}
       </li>)}
     </ul>
   </div>;
 }
 
-function messageFromError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+// gateway / origin が返した文があればそれを出し、無ければ辞書キーで翻訳する。
+// サーバー由来の文は翻訳できないため、英語表示でも原文のまま出る。
+function failureFrom(error: unknown, fallbackKey: string): { messageKey: string; serverText?: string } {
+  if (error instanceof ZoovoiceApiError) {
+    return error.serverMessage
+      ? { messageKey: error.messageKey || fallbackKey, serverText: error.serverMessage }
+      : { messageKey: error.messageKey || fallbackKey };
+  }
+  if (error instanceof Error && error.message) return { messageKey: fallbackKey, serverText: error.message };
+  return { messageKey: fallbackKey };
 }
 
-mountPublicPage(<Zoovoice />);
+mountPublicPage(<Zoovoice />, [], { localized: true, titleKey: "zoovoice.pageTitle" });

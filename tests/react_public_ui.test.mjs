@@ -13,10 +13,12 @@ const [portal, speakloop, privacy, shared, styles, worker, pkg, viteConfig, port
   read("apps/web/portal.html"), read("apps/web/speakloop.html"), read("apps/web/privacy.html"),
   read("apps/web/public/github-invertocat-black.svg"), read("apps/web/public/github-invertocat-white.svg"),
 ]);
+// 表示文言はcomponents.tsxから辞書へ移した。契約は「どのキーを使うか」と「辞書に何が入っているか」で見る。
+const messages = await read("apps/web/src/shared/i18n-messages.ts");
 
 test("public portal, SpeakLoop, and privacy policy are React TypeScript entries", () => {
   assert.match(portal, /mountPublicPage\(<Portal/);
-  assert.match(speakloop, /mountPublicPage\(<SpeakLoop/);
+  assert.match(speakloop, /mountPublicPage\(\s*<SpeakLoop/);
   assert.match(privacy, /mountPublicPage\(<PrivacyPolicy/);
   assert.match(shared, /function ProductHeader/);
   assert.match(shared, /activateCompactLayout/);
@@ -46,7 +48,8 @@ test("SpeakLoop uses a contained microphone icon instead of oversized legacy pse
 
 test("React layouts include responsive product and workflow structure", () => {
   assert.match(portal, /aria-label="Voice Lab"/);
-  assert.match(portal, /声から、[\s\S]*ことばの体験を[\s\S]*つくる。/);
+  assert.match(portal, /t\("portal\.headlineLine1"\)[\s\S]*t\("portal\.headlineLine2"\)[\s\S]*t\("portal\.headlineLine3"\)/);
+  assert.match(messages, /"portal\.headlineLine1": "声から、"[\s\S]*"portal\.headlineLine2": "ことばの体験を"[\s\S]*"portal\.headlineLine3": "つくる。"/);
   assert.doesNotMatch(portal, /href:\s*"\/skitvoice"|SkitVoice|VibeVoice/);
   assert.match(portal, /href:\s*"\/speakloop"/);
   assert.match(speakloop, /react-practice-flow/);
@@ -65,7 +68,8 @@ test("portal links to the GitHub repository with hover and focus help", () => {
   assert.match(shared, /target="_blank"/);
   assert.match(shared, /rel="noopener noreferrer"/);
   assert.match(shared, /aria-describedby=\{tooltipId\}/);
-  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*実際の動作を動画で確認できます/);
+  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*t\("shared\.githubTooltip"\)/);
+  assert.match(messages, /"shared\.githubTooltip": "実際の動作を/);
 });
 
 test("SpeakLoop reuses the portal GitHub repository link", () => {
@@ -74,14 +78,15 @@ test("SpeakLoop reuses the portal GitHub repository link", () => {
   assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
   assert.match(shared, /target="_blank"/);
   assert.match(shared, /rel="noopener noreferrer"/);
-  assert.match(shared, /実際の動作を動画で確認できます/);
+  assert.match(messages, /"shared\.githubTooltip": "実際の動作を/);
   assert.match(speakloop, /<ProductHeader[\s\S]*githubLink/);
 });
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {
   assert.match(shared, /export function PrivacyNotice[\s\S]*<footer className="react-workflow-privacy-note" data-public-privacy-notice>/);
-  assert.match(shared, /音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。/);
-  assert.match(shared, /href="\/privacy"[\s\S]*プライバシーポリシー/);
+  assert.match(messages, /"shared\.privacyNotice": "音声は生成・評価のため外部サービスで処理され、Voice Labの履歴には保存されません。/);
+  assert.match(shared, /href="\/privacy">\{t\("shared\.privacyPolicy"\)\}/);
+  assert.match(messages, /"shared\.privacyPolicy": "プライバシーポリシー"/);
   assert.equal((speakloop.match(/<PrivacyNotice\s*\/>/g) || []).length, 1);
   assert.ok(speakloop.indexOf("react-practice-flow") < speakloop.indexOf("<PrivacyNotice"));
   assert.doesNotMatch(speakloop, /外部の音声処理サービスで一時処理/);
@@ -89,19 +94,37 @@ test("SpeakLoop places the shared privacy notice after its main workflow", () =>
 
 test("privacy policy explains external audio processing and retention in plain language", () => {
   for (const provider of ["Cloudflare", "OpenAI", "RunPod"]) {
-    assert.match(privacy, new RegExp(provider));
+    assert.match(messages, new RegExp(provider));
   }
-  assert.match(privacy, /音声と生成音声[\s\S]*履歴として保存しません/);
-  assert.match(privacy, /処理結果の短期データ[\s\S]*1時間/);
-  assert.match(privacy, /利用上限を管理するため、利用者ごとの利用回数を記録します。音声や入力内容はこの記録に含まれません。/);
-  assert.match(privacy, /日ごとの利用回数[\s\S]*3日以内に削除/);
-  assert.match(privacy, /操作ログ[\s\S]*約90日間保存/);
-  assert.match(privacy, /累計利用回数[\s\S]*公開デモの運用中/);
-  assert.match(privacy, /最終更新日: 2026年7月21日/);
-  assert.match(privacy, /ログインしたメールアドレスと日時[\s\S]*利用状況の把握と不正利用の確認/);
-  assert.match(privacy, /ログインしたメールアドレスと日時:[\s\S]*公開デモ終了時に削除/);
-  assert.doesNotMatch(privacy, /最大3日|最大91日|72時間未満|91日未満/);
-  assert.doesNotMatch(privacy, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
+  // 保持期間と送信先は開示内容そのもの。文言を辞書へ移したので、日本語(正本)の記述と、
+  // 英訳側の数値・固有名詞が原文と一致していることを両方固定する。
+  assert.match(messages, /"privacy\.audioBody": "Cloudflare公開版は[\s\S]*履歴として保存しません/);
+  assert.match(messages, /"privacy\.retentionShortLived": "処理結果の短期データ: 1時間。"/);
+  assert.match(messages, /"privacy\.collectCount": "利用上限を管理するため、利用者ごとの利用回数を記録します。音声や入力内容はこの記録に含まれません。"/);
+  assert.match(messages, /"privacy\.retentionDailyCount": "日ごとの利用回数は、利用日から3日以内に削除します。"/);
+  assert.match(messages, /"privacy\.retentionOperationLog": "操作ログは、約90日間保存します。"/);
+  assert.match(messages, /"privacy\.retentionCumulative": "累計利用回数[\s\S]*公開デモの運用中/);
+  assert.match(messages, /"privacy\.lastUpdated": "最終更新日: 2026年7月21日"/);
+  assert.match(messages, /"privacy\.retentionCookie": "Googleログイン用cookie: 30日。/);
+
+  // 英訳側。数値と期間の取り違えが一番危ないので、原文と同じ値が出ることを明示的に見る。
+  assert.match(messages, /"privacy\.retentionCookie": "The Google sign-in cookie: 30 days\./);
+  assert.match(messages, /"privacy\.retentionShortLived": "Short-lived data holding a processing result: one hour\."/);
+  assert.match(messages, /"privacy\.retentionDailyCount": "Daily usage counts are deleted within three days/);
+  assert.match(messages, /"privacy\.retentionOperationLog": "Operation logs are kept for about 90 days\."/);
+  assert.match(messages, /"privacy\.audioBody": "The public Cloudflare deployment[\s\S]*through Cloudflare to OpenAI or RunPod[\s\S]*expires after one hour\./);
+  assert.match(messages, /"privacy\.collectHash": "In the usage records[\s\S]*SHA-256/);
+  assert.match(messages, /"privacy\.lastUpdated": "Last updated: July 21, 2026"/);
+
+  // 英語で読む人にだけ、正本が日本語であることを伝える。
+  assert.match(privacy, /locale === "en" &&[\s\S]*privacy\.translationNotice/);
+  assert.match(messages, /"privacy\.translationNotice": "This is an English translation[\s\S]*Japanese version is authoritative/);
+  assert.match(messages, /"privacy\.collectAdmin": "ログインしたメールアドレスと日時[\s\S]*利用状況の把握と不正利用の確認/);
+  assert.match(messages, /"privacy\.collectAdmin": "The email address you signed in with[\s\S]*check for abuse/);
+  assert.match(messages, /"privacy\.retentionEmail": "ログインしたメールアドレスと日時:[\s\S]*公開デモ終了時に削除/);
+  assert.match(messages, /"privacy\.retentionEmail": "The email address you signed in with and the time:[\s\S]*public demo ends/);
+  assert.doesNotMatch(messages, /最大3日|最大91日|72時間未満|91日未満/);
+  assert.doesNotMatch(messages, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
   assert.match(viteConfig, /privacy:\s*resolve\(rootDir,\s*"privacy\.html"\)/);
   assert.match(privacyHtml, /\/src\/privacy\/main\.tsx/);
 });
@@ -127,10 +150,11 @@ test("SpeakLoop provides a Chinese script segmented control backed by OpenCC", (
 
 test("SpeakLoop exposes an opt-in Seed-VC model voice control with hover and focus help", () => {
   assert.match(speakloop, /id="practice-own-voice-toggle"/);
-  assert.match(speakloop, /自分の声/);
+  assert.match(speakloop, /t\("speakloop\.ownVoice"\)/);
+  assert.match(messages, /"speakloop\.ownVoice": "自分の声"/);
   assert.match(speakloop, /practice-own-voice-control/);
   assert.match(speakloop, /role="tooltip"/);
-  assert.match(speakloop, /「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。/);
+  assert.match(messages, /"speakloop\.ownVoiceTooltip": "「自分の声」は、同じセッションであなたが最初に録音した音声からAI生成音声を作ります。"/);
   assert.doesNotMatch(speakloop, /practice-own-voice-help-button|practice-own-voice-disclosure/);
   assert.doesNotMatch(speakloop, /CircleHelp|useState/);
   assert.doesNotMatch(speakloop, /通常のお手本音声で練習を続けられます/);
@@ -142,7 +166,8 @@ test("SpeakLoop keeps comparison playback simple without an auto-play preference
   assert.doesNotMatch(speakloop, /practice-auto-play-comparison|練習終了後すぐ再生/);
   assert.match(speakloop, /practice-play-model-button/);
   assert.match(speakloop, /practice-play-model-only-button/);
-  assert.match(speakloop, /お手本だけ再生/);
+  assert.match(speakloop, /t\("speakloop\.playModelOnly"\)/);
+  assert.match(messages, /"speakloop\.playModelOnly": "お手本だけ再生"/);
   assert.match(speakloop, /practice-speed-slider/);
 });
 
@@ -155,19 +180,24 @@ test("SpeakLoop keeps local developer settings hidden until runtime capability i
   assert.match(speakloop, /id="practice-comparison-model-select"[\s\S]*defaultValue="gpt-5\.6-terra"/);
   assert.match(speakloop, /id="practice-playback-padding-slider"[\s\S]*min="0"[\s\S]*max="0\.5"[\s\S]*step="0\.05"[\s\S]*defaultValue="0\.3"/);
   assert.match(speakloop, /id="practice-history-preview"[\s\S]*hidden/);
-  assert.match(speakloop, /過去の結果で表示確認/);
+  assert.match(speakloop, /t\("speakloop\.historyPreview"\)/);
+  assert.match(messages, /"speakloop\.historyPreview": "過去の結果で表示確認"/);
   assert.match(speakloop, /id="practice-saved-result-notice"/);
   assert.match(speakloop, /id="practice-history-preview-source-select"[\s\S]*defaultValue="saved"/);
-  assert.match(speakloop, /<option value="recomputed">現行ロジックで再計算<\/option>/);
-  assert.match(speakloop, /前後余白/);
-  assert.match(speakloop, /LLM採点/);
+  assert.match(speakloop, /<option value="recomputed">\{t\("speakloop\.comparisonRecomputed"\)\}<\/option>/);
+  assert.match(messages, /"speakloop\.comparisonRecomputed": "現行ロジックで再計算"/);
+  assert.match(speakloop, /t\("speakloop\.playbackPadding"\)/);
+  assert.match(messages, /"speakloop\.playbackPadding": "前後余白"/);
+  assert.match(speakloop, /t\("speakloop\.gradeBadge"\)/);
+  assert.match(messages, /"speakloop\.gradeBadge": "LLM採点"/);
   assert.doesNotMatch(speakloop, /99\.5%以上/);
 });
 
 test("SpeakLoop exposes recording cancel controls for both recording actions", () => {
   assert.match(speakloop, /id="practice-native-cancel-button"/);
   assert.match(speakloop, /id="practice-repeat-cancel-button"/);
-  assert.match(speakloop, /function CancelRecordingButton[\s\S]*aria-label="録音をキャンセル"/);
+  assert.match(speakloop, /function CancelRecordingButton[\s\S]*aria-label=\{t\("shared\.cancelRecording"\)\}/);
+  assert.match(messages, /"shared\.cancelRecording": "録音をキャンセル"/);
   assert.match(styles, /\.practice-record-cancel-button/);
 });
 
@@ -186,10 +216,10 @@ test("public React routes use the staged Tailwind and shadcn migration boundary"
 });
 
 test("public UI finalizes the compact layout and exposes theme settings", () => {
-  assert.match(shared, /function ThemeSettings/);
-  assert.match(shared, /明色/);
-  assert.match(shared, /暗色/);
-  assert.match(shared, /システム/);
+  assert.match(shared, /function DisplaySettings/);
+  assert.match(messages, /"shared\.themeLight": "明色"/);
+  assert.match(messages, /"shared\.themeDark": "暗色"/);
+  assert.match(messages, /"shared\.themeSystem": "システム"/);
   assert.match(shared, /mo-speech-theme/);
   assert.match(shared, /stroke="currentColor"/);
   assert.match(shared, /strokeLinecap="round"/);

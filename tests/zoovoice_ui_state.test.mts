@@ -27,20 +27,20 @@ test("zoovoice state distinguishes finalizing verification compose and success",
   assert.equal(verifying.phase, "verifying");
   assert.equal(processing.phase, "processing");
   assert.equal(success.phase, "success");
-  assert.equal(success.message, "できあがりました。自動再生を開始します。");
+  assert.equal(success.messageKey, "zoovoice.status.success");
   assert.equal(success.errorKind, "none");
 });
 
 test("starting a new recording clears an earlier result message", () => {
   const success = {
     phase: "success",
-    message: "できあがりました。自動再生を開始します。",
+    messageKey: "zoovoice.status.success",
     errorKind: "none",
   } as const;
 
   const next = zoovoiceReducer(success, { type: "recording_starting" });
 
-  assert.deepEqual(next, { phase: "starting", message: "マイクを準備しています。", errorKind: "none" });
+  assert.deepEqual(next, { phase: "starting", messageKey: "zoovoice.status.micPreparing", errorKind: "none" });
 });
 
 test("cancelling returns to idle and says the recording was not sent", () => {
@@ -48,22 +48,39 @@ test("cancelling returns to idle and says the recording was not sent", () => {
 
   assert.deepEqual(next, {
     phase: "idle",
-    message: "録音をキャンセルしました。音声は送信していません。",
+    messageKey: "zoovoice.status.cancelled",
     errorKind: "none",
   });
 });
 
-test("errors retain their kind and actionable Japanese message", () => {
+test("errors retain their kind and the actionable message key", () => {
   const next = zoovoiceReducer(initialZoovoiceState, {
     type: "failed",
     kind: "mic_denied",
-    message: "マイクを使用できません。ブラウザの権限を確認してください。",
+    messageKey: "zoovoice.error.micDenied",
   });
 
   assert.deepEqual(next, {
     phase: "error",
-    message: "マイクを使用できません。ブラウザの権限を確認してください。",
+    messageKey: "zoovoice.error.micDenied",
     errorKind: "mic_denied",
+  });
+});
+
+// gateway/originが返した文は翻訳できないため、キーではなくその文をそのまま表示に回す。
+test("a server supplied message is kept alongside the fallback key", () => {
+  const next = zoovoiceReducer(initialZoovoiceState, {
+    type: "failed",
+    kind: "compose_terminal",
+    messageKey: "zoovoice.api.composeFailed",
+    serverText: "本日の利用上限に達しました。",
+  });
+
+  assert.deepEqual(next, {
+    phase: "error",
+    messageKey: "zoovoice.api.composeFailed",
+    serverText: "本日の利用上限に達しました。",
+    errorKind: "compose_terminal",
   });
 });
 
@@ -77,7 +94,7 @@ test("error kinds determine orb slider and retry controls", () => {
   ] as const;
 
   for (const row of rows) {
-    const state = { phase: "error", message: "error", errorKind: row.kind } as const;
+    const state = { phase: "error", messageKey: "zoovoice.error.composeFailed", errorKind: row.kind } as const;
     assert.deepEqual(
       controlsForZoovoiceState(state, { configEnabled: true, hasRecording: true }),
       { orbEnabled: row.orb, sliderEnabled: row.slider, retryVisible: row.retry },
@@ -87,7 +104,7 @@ test("error kinds determine orb slider and retry controls", () => {
 });
 
 test("recording keeps the orb available for stop while settings stay fixed", () => {
-  const state = { phase: "recording", message: "", errorKind: "none" } as const;
+  const state = { phase: "recording", messageKey: "", errorKind: "none" } as const;
 
   assert.deepEqual(
     controlsForZoovoiceState(state, { configEnabled: true, hasRecording: false }),
@@ -110,8 +127,8 @@ test("zoovoice exposes only the supported user settings", async () => {
   for (const removed of ["<select", "にわとり牧場", "feel lucky", "<details", "SlotSelect", "Arrangement"]) {
     assert.doesNotMatch(source, new RegExp(removed, "i"));
   }
-  assert.equal(source.match(/アニマル度/g)?.length, 1);
-  assert.equal(source.match(/動物の数/g)?.length, 2);
+  assert.equal(source.match(/zoovoice\.intensityLabel/g)?.length, 1);
+  assert.equal(source.match(/zoovoice\.animalCount"/g)?.length, 2);
 });
 
 test("zoovoice public config distinguishes local and Turnstile gateways", async () => {

@@ -20,7 +20,10 @@ export type ZoovoiceErrorKind =
 
 export type ZoovoiceState = {
   phase: ZoovoicePhase;
-  message: string;
+  // 表示言語を切り替えても同じstateで正しい文が出るよう、文言ではなく辞書キーを持つ。
+  messageKey: string;
+  // gateway / origin が返した文。翻訳できないので、あるときはキーより優先して出す。
+  serverText?: string;
   errorKind: ZoovoiceErrorKind;
 };
 
@@ -34,11 +37,11 @@ export type ZoovoiceAction =
   | { type: "verification_waiting" }
   | { type: "compose_started" }
   | { type: "compose_succeeded"; fallback: boolean }
-  | { type: "failed"; kind: Exclude<ZoovoiceErrorKind, "none">; message: string };
+  | { type: "failed"; kind: Exclude<ZoovoiceErrorKind, "none">; messageKey: string; serverText?: string };
 
 export const initialZoovoiceState: ZoovoiceState = {
   phase: "loading",
-  message: "準備しています。",
+  messageKey: "zoovoice.status.preparing",
   errorKind: "none",
 };
 
@@ -50,25 +53,28 @@ export function zoovoiceReducer(
     case "config_loaded":
       return state("idle", "");
     case "recording_starting":
-      return state("starting", "マイクを準備しています。");
+      return state("starting", "zoovoice.status.micPreparing");
     case "recording_started":
       return state("recording", "");
     case "recording_stopping":
-      return state("finalizing", "録音を確認しています。");
+      return state("finalizing", "zoovoice.status.checkingRecording");
     case "recording_cancelled":
-      return state("idle", "録音をキャンセルしました。音声は送信していません。");
+      return state("idle", "zoovoice.status.cancelled");
     case "recording_too_short":
-      return state("idle", "録音が短すぎました。0.5秒以上話してください。");
+      return state("idle", "zoovoice.status.tooShort");
     case "verification_waiting":
-      return state("verifying", "不正利用防止の確認を待っています。");
+      return state("verifying", "zoovoice.status.verifying");
     case "compose_started":
-      return state("processing", "声を聞き取り、動物を連想して合成しています。");
+      return state("processing", "zoovoice.status.composing");
     case "compose_succeeded":
       return action.fallback
-        ? state("fallback", "関連する動物が見つからなかったため、ランダムに選びました。")
-        : state("success", "できあがりました。自動再生を開始します。");
+        ? state("fallback", "zoovoice.status.fallback")
+        : state("success", "zoovoice.status.success");
     case "failed":
-      return { phase: "error", message: action.message, errorKind: action.kind };
+      // serverTextが無いときはキーを持たせない。stateの形が素直になり、比較も素直になる。
+      return action.serverText
+        ? { phase: "error", messageKey: action.messageKey, serverText: action.serverText, errorKind: action.kind }
+        : { phase: "error", messageKey: action.messageKey, errorKind: action.kind };
   }
 }
 
@@ -100,6 +106,19 @@ export function isComposeReady(
   return !turnstileRequired || isTurnstileTokenFresh(token, issuedAt, now);
 }
 
-function state(phase: ZoovoicePhase, message: string): ZoovoiceState {
-  return { phase, message, errorKind: "none" };
+function state(phase: ZoovoicePhase, messageKey: string): ZoovoiceState {
+  return { phase, messageKey, errorKind: "none" };
 }
+
+// reducerが返し得るキーの一覧。辞書側の取りこぼし(生キーが画面に出る)をテストで塞ぐために公開する。
+export const zoovoiceStatusMessageKeys = [
+  "zoovoice.status.preparing",
+  "zoovoice.status.micPreparing",
+  "zoovoice.status.checkingRecording",
+  "zoovoice.status.cancelled",
+  "zoovoice.status.tooShort",
+  "zoovoice.status.verifying",
+  "zoovoice.status.composing",
+  "zoovoice.status.fallback",
+  "zoovoice.status.success",
+] as const;

@@ -26,12 +26,15 @@ export type ComposeResponse = {
 
 // 2種を選んでもアニマル度0や短い録音では末尾の1本だけになり、鳴るのは1種目だけになる。
 // 画面には連想した動物ではなく実際に差し込んだ動物を出す。
-export function insertedAnimalLabels(meta: ComposeResponse["meta"]): string[] {
+export function insertedAnimals(meta: ComposeResponse["meta"]): AssociatedAnimal[] {
   const inserted = new Set(meta.insertions.map((insertion) => insertion.species));
-  const labels = meta.selected_animals
-    .filter((animal) => inserted.has(animal.id))
-    .map((animal) => animal.label_ja);
-  return labels.length > 0 ? labels : meta.selected_animals.map((animal) => animal.label_ja);
+  const animals = meta.selected_animals.filter((animal) => inserted.has(animal.id));
+  return animals.length > 0 ? animals : meta.selected_animals;
+}
+
+// 表示言語ごとの名前は画面側で解決するので、ラベルだけが要る呼び出し向けの薄い包み。
+export function insertedAnimalLabels(meta: ComposeResponse["meta"]): string[] {
+  return insertedAnimals(meta).map((animal) => animal.label_ja);
 }
 
 // 連想した動物。1種のときも配列で返るので、画面側は件数で分岐しなくてよい。
@@ -78,12 +81,18 @@ const retryableErrorCodes = new Set([
 export class ZoovoiceApiError extends Error {
   readonly code: string;
   readonly status: number;
+  // 表示は messageKey を翻訳して出す。serverMessage は gateway / origin が返した文で、
+  // 翻訳できないため英語表示でもそのまま出す。
+  readonly messageKey: string;
+  readonly serverMessage: string;
 
-  constructor(code: string, status: number, message: string) {
-    super(message);
+  constructor(code: string, status: number, messageKey: string, serverMessage = "") {
+    super(serverMessage || messageKey);
     this.name = "ZoovoiceApiError";
     this.code = code;
     this.status = status;
+    this.messageKey = messageKey;
+    this.serverMessage = serverMessage;
   }
 }
 
@@ -95,9 +104,9 @@ export async function fetchZoovoiceConfig(signal?: AbortSignal): Promise<Zoovoic
   const response = await fetchResponse("/api/zoovoice/config", { signal });
   const payload = await responsePayload<Partial<ZoovoiceConfig> & ErrorEnvelope>(
     response,
-    "Zoovoiceの設定を読み込めませんでした。",
+    "zoovoice.api.configLoadFailed",
   );
-  if (!response.ok) throw apiError(response, payload, "Zoovoiceの設定を読み込めませんでした。");
+  if (!response.ok) throw apiError(response, payload, "zoovoice.api.configLoadFailed");
   if (
     typeof payload.enabled !== "boolean"
     || typeof payload.turnstile_required !== "boolean"
@@ -108,7 +117,7 @@ export async function fetchZoovoiceConfig(signal?: AbortSignal): Promise<Zoovoic
     throw new ZoovoiceApiError(
       "zoovoice_invalid_response",
       response.status,
-      "Zoovoiceの設定を確認できませんでした。",
+      "zoovoice.api.configVerifyFailed",
     );
   }
   return payload as ZoovoiceConfig;
@@ -130,9 +139,9 @@ export async function composeRecording(
   });
   const payload = await responsePayload<ComposeResponse & ErrorEnvelope>(
     response,
-    "音声を生成できませんでした。",
+    "zoovoice.api.composeFailed",
   );
-  if (!response.ok) throw apiError(response, payload, "音声を生成できませんでした。");
+  if (!response.ok) throw apiError(response, payload, "zoovoice.api.composeFailed");
   if (
     payload.audio?.format !== "wav"
     || !payload.audio.base64
@@ -144,7 +153,7 @@ export async function composeRecording(
     throw new ZoovoiceApiError(
       "zoovoice_invalid_response",
       response.status,
-      "生成結果を確認できませんでした。",
+      "zoovoice.api.resultVerifyFailed",
     );
   }
   return payload;
@@ -173,27 +182,28 @@ async function fetchResponse(input: RequestInfo | URL, init?: RequestInit): Prom
     throw new ZoovoiceApiError(
       "zoovoice_network_error",
       0,
-      "ネットワークに接続できませんでした。接続を確認してもう一度お試しください。",
+      "zoovoice.api.networkFailed",
     );
   }
 }
 
-async function responsePayload<T extends ErrorEnvelope>(response: Response, fallback: string): Promise<T> {
+async function responsePayload<T extends ErrorEnvelope>(response: Response, fallbackKey: string): Promise<T> {
   const text = await response.text();
   try {
     return JSON.parse(text) as T;
   } catch {
     if (!response.ok && response.status >= 500) {
-      throw new ZoovoiceApiError("zoovoice_http_unavailable", response.status, fallback);
+      throw new ZoovoiceApiError("zoovoice_http_unavailable", response.status, fallbackKey);
     }
-    throw new ZoovoiceApiError("zoovoice_invalid_response", response.status, fallback);
+    throw new ZoovoiceApiError("zoovoice_invalid_response", response.status, fallbackKey);
   }
 }
 
-function apiError(response: Response, payload: ErrorEnvelope, fallback: string): ZoovoiceApiError {
+function apiError(response: Response, payload: ErrorEnvelope, fallbackKey: string): ZoovoiceApiError {
   return new ZoovoiceApiError(
     payload.error?.code || "zoovoice_unknown_error",
     response.status,
-    payload.error?.message || fallback,
+    fallbackKey,
+    payload.error?.message || "",
   );
 }

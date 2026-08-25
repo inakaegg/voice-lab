@@ -6,6 +6,8 @@ const zoovoiceTests = [
   "**/zoovoice.spec.ts",
   "**/zoovoice-real-backend.spec.ts",
   "**/portal-zoovoice.spec.ts",
+  // zoovoiceの画面はWorker経由でしか開けないため、表示言語のspecもzoovoice側のconfigで動かす。
+  "**/language-switch.spec.ts",
 ];
 
 const browserNames = ["chromium", "webkit", "firefox"] as const;
@@ -51,6 +53,9 @@ export default defineConfig({
   ],
   use: {
     baseURL,
+    // 表示言語の初期値は navigator.language を見るため、既存の日本語前提のテストが
+    // 実行環境のロケールに左右されないよう ja-JP へ固定する。英語表示は専用のspecで確かめる。
+    locale: "ja-JP",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

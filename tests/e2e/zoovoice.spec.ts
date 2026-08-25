@@ -309,7 +309,7 @@ test("zoovoice explains how to recover from microphone permission failure", asyn
   await expect(page.getByRole("button", { name: "録音する" })).toBeEnabled();
   await captureIfRequested(page, testInfo, "error-light");
 
-  await page.getByLabel("配色設定").click();
+  await page.getByLabel("表示設定").click();
   await page.getByRole("radio", { name: "暗色" }).click();
   await page.keyboard.press("Escape");
   await captureIfRequested(page, testInfo, "error-dark");
@@ -748,7 +748,7 @@ function silentWav(): Buffer {
 }
 
 async function setTheme(page: Page, theme: "明色" | "暗色") {
-  await page.getByLabel("配色設定").click();
+  await page.getByLabel("表示設定").click();
   await page.getByRole("radio", { name: theme }).click();
   await page.keyboard.press("Escape");
 }

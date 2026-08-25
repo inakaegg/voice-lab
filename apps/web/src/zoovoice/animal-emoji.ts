@@ -59,6 +59,9 @@ const animalEmojiById: Record<string, string> = {
   "wolf": "🐺",
 };
 
+// 英語名の辞書と同じidを覆っているかをテストで固定するために公開する。
+export const animalEmojiIds = Object.keys(animalEmojiById);
+
 const fallbackAnimalEmoji = "🐾";
 
 export function animalEmoji(animalId: string): string {
