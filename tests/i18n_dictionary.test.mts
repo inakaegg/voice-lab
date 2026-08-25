@@ -79,14 +79,18 @@ test("every message key the sources use exists in both dictionaries", async () =
 });
 
 test("keys that contain digits are covered by the source scan", async () => {
-  const speakloopSource = await read("apps/web/src/speakloop/main.tsx");
+  const scanned = await Promise.all([
+    read("apps/web/src/speakloop/main.tsx"),
+    read("apps/web/src/portal/main.tsx"),
+  ]);
+  const speakloopSource = scanned.join("\n");
   const digitKeys = [...new Set(locales.flatMap((locale) => Object.keys(dictionaries[locale])))]
     .filter((key) => /\d/.test(key));
   assert.ok(digitKeys.length > 0, "the dictionary no longer has a key with a digit; drop this test");
   for (const key of digitKeys) {
     assert.ok(
       speakloopSource.includes(`t("${key}")`),
-      `${key} is in the dictionary but no source calls it`,
+      `${key} is in the dictionary but no scanned source calls it`,
     );
     for (const locale of locales) {
       assert.ok(dictionaries[locale][key], `${locale} is missing ${key}`);
@@ -106,11 +110,20 @@ test("an unknown animal id falls back to the Japanese label", () => {
 
 test("the insertion summary changes form for a single spot in English", () => {
   assert.equal(
-    translateWith("zoovoice.insertionSummary", "en", { count: 1, animal: "Cat" }),
-    "Added one Cat call in a single spot.",
+    translateWith("zoovoice.insertionSummary", "en", { count: 1, animals: "Cat" }),
+    "Spliced in one Cat call at a single word boundary.",
   );
-  assert.match(translateWith("zoovoice.insertionSummary", "en", { count: 3, animal: "Cat" }), /3 spots/);
-  assert.match(translateWith("zoovoice.insertionSummary", "ja", { count: 3, animal: "猫" }), /3か所/);
+  assert.match(translateWith("zoovoice.insertionSummary", "en", { count: 3, animals: "Cat" }), /3 word boundaries/);
+  assert.match(translateWith("zoovoice.insertionSummary", "ja", { count: 3, animals: "猫" }), /3か所/);
+});
+
+// 動物は複数選ばれうる。並べ方も表示言語で変わる。
+test("several animals are joined the way each language reads", () => {
+  const names = ["Cat", "Wolf"];
+  assert.equal(names.join(translateWith("zoovoice.animalJoiner", "en")), "Cat and Wolf");
+  assert.equal(["猫", "オオカミ"].join(translateWith("zoovoice.animalJoiner", "ja")), "猫」と「オオカミ");
+  assert.equal(translateWith("zoovoice.animalReason", "en", { animal: "Cat" }), "Why Cat");
+  assert.equal(translateWith("zoovoice.animalReason", "ja", { animal: "猫" }), "猫を選んだ理由");
 });
 
 test("a missing key falls back to Japanese and then to the key itself", () => {

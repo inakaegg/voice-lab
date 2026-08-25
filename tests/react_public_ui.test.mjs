@@ -48,7 +48,8 @@ test("SpeakLoop uses a contained microphone icon instead of oversized legacy pse
 
 test("React layouts include responsive product and workflow structure", () => {
   assert.match(portal, /aria-label="Voice Lab"/);
-  assert.match(portal, /声から、[\s\S]*ことばの体験を[\s\S]*つくる。/);
+  assert.match(portal, /t\("portal\.headlineLine1"\)[\s\S]*t\("portal\.headlineLine2"\)[\s\S]*t\("portal\.headlineLine3"\)/);
+  assert.match(messages, /"portal\.headlineLine1": "声から、"[\s\S]*"portal\.headlineLine2": "ことばの体験を"[\s\S]*"portal\.headlineLine3": "つくる。"/);
   assert.doesNotMatch(portal, /href:\s*"\/skitvoice"|SkitVoice|VibeVoice/);
   assert.match(portal, /href:\s*"\/speakloop"/);
   assert.match(speakloop, /react-practice-flow/);
@@ -93,19 +94,37 @@ test("SpeakLoop places the shared privacy notice after its main workflow", () =>
 
 test("privacy policy explains external audio processing and retention in plain language", () => {
   for (const provider of ["Cloudflare", "OpenAI", "RunPod"]) {
-    assert.match(privacy, new RegExp(provider));
+    assert.match(messages, new RegExp(provider));
   }
-  assert.match(privacy, /音声と生成音声[\s\S]*履歴として保存しません/);
-  assert.match(privacy, /処理結果の短期データ[\s\S]*1時間/);
-  assert.match(privacy, /利用上限を管理するため、利用者ごとの利用回数を記録します。音声や入力内容はこの記録に含まれません。/);
-  assert.match(privacy, /日ごとの利用回数[\s\S]*3日以内に削除/);
-  assert.match(privacy, /操作ログ[\s\S]*約90日間保存/);
-  assert.match(privacy, /累計利用回数[\s\S]*公開デモの運用中/);
-  assert.match(privacy, /最終更新日: 2026年7月21日/);
-  assert.match(privacy, /ログインしたメールアドレスと日時[\s\S]*利用状況の把握と不正利用の確認/);
-  assert.match(privacy, /ログインしたメールアドレスと日時:[\s\S]*公開デモ終了時に削除/);
-  assert.doesNotMatch(privacy, /最大3日|最大91日|72時間未満|91日未満/);
-  assert.doesNotMatch(privacy, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
+  // 保持期間と送信先は開示内容そのもの。文言を辞書へ移したので、日本語(正本)の記述と、
+  // 英訳側の数値・固有名詞が原文と一致していることを両方固定する。
+  assert.match(messages, /"privacy\.audioBody": "Cloudflare公開版は[\s\S]*履歴として保存しません/);
+  assert.match(messages, /"privacy\.retentionShortLived": "処理結果の短期データ: 1時間。"/);
+  assert.match(messages, /"privacy\.collectCount": "利用上限を管理するため、利用者ごとの利用回数を記録します。音声や入力内容はこの記録に含まれません。"/);
+  assert.match(messages, /"privacy\.retentionDailyCount": "日ごとの利用回数は、利用日から3日以内に削除します。"/);
+  assert.match(messages, /"privacy\.retentionOperationLog": "操作ログは、約90日間保存します。"/);
+  assert.match(messages, /"privacy\.retentionCumulative": "累計利用回数[\s\S]*公開デモの運用中/);
+  assert.match(messages, /"privacy\.lastUpdated": "最終更新日: 2026年7月21日"/);
+  assert.match(messages, /"privacy\.retentionCookie": "Googleログイン用cookie: 30日。/);
+
+  // 英訳側。数値と期間の取り違えが一番危ないので、原文と同じ値が出ることを明示的に見る。
+  assert.match(messages, /"privacy\.retentionCookie": "The Google sign-in cookie: 30 days\./);
+  assert.match(messages, /"privacy\.retentionShortLived": "Short-lived data holding a processing result: one hour\."/);
+  assert.match(messages, /"privacy\.retentionDailyCount": "Daily usage counts are deleted within three days/);
+  assert.match(messages, /"privacy\.retentionOperationLog": "Operation logs are kept for about 90 days\."/);
+  assert.match(messages, /"privacy\.audioBody": "The public Cloudflare deployment[\s\S]*through Cloudflare to OpenAI or RunPod[\s\S]*expires after one hour\./);
+  assert.match(messages, /"privacy\.collectHash": "In the usage records[\s\S]*SHA-256/);
+  assert.match(messages, /"privacy\.lastUpdated": "Last updated: July 21, 2026"/);
+
+  // 英語で読む人にだけ、正本が日本語であることを伝える。
+  assert.match(privacy, /locale === "en" &&[\s\S]*privacy\.translationNotice/);
+  assert.match(messages, /"privacy\.translationNotice": "This is an English translation[\s\S]*Japanese version is authoritative/);
+  assert.match(messages, /"privacy\.collectAdmin": "ログインしたメールアドレスと日時[\s\S]*利用状況の把握と不正利用の確認/);
+  assert.match(messages, /"privacy\.collectAdmin": "The email address you signed in with[\s\S]*check for abuse/);
+  assert.match(messages, /"privacy\.retentionEmail": "ログインしたメールアドレスと日時:[\s\S]*公開デモ終了時に削除/);
+  assert.match(messages, /"privacy\.retentionEmail": "The email address you signed in with and the time:[\s\S]*public demo ends/);
+  assert.doesNotMatch(messages, /最大3日|最大91日|72時間未満|91日未満/);
+  assert.doesNotMatch(messages, /外部処理事業者|Report a vulnerability|security\/advisories\/new/);
   assert.match(viteConfig, /privacy:\s*resolve\(rootDir,\s*"privacy\.html"\)/);
   assert.match(privacyHtml, /\/src\/privacy\/main\.tsx/);
 });

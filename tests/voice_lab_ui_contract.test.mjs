@@ -111,9 +111,12 @@ test("Playwright layout tests are wired into npm and CI", () => {
 test("portal product accents distinguish creation from learning", () => {
   assert.match(portalStyles, /\.portal-product-link-speak\s*\{[^}]*--product-accent:\s*#3e68ad/s);
   assert.match(portalMain, /number:\s*"02"[\s\S]*name:\s*"Zoovoice"[\s\S]*href:\s*"\/zoovoice"/);
-  assert.match(portalMain, /title:\s*"話すだけで、ぴったりの動物を。"/);
-  assert.match(portalMain, /description:\s*"話した内容から動物を選び、声のすき間へ鳴き声を重ねます。"/);
-  assert.match(portalMain, /action:\s*"声を変えてみる"/);
+  assert.match(portalMain, /titleKey:\s*"portal\.zoovoiceTitle"/);
+  assert.match(i18nMessages, /"portal\.zoovoiceTitle": "話すだけで、ぴったりの動物を。"/);
+  assert.match(portalMain, /descriptionKey:\s*"portal\.zoovoiceDescription"/);
+  assert.match(i18nMessages, /"portal\.zoovoiceDescription": "話した内容から動物を選び、声のすき間へ鳴き声を重ねます。"/);
+  assert.match(portalMain, /actionKey:\s*"portal\.zoovoiceAction"/);
+  assert.match(i18nMessages, /"portal\.zoovoiceAction": "声を変えてみる"/);
   assert.match(portalMain, /icon:\s*PawPrint/);
   assert.match(portalMain, /tone:\s*"portal-product-link-zoovoice"/);
   assert.match(portalStyles, /\.portal-product-link-zoovoice\s*\{[^}]*--product-accent:\s*#8a4a18;[^}]*--product-soft:\s*#f7e4d0;/s);
