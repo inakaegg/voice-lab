@@ -1,18 +1,17 @@
 # Voice Lab公開デモ・ポートフォリオ
 
-更新日: 2026-08-10
+更新日: 2026-08-24
 
 ## 現在地
 
 - Voice Labの公開ポートフォリオはSpeakLoopを中心とし、Zoovoiceを含む。
-- Cloudflareのproduction公開環境にはmerge済みの版を反映済みである。公開routeは `/`・`/speakloop`・`/zoovoice`・`/privacy` とする。
-- 本branchのUI変更（β表示の削除・使用技術表示・SpeakLoopのGitHub導線）はproduction未反映である。merge後にdeployとdeploy後smokeを実施する。
+- Cloudflare Workerはmainへのpushで自動反映するため、production公開環境の版はmainと同じである。公開routeは `/`・`/speakloop`・`/zoovoice`・`/privacy` とする。
 - 実装済みの機能: Google OAuth・機能別quota・入力上限・管理者認証・簡易監査ログ。
 - 利用者音声と生成音声はCloudflare版のVoice Lab履歴へ保存しない。
 - quota・監査情報はD1、短期jobとfallbackはKVを使い、平文emailを含む旧quota keyは削除済み。
 - 中国語ASRと任意の声質変換はprivateなRunPod Serverlessへ分離している。
 - Zoovoiceの日本語ASR・動物連想・音声合成は、privateなGoogle Cloud Run上のGoサービスで実行する。WorkerはTurnstile検証とGoogle IAM認証付きの中継を担当する。
-- Zoovoiceのproduction有効化とWorker deployは完了している。Worker経由の実composeはproduction Turnstileの人間操作が必要なため未確認である。
+- Zoovoiceはproductionで有効である。Worker経由の実composeはproduction Turnstileの人間操作が必要なため、自動smokeの対象にしない。
 - Python／Node CI、React production build、Playwright 3ブラウザ×3 viewport E2Eを実装済み。Zoovoice E2EはChromiumに限定して実行する。
 - Gitleaksはcommit前、push前、全branchへのpush・pull requestで独立して実行する。
 - GitHub repositoryはpublicである。Secret scanning、Push Protection、Private vulnerability reportingを有効にしている。

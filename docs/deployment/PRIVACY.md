@@ -63,7 +63,7 @@ compose用の録音、アニマル度、動物の種類数は、ブラウザか�
 
 Workerは受け取った録音と2つの設定をGoogle Cloud Runへ一時送信する。Cloud Runは日本語ASR、動物の自動連想、鳴き声を差し込んだ音声の合成を担当する。Cloud Runはprivate IAMを前提とし、ブラウザからCloud Runへ直接送る経路は持たない。
 
-productionのWorkerは、専用invoker service accountのkeyで署名したJWTをGoogleのtoken endpointで短期ID tokenへ交換し、そのtokenを付けてCloud Runを呼ぶ。ID tokenはisolate内のmemoryだけへ短期cacheし、KV・D1・R2へ保存しない。service account key、JWT、ID tokenは応答とlogへ含めない。この認証は実装済みであり、実keyのWorker secret登録とCloud Runへのdeployも完了している。deploy済みのCloud Runが認証なしのrequestを403で拒否することは、実環境で確認済みである。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す。
+productionのWorkerは、専用invoker service accountのkeyで署名したJWTをGoogleのtoken endpointで短期ID tokenへ交換し、そのtokenを付けてCloud Runを呼ぶ。ID tokenはisolate内のmemoryだけへ短期cacheし、KV・D1・R2へ保存しない。service account key、JWT、ID tokenは応答とlogへ含めない。Cloud Runは認証なしのrequestを403で拒否する。ローカルのsmoke確認では、developer端末のgcloud service account impersonationで取得した短期ID tokenをlocal Wrangler経由で渡す。
 
 WorkerはTurnstileをserver-sideで検証する。検証はcompose requestごとに行う。ブラウザは使ったtokenを成功・失敗の後にresetし、次のtokenを取得する。この検証では検証tokenをCloudflareのSiteverify APIへ送る。Cloudflareがrequest headerで渡すclient IPを取得できた場合は、そのIPも同じrequestへ添えて送る。Turnstile tokenはCloud Runへ転送しない。Cloud Runへ渡すのは録音の音声bytesと、アニマル度・動物の種類数の設定JSONだけである。動物と挿入位置はCloud Run側が決めるため、ブラウザから配置設定を送らない。
 
@@ -96,7 +96,7 @@ D1へ音声と入力本文を保存しない。保存するのはZoovoice共通�
 
 動物一覧はCloud RunのGo APIの `/animals` を中継して返す。この経路では音声データを扱わない。
 
-Cloud Runのregionは `us-central1` とする。privateなCloud Run serviceへのdeployは完了している。公開範囲を変える前に本書と [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を確認する。
+Cloud Runのregionは `us-central1` とし、serviceはprivateとする。公開範囲を変える前に本書と [Voice Lab プライバシーポリシー](../PRIVACY_POLICY.md) を確認する。
 
 ## 保持期間、削除と問い合わせ
 
