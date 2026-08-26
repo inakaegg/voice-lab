@@ -47,6 +47,8 @@ Browser
 
 Google OAuth clientの「承認済みのリダイレクトURI」には `https://voice-lab.inakaegg.workers.dev/auth/google/callback` を登録する。旧Worker URLから切り替える間は旧URIを残してよいが、新URLでログイン確認が完了した後に不要な旧URIを削除する。
 
+iOSアプリなどのnativeクライアントは、cookieの代わりに後述のnative session交換でログインする。Google Cloud Console側では、同じprojectへapplication type「iOS」のOAuth clientを追加し、アプリのserver client ID（Google Sign-In SDKの `GIDServerClientID`）には上記Web applicationのclient ID（`GOOGLE_CLIENT_ID` と同じ値）を指定する。これでアプリが取得するGoogle ID tokenの `aud` が `GOOGLE_CLIENT_ID` と一致し、Workerが検証できる。iOS clientにsecretは発行されず、この対応で追加するWorker secretもない。
+
 ### Zoovoiceのsecretとflag
 
 Zoovoiceを有効にする配備では、`ZOOVOICE_GCP_SA_KEY` と `ZOOVOICE_TURNSTILE_SECRET_KEY` をWorker secretとして登録する。既定の配備では登録しない。production Workerへはこの2つを登録済みである。
@@ -130,6 +132,7 @@ Workerは次の主要なAPI互換エンドポイントを提供する。
 
 - `GET /api/runtime`
 - `GET /api/public-session`
+- `POST /api/native-session`
 - `GET /api/public-access-settings`
 - `GET /api/public-sample-audios`
 - `POST /api/practice/prompts`
@@ -185,6 +188,17 @@ KVは軽量設定とready状態など、厳密な整合性を必要としない�
 ログインした利用者のemailと日時は `public_users` へ保存し、管理者専用の `GET /api/public-users` と `/admin` の利用者一覧から確認する。audit eventのemailはSHA-256 hashのままとする。
 
 sample metadataはD1、音声blobは非公開R2へ保存する。過去の研究機能で登録したsample dataは一般向けAPIから返らない。保持は保証せず、管理者のsample保存・削除操作でD1 rowとR2 objectごと削除され得る。
+
+### ネイティブアプリのnative session交換
+
+ブラウザ以外のクライアント（iOSアプリ）はHttpOnly cookieを受け渡せないため、`POST /api/native-session` でGoogle ID tokenを短期sessionへ交換する。
+
+- requestはJSON `{"id_token": "<Google ID token>"}` とする。ID tokenは16KiB、request本文はそれに512 byteを加えた値を上限とし、超過は413で拒否する。
+- Workerは固定のGoogle JWKS（`https://www.googleapis.com/oauth2/v3/certs`）でRS256署名を検証する。受理条件は、`iss` が `https://accounts.google.com` または `accounts.google.com`・`aud` が `GOOGLE_CLIENT_ID` と完全一致・`exp` と `nbf` が有効・空でない `sub` とemail・`email_verified=true` のすべてとする。検証失敗は401、Google JWKSへ到達できない場合や `GOOGLE_CLIENT_ID`・`PUBLIC_SESSION_SECRET` 未設定の配備は503のfail closedとする。
+- 成功時のresponseは `session_token`・`token_type: "Bearer"`・Unix秒 `expires_at` の3つだけを返し、`Cache-Control: no-store` を付ける。`session_token` はcookieと同じ `PUBLIC_SESSION_SECRET` 署名・同じpayload形式（email・iat・exp）で、有効期限は発行から最大3600秒かつGoogle ID tokenの `exp` 以下とする。refresh tokenは発行せず、期限後はアプリ側がGoogle Sign-InのID token更新で再交換する。
+- 以後のAPIは `Authorization: Bearer <session_token>` で呼ぶ。Authorizationヘッダがあるrequestはヘッダだけを検証し、不正・期限切れでもcookieへfallbackしない。ヘッダがないrequestは従来どおりcookieを使う。identity・quota・管理者判定・job polling規則はcookieログインと同一である。
+- 交換成功時は既存Googleログインと同様に `public_users` の日時を更新し、audit eventは `google_native_login_success` としてhash化identityとactionだけを保存する。Google ID token・session token・Authorizationヘッダはlog・D1・KV・R2へ保存しない。
+- この対応に伴い、全 `/api/*` のCORS preflight応答の `Access-Control-Allow-Headers` へ `Authorization` が加わる（共有responseヘルパー経由の一律変更で、origin・method設定は変えない）。
 
 ## warmup
 

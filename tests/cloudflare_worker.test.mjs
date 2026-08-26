@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 
 import workerEntrypoint from "../cloudflare/src/index.ts";
 import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
@@ -1179,6 +1180,280 @@ test("Cloudflare worker signs in public users with Google OAuth", async () => {
   assert.equal(audit[0].email_hash, await publicIdentityHashForTest("viewer@example.com"));
   assert.equal(audit[0].path, "/auth/google/callback");
   assert.equal(audit[0].next, "/speakloop");
+});
+
+test("Cloudflare worker exchanges a valid Google ID token for a native session", async () => {
+  const kv = fakeKv();
+  const db = fakeD1();
+  const fixture = await googleIdTokenFixture();
+  const env = publicAuthEnv(async (url) => {
+    throw new Error(`native session exchange must not call an external service: ${url}`);
+  }, { kv, db, adminGoogleEmails: "admin@example.com" });
+  env.__googleJwks = fixture.jwks;
+  const googleExpiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const idToken = await signGoogleIdToken({ exp: googleExpiresAt, email: "Viewer@Example.com" });
+
+  const response = await handleRequest(nativeSessionRequest(idToken), env);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(Object.keys(body).sort(), ["expires_at", "session_token", "token_type"]);
+  assert.equal(body.token_type, "Bearer");
+  assert.equal(typeof body.session_token, "string");
+  assert.ok(body.session_token.length > 40);
+  assert.ok(body.expires_at <= googleExpiresAt);
+  assert.ok(body.expires_at <= Math.floor(Date.now() / 1000) + 3600);
+  assert.equal(signedSessionPayload(body.session_token).email, "viewer@example.com");
+  assert.equal(signedSessionPayload(body.session_token).exp, body.expires_at);
+
+  const sessionResponse = await handleRequest(
+    new Request("https://example.com/api/public-session", {
+      headers: { Authorization: `Bearer ${body.session_token}` },
+    }),
+    env,
+  );
+  const session = await sessionResponse.json();
+  assert.equal(session.authenticated, true);
+  assert.equal(session.email, "viewer@example.com");
+  assert.equal(session.is_admin, false);
+
+  const emailHash = await publicIdentityHashForTest("viewer@example.com");
+  assert.equal(db.__tables.users.get(emailHash).email, "viewer@example.com");
+  assert.match(db.__tables.users.get(emailHash).last_login_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(db.__tables.audit.length, 1);
+  assert.equal(db.__tables.audit[0].action, "google_native_login_success");
+  assert.equal(db.__tables.audit[0].actor_email_hash, emailHash);
+  assert.equal(db.__tables.audit[0].path, "/api/native-session");
+  const persisted = JSON.stringify({
+    kv: [...kv.__store.entries()],
+    db: {
+      users: [...db.__tables.users.entries()],
+      daily: [...db.__tables.daily.entries()],
+      total: [...db.__tables.total.entries()],
+      audit: db.__tables.audit,
+    },
+  });
+  assert.doesNotMatch(persisted, new RegExp(escapeRegExp(idToken)));
+  assert.doesNotMatch(persisted, new RegExp(escapeRegExp(body.session_token)));
+});
+
+test("Cloudflare worker rejects the native session invalid Google ID token matrix without credential disclosure", async () => {
+  const fixture = await googleIdTokenFixture();
+  const now = Math.floor(Date.now() / 1000);
+  const cases = [
+    ["malformed", "not-a-jwt"],
+    ["wrong algorithm", await signGoogleIdToken({}, { algorithm: "HS256" })],
+    ["invalid signature", await signGoogleIdToken({}, { privateKey: fixture.otherPrivateKey })],
+    ["unknown kid", await signGoogleIdToken({}, { kid: "unknown-google-key" })],
+    ["wrong issuer", await signGoogleIdToken({ iss: "https://issuer.example.com" })],
+    ["wrong audience", await signGoogleIdToken({ aud: "another-client-id" })],
+    ["multiple audiences", await signGoogleIdToken({ aud: ["google-client-id", "another-client-id"] })],
+    ["expired", await signGoogleIdToken({ exp: now - 1 })],
+    ["future nbf", await signGoogleIdToken({ nbf: now + 300 })],
+    ["missing expiration", await signGoogleIdToken({ exp: undefined })],
+    ["missing subject", await signGoogleIdToken({ sub: undefined })],
+    ["blank subject", await signGoogleIdToken({ sub: " " })],
+    ["missing email", await signGoogleIdToken({ email: undefined })],
+    ["blank email", await signGoogleIdToken({ email: " " })],
+    ["unverified email", await signGoogleIdToken({ email_verified: false })],
+    ["non-boolean verified email", await signGoogleIdToken({ email_verified: "true" })],
+  ];
+  const env = publicAuthEnv(async (url) => {
+    throw new Error(`invalid token verification must not call runtime fetch: ${url}`);
+  }, { kv: fakeKv() });
+  env.__googleJwks = fixture.jwks;
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(" "));
+  try {
+    for (const [label, idToken] of cases) {
+      const response = await handleRequest(nativeSessionRequest(idToken), env);
+      const responseBody = await response.text();
+      assert.equal(response.status, 401, label);
+      assert.deepEqual(JSON.parse(responseBody), { detail: "invalid Google ID token" }, label);
+      assert.equal(response.headers.get("Cache-Control"), "no-store", label);
+      assert.equal(responseBody.includes(idToken), false, label);
+      assert.equal(logged.some((entry) => entry.includes(idToken)), false, label);
+    }
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
+test("Cloudflare worker accepts the legacy Google ID token issuer", async () => {
+  const fixture = await googleIdTokenFixture();
+  const env = publicAuthEnv(async (url) => {
+    throw new Error(`legacy issuer verification must not call runtime fetch: ${url}`);
+  }, { kv: fakeKv() });
+  env.__googleJwks = fixture.jwks;
+
+  const response = await handleRequest(
+    nativeSessionRequest(await signGoogleIdToken({ iss: "accounts.google.com" })),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).token_type, "Bearer");
+});
+
+test("Cloudflare worker fails closed when Google JWKS verification is unavailable", async () => {
+  const idToken = await signGoogleIdToken();
+  const env = publicAuthEnv(async () => {
+    throw new Error("native session exchange must not use runtime fetch injection");
+  }, { kv: fakeKv() });
+  env.__googleJwks = async () => {
+    throw new Error("simulated JWKS outage");
+  };
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => logged.push(args.map(String).join(" "));
+  let response;
+  try {
+    response = await handleRequest(nativeSessionRequest(idToken), env);
+  } finally {
+    console.error = originalConsoleError;
+  }
+  const body = await response.text();
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(JSON.parse(body), { detail: "Google token verification is unavailable" });
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(body.includes(idToken), false);
+  assert.equal(logged.some((entry) => entry.includes(idToken)), false);
+});
+
+test("Cloudflare worker rejects oversized native session credentials before verification", async () => {
+  let verificationCalls = 0;
+  const env = publicAuthEnv(async () => {
+    throw new Error("oversized credentials must not call an external service");
+  }, { kv: fakeKv() });
+  env.__googleJwks = async () => {
+    verificationCalls += 1;
+    throw new Error("oversized credentials must not reach JWT verification");
+  };
+  const marker = "oversized-google-id-token-marker";
+  const response = await handleRequest(nativeSessionRequest(marker.repeat(700)), env);
+  const body = await response.text();
+
+  assert.equal(response.status, 413);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(verificationCalls, 0);
+  assert.equal(body.includes(marker), false);
+
+  const tokenLimitResponse = await handleRequest(nativeSessionRequest("x".repeat(16 * 1024 + 1)), env);
+  assert.equal(tokenLimitResponse.status, 413);
+  assert.equal(tokenLimitResponse.headers.get("Cache-Control"), "no-store");
+  assert.equal(verificationCalls, 0);
+});
+
+test("Cloudflare worker gives Bearer sessions precedence while preserving cookie and CORS behavior", async () => {
+  const fixture = await googleIdTokenFixture();
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "google-access-token" });
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+      return json({ email: "viewer@example.com", email_verified: true });
+    }
+    throw new Error(`unexpected external request: ${url}`);
+  }, { kv: fakeKv() });
+  env.__googleJwks = fixture.jwks;
+  const exchange = await handleRequest(nativeSessionRequest(await signGoogleIdToken()), env);
+  const { session_token: sessionToken } = await exchange.json();
+  const cookie = await publicCookie(env);
+
+  const bearerSession = await (
+    await handleRequest(new Request("https://example.com/api/public-session", {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    }), env)
+  ).json();
+  const cookieSession = await (
+    await handleRequest(new Request("https://example.com/api/public-session", { headers: { cookie } }), env)
+  ).json();
+  const invalidBearerWithCookie = await (
+    await handleRequest(new Request("https://example.com/api/public-session", {
+      headers: { Authorization: "Bearer invalid-native-session", cookie },
+    }), env)
+  ).json();
+  const malformedAuthorizationWithCookie = await (
+    await handleRequest(new Request("https://example.com/api/public-session", {
+      headers: { Authorization: "Basic ignored", cookie },
+    }), env)
+  ).json();
+  const now = Math.floor(Date.now() / 1000);
+  const expiredBearer = await signPublicSessionTokenForTest({
+    email: "viewer@example.com",
+    iat: now - 3601,
+    exp: now - 1,
+  });
+  const expiredBearerSession = await (
+    await handleRequest(new Request("https://example.com/api/public-session", {
+      headers: { Authorization: `Bearer ${expiredBearer}` },
+    }), env)
+  ).json();
+  const preflight = await handleRequest(new Request("https://example.com/api/native-session", { method: "OPTIONS" }), env);
+
+  assert.equal(bearerSession.authenticated, true);
+  assert.equal(bearerSession.email, "viewer@example.com");
+  assert.equal(cookieSession.authenticated, true);
+  assert.equal(cookieSession.email, "viewer@example.com");
+  assert.equal(invalidBearerWithCookie.authenticated, false);
+  assert.equal(malformedAuthorizationWithCookie.authenticated, false);
+  assert.equal(expiredBearerSession.authenticated, false);
+  assert.equal(preflight.status, 204);
+  assert.match(preflight.headers.get("Access-Control-Allow-Headers") || "", /(?:^|,\s*)Authorization(?:,|$)/i);
+});
+
+test("Cloudflare worker applies native Bearer identity to quota admin and polling boundaries", async () => {
+  const fixture = await googleIdTokenFixture();
+  const kv = fakeKv();
+  const db = fakeD1();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    admin_google_emails: ["admin@example.com"],
+    features: { speakloop: { daily_limit: 5, total_limit: 5, audio_max_bytes: 8000000, text_max_chars: 800 } },
+  }));
+  const env = publicAuthEnv(async (url) => {
+    if (url === "https://api.openai.com/v1/audio/transcriptions") return json({ text: "今日は何をしますか" });
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({ output_text: JSON.stringify({ source_language: "ja-JP", target_language: "en-US", translated_text: "What are you doing today?" }) });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    if (url === "https://api.runpod.ai/v2/endpoint/status/native-poll-job") {
+      return json({ id: "native-poll-job", status: "IN_PROGRESS", output: { stage: "voice_conversion" } });
+    }
+    throw new Error(`unexpected external request: ${url}`);
+  }, { kv, db, adminGoogleEmails: "admin@example.com" });
+  env.__googleJwks = fixture.jwks;
+  const viewerExchange = await handleRequest(nativeSessionRequest(await signGoogleIdToken()), env);
+  const viewerToken = (await viewerExchange.json()).session_token;
+
+  const form = new FormData();
+  form.append("audio", new Blob(["prompt"], { type: "audio/webm" }), "recording.webm");
+  form.append("target_language", "en-US");
+  form.append("recording_intent", "prompt");
+  const generated = await handleRequest(new Request("https://example.com/api/practice/recordings", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${viewerToken}` },
+    body: form,
+  }), env);
+  const polled = await handleRequest(new Request("https://example.com/api/practice/voice-jobs/native-poll-job", {
+    headers: { Authorization: `Bearer ${viewerToken}` },
+  }), env);
+
+  assert.equal(generated.status, 200);
+  assert.equal(polled.status, 200);
+  const viewerHash = await publicIdentityHashForTest("viewer@example.com");
+  assert.equal(db.__tables.total.get(`${viewerHash}:speakloop`).usage_count, 1);
+
+  const adminExchange = await handleRequest(nativeSessionRequest(await signGoogleIdToken({
+    sub: "google-admin-subject",
+    email: "admin@example.com",
+  })), env);
+  const adminToken = (await adminExchange.json()).session_token;
+  const adminResponse = await handleRequest(new Request("https://example.com/api/public-users", {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  }), env);
+  assert.equal(adminResponse.status, 200);
 });
 
 test("Cloudflare worker records a signed-in Google email with its login time", async () => {
@@ -3574,6 +3849,79 @@ test("Cloudflare worker scopes Seed-VC ready state by RunPod endpoint", async ()
   assert.equal(secondRuntime.voice_conversion_backends[0].settings.warmup.ready, false);
   assert.equal(secondRuntime.voice_conversion_backends[0].settings.seed_vc.model_resident, false);
 });
+
+const GOOGLE_TEST_KEY_ID = "google-test-key";
+let googleIdTokenFixturePromise;
+
+async function googleIdTokenFixture() {
+  if (!googleIdTokenFixturePromise) {
+    googleIdTokenFixturePromise = (async () => {
+      const primary = await generateKeyPair("RS256", { extractable: true });
+      const other = await generateKeyPair("RS256", { extractable: true });
+      const publicJwk = await exportJWK(primary.publicKey);
+      Object.assign(publicJwk, { alg: "RS256", kid: GOOGLE_TEST_KEY_ID, use: "sig" });
+      return {
+        privateKey: primary.privateKey,
+        otherPrivateKey: other.privateKey,
+        jwks: createLocalJWKSet({ keys: [publicJwk] }),
+      };
+    })();
+  }
+  return googleIdTokenFixturePromise;
+}
+
+async function signGoogleIdToken(claims = {}, options = {}) {
+  const fixture = await googleIdTokenFixture();
+  const now = Math.floor(Date.now() / 1000);
+  const algorithm = options.algorithm || "RS256";
+  const key = algorithm === "HS256"
+    ? new TextEncoder().encode("unit-test-google-hmac-secret-at-least-32-bytes")
+    : (options.privateKey || fixture.privateKey);
+  return new SignJWT({
+    iss: "https://accounts.google.com",
+    aud: "google-client-id",
+    sub: "google-viewer-subject",
+    email: "viewer@example.com",
+    email_verified: true,
+    iat: now,
+    nbf: now - 5,
+    exp: now + 900,
+    ...claims,
+  })
+    .setProtectedHeader({ alg: algorithm, kid: options.kid || GOOGLE_TEST_KEY_ID, typ: "JWT" })
+    .sign(key);
+}
+
+function nativeSessionRequest(idToken) {
+  return new Request("https://example.com/api/native-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id_token: idToken }),
+  });
+}
+
+function signedSessionPayload(token) {
+  const encodedPayload = String(token || "").split(".")[0];
+  return JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+}
+
+async function signPublicSessionTokenForTest(payload, secret = "test-public-session-secret") {
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encodedPayload)));
+  const signatureHex = [...signature].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `${encodedPayload}.${signatureHex}`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function fakeEnv(fetchImpl, options = {}) {
   return {
