@@ -1,6 +1,6 @@
 # Voice Lab公開デモ・ポートフォリオ
 
-更新日: 2026-08-24
+更新日: 2026-08-29
 
 ## 現在地
 
@@ -42,7 +42,7 @@ Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオ�
 1. PRのrequired checksが最新headで完了し、未解決threadが0件であることを確認する。
 2. release前にGit履歴全体をGitleaksで再検査する。
 3. GitHub security設定と`main`のbranch protectionを定期確認する。
-4. 匿名状態でrepositoryトップ、脆弱性報告導線、公開デモURLを確認する。
+4. 匿名状態でrepositoryトップ、脆弱性の報告導線、公開デモURLを確認する。
 5. deploy後smokeで公開画面、公開JSON API、匿名管理APIの拒否を確認する。
 
 ## 公開後に検討する改善
@@ -50,6 +50,7 @@ Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオ�
 - Safari、Firefox、スマートフォン実機の録音形式を継続確認する。
 - RunPodのcold start、queue、GPU費用を実測し、必要な場合だけwarmup運用を調整する。
 - 公開画面の説明、プライバシーポリシー、実装上の保存境界が一致していることを継続監査する。
+- ZoovoiceのCloud Run deployを、mainへのpushでの自動deployへ切り替える。現在はASRモデルと動物音源の正本がローカルにしかなく、build資材が揃わないため自動化できない。先にこの2つをGCSへ移してCIが取得とSHA-256照合を行えるようにし、[MODEL_STORAGE.md](MODEL_STORAGE.md)へ保管とバックアップの方針を追記する。自動化後に、whisper.cppソース・ASRモデル・動物音源からimageまでのbuild資材フロー図を `docs/diagrams/` へ追加する。
 
 ## 自動検証
 
