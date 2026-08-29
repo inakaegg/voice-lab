@@ -25,10 +25,17 @@ REPOSITORY = "voice-lab"
 SERVICE = "zoovoice"
 SOUNDS_PREFIX = "app/sounds/"
 REGISTRY_HOST = f"{REGION}-docker.pkg.dev"
+# CIがbuildxのdocker-containerドライバでpushすると、既定でprovenance attestationが付き、
+# 配備digestは単一manifestではなくimage indexを指す。両方を受け取れるようにする。
 MANIFEST_ACCEPT = (
+    "application/vnd.oci.image.index.v1+json,"
+    "application/vnd.docker.distribution.manifest.list.v2+json,"
     "application/vnd.oci.image.manifest.v1+json,"
     "application/vnd.docker.distribution.manifest.v2+json"
 )
+# attestationの子manifestはplatformのarchitectureが unknown で入る。実imageと区別する。
+ATTESTATION_ARCHITECTURE = "unknown"
+ATTESTATION_ANNOTATION = "vnd.docker.reference.type"
 
 
 def run(command: list[str]) -> str:
@@ -60,6 +67,30 @@ def deployed_digest() -> str:
     if "@" not in image:
         raise SystemExit(f"稼働中のimageがdigest指定ではありません: {image}")
     return image.split("@", 1)[1]
+
+
+def is_image_index(document: dict) -> bool:
+    """image index（manifest list）かどうかを返す。単一manifestは layers を持つ。"""
+    return "manifests" in document and "layers" not in document
+
+
+def pick_platform_manifest(index: dict) -> str:
+    """image indexから linux/amd64 の実imageのdigestを選ぶ。
+
+    provenance attestationの子manifestは、実行できるimageではない。
+    platformのarchitectureが ``unknown`` になるか、docker独自のannotationが付く。
+    どちらの目印も見て除外する。
+    """
+    for entry in index.get("manifests", []):
+        platform = entry.get("platform") or {}
+        annotations = entry.get("annotations") or {}
+        if platform.get("architecture") == ATTESTATION_ARCHITECTURE:
+            continue
+        if annotations.get(ATTESTATION_ANNOTATION) == "attestation-manifest":
+            continue
+        if platform.get("os") == "linux" and platform.get("architecture") == "amd64":
+            return entry["digest"]
+    raise SystemExit("image indexに linux/amd64 のimageが見つかりません。")
 
 
 def sounds_layer_candidates(config: dict, manifest: dict) -> list[str]:
@@ -145,6 +176,10 @@ def main() -> None:
     print(f"復旧元image: {digest}")
 
     manifest = json.loads(registry_get(f"manifests/{digest}", token, MANIFEST_ACCEPT))
+    if is_image_index(manifest):
+        child = pick_platform_manifest(manifest)
+        print(f"image index を検出。linux/amd64 の子manifest: {child}")
+        manifest = json.loads(registry_get(f"manifests/{child}", token, MANIFEST_ACCEPT))
     config = json.loads(registry_get(f"blobs/{manifest['config']['digest']}", token))
     destination = arguments.destination
     destination.mkdir(parents=True, exist_ok=True)

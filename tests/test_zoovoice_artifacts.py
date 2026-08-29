@@ -244,3 +244,86 @@ def test_upload_stops_before_remote_write_on_model_mismatch(tmp_path: Path, prep
     assert result.returncode != 0
     assert "SHA-256が期待値と一致しません" in result.stderr
     assert "storage cp" not in (log.read_text(encoding="utf-8") if log.exists() else "")
+
+
+# --- 復旧CLIのimage index対応 ---------------------------------------------
+
+
+def load_recovery_module():
+    import importlib.util
+
+    path = SCRIPTS / "recover_zoovoice_sounds_from_image.py"
+    spec = importlib.util.spec_from_file_location("zoovoice_recovery", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_single_manifest_is_not_treated_as_an_index() -> None:
+    recovery = load_recovery_module()
+    single = {"schemaVersion": 2, "config": {"digest": "sha256:c"}, "layers": []}
+    assert not recovery.is_image_index(single)
+
+
+def test_image_index_selects_the_runnable_amd64_manifest() -> None:
+    """CIのbuildxは既定でprovenance attestationを付け、配備digestがindexを指す。
+
+    attestationの子manifestを掴むと復旧できないため、実imageだけを選ぶ。
+    """
+    recovery = load_recovery_module()
+    index = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        # attestationを先に置く。実imageが先だと、除外を忘れていても
+        # たまたま正しい方を返してしまい、テストが素通りする。
+        "manifests": [
+            {
+                "digest": "sha256:attestation",
+                "platform": {"os": "unknown", "architecture": "unknown"},
+                "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+            },
+            {
+                "digest": "sha256:real",
+                "platform": {"os": "linux", "architecture": "amd64"},
+            },
+        ],
+    }
+    assert recovery.is_image_index(index)
+    assert recovery.pick_platform_manifest(index) == "sha256:real"
+
+
+def test_image_index_without_a_runnable_manifest_fails_loudly() -> None:
+    recovery = load_recovery_module()
+    index = {
+        "manifests": [
+            {
+                "digest": "sha256:attestation",
+                "platform": {"os": "unknown", "architecture": "unknown"},
+            }
+        ]
+    }
+    with pytest.raises(SystemExit):
+        recovery.pick_platform_manifest(index)
+
+
+# --- CD用roleの権限固定 -----------------------------------------------------
+
+
+def test_cd_custom_roles_declare_every_permission_the_deploy_needs() -> None:
+    """配備scriptが実際に呼ぶ操作に対応する権限を、Terraform側で固定する。
+
+    どれか1つでも欠けると、pushが済んだ後の段階で失敗して反映が中途半端になる。
+    """
+    terraform = (ROOT / "infra/gcp/ci_service_account.tf").read_text(encoding="utf-8")
+    required = [
+        # gcloud artifacts repositories get-iam-policy（allUsers不在の確認）
+        "artifactregistry.repositories.getIamPolicy",
+        # gcloud run services describe / update
+        "run.services.get",
+        "run.services.getIamPolicy",
+        "run.services.update",
+        # gcloud run services update が更新operationの状態を取りに行く
+        "run.operations.get",
+    ]
+    for permission in required:
+        assert f'"{permission}"' in terraform, permission
