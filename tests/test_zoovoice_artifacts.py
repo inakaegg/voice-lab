@@ -276,10 +276,19 @@ def test_image_index_selects_the_runnable_amd64_manifest() -> None:
         "mediaType": "application/vnd.oci.image.index.v1+json",
         # attestationを先に置く。実imageが先だと、除外を忘れていても
         # たまたま正しい方を返してしまい、テストが素通りする。
+        #
+        # 2件目はplatformがlinux/amd64のattestationである。これが無いと、
+        # 除外の分岐を消しても最後のplatform一致条件だけで弾かれてしまい、
+        # 除外そのものが検証されない。annotationでしか区別できない場合を作る。
         "manifests": [
             {
-                "digest": "sha256:attestation",
+                "digest": "sha256:attestation-unknown-platform",
                 "platform": {"os": "unknown", "architecture": "unknown"},
+                "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+            },
+            {
+                "digest": "sha256:attestation-amd64-platform",
+                "platform": {"os": "linux", "architecture": "amd64"},
                 "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
             },
             {
