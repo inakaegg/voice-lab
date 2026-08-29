@@ -101,9 +101,15 @@ CIはservice account鍵で認証する。鍵はTerraformで作らない。秘密
 
 **漏洩したとき**
 
-1. 即座に `keys delete` で当該鍵を消す。
-2. GitHub Secretを削除する。
-3. 監査ログで当該service accountの操作を確認する。
+鍵を消すだけでは足りない。漏洩している間にimageを入れ替えられていた場合、Cloud Runでは
+すでに別のコードが動いている。次の順で、止める・戻す・調べる、を行う。
+
+1. `keys delete` で当該鍵を消し、GitHub Secretも削除する。
+2. `Deploy Production` を無効にして、自動反映を止める。
+3. Cloud Runのimageを、漏洩前と分かっているdigestへ戻す。
+4. Cloud Runのrevision一覧と、Artifact Registryのimageの作成時刻を確認する。身に覚えのない反映が無いかを見る。
+5. Secret Manager の `zoovoice-openai-api-key` を新しい値へ入れ替える。CI用service accountはこのsecretを読めないが、imageを差し替えられていれば実行時に読み出せるためである。
+6. 監査ログで当該service accountの操作を確認する。対象はArtifact Registryへのpushと、Cloud Runの更新である。
 
 ## モデル候補の容量目安
 
