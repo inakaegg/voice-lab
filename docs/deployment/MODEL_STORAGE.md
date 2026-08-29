@@ -91,7 +91,8 @@ CIはservice account鍵で認証する。鍵はTerraformで作らない。秘密
 
 1. `gcloud iam service-accounts keys create` で作る。出力はGitHub Secretへ移し、ローカルへ残さない。
 2. GitHub Secret `GCP_ZOOVOICE_CI_SA_KEY` へ設定する。
-3. 反映jobの認証stepが通ることを確認する。
+3. `gcloud iam service-accounts keys list --managed-by=user` で鍵の実数を数える。意図した本数だけがあることを目で確かめる。作成に失敗した試行が鍵だけ残していることがあるためで、鍵は作った本人しか気づけない。
+4. 反映jobの認証stepが通ることを確認する。
 
 **交換**
 
