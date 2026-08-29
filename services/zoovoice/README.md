@@ -389,15 +389,14 @@ emulationのlocal値はCloud Runの実CPU上の値より遅くなり得ます。
 production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker service accountのkeyによるID token取得方式です。
 認証フローとsecret運用の詳細は[CLOUDFLARE.md](../../docs/deployment/CLOUDFLARE.md)を参照してください。
 
-Cloudflare Workerは`main`へのpushで自動反映します。
-Cloud Runも同じ`Deploy Production`から反映する構成にしてありますが、**この経路はまだ有効ではありません**。
-有効になるのは、次の3つの外部操作が済んだ後です。いずれも未実行で、`deploy-cloud-run`のjobは一度も動いていません。
+Cloudflare WorkerとCloud Runは、どちらも`main`へのpushで自動反映します。
+`Deploy Production`がCIの成功を待ち、同じrevisionから両方を反映します。
 
-1. `infra/gcp`の`terraform apply`（bucketとservice accountの作成）
-2. build資材のCloud Storageへのアップロード
-3. CI用service account鍵のGitHub Secretへの登録
+Cloud Runの反映はWorkerの反映が成功してから始まります。
+WorkerはCloud Runの応答形を厳密に検証し、二形状を同時に受理する互換層を持たないためです。
+応答形を変える変更でCloud Runが先に入れ替わると、古いWorkerがその応答を拒み続けます。
 
-それまでのCloud Runへの反映は、従来どおり手元から`./scripts/deploy_zoovoice_cloud_run.sh`を明示applyで実行します。
+手元からの明示applyも従来どおり使えます。CDを止めたいときや、CDが失敗した状態から戻すときに使います。
 
 反映の前に、`Deploy Production`のjobがrunner上でimageを起動して`POST /compose`を1回通します。
 このとき連想APIの向き先だけを`ZOOVOICE_LLM_ENDPOINT`でrunner上のstubへ変え、課金の発生する外部呼び出しを避けます。
