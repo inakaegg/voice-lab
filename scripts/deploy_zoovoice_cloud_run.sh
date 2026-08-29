@@ -27,8 +27,14 @@ region=us-central1
 service=zoovoice
 artifact_repository=voice-lab
 local_smoke_port=${ZOOVOICE_LOCAL_SMOKE_PORT:-18080}
+# CIは課金対象のLLM呼び出しをしないため、local smokeの連想APIをstubへ向けられるようにする。
+# 未設定なら従来どおりserviceの既定（公式endpoint）が使われる。
+llm_endpoint=${ZOOVOICE_LLM_ENDPOINT:-}
+# build cacheはworkflowから渡す。未設定ならbuildx呼び出しは従来と同じになる。
+build_cache_from=${ZOOVOICE_BUILD_CACHE_FROM:-}
+build_cache_to=${ZOOVOICE_BUILD_CACHE_TO:-}
 
-expected_whisper_commit=5250a86fdebac4d51085fcfcd0b315cb0c6b91c9
+expected_whisper_commit=edea8a9c3cf0eb7676dcdb604991eb2f95c3d984
 expected_model_sha256=1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
 
 required_value ZOOVOICE_GCP_PROJECT "$project"
@@ -167,6 +173,12 @@ build_arguments=(
   --build-arg "ZOOVOICE_ASR_MODEL_SHA256=$model_sha256"
   --file services/zoovoice/Dockerfile
 )
+if [[ -n "$build_cache_from" ]]; then
+  build_arguments+=(--cache-from "$build_cache_from")
+fi
+if [[ -n "$build_cache_to" ]]; then
+  build_arguments+=(--cache-to "$build_cache_to")
+fi
 
 if ! docker info >/dev/null 2>"$temporary_directory/docker-info.err"; then
   fail "Docker daemonへ接続できませんでした。"
@@ -176,15 +188,22 @@ local_image="zoovoice-local-smoke:${short_sha}"
 docker buildx build "${build_arguments[@]}" --load --tag "$local_image" .
 
 cold_start_started=$(python3 -c 'import time; print(time.monotonic_ns())')
-local_container_id=$(docker run \
-  --detach \
-  --rm \
-  --platform linux/amd64 \
-  --memory 2g \
-  --cpus 2 \
-  --env "OPENAI_API_KEY=$openai_api_key" \
-  --publish "127.0.0.1:${local_smoke_port}:8080" \
-  "$local_image")
+run_arguments=(
+  --detach
+  --rm
+  --platform linux/amd64
+  --memory 2g
+  --cpus 2
+  --env "OPENAI_API_KEY=$openai_api_key"
+  --publish "127.0.0.1:${local_smoke_port}:8080"
+)
+if [[ -n "$llm_endpoint" ]]; then
+  # containerからhost上のstubへ届かせる。Linuxではhost.docker.internalが既定で無いため、
+  # gatewayへの名前をここで与える。stubを使わないときは付けない。
+  run_arguments+=(--add-host "host.docker.internal:host-gateway")
+  run_arguments+=(--env "ZOOVOICE_LLM_ENDPOINT=$llm_endpoint")
+fi
+local_container_id=$(docker run "${run_arguments[@]}" "$local_image")
 [[ -n "$local_container_id" ]] || fail "local smoke containerを起動できませんでした。"
 
 ready=0
@@ -226,6 +245,22 @@ if not isinstance(selected.get("id"), str) or not selected["id"]:
     raise SystemExit("invalid local compose selected animal")
 if not isinstance(meta.get("association_reason"), str) or not meta["association_reason"].strip():
     raise SystemExit("invalid local compose association reason")
+
+# whisper.cppの版を変えたときに、前後で挙動が同じかを比べられるようにする。
+# 一時ディレクトリは終了時に消えるため、比べる値はここで標準出力へ残す。
+insertions = meta.get("insertions") or []
+placements = ",".join(
+    "{slot}@{at}+{duration}".format(
+        slot=item.get("slot", ""),
+        at=item.get("at_seconds", ""),
+        duration=item.get("duration_seconds", ""),
+    )
+    for item in insertions
+)
+print("compose transcript:", meta["transcript"])
+print("compose selected animal:", selected["id"])
+print("compose insertions:", placements)
+print("compose output duration seconds:", meta.get("output_duration_seconds", ""))
 ' "$temporary_directory/compose.json"
 
 image_size_bytes=$(docker image inspect --format '{{.Size}}' "$local_image")
