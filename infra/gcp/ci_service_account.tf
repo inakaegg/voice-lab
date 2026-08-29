@@ -32,6 +32,16 @@ resource "google_project_iam_custom_role" "cloud_run_image_updater" {
   ]
 }
 
+# `gcloud run services update` は更新operationの状態を取りに行くため run.operations.get を要する。
+# この権限はserviceスコープでは付与できずprojectスコープにしかないので、roleを分ける。
+# 欠けるとimageのpushは成功したまま更新の完了確認で失敗し、反映が中途半端になる。
+resource "google_project_iam_custom_role" "cloud_run_operation_reader" {
+  role_id     = "zoovoiceCloudRunOperationReader"
+  title       = "Zoovoice Cloud Run operation reader"
+  description = "Cloud Runの更新operationの状態を読むだけのrole"
+  permissions = ["run.operations.get"]
+}
+
 # 資材の取得。読み取りだけで、削除と上書きは与えない。
 resource "google_storage_bucket_iam_member" "ci_deployer_artifacts_reader" {
   bucket = google_storage_bucket.zoovoice_artifacts.name
@@ -62,6 +72,13 @@ resource "google_cloud_run_v2_service_iam_member" "ci_deployer_image_updater" {
   location = local.region
   role     = google_project_iam_custom_role.cloud_run_image_updater.id
   member   = "serviceAccount:${google_service_account.ci_deployer.email}"
+}
+
+# 更新operationの状態取得はprojectスコープでしか付与できない。権限は1つに絞る。
+resource "google_project_iam_member" "ci_deployer_operation_reader" {
+  project = local.project
+  role    = google_project_iam_custom_role.cloud_run_operation_reader.id
+  member  = "serviceAccount:${google_service_account.ci_deployer.email}"
 }
 
 # Cloud Run実行用service accountを名乗るserviceを更新するために要る。
