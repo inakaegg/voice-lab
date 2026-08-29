@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/deploy_zoovoice_cloud_run.sh"
 DOCKERFILE = ROOT / "services/zoovoice/Dockerfile"
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
-WHISPER_COMMIT = "5250a86fdebac4d51085fcfcd0b315cb0c6b91c9"
+WHISPER_COMMIT = "edea8a9c3cf0eb7676dcdb604991eb2f95c3d984"
 MODEL_SHA256 = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
 
 
@@ -47,7 +47,7 @@ case "${0##*/}:$*" in
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "--output" ]; then
         shift
-        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"selected_animals":[{"id":"dog","label_ja":"犬","reason":"%s"}],"association_reason":"%s","insertions":[],"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" > "$1"
+        printf '{"audio":{"format":"wav","base64":"UklGRg=="},"meta":{"transcript":"犬が走る","selected_animal":{"id":"dog","label_ja":"犬"},"selected_animals":[{"id":"dog","label_ja":"犬","reason":"%s"}],"association_reason":"%s","insertions":%s,"input_duration_seconds":1,"output_duration_seconds":1}}' "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" "${ZOOVOICE_FAKE_ASSOCIATION_REASON:-犬が出てくるため}" "${ZOOVOICE_FAKE_INSERTIONS:-[]}" > "$1"
       fi
       shift || true
     done
@@ -378,3 +378,92 @@ def test_runtime_artifacts_are_readable_by_the_nonroot_user() -> None:
     assert "COPY services/zoovoice/assets" not in dockerfile
     assert "ZOOVOICE_CONCEPTNET_INDEX_PATH" not in dockerfile
     assert "/app/models/ggml-small.bin | sha256sum --check --strict" in dockerfile
+
+
+def run_local_verify(
+    tmp_path: Path, extra: dict[str, str], workspace: str = "run"
+) -> tuple[str, str]:
+    """local-only verificationを走らせ、記録したコマンド列と標準出力を返す。
+
+    fakeコマンドと資材fixtureは実行ごとに作り直すため、呼び出しごとに別のディレクトリを使う。
+    """
+    directory = tmp_path / workspace
+    directory.mkdir()
+    command_log = install_recording_fakes(directory)
+    result = run_deploy(
+        {
+            "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}",
+            "ZOOVOICE_FAKE_COMMAND_LOG": str(command_log),
+            "ZOOVOICE_GCP_PROJECT": "example-project",
+            "ZOOVOICE_LOCAL_VERIFY": "1",
+            **valid_artifact_env(directory),
+            **extra,
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    return command_log.read_text(encoding="utf-8"), result.stdout
+
+
+def test_local_verify_keeps_the_default_container_arguments(tmp_path: Path) -> None:
+    """stubを使わないときの`docker run`は従来どおりで、hostへの経路も開けない。"""
+    commands, _output = run_local_verify(tmp_path, {})
+
+    assert "ZOOVOICE_LLM_ENDPOINT" not in commands
+    assert "--add-host" not in commands
+
+
+def test_local_verify_reaches_a_stub_endpoint_when_configured(tmp_path: Path) -> None:
+    """課金なしでcomposeを通すため、連想APIの向き先をstubへ変えられる。
+
+    containerからhost上のstubへ届く経路も同時に開ける。Linuxでは
+    `host.docker.internal` が既定で存在しないため、これが無いとstubへ到達できない。
+    """
+    commands, _output = run_local_verify(
+        tmp_path, {"ZOOVOICE_LLM_ENDPOINT": "http://host.docker.internal:19000/v1/responses"}
+    )
+
+    assert "ZOOVOICE_LLM_ENDPOINT=http://host.docker.internal:19000/v1/responses" in commands
+    assert "host.docker.internal:host-gateway" in commands
+
+
+def test_local_verify_passes_build_cache_arguments_only_when_configured(
+    tmp_path: Path,
+) -> None:
+    """build cacheはCIから渡す。未設定ならbuildxの呼び出しは従来と同じになる。"""
+    without_cache, _ = run_local_verify(tmp_path, {}, workspace="without-cache")
+    assert "--cache-from" not in without_cache
+    assert "--cache-to" not in without_cache
+
+    with_cache, _ = run_local_verify(
+        tmp_path,
+        {
+            "ZOOVOICE_BUILD_CACHE_FROM": "type=gha",
+            "ZOOVOICE_BUILD_CACHE_TO": "type=gha,mode=max",
+        },
+        workspace="with-cache",
+    )
+    # fakeコマンドは引数を %q で記録するため、カンマがエスケープされる。比較前に外す。
+    recorded = with_cache.replace("\\", "")
+    assert "--cache-from type=gha" in recorded
+    assert "--cache-to type=gha,mode=max" in recorded
+
+
+def test_local_verify_reports_the_fields_needed_to_compare_builds(tmp_path: Path) -> None:
+    """whisper.cppの版を変えたとき、前後で挙動が同じかを比べられるようにする。
+
+    一時ディレクトリは終了時に消えるため、比較に使う値は標準出力へ残す必要がある。
+    挿入位置は実際の値まで検査する。空の配列だけで確かめると、キー名を間違えていても
+    ラベルだけが一致して通ってしまう。
+    """
+    insertions = (
+        '[{"slot":"word","species":"dog","at_seconds":2.18,"duration_seconds":0.79},'
+        '{"slot":"ending","species":"dog","at_seconds":4.7,"duration_seconds":0.33}]'
+    )
+    _commands, output = run_local_verify(
+        tmp_path, {"ZOOVOICE_FAKE_INSERTIONS": insertions}
+    )
+
+    assert "compose transcript: 犬が走る" in output
+    assert "compose selected animal: dog" in output
+    assert "compose insertions: word@2.18+0.79,ending@4.7+0.33" in output
+    assert "compose output duration seconds: 1" in output

@@ -226,18 +226,21 @@ staging環境は廃止した。deploy経路はproduction Workerだけである�
 
 ### production
 
-mainへのpushではGitHub Actionsの `CI` を先に実行する。`Deploy Cloudflare Production` はpush起点のCIが成功した場合だけ動く。CIが検証したcommit SHAをcheckoutし、React成果物を再生成してから次の順で本番へ反映する。
+mainへのpushではGitHub Actionsの `CI` を先に実行する。`Deploy Production` はpush起点のCIが成功した場合だけ動く。CIが検証したcommit SHAをcheckoutし、React成果物を再生成してから次の順で本番へ反映する。
 
 1. `npx wrangler d1 migrations apply mo-speech-demo-db --remote`
 2. `npx wrangler deploy --env=""`
 3. `python3 scripts/smoke_cloudflare_deployment.py --base-url https://voice-lab.inakaegg.workers.dev`
 
-D1 migrationはWorkerより先に適用する。`--remote`を省略するとlocal databaseが対象になるため省略しない。deploy後のsmokeは公開画面、公開JSON API、認証境界を確認する。有料の生成APIは呼ばない。RunPod imageはこの自動deployへ含めず、既存の手動workflowを維持する。
+D1 migrationはWorkerより先に適用する。`--remote`を省略するとlocal databaseが対象になるため省略しない。deploy後のsmokeは公開画面、公開JSON API、認証境界を確認する。有料の生成APIは呼ばない。
+
+同じworkflowはZoovoiceのCloud Run imageも同じrevisionから反映する。Cloud RunのjobはWorkerのdeployが成功してから動く。WorkerはCloud Runの応答形を厳密に検証するため、先にCloud Runが入れ替わると古いWorkerが応答を拒み続けるためである。契約は[services/zoovoice/README.md](../../services/zoovoice/README.md)を正とする。RunPod imageはこの自動deployへ含めず、既存の手動workflowを維持する。
 
 GitHub repositoryには次のActions secretsを登録する。未登録の場合はworkflowが対象名を示して失敗する。
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
+- `GCP_ZOOVOICE_CI_SA_KEY`（Cloud Run反映用。鍵の作り方と失効は[MODEL_STORAGE.md](MODEL_STORAGE.md)を正とする）
 
 API tokenはCloudflareの `Edit Cloudflare Workers` templateを基にする。対象accountだけへscopeを絞り、Accountの `D1 Edit` 権限を追加する。D1 migrationはdatabaseへのwriteを伴うため、この権限が必要である。
 

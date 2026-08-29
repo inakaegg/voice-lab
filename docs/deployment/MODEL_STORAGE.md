@@ -1,6 +1,6 @@
 # モデル保存とデプロイ方針
 
-更新日: 2026-08-24
+更新日: 2026-08-29
 
 ## 現在の保存方針
 
@@ -18,8 +18,10 @@ ZoovoiceのGoサービスは、日本語ASRのために次の2つを必要とす
 
 | artifact | 内容 | 固定する識別子 |
 | --- | --- | --- |
-| whisper.cppソース | `whisper-cli` をbuildする元 | commit `5250a86fdebac4d51085fcfcd0b315cb0c6b91c9` |
+| whisper.cppソース | `whisper-cli` をbuildする元 | commit `edea8a9c3cf0eb7676dcdb604991eb2f95c3d984` |
 | ASRモデル | 日本語ASR用 `ggml-small.bin` | SHA-256 `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
+
+whisper.cppソースはupstreamのcommitを固定し、CIとローカルのどちらもGitHubから取得する。ASRモデルと動物音源セットはCloud Storageに置く。配置と復旧の方針は [build資材の保管と復旧](#build資材の保管と復旧) に定める。
 
 ローカル実行では、環境変数でこの2つのpathを渡す。連想に使うAPIキーは `OPENAI_API_KEY` で渡す。Cloud Run向けimageでは、buildが検証済みのディレクトリをnamed contextとして受け取り、imageへ取り込む。取り込み後にimage内でSHA-256を照合し、一致しない場合はbuildを失敗させる。
 
@@ -32,6 +34,83 @@ RunPod用の大きいモデルと違い、imageへ焼き込む理由は次のと
 動物音もgit管理せず、ASRモデルと同じくリポジトリ外へ置き、build時に `zoovoice_sounds` named contextからimageへ取り込む。出所と採用hashはそのセットの `manifest.json` を正とし、Goサービスが起動時にSHA-256を照合する。
 
 imageの実測値と測定条件、whisper-cliのlink構成は [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
+
+## build資材の保管と復旧
+
+Zoovoiceのbuild資材はgit管理しない。かつて正本がローカルの一時ディレクトリにしか無く、リポジトリ名の変更でそのディレクトリが引き継がれず、動物音源セットを失った。同じことを繰り返さないため、資材ごとに役割と復旧の順序を決める。
+
+### 資材の役割
+
+| 役割 | 実体 | 位置づけ |
+| --- | --- | --- |
+| 正本 | Cloud Storageのobject | 内容hashをpathへ含め、既存objectを上書きしない |
+| 二次復旧元 | 稼働中のCloud Run image | deployのたびに資材が焼き込まれ、正本と同じ内容が自動で二重化される |
+| 作業用複製 | ローカルのファイル | 正本ではない。失っても上の2つから復元できる |
+
+whisper.cppソースはこの3分類の外にある。upstreamのcommitを固定して取得するため、正本はupstreamのリポジトリである。
+
+### bucketの保護
+
+bucketは `mo-speech-501706-zoovoice-artifacts` で、リージョンは `us-central1` とする。定義は `infra/gcp/storage.tf` を正とする。
+
+- 動物音源には再配布が禁止された素材を含むため、public access preventionをenforcedにする。
+- 誤削除と誤上書きから戻せるよう、versioningとsoft deleteを有効にする。
+- CI用service accountにはobjectの読み取りだけを与える。削除と上書きの権限は与えない。
+
+### 復旧の順序と確認方法
+
+1. Cloud Storageのobjectから取り出す。`ZOOVOICE_ARTIFACTS_DIR=<復元先> ./scripts/fetch_zoovoice_artifacts.sh` を実行する。objectを消していても、versioningの旧versionから戻せる。
+2. 稼働中のCloud Run imageから取り出す。`python3 scripts/recover_zoovoice_sounds_from_image.py <復元先>` を実行する。
+3. ローカルの作業用複製を使う。
+
+どの経路でも、復元できたかどうかはSHA-256で確かめる。ASRモデルは既知のSHA-256と照合し、動物音源セットは `manifest.json` に記録した全ファイルのSHA-256と照合する。上の2つのscriptはこの照合まで自動で行い、1件でも合わなければ失敗する。
+
+imageからの復旧は、image全体を取得しない。`COPY . /app/sounds` に対応するlayerだけを取り出すため、必要な通信量は数MiBで済む。
+
+### 残っているリスク
+
+bucketは単一リージョンの単一bucketである。リージョン全体の障害では、二次復旧元と作業用複製に頼ることになる。複数リージョンへの複製は無料枠を超えるため採用しない。
+
+### 資材の差し替え
+
+資材を新しくするときは、新しいobjectを別のpathへ置いてから `scripts/zoovoice_artifacts_common.sh` の定数を更新する。既存objectは上書きしない。アップロードは `scripts/upload_zoovoice_artifacts.sh` を使う。既定はdry-runで、内容を確かめてから `ZOOVOICE_ARTIFACTS_UPLOAD_APPLY=1` を付けて実行する。
+
+```sh
+ZOOVOICE_ASR_MODEL_PATH=<ggml-small.binのpath> \
+ZOOVOICE_SOUNDS_DIR=<manifest.json付きの音源ディレクトリ> \
+./scripts/upload_zoovoice_artifacts.sh
+```
+
+動物音源セットは決定的なtar.gzにまとめる。同じ入力から同じSHA-256になるよう、entryの順序と時刻、gzipヘッダに入るファイル名まで固定している。作成は `scripts/build_zoovoice_sounds_archive.py` が行う。
+
+### CI用service account鍵の扱い
+
+CIはservice account鍵で認証する。鍵はTerraformで作らない。秘密鍵がstateへ入るためである。
+
+**作成と登録**
+
+1. `gcloud iam service-accounts keys create` で作る。出力はGitHub Secretへ移し、ローカルへ残さない。
+2. GitHub Secret `GCP_ZOOVOICE_CI_SA_KEY` へ設定する。
+3. `gcloud iam service-accounts keys list --managed-by=user` で鍵の実数を数える。意図した本数だけがあることを目で確かめる。作成に失敗した試行が鍵だけ残していることがあるためで、鍵は作った本人しか気づけない。
+4. 反映jobの認証stepが通ることを確認する。
+
+**交換**
+
+1. 新しい鍵を作り、GitHub Secretを差し替える。
+2. 旧鍵は削除せず `keys disable` で止める。問題があれば戻せる。
+3. 一定期間動作に問題がなければ `keys delete` で消す。
+
+**漏洩したとき**
+
+鍵を消すだけでは足りない。漏洩している間にimageを入れ替えられていた場合、Cloud Runでは
+すでに別のコードが動いている。次の順で、止める・戻す・調べる、を行う。
+
+1. `keys delete` で当該鍵を消し、GitHub Secretも削除する。
+2. `Deploy Production` を無効にして、自動反映を止める。
+3. Cloud Runのimageを、漏洩前と分かっているdigestへ戻す。
+4. Cloud Runのrevision一覧と、Artifact Registryのimageの作成時刻を確認する。身に覚えのない反映が無いかを見る。
+5. Secret Manager の `zoovoice-openai-api-key` を新しい値へ入れ替える。CI用service accountはこのsecretを読めないが、imageを差し替えられていれば実行時に読み出せるためである。
+6. 監査ログで当該service accountの操作を確認する。対象はArtifact Registryへのpushと、Cloud Runの更新である。
 
 ## モデル候補の容量目安
 

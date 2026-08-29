@@ -487,10 +487,12 @@ def test_current_state_docs_match_the_deployed_production_boundary() -> None:
         assert "production未反映" not in document, relative_path
         assert "not yet in production" not in document, relative_path
 
-    # 反映経路の違い（Workerは自動、Cloud Runは手動）は変わらない仕組みなので固定する。
+    # 反映経路（1つのworkflowがWorkerとCloud Runを同じrevisionから反映する）は
+    # 変わらない仕組みなので固定する。手動deployへ戻す記述が復活しないことも見る。
     architecture = read_text("docs/deployment/ARCHITECTURE.md")
-    assert "Deploy Cloudflare Production" in architecture
+    assert "Deploy Production" in architecture
     assert "deploy_zoovoice_cloud_run.sh" in architecture
+    assert "Cloud Runのimageは手動" not in architecture
 
 
 def test_speakloop_roadmap_contains_future_work_without_public_task_notes() -> None:

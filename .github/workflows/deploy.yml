@@ -1,4 +1,4 @@
-name: Deploy Cloudflare Production
+name: Deploy Production
 
 on:
   workflow_run:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cloudflare-production
+  group: production
   cancel-in-progress: false
 
 jobs:
@@ -92,3 +92,121 @@ jobs:
         run: >-
           python3 scripts/smoke_cloudflare_deployment.py
           --base-url https://voice-lab.inakaegg.workers.dev
+
+  # このjobはGCPのservice account鍵を扱う。tagは動かせるため、
+  # 使うactionはcommit SHAで固定する（末尾のコメントが対応するtag）。
+  #
+  # Workerのdeployを待ってから動かす。WorkerはCloud Runの応答形を厳密に検証し、
+  # 二形状を同時に受理する互換層を持たない（ARCHITECTURE.md）。応答形を変える変更で
+  # Cloud Runが先に入れ替わると、古いWorkerがその応答を拒み続ける。
+  deploy-cloud-run:
+    needs: [current-main, deploy]
+    if: needs.current-main.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZOOVOICE_GCP_PROJECT: mo-speech-501706
+      ZOOVOICE_WHISPER_COMMIT: edea8a9c3cf0eb7676dcdb604991eb2f95c3d984
+      ZOOVOICE_STUB_PORT: "19000"
+
+    steps:
+      # whisper.cppのbuildとASRモデルを同時に抱えるため、runnerの空きを先に確保する。
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/local/cuda* \
+            /opt/ghc
+          docker system prune -af || true
+          df -h
+
+      - name: Checkout tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # 配備scriptはworking treeがcleanであることを要求する。
+      # tmp/ は .gitignore の対象なので、ここへ置いてもcleanのまま保てる。
+      - name: Checkout the pinned whisper.cpp source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.ZOOVOICE_WHISPER_COMMIT }}
+          path: tmp/whisper.cpp
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          credentials_json: ${{ secrets.GCP_ZOOVOICE_CI_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Fetch build artifacts from Cloud Storage
+        shell: bash
+        env:
+          ZOOVOICE_ARTIFACTS_DIR: ${{ runner.temp }}/zoovoice-artifacts
+        run: bash scripts/fetch_zoovoice_artifacts.sh
+
+      # 連想APIの1往復だけを固定応答へ置き換える。課金対象の外部呼び出しは行わない。
+      # ASR・形態素解析・音声合成・起動時のmanifest照合は本番と同じ経路を通る。
+      - name: Start the association stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python3 scripts/zoovoice_llm_stub.py --port "${ZOOVOICE_STUB_PORT}" >/dev/null 2>&1 &
+          for _ in $(seq 1 40); do
+            if curl --fail --silent "http://127.0.0.1:${ZOOVOICE_STUB_PORT}/" >/dev/null; then
+              echo "stub ready"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "::error::連想stubが起動しませんでした。"
+          exit 1
+
+      - name: Build, verify, and deploy the Cloud Run image
+        shell: bash
+        env:
+          ZOOVOICE_DEPLOY_APPLY: "1"
+          ZOOVOICE_WHISPER_SOURCE_DIR: ${{ github.workspace }}/tmp/whisper.cpp
+          ZOOVOICE_ASR_MODEL_PATH: ${{ runner.temp }}/zoovoice-artifacts/ggml-small.bin
+          ZOOVOICE_SOUNDS_DIR: ${{ runner.temp }}/zoovoice-artifacts/sounds
+          ZOOVOICE_SMOKE_AUDIO_PATH: ${{ github.workspace }}/services/zoovoice/testdata/compose-input.wav
+          ZOOVOICE_LLM_ENDPOINT: http://host.docker.internal:${{ env.ZOOVOICE_STUB_PORT }}/v1/responses
+          OPENAI_API_KEY: stub-key-not-used-for-billing
+        # build cacheはまだ有効にしない。scriptが自前でbuildxを呼ぶ構成では、
+        # type=gha に ACTIONS_RUNTIME_TOKEN と ACTIONS_RESULTS_URL の注入が要る。
+        # 初回実行でbuild時間とdisk使用量を測ってから、入れ方を決める。
+        run: bash scripts/deploy_zoovoice_cloud_run.sh
+
+      - name: Smoke the deployed service
+        shell: bash
+        run: |
+          set -euo pipefail
+          url=$(gcloud run services describe zoovoice \
+            --project "${ZOOVOICE_GCP_PROJECT}" --region us-central1 \
+            --format='value(status.url)')
+          [[ "${url}" == https://* ]] || { echo "::error::service URLを取得できませんでした。"; exit 1; }
+
+          anonymous=$(curl --silent --output /dev/null --write-out '%{http_code}' "${url}/animals")
+          if [[ "${anonymous}" != "403" ]]; then
+            echo "::error::認証なしのrequestが403で拒否されませんでした（${anonymous}）。"
+            exit 1
+          fi
+
+          token=$(gcloud auth print-identity-token --audiences="${url}")
+          authorized=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${token}" "${url}/animals")
+          if [[ "${authorized}" != "200" ]]; then
+            echo "::error::認証付きの GET /animals が200を返しませんでした（${authorized}）。"
+            exit 1
+          fi
+          echo "remote smoke: 認証なし403 / 認証あり200"

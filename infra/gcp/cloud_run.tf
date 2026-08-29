@@ -66,13 +66,16 @@ resource "google_cloud_run_v2_service" "zoovoice" {
   }
 }
 
-# privateを維持する。呼び出しはWorker用とローカルsmoke用の2つのservice accountだけに許可する。
+# privateを維持する。呼び出しはWorker用・ローカルsmoke用・CD用の3つのservice accountだけに許可する。
+# CD用へ直接付与するのは、smoke用service accountの借用（serviceAccountTokenCreator）だと
+# その相手の権限をすべて引き継ぎ、範囲が広がるためである。
 resource "google_cloud_run_v2_service_iam_binding" "zoovoice_invoker" {
   name     = google_cloud_run_v2_service.zoovoice.name
   location = local.region
   role     = "roles/run.invoker"
 
   members = [
+    "serviceAccount:${google_service_account.ci_deployer.email}",
     "serviceAccount:${google_service_account.smoke_invoker.email}",
     "serviceAccount:${google_service_account.worker_invoker.email}",
   ]

@@ -271,7 +271,7 @@ python3 scripts/select_animal_sounds.py <素材ディレクトリ>
 imageは`services/zoovoice/Dockerfile`で作ります。
 モデルと鳴き声素材はリポジトリへcommitしないため、buildはgit外の成果物を named context として受け取ります。
 
-- `whisper_source`: 検証済みのwhisper.cppソース。commitは`5250a86fdebac4d51085fcfcd0b315cb0c6b91c9`に固定する
+- `whisper_source`: 検証済みのwhisper.cppソース。commitは`edea8a9c3cf0eb7676dcdb604991eb2f95c3d984`に固定する
 - `zoovoice_runtime`: `ggml-small.bin`を置いた一時ディレクトリ
 - `zoovoice_sounds`: `manifest.json`付きの鳴き声セット（`ZOOVOICE_SOUNDS_DIR`の中身をそのまま渡す）
 
@@ -304,6 +304,23 @@ Cloud Runへの配備は`./scripts/deploy_zoovoice_cloud_run.sh`を使います�
 | `ZOOVOICE_SOUNDS_DIR` | imageへ入れる鳴き声セット（`manifest.json`付き） |
 | `ZOOVOICE_SMOKE_AUDIO_PATH` | local smokeへ送る短い音声 |
 | `OPENAI_API_KEY` | local smokeとCloud Runが使う連想APIのキー |
+
+次の3つは任意です。CIが使い、ローカルでは省略できます。
+
+| 変数 | 内容 |
+| --- | --- |
+| `ZOOVOICE_LLM_ENDPOINT` | 連想APIの向き先。未設定なら公式endpointを使う |
+| `ZOOVOICE_BUILD_CACHE_FROM` | `docker buildx` へ渡すcacheの読み出し先 |
+| `ZOOVOICE_BUILD_CACHE_TO` | 同じくcacheの書き込み先 |
+
+ASRモデルと鳴き声セットは、Cloud Storageから取得できます。
+取得先のディレクトリは`ZOOVOICE_ARTIFACTS_DIR`で渡します。
+
+```sh
+ZOOVOICE_ARTIFACTS_DIR=/tmp/zoovoice-artifacts ./scripts/fetch_zoovoice_artifacts.sh
+```
+
+取得時にSHA-256を照合し、`ZOOVOICE_ASR_MODEL_PATH`と`ZOOVOICE_SOUNDS_DIR`へ渡すべき2つのpathを出力します。
 
 scriptはwhisper.cpp commitとASRモデルのSHA-256を先に検査します。
 一致しない場合は、buildへ進まず停止します。
@@ -338,10 +355,12 @@ CPUとメモリはlocal-only verificationで同じ上限を課して起動でき
 - imageはtagではなくdigestを固定して指定する
 
 Cloud RunへGit repositoryを接続する自動buildは使いません。
-container imageのbuildとpushはローカルの配備scriptだけが行います。
+container imageのbuildとpushは、この配備scriptだけが行います。
+`main`へのpushではGitHub Actionsが同じscriptを呼び出し、手元から実行するときも同じ経路を通ります。
 
 invoker権限はservice単位の`roles/run.invoker`だけを付与し、`allUsers`へは付与しません。
-付与先はCloudflare Worker用のinvoker service accountと、smoke専用のservice accountの2つです。
+付与先はCloudflare Worker用のinvoker service account、smoke専用のservice account、CD用のservice accountの3つです。
+CD用へ直接付与しているのは、smoke専用service accountを借用させるとその相手の権限をすべて引き継ぐためです。
 active developerのgcloudアカウントは、smoke専用service account上の`roles/iam.serviceAccountTokenCreator`だけを持ち、Cloud Run自体のinvoker権限は持ちません。
 これらのIAMもTerraform（`infra/gcp/`）が管理します。scriptはapply時に`allUsers`が居ないことの確認だけを行います。
 
@@ -370,13 +389,29 @@ emulationのlocal値はCloud Runの実CPU上の値より遅くなり得ます。
 production Cloudflare WorkerがCloud Runを呼ぶ認証は、専用invoker service accountのkeyによるID token取得方式です。
 認証フローとsecret運用の詳細は[CLOUDFLARE.md](../../docs/deployment/CLOUDFLARE.md)を参照してください。
 
-Cloudflare Workerはmainへのpushで自動反映します。Cloud Runのimageだけが手動で、mainのHEADから`./scripts/deploy_zoovoice_cloud_run.sh`を明示applyで実行します。
-Cloud Runへ反映したら、次のsmokeで反映結果を確認します。
+Cloudflare WorkerとCloud Runは、どちらも`main`へのpushで自動反映します。
+`Deploy Production`がCIの成功を待ち、同じrevisionから両方を反映します。
+
+Cloud Runの反映はWorkerの反映が成功してから始まります。
+WorkerはCloud Runの応答形を厳密に検証し、二形状を同時に受理する互換層を持たないためです。
+応答形を変える変更でCloud Runが先に入れ替わると、古いWorkerがその応答を拒み続けます。
+
+手元からの明示applyも従来どおり使えます。CDを止めたいときや、CDが失敗した状態から戻すときに使います。
+
+反映の前に、`Deploy Production`のjobがrunner上でimageを起動して`POST /compose`を1回通します。
+このとき連想APIの向き先だけを`ZOOVOICE_LLM_ENDPOINT`でrunner上のstubへ変え、課金の発生する外部呼び出しを避けます。
+stubはGoのテスト内で使う`stubDoer`とは別物で、runner上に立てる実際のHTTPサーバーです。
+imageには手を入れないため、検証した成果物と配布する成果物は同一です。
+`ZOOVOICE_LLM_ENDPOINT`はテスト専用の仕組みではなく、サービスが元から持つ設定項目です。
+
+反映のたびに同じjobが次を確認します。満たさない場合はjobが失敗します。
 
 - 認証なしのCloud Run直接requestが403で拒否されること
-- smoke専用service accountを借用した`GET /animals`の200応答
-- 同じ認証での実音声の`POST /compose`の200応答と、挿入位置・選んだ動物の妥当性
+- CD用service accountでの`GET /animals`の200応答
 - 公開側は`python3 scripts/smoke_cloudflare_deployment.py --base-url https://voice-lab.inakaegg.workers.dev`
+
+実音声での`POST /compose`は自動化しません。実LLM呼び出しに課金が発生するためです。
+挿入位置と選んだ動物の妥当性は、必要なときに手元で確かめます。
 
 Cloud Runの`/healthz`は認証付きrequestでもGoogle側で404になるため、remote smokeの確認先には使いません。
 local containerでは同じpathが200を返します。

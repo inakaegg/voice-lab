@@ -18,3 +18,4 @@ build/
 .env
 .env.*
 .runpod.env
+gha-creds-*.json
