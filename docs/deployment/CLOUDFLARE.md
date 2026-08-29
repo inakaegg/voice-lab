@@ -234,7 +234,7 @@ mainへのpushではGitHub Actionsの `CI` を先に実行する。`Deploy Produ
 
 D1 migrationはWorkerより先に適用する。`--remote`を省略するとlocal databaseが対象になるため省略しない。deploy後のsmokeは公開画面、公開JSON API、認証境界を確認する。有料の生成APIは呼ばない。
 
-同じworkflowはZoovoiceのCloud Run imageも同じrevisionから反映する。Workerとは別のjobで動くため、片方の失敗がもう片方を巻き込むことはない。契約は[services/zoovoice/README.md](../../services/zoovoice/README.md)を正とする。RunPod imageはこの自動deployへ含めず、既存の手動workflowを維持する。
+同じworkflowはZoovoiceのCloud Run imageも同じrevisionから反映する。Cloud RunのjobはWorkerのdeployが成功してから動く。WorkerはCloud Runの応答形を厳密に検証するため、先にCloud Runが入れ替わると古いWorkerが応答を拒み続けるためである。契約は[services/zoovoice/README.md](../../services/zoovoice/README.md)を正とする。RunPod imageはこの自動deployへ含めず、既存の手動workflowを維持する。
 
 GitHub repositoryには次のActions secretsを登録する。未登録の場合はworkflowが対象名を示して失敗する。
 

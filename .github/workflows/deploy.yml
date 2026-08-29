@@ -95,8 +95,12 @@ jobs:
 
   # このjobはGCPのservice account鍵を扱う。tagは動かせるため、
   # 使うactionはcommit SHAで固定する（末尾のコメントが対応するtag）。
+  #
+  # Workerのdeployを待ってから動かす。WorkerはCloud Runの応答形を厳密に検証し、
+  # 二形状を同時に受理する互換層を持たない（ARCHITECTURE.md）。応答形を変える変更で
+  # Cloud Runが先に入れ替わると、古いWorkerがその応答を拒み続ける。
   deploy-cloud-run:
-    needs: current-main
+    needs: [current-main, deploy]
     if: needs.current-main.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45

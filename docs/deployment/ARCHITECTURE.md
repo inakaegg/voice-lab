@@ -105,7 +105,7 @@ sequenceDiagram
 
 WorkerはCloud Runの応答形を厳密に検証するため、二形状を同時に受理する互換層は持たない。応答形を変える場合は、受理側のWorkerを先に反映する。
 
-反映は `Deploy Production` が担う。mainへのpushでCIが成功した場合だけ動き、Cloudflare WorkerとCloud Runを同じrevisionから反映する。Cloud Run側は、まずCloud Storageに置いたbuild資材を取得してSHA-256を照合する。その後 `scripts/deploy_zoovoice_cloud_run.sh` がimageのbuildとpush、digest指定での入れ替えを行う。反映後は認証なしrequestの拒否と認証付きの応答を確認する。手順は [CLOUDFLARE.md](CLOUDFLARE.md) と [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
+反映は `Deploy Production` が担う。mainへのpushでCIが成功した場合だけ動き、Cloudflare WorkerとCloud Runを同じrevisionから反映する。上の制約により、Cloud RunはWorkerの反映が成功してから入れ替える。Cloud Run側は、まずCloud Storageに置いたbuild資材を取得してSHA-256を照合する。その後 `scripts/deploy_zoovoice_cloud_run.sh` がimageのbuildとpush、digest指定での入れ替えを行う。反映後は認証なしrequestの拒否と認証付きの応答を確認する。手順は [CLOUDFLARE.md](CLOUDFLARE.md) と [services/zoovoice/README.md](../../services/zoovoice/README.md) を正とする。
 
 どこまで実地確認したかは [services/zoovoice/README.md](../../services/zoovoice/README.md) の「外部操作の状況」を正とする。この文書には個々のdeployの状況を書かない。
 
