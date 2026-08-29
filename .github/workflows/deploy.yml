@@ -93,6 +93,8 @@ jobs:
           python3 scripts/smoke_cloudflare_deployment.py
           --base-url https://voice-lab.inakaegg.workers.dev
 
+  # このjobはGCPのservice account鍵を扱う。tagは動かせるため、
+  # 使うactionはcommit SHAで固定する（末尾のコメントが対応するtag）。
   deploy-cloud-run:
     needs: current-main
     if: needs.current-main.outputs.deploy == 'true'
@@ -121,27 +123,27 @@ jobs:
           df -h
 
       - name: Checkout tested revision
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       # 配備scriptはworking treeがcleanであることを要求する。
       # tmp/ は .gitignore の対象なので、ここへ置いてもcleanのまま保てる。
       - name: Checkout the pinned whisper.cpp source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ggml-org/whisper.cpp
           ref: ${{ env.ZOOVOICE_WHISPER_COMMIT }}
           path: tmp/whisper.cpp
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           credentials_json: ${{ secrets.GCP_ZOOVOICE_CI_SA_KEY }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Fetch build artifacts from Cloud Storage
         shell: bash
