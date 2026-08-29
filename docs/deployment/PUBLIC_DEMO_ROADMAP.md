@@ -50,7 +50,9 @@ Voice Lab本体にはOSSライセンスを付与せず、ポートフォリオ�
 - Safari、Firefox、スマートフォン実機の録音形式を継続確認する。
 - RunPodのcold start、queue、GPU費用を実測し、必要な場合だけwarmup運用を調整する。
 - 公開画面の説明、プライバシーポリシー、実装上の保存境界が一致していることを継続監査する。
-- ZoovoiceのCloud Run deployを、mainへのpushでの自動deployへ切り替える。現在はASRモデルと動物音源の正本がローカルにしかなく、build資材が揃わないため自動化できない。先にこの2つをGCSへ移してCIが取得とSHA-256照合を行えるようにし、[MODEL_STORAGE.md](MODEL_STORAGE.md)へ保管とバックアップの方針を追記する。自動化後に、whisper.cppソース・ASRモデル・動物音源からimageまでのbuild資材フロー図を `docs/diagrams/` へ追加する。
+- ZoovoiceのCloud Run deployを、mainへのpushでの自動deployへ切り替える。実装とdocsは用意した。残るのは外部操作で、bucketとservice accountの作成、build資材のアップロード、CI用鍵のGitHub Secretへの登録である。この3つが済むまで自動deployは動かない。
+- build資材の流れとCI検証の経路を図にして `docs/diagrams/` へ追加する。対象は2つで、whisper.cppソースとASRモデルと動物音源からimageまでの流れと、CIが連想APIをstubへ向けて検証する経路である。
+- whisper.cppを最新のupstreamへ更新する。固定している `edea8a9c` から1,900 commit以上進んでいる。ASRの挙動が変わり得るため、動作確認を伴う作業として別に扱う。
 
 ## 自動検証
 
