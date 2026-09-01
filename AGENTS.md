@@ -106,7 +106,7 @@
 - ブランチ種別に関わらず、原則としてpushしない。
 - pushが必要な場合は作業内容、確認結果、未確認範囲を報告し、ユーザー側で実行してもらう。
 - ユーザーがそのターンで明示的に「pushして」と依頼した場合だけpushしてよい。
-- コミットする場合は、可能なら `日本語 / English` の1行形式にする。
+- コミット件名は、可能なら `English / 日本語` の1行形式にする（kit既定の `COMMIT_LANG_ORDER=en-ja`。正本は repo直下の `agent-settings.env`）。
 - 各worktreeで `./scripts/install_git_hooks.sh` を実行し、Gitleaksの `pre-commit` と `pre-push` hookを有効にする。Gitleaksがない環境ではcommit・pushを黙って通さず停止する。
 - ローカルhookはGitHub ActionsとGitHub Push Protectionの代替ではない。全branchへのpush・pull requestの専用CI再検査を維持し、公開前にはGit履歴全体を別途検査する。
 
