@@ -66,6 +66,21 @@ jobs:
       - name: React typecheck and production build
         run: npm run check:web
 
+      - name: Committed frontend build artifacts are fresh
+        run: |
+          stale=0
+          # 追跡済みファイルの内容差分。
+          git diff --exit-code -- src/mo_speech/web/react || stale=1
+          # 生成物の増減(untracked/削除)は git diff では見えないため status も併用する。
+          if [ -n "$(git status --porcelain -- src/mo_speech/web/react)" ]; then
+            git status --porcelain -- src/mo_speech/web/react
+            stale=1
+          fi
+          if [ "$stale" -ne 0 ]; then
+            echo "::error::commit済みのフロントエンド生成物がlockfileとずれています。ローカルで npm run check:web を実行し、src/mo_speech/web/react の差分をcommitしてください。"
+            exit 1
+          fi
+
       - name: Build wheel and verify bundled web assets
         run: |
           python3 -m pip wheel . --no-deps --wheel-dir tmp/wheel
@@ -81,6 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         browser: [chromium, webkit, firefox]
 

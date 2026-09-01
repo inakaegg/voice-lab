@@ -406,7 +406,10 @@ def test_frontend_build_emits_and_packages_bundled_dependency_licenses() -> None
     assert '"mo_speech/web/react/favicon.ico"' in wheel_verifier
     assert '"mo_speech/web/react/github-invertocat-black.svg"' in wheel_verifier
     assert '"mo_speech/web/react/github-invertocat-white.svg"' in wheel_verifier
-    assert "opencc-js - 1.4.1 (MIT AND Apache-2.0)" in generated_licenses
+    # 版番号はdependabotのbumpで動くため固定しない。行の体裁だけを検証する。
+    assert re.search(
+        r"^## opencc-js - \S+ \(MIT AND Apache-2\.0\)$", generated_licenses, re.MULTILINE
+    )
     assert "opencc-data" in generated_licenses
     assert "Apache License" in generated_licenses
 

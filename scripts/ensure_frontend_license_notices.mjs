@@ -9,13 +9,23 @@ const openccThirdPartyLicensesUrl = new URL(
   "node_modules/opencc-js/THIRD_PARTY_LICENSES.md",
   repositoryRoot,
 );
+const openccPackageJsonUrl = new URL(
+  "node_modules/opencc-js/package.json",
+  repositoryRoot,
+);
 const marker = "## opencc-js bundled third-party notices";
 
 const generatedLicenses = await readFile(generatedLicensesUrl, "utf8");
 const openccThirdPartyLicenses = await readFile(openccThirdPartyLicensesUrl, "utf8");
+// 版はdependabotのbumpで動くのでinstall済みのpackage.jsonから取る。
+// ライセンス表記の変更は人の確認を要する事象なので、こちらは固定して検査する。
+const { version: openccVersion } = JSON.parse(
+  await readFile(openccPackageJsonUrl, "utf8"),
+);
+const expectedOpenccNotice = `opencc-js - ${openccVersion} (MIT AND Apache-2.0)`;
 
-if (!generatedLicenses.includes("opencc-js - 1.4.1 (MIT AND Apache-2.0)")) {
-  throw new Error("Viteのライセンス出力にopencc-js 1.4.1が見つかりません。");
+if (!generatedLicenses.includes(expectedOpenccNotice)) {
+  throw new Error(`Viteのライセンス出力に「${expectedOpenccNotice}」が見つかりません。`);
 }
 if (
   !openccThirdPartyLicenses.includes("## opencc-data") ||
