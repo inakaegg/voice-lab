@@ -191,29 +191,26 @@ test("portal GitHub link reveals its video guidance on hover and keyboard focus"
   }
 });
 
-test("SpeakLoop GitHub link supports hover, keyboard focus, theme, and opening the repository", async ({ context, page }, testInfo) => {
-  await context.route("https://github.com/inakaegg/voice-lab", async (route) => {
-    await route.fulfill({ contentType: "text/html", body: "<title>Voice Lab repository</title>" });
+// SpeakLoopのGitHub linkはデモ動画へ寄せた変種で、吹き出しを常時表示にする。
+test("SpeakLoop GitHub link shows its note at all times and opens the demo videos", async ({ context, page }, testInfo) => {
+  await context.route(/README\.ja\.md/, async (route) => {
+    await route.fulfill({ contentType: "text/html", body: "<title>Voice Lab demo videos</title>" });
   });
   await page.addInitScript(() => {
     if (!localStorage.getItem("mo-speech-theme")) localStorage.setItem("mo-speech-theme", "light");
   });
   await page.goto("/speakloop");
-  const link = page.getByRole("link", { name: "GitHubリポジトリ" });
+  const link = page.getByRole("link", { name: "GitHubのデモ動画" });
   const tooltip = page.locator("#speakloop-github-tooltip");
   const marks = link.locator("img.portal-github-mark");
 
-  await expect(link).toHaveAttribute("href", "https://github.com/inakaegg/voice-lab");
+  await expect(link).toHaveAttribute("href", "https://github.com/inakaegg/voice-lab/blob/main/README.ja.md#デモ動画");
   await expect(link).toHaveAttribute("target", "_blank");
   await expect(link).toHaveAttribute("rel", "noopener noreferrer");
   await expect(marks).toHaveCount(2);
-  await expect(tooltip).toBeHidden();
-
-  if ((page.viewportSize()?.width || 0) > 820) {
-    await link.hover();
-    await expect(tooltip).toBeVisible();
-    await expect(tooltip).toHaveText("実際の動作を動画で確認できます");
-  }
+  // hoverもfocusもしていない初期状態から見えていることが、この画面の契約である。
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveText("実際の動作をデモ動画で確認できます");
 
   await link.focus();
   await expect(link).toBeFocused();
@@ -222,7 +219,7 @@ test("SpeakLoop GitHub link supports hover, keyboard focus, theme, and opening t
   await assertVisibleControlsInsideViewport(page);
 
   const [popup] = await Promise.all([context.waitForEvent("page"), link.click()]);
-  await expect(popup).toHaveTitle("Voice Lab repository");
+  await expect(popup).toHaveTitle("Voice Lab demo videos");
   await popup.close();
 
   if (process.env.PLAYWRIGHT_VISUAL_REVIEW === "1") {

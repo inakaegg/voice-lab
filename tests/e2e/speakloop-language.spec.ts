@@ -17,6 +17,11 @@ test.describe("SpeakLoop display language", () => {
     await expect(page.getByRole("heading", { name: "Say what you mean" })).toBeVisible();
     await expect(page.getByText("Built with")).toBeVisible();
 
+    // デモ動画への導線は常時表示で、表示言語に合う方のREADMEの見出しへ飛ばす。
+    const demoVideoLink = page.locator("[data-demo-video-link]");
+    await expect(demoVideoLink).toBeVisible();
+    await expect(demoVideoLink).toHaveAttribute("href", "https://github.com/inakaegg/voice-lab#demo-videos");
+
     // この画面はvanilla JS層を持つので、切り替えるとページを読み直す。
     await page.getByLabel("Display settings").click();
     await page.getByRole("radio", { name: "日本語" }).click();
@@ -24,6 +29,7 @@ test.describe("SpeakLoop display language", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "ja");
     await expect(page).toHaveTitle(/言いたいことで発音練習/);
     await expect(page.getByRole("heading", { name: "言いたいことを話す" })).toBeVisible();
+    await expect(demoVideoLink).toHaveAttribute("href", "https://github.com/inakaegg/voice-lab/blob/main/README.ja.md#デモ動画");
 
     // 選択はlocalStorageに残るので、英語ブラウザで開き直しても日本語のままになる。
     await page.goto("/speakloop");
