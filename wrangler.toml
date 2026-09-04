@@ -19,6 +19,13 @@ binding = "MO_SPEECH_AUDIO_R2"
 bucket_name = "mo-speech-audio"
 preview_bucket_name = "mo-speech-audio-preview"
 
+# 共通課金基盤（credit-base）の内部API。RPCなのでbinding宣言そのものが認可になり、
+# shared secretを配らずに済む。HTTP経路はローカル開発とテスト用で、.dev.varsにだけ置く。
+[[services]]
+binding = "CREDIT_BASE"
+service = "credit-base"
+entrypoint = "CreditBase"
+
 [vars]
 PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.inakaegg.workers.dev"
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
@@ -36,6 +43,12 @@ ZOOVOICE_ORIGIN_MODE = "cloud-run"
 ZOOVOICE_CLOUD_RUN_URL = "https://zoovoice-kx3ku4k2fa-uc.a.run.app"
 ZOOVOICE_TURNSTILE_SITE_KEY = "0x4AAAAAAEGEa8LeZO8poIN_"
 ZOOVOICE_TURNSTILE_EXPECTED_HOSTNAME = "voice-lab.inakaegg.workers.dev"
+# 無料枠を超えた利用者のクレジット消費。未設定が既定のOFFで、現行のquotaのみ運用へ戻せる
+CREDIT_CONSUME_ENABLED = "0"
+# GPU実費の換算。voice-conversion-jobsの想定（120秒で予約額30）から 30/120。実測後に見直す
+CREDIT_RUNPOD_CREDITS_PER_SECOND = "0.25"
+CREDIT_SYNC_RESERVE_TTL_SECONDS = "600"
+CREDIT_JOB_RESERVE_TTL_SECONDS = "600"
 
 [observability]
 enabled = true

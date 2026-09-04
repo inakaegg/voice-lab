@@ -1,6 +1,6 @@
 # Cloudflareデモ構成
 
-更新日: 2026-08-24
+更新日: 2026-09-05
 
 ## 目的
 
@@ -40,14 +40,36 @@ Browser
 - `GOOGLE_CLIENT_SECRET`
 - `PUBLIC_SESSION_SECRET`
 - `ADMIN_GOOGLE_EMAILS`
+- `CREDIT_BASE_CALLBACK_SECRET`
 
 `RUNPOD_API_KEY` は可能なら対象endpointだけに権限を絞ったRestricted API keyにする。OpenAI API keyはWorker側で完結する処理に使う。対象処理はASR・翻訳・TTS・表示用ひらがなである。
 
 `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` は、公開デモの生成APIと管理画面で共用するGoogle OAuth clientである。`PUBLIC_SESSION_SECRET` はGoogleログインcookieへの署名に使い、他のsecretへfallbackさせない。`ADMIN_GOOGLE_EMAILS` は、管理画面へアクセスできるGoogleアカウントをカンマ区切りで指定する。管理画面側の設定にも管理者メールを追加でき、secret側と保存設定側の和集合を管理者扱いにする。管理者は公開生成quotaを消費しない。ただし入力サイズ上限は適用する。
 
+### クレジット消費のsecretとflag
+
+無料枠を超えた利用者にクレジットを消費させる機能は、既定でOFFである。有効にするには `wrangler.toml` の `CREDIT_CONSUME_ENABLED` を `1` にする。OFFのあいだは無料枠を超えた要求を従来どおり429で断る。
+
+共通課金基盤（credit-base）の内部APIはService BindingのRPCで呼ぶ。`wrangler.toml` の `[[services]]` に `CREDIT_BASE` / `credit-base` / `CreditBase` を宣言してあり、binding宣言そのものが認可になる。この経路にsecretは要らない。HTTP経路（`CREDIT_BASE_URL` と `CREDIT_BASE_SECRET`）はローカル開発とテスト専用で、`.dev.vars` にだけ置く。`wrangler.toml` へ書かない。
+
+`CREDIT_BASE_CALLBACK_SECRET` は、credit-baseのcronが問い合わせてくる `GET /api/internal/credit-jobs/<予約キー>` を守る署名鍵である。cronは認証ヘッダを送らないため、この鍵で署名した値をURLへ載せる。応答は状態と消費creditだけで、利用者を特定できる情報を含まない。
+
+**この鍵を登録しないままクレジット消費を有効にしても、消費は始まらない。** 照会先を署名して組めない状態で予約を作ると、cronが掃除できない予約が溜まるためである。鍵が無いあいだは無料枠を超えた要求を従来どおり429で断り、監査ログへ理由を残す。有効にする前に必ず登録する。
+
+数値の設定は `wrangler.toml` の `vars` に置く。`CREDIT_RUNPOD_CREDITS_PER_SECOND` はGPUの実行時間を消費creditへ換算する係数である。`CREDIT_SYNC_RESERVE_TTL_SECONDS` と `CREDIT_JOB_RESERVE_TTL_SECONDS` は予約の有効期間で、これを過ぎるとcronが後始末を引き取る。
+
+#### `CREDIT_BASE_CALLBACK_SECRET` の回転手順
+
+鍵を差し替えると、発行済みのURLは署名が合わずに401を返す。cronはそれを保留として扱い、対象の予約が精算されないまま残る。旧鍵を残す期間を必ず設ける。
+
+1. 新しい鍵を `CREDIT_BASE_CALLBACK_SECRET` へ登録する。
+2. 直前の鍵を `CREDIT_BASE_CALLBACK_SECRET_PREVIOUS` へ登録する。両方の鍵で署名されたURLを受け付ける。
+3. 旧鍵で署名した予約がすべて決着するまで待つ。最短でも24時間とcron間隔（5分）を置く。
+4. credit-base側の未精算の予約が0件であることを確認してから `CREDIT_BASE_CALLBACK_SECRET_PREVIOUS` を削除する。
+
 Google OAuth clientの「承認済みのリダイレクトURI」には `https://voice-lab.inakaegg.workers.dev/auth/google/callback` を登録する。旧Worker URLから切り替える間は旧URIを残してよいが、新URLでログイン確認が完了した後に不要な旧URIを削除する。
 
-iOSアプリなどのnativeクライアントは、cookieの代わりに後述のnative session交換でログインする。Google Cloud Console側では、同じprojectへapplication type「iOS」のOAuth clientを追加し、アプリのserver client ID（Google Sign-In SDKの `GIDServerClientID`）には上記Web applicationのclient ID（`GOOGLE_CLIENT_ID` と同じ値）を指定する。これでアプリが取得するGoogle ID tokenの `aud` が `GOOGLE_CLIENT_ID` と一致し、Workerが検証できる。iOS clientにsecretは発行されず、この対応で追加するWorker secretもない。
+iOSアプリなどのnativeクライアントは、cookieの代わりに後述のnative session交換でログインする。Google Cloud Console側では、同じprojectへapplication type「iOS」のOAuth clientを追加する。アプリのserver client ID（Google Sign-In SDKの `GIDServerClientID`）には、上記Web applicationのclient ID（`GOOGLE_CLIENT_ID` と同じ値）を指定する。これでアプリが取得するGoogle ID tokenの `aud` が `GOOGLE_CLIENT_ID` と一致し、Workerが検証できる。iOS clientにsecretは発行されず、この対応で追加するWorker secretもない。
 
 ### Zoovoiceのsecretとflag
 
@@ -194,7 +216,7 @@ sample metadataはD1、音声blobは非公開R2へ保存する。過去の研究
 ブラウザ以外のクライアント（iOSアプリ）はHttpOnly cookieを受け渡せないため、`POST /api/native-session` でGoogle ID tokenを短期sessionへ交換する。
 
 - requestはJSON `{"id_token": "<Google ID token>"}` とする。ID tokenは16KiB、request本文はそれに512 byteを加えた値を上限とし、超過は413で拒否する。
-- Workerは固定のGoogle JWKS（`https://www.googleapis.com/oauth2/v3/certs`）でRS256署名を検証する。受理条件は、`iss` が `https://accounts.google.com` または `accounts.google.com`・`aud` が `GOOGLE_CLIENT_ID` と完全一致・`exp` と `nbf` が有効・空でない `sub` とemail・`email_verified=true` のすべてとする。検証失敗は401、Google JWKSへ到達できない場合や `GOOGLE_CLIENT_ID`・`PUBLIC_SESSION_SECRET` 未設定の配備は503のfail closedとする。
+- Workerは固定のGoogle JWKS（`https://www.googleapis.com/oauth2/v3/certs`）でRS256署名を検証する。受理条件は次のすべてとする。`iss` が `https://accounts.google.com` または `accounts.google.com`・`aud` が `GOOGLE_CLIENT_ID` と完全一致・`exp` と `nbf` が有効・空でない `sub` とemail・`email_verified=true`。検証失敗は401、Google JWKSへ到達できない場合や `GOOGLE_CLIENT_ID`・`PUBLIC_SESSION_SECRET` 未設定の配備は503のfail closedとする。
 - 成功時のresponseは `session_token`・`token_type: "Bearer"`・Unix秒 `expires_at` の3つだけを返し、`Cache-Control: no-store` を付ける。`session_token` はcookieと同じ `PUBLIC_SESSION_SECRET` 署名・同じpayload形式（email・iat・exp）で、有効期限は発行から最大3600秒かつGoogle ID tokenの `exp` 以下とする。refresh tokenは発行せず、期限後はアプリ側がGoogle Sign-InのID token更新で再交換する。
 - 以後のAPIは `Authorization: Bearer <session_token>` で呼ぶ。Authorizationヘッダがあるrequestはヘッダだけを検証し、不正・期限切れでもcookieへfallbackしない。ヘッダがないrequestは従来どおりcookieを使う。identity・quota・管理者判定・job polling規則はcookieログインと同一である。
 - 交換成功時は既存Googleログインと同様に `public_users` の日時を更新し、audit eventは `google_native_login_success` としてhash化identityとactionだけを保存する。Google ID token・session token・Authorizationヘッダはlog・D1・KV・R2へ保存しない。
@@ -255,6 +277,7 @@ wrangler secret put GOOGLE_CLIENT_SECRET
 openssl rand -base64 32
 wrangler secret put PUBLIC_SESSION_SECRET
 wrangler secret put ADMIN_GOOGLE_EMAILS
+wrangler secret put CREDIT_BASE_CALLBACK_SECRET
 ```
 
 ### staging（廃止）

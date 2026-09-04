@@ -5,6 +5,8 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import workerEntrypoint from "../cloudflare/src/index.ts";
 import { handleRequest, runPublicDataRetention, validatePracticeLlmResult } from "../cloudflare/worker.mjs";
 import { clearZoovoiceIdTokenCacheForTests } from "../cloudflare/zoovoice-gateway.mjs";
+import { resolveCreditClient } from "../cloudflare/credit-client.mjs";
+import { CREDIT_RESERVATION_SQL } from "../cloudflare/worker.mjs";
 
 test("Cloudflare worker routes only the current public app pages", async () => {
   const requestedPaths = [];
@@ -3953,7 +3955,7 @@ function adminAuthEnv(fetchImpl, options = {}) {
         return json({ access_token: "google-access-token" });
       }
       if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-        return json({ email: options.googleEmail || "admin@example.com", email_verified: true, name: "Admin" });
+        return json({ sub: options.googleSub || "google-admin-subject", email: options.googleEmail || "admin@example.com", email_verified: true, name: "Admin" });
       }
       return fetchImpl(url, init);
     },
@@ -4186,10 +4188,13 @@ function fakeD1() {
     total: new Map(),
     audit: [],
     users: new Map(),
+    reservations: new Map(),
   };
   const db = {
     __tables: tables,
     __rejectUnboundedQuotaScan: false,
+    // 対応表へ流れたSQLを記録する。無料枠の利用者でD1読みが増えていないことを検査で見るため
+    __reservationQueries: [],
     prepare(sql) {
       return fakeD1Statement(db, String(sql), []);
     },
@@ -4250,6 +4255,17 @@ function fakeD1Statement(db, sql, args) {
       return { results: [] };
     },
     async first() {
+      // 対応表のSQLは定数と完全一致でだけ拾う。部分一致だと本体側で文を変えてもfakeが
+      // 古い解釈のまま応え続け、テストが素通りする
+      if (sql === CREDIT_RESERVATION_SQL.selectByKey) {
+        db.__reservationQueries.push("selectByKey");
+        return db.__tables.reservations.get(args[0]) || null;
+      }
+      if (sql === CREDIT_RESERVATION_SQL.selectByJobId) {
+        db.__reservationQueries.push("selectByJobId");
+        return [...db.__tables.reservations.values()].find((row) => row.job_id === args[0]) || null;
+      }
+      if (sql.includes("credit_job_reservations")) throw new Error(`unexpected credit reservation query: ${sql}`);
       if (sql.includes("quota_usage_daily")) return db.__tables.daily.get(`${args[0]}:${args[1]}:${args[2]}`) || null;
       if (sql.includes("quota_usage_total")) return db.__tables.total.get(`${args[0]}:${args[1]}`) || null;
       if (sql.includes("COUNT(*)") && sql.includes("public_users")) return { count: db.__tables.users.size };
@@ -4257,6 +4273,50 @@ function fakeD1Statement(db, sql, args) {
       return null;
     },
     async run() {
+      if (sql === CREDIT_RESERVATION_SQL.insert) {
+        db.__reservationQueries.push("insert");
+        db.__tables.reservations.set(args[0], {
+          reserve_key: args[0], job_id: null, subject_id: args[1], feature: args[2], kind: args[3],
+          reserved_amount: args[4], status: "in_flight", job_status: null, execution_time_ms: null,
+          settled_amount: null, created_at: args[5], resolved_at: null,
+        });
+        return { success: true };
+      }
+      if (sql === CREDIT_RESERVATION_SQL.attachJobId) {
+        db.__reservationQueries.push("attachJobId");
+        const row = db.__tables.reservations.get(args[1]);
+        if (row) row.job_id = args[0];
+        return { success: true };
+      }
+      if (sql === CREDIT_RESERVATION_SQL.recordOutcome) {
+        db.__reservationQueries.push("recordOutcome");
+        const row = db.__tables.reservations.get(args[2]);
+        if (row && row.status === "in_flight") {
+          row.job_status = args[0];
+          row.execution_time_ms = args[1];
+        }
+        return { success: true };
+      }
+      if (sql === CREDIT_RESERVATION_SQL.finalize) {
+        db.__reservationQueries.push("finalize");
+        const row = db.__tables.reservations.get(args[3]);
+        if (row && row.status === "in_flight") {
+          row.status = args[0];
+          row.settled_amount = args[1];
+          row.resolved_at = args[2];
+        }
+        return { success: true };
+      }
+      if (sql === CREDIT_RESERVATION_SQL.deleteResolved) {
+        db.__reservationQueries.push("deleteResolved");
+        for (const [key, row] of db.__tables.reservations) {
+          if (row.status !== "in_flight" && String(row.resolved_at || "") < args[0]) {
+            db.__tables.reservations.delete(key);
+          }
+        }
+        return { success: true };
+      }
+      if (sql.includes("credit_job_reservations")) throw new Error(`unexpected credit reservation query: ${sql}`);
       if (sql.startsWith("DELETE FROM quota_usage_daily")) {
         for (const [key, row] of db.__tables.daily) {
           if (row.updated_at < args[0]) db.__tables.daily.delete(key);
@@ -4375,4 +4435,823 @@ test("Cloudflare worker blocks crawlers on non-canonical deployments", async () 
   assert.match(await mismatchedRobots.text(), /^Disallow: \/$/m);
   const mismatchedSitemap = await handleRequest(new Request("https://voice-lab-unset-origin.inakaegg.workers.dev/sitemap.xml"), mismatchedEnv);
   assert.equal(mismatchedSitemap.status, 404);
+});
+
+test("Cloudflare worker stores the Google subject in the public session cookie", async () => {
+  const env = adminAuthEnv(async (url) => {
+    throw new Error(`unexpected fetch: ${url}`);
+  }, { googleEmail: "viewer@example.com", googleSub: "google-subject-42" });
+
+  const cookie = await publicCookie(env);
+
+  assert.equal(publicSessionPayload(cookie).sub, "google-subject-42");
+  assert.equal(publicSessionPayload(cookie).email, "viewer@example.com");
+});
+
+test("Cloudflare worker stores the Google subject in a native session token", async () => {
+  const fixture = await googleIdTokenFixture();
+  const env = publicAuthEnv(async (url) => {
+    throw new Error(`native session exchange must not call an external service: ${url}`);
+  }, { kv: fakeKv(), db: fakeD1() });
+  env.__googleJwks = fixture.jwks;
+  const idToken = await signGoogleIdToken({ sub: "google-native-subject", email: "viewer@example.com" });
+
+  const response = await handleRequest(nativeSessionRequest(idToken), env);
+
+  assert.equal(response.status, 200);
+  const body = parseJsonBody(await response.text());
+  assert.equal(signedSessionPayload(body.session_token).sub, "google-native-subject");
+});
+
+test("Cloudflare worker keeps accepting public sessions issued before the subject was stored", async () => {
+  const env = publicAuthEnv(async (url) => {
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+  const legacyToken = await signPublicSessionTokenForTest({
+    email: "viewer@example.com",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  });
+
+  const response = await handleRequest(
+    new Request("https://example.com/api/public-session", {
+      headers: { cookie: `mo_public_session=${legacyToken}` },
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  const body = parseJsonBody(await response.text());
+  assert.equal(body.authenticated, true);
+  assert.equal(body.email, "viewer@example.com");
+});
+
+test("credit client prefers the HTTP route so a declared service binding stub cannot hide it", async () => {
+  const calls = [];
+  const env = {
+    CREDIT_BASE_URL: "https://credit.example.test",
+    CREDIT_BASE_SECRET: "credit-secret",
+    CREDIT_BASE: { async reserve() { throw new Error("the RPC stub must not be used while the HTTP route is configured"); } },
+    __fetch: async (url, init) => {
+      calls.push({ url, authorization: init.headers.authorization });
+      return json({ status: "recorded", reservedAmount: 30, balance: 70 });
+    },
+  };
+
+  const { client, reason } = resolveCreditClient(env);
+  const result = await client.reserve({
+    subjectId: "google:1", amount: 30, product: "voice-lab", feature: "voice-conversion-jobs", idempotencyKey: "k1",
+  });
+
+  assert.equal(reason, "");
+  assert.equal(client.transport, "http");
+  assert.equal(calls[0].url, "https://credit.example.test/internal/reserve");
+  assert.equal(calls[0].authorization, "Bearer credit-secret");
+  assert.deepEqual(result, { status: "recorded", reservedAmount: 30, balance: 70 });
+});
+
+test("credit client uses the RPC binding when no HTTP route is configured", async () => {
+  const calls = [];
+  const env = {
+    CREDIT_BASE: {
+      async reserve(payload) {
+        calls.push(payload);
+        return { status: "recorded", reserved_amount: 30, balance: 70 };
+      },
+    },
+  };
+
+  const { client } = resolveCreditClient(env);
+  const result = await client.reserve({
+    subjectId: "google:1", amount: 30, product: "voice-lab", feature: "voice-conversion-jobs",
+    idempotencyKey: "k1", callbackUrl: "https://voice-lab.test/cb", ttlSeconds: 600,
+  });
+
+  assert.equal(client.transport, "rpc");
+  assert.deepEqual(calls[0], {
+    subject_id: "google:1", amount: 30, product: "voice-lab", feature: "voice-conversion-jobs",
+    idempotency_key: "k1", callback_url: "https://voice-lab.test/cb", ttl_seconds: 600,
+  });
+  assert.deepEqual(result, { status: "recorded", reservedAmount: 30, balance: 70 });
+});
+
+test("credit client reports a misconfigured HTTP route separately from an absent one", () => {
+  assert.deepEqual(
+    resolveCreditClient({ CREDIT_BASE_URL: "https://credit.example.test" }),
+    { client: null, reason: "misconfigured" },
+  );
+  assert.deepEqual(resolveCreditClient({}), { client: null, reason: "no_client" });
+});
+
+test("credit client normalizes both key spellings and both routes' validation errors", async () => {
+  const rpc = resolveCreditClient({
+    CREDIT_BASE: {
+      async settle() {
+        const error = new Error("actual_amount は1以上の整数である必要がある");
+        error.name = "ValidationError";
+        throw error;
+      },
+    },
+  }).client;
+  const http = resolveCreditClient({
+    CREDIT_BASE_URL: "https://credit.example.test",
+    CREDIT_BASE_SECRET: "s",
+    __fetch: async () => json({ error: "invalid_request", message: "actual_amount は1以上の整数である必要がある" }, { status: 400 }),
+  }).client;
+
+  await assert.rejects(
+    () => rpc.settle({ reserveKey: "r1", actualAmount: 0, idempotencyKey: "vl:r1:settle" }),
+    (error) => error.creditKind === "invalid_request",
+  );
+  await assert.rejects(
+    () => http.settle({ reserveKey: "r1", actualAmount: 0, idempotencyKey: "vl:r1:settle" }),
+    (error) => error.creditKind === "invalid_request",
+  );
+});
+
+test("credit client treats an unnamed RPC failure as an unknown outcome that may be retried", async () => {
+  const client = resolveCreditClient({
+    CREDIT_BASE: { async settle() { throw new Error("D1_ERROR: database is locked"); } },
+  }).client;
+
+  await assert.rejects(
+    () => client.settle({ reserveKey: "r1", actualAmount: 5, idempotencyKey: "vl:r1:settle" }),
+    (error) => error.creditKind === "unknown",
+  );
+});
+
+function fakeCreditBase(responses = {}) {
+  const calls = [];
+  const respond = (method, fallback) => async (payload) => {
+    calls.push({ method, payload });
+    const handler = responses[method];
+    if (typeof handler === "function") return handler(payload, calls);
+    return handler || fallback;
+  };
+  return {
+    calls,
+    getBalance: respond("getBalance", { balance: 0 }),
+    reserve: respond("reserve", { status: "recorded" }),
+    settle: respond("settle", { status: "recorded" }),
+    release: respond("release", { status: "recorded" }),
+  };
+}
+
+function practiceOpenAiFetch(overrides = {}) {
+  return async (url) => {
+    if (typeof overrides[url] === "function") return overrides[url]();
+    if (url === "https://api.openai.com/v1/audio/transcriptions") return json({ text: "今日は何をしますか" });
+    if (url === "https://api.openai.com/v1/responses") {
+      return json({ output_text: JSON.stringify({ source_language: "ja-JP", target_language: "en-US", translated_text: "What are you doing today?" }) });
+    }
+    if (url === "https://api.openai.com/v1/audio/speech") return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    throw new Error(`unexpected external request: ${url}`);
+  };
+}
+
+async function exhaustedQuotaCreditEnv({ fetchImpl = practiceOpenAiFetch(), credit = fakeCreditBase(), flag = "1", db = fakeD1() } = {}) {
+  const kv = fakeKv();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    admin_google_emails: ["admin@example.com"],
+    features: { speakloop: { daily_limit: 0, total_limit: 0, audio_max_bytes: 8000000, text_max_chars: 800 } },
+  }));
+  const env = adminAuthEnv(fetchImpl, { kv, db, googleEmail: "viewer@example.com", googleSub: "viewer-subject" });
+  if (flag !== null) env.CREDIT_CONSUME_ENABLED = flag;
+  if (credit) env.CREDIT_BASE = credit;
+  env.PUBLIC_CANONICAL_ORIGIN = "https://voice-lab.test";
+  env.CREDIT_BASE_CALLBACK_SECRET = "callback-secret";
+  return { env, kv, db, credit };
+}
+
+function practicePromptRequest(cookie) {
+  const form = new FormData();
+  form.append("audio", new Blob(["prompt"], { type: "audio/webm" }), "recording.webm");
+  form.append("target_language", "en-US");
+  return new Request("https://example.com/api/practice/prompts", { method: "POST", headers: { cookie }, body: form });
+}
+
+test("Cloudflare worker spends credits once the free quota is exhausted", async () => {
+  const { env, credit, db } = await exhaustedQuotaCreditEnv();
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "settle"]);
+  const [reserve, settle] = credit.calls;
+  assert.equal(reserve.payload.subject_id, "google:viewer-subject");
+  assert.equal(reserve.payload.amount, 5);
+  assert.equal(reserve.payload.product, "voice-lab");
+  assert.equal(reserve.payload.feature, "practice-prompts");
+  assert.equal(reserve.payload.ttl_seconds, 600);
+  assert.match(reserve.payload.callback_url, /^https:\/\/voice-lab\.test\/api\/internal\/credit-jobs\/[^?]+\?iat=.+&sig=[0-9a-f]{32}$/);
+  assert.equal(settle.payload.actual_amount, 5);
+  assert.equal(settle.payload.idempotency_key, `vl:${reserve.payload.idempotency_key}:settle`);
+  const reservation = db.__tables.reservations.get(reserve.payload.idempotency_key);
+  assert.equal(reservation.status, "settled");
+  assert.equal(reservation.job_status, "succeeded");
+  assert.equal(reservation.settled_amount, 5);
+});
+
+test("Cloudflare worker refuses the request without calling OpenAI when the credit balance is short", async () => {
+  const credit = fakeCreditBase({ reserve: { status: "insufficient_balance" } });
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => { throw new Error(`OpenAI must not be called without credits: ${url}`); },
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 402);
+  assert.equal(parseJsonBody(await response.text()).code, "credit_insufficient");
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve"]);
+});
+
+test("Cloudflare worker returns the reserved credits when the generation fails", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: practiceOpenAiFetch({
+      "https://api.openai.com/v1/audio/speech": () => new Response("tts is down", { status: 502 }),
+    }),
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
+  const reservation = db.__tables.reservations.get(credit.calls[0].payload.idempotency_key);
+  assert.equal(reservation.status, "released");
+  assert.equal(reservation.job_status, "failed");
+});
+
+test("Cloudflare worker keeps rejecting exhausted quotas while credit consumption is switched off", async () => {
+  const credit = fakeCreditBase();
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit,
+    flag: null,
+    fetchImpl: async (url) => { throw new Error(`no external call is expected: ${url}`); },
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 429);
+  assert.equal(parseJsonBody(await response.text()).detail, "public quota exceeded");
+  assert.deepEqual(credit.calls, []);
+});
+
+test("Cloudflare worker declines to spend credits for sessions issued without a Google subject", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => { throw new Error(`no external call is expected: ${url}`); },
+  });
+  const legacyToken = await signPublicSessionTokenForTest({
+    email: "viewer@example.com",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  });
+
+  const response = await handleRequest(practicePromptRequest(`mo_public_session=${legacyToken}`), env);
+
+  assert.equal(response.status, 429);
+  assert.deepEqual(credit.calls, []);
+  assert.equal(db.__tables.audit.at(-1).action, "credit_skipped_no_subject");
+});
+
+test("Cloudflare worker disables credit consumption when the reservation table is unreachable", async () => {
+  const credit = fakeCreditBase();
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit,
+    db: null,
+    fetchImpl: async (url) => { throw new Error(`no external call is expected: ${url}`); },
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 429);
+  assert.deepEqual(credit.calls, []);
+});
+
+test("Cloudflare worker reports the billing service as unavailable instead of claiming the quota ran out", async () => {
+  const credit = fakeCreditBase({ reserve: () => { throw new Error("D1_ERROR: database is locked"); } });
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => { throw new Error(`OpenAI must not be called: ${url}`); },
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 503);
+  assert.equal(parseJsonBody(await response.text()).detail, "credit service is unavailable");
+});
+
+function attemptJobRequest(cookie) {
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "zh-CN");
+  form.append("target_text", "我想喝咖啡。");
+  form.append("asr_model", "whisper-1");
+  return new Request("https://example.com/api/practice/attempt-jobs", { method: "POST", headers: { cookie }, body: form });
+}
+
+function runpodJobFetch(statusByCall) {
+  let statusIndex = 0;
+  return async (url) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") return json({ id: "zh-job", status: "IN_QUEUE" });
+    if (url === "https://api.runpod.ai/v2/endpoint/health") return json({ workers: {} });
+    if (url === "https://api.runpod.ai/v2/endpoint/status/zh-job") {
+      const next = statusByCall[Math.min(statusIndex, statusByCall.length - 1)];
+      statusIndex += 1;
+      if (typeof next === "function") return next();
+      return json(next);
+    }
+    throw new Error(`unexpected external request: ${url}`);
+  };
+}
+
+test("Cloudflare worker reserves on submission and settles the measured cost when polling sees the job finish", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: runpodJobFetch([
+      { id: "zh-job", status: "IN_PROGRESS" },
+      { id: "zh-job", status: "FAILED", error: "gpu crashed", executionTime: 48_000 },
+    ]),
+  });
+  const cookie = await publicCookie(env);
+
+  const submitted = await handleRequest(attemptJobRequest(cookie), env);
+  assert.equal(submitted.status, 202);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve"]);
+  const reserveKey = credit.calls[0].payload.idempotency_key;
+  assert.equal(credit.calls[0].payload.amount, 10);
+  assert.equal(db.__tables.reservations.get(reserveKey).job_id, "zh-job");
+
+  // 実行中のあいだは精算しない
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve"]);
+
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
+  const reservation = db.__tables.reservations.get(reserveKey);
+  assert.equal(reservation.status, "released");
+  assert.equal(reservation.job_status, "failed");
+});
+
+test("Cloudflare worker settles a finished job from the recorded measurement after RunPod drops the result", async () => {
+  let settleAttempts = 0;
+  const credit = fakeCreditBase({
+    settle: () => {
+      settleAttempts += 1;
+      if (settleAttempts === 1) throw new Error("D1_ERROR: database is locked");
+      return { status: "recorded" };
+    },
+  });
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: runpodJobFetch([
+      { id: "zh-job", status: "COMPLETED", executionTime: 48_000, output: { practice_asr_contract_version: 3 } },
+      () => { throw httpErrorForTest(404, "RunPod request failed with HTTP 404"); },
+    ]),
+  });
+  const cookie = await publicCookie(env);
+  await handleRequest(attemptJobRequest(cookie), env);
+  const reserveKey = credit.calls[0].payload.idempotency_key;
+
+  // 1回目のポーリングは終了を観測して記録するが、精算そのものは落ちる
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  assert.equal(db.__tables.reservations.get(reserveKey).status, "in_flight");
+  assert.equal(db.__tables.reservations.get(reserveKey).execution_time_ms, 48_000);
+
+  // RunPodが結果を捨てた後でも、記録した実行時間から同じ額で精算し直せる
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  const settleCalls = credit.calls.filter((call) => call.method === "settle");
+  assert.equal(settleCalls.length, 2);
+  assert.equal(settleCalls[0].payload.actual_amount, 12);
+  assert.equal(settleCalls[1].payload.actual_amount, 12);
+  assert.equal(settleCalls[0].payload.idempotency_key, settleCalls[1].payload.idempotency_key);
+  assert.equal(db.__tables.reservations.get(reserveKey).status, "settled");
+});
+
+test("Cloudflare worker records the amount the ledger actually billed, not the amount it sent", async () => {
+  // 実費が予約額を超えると credit-base 側で頭打ちになる。照会エンドポイントは台帳と同じ額を返す
+  const credit = fakeCreditBase({ settle: { status: "recorded", billed: 10, unbilled_overage: 2 } });
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: runpodJobFetch([{ id: "zh-job", status: "COMPLETED", executionTime: 48_000, output: { practice_asr_contract_version: 3 } }]),
+  });
+  const cookie = await publicCookie(env);
+  await handleRequest(attemptJobRequest(cookie), env);
+  const reserveKey = credit.calls[0].payload.idempotency_key;
+
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+
+  assert.equal(credit.calls.find((call) => call.method === "settle").payload.actual_amount, 12);
+  assert.equal(db.__tables.reservations.get(reserveKey).settled_amount, 10);
+  assert.equal(db.__tables.audit.at(-1).action, "credit_unbilled_overage");
+});
+
+test("Cloudflare worker stops retrying once credit-base reports the reservation is already resolved", async () => {
+  const credit = fakeCreditBase({ settle: { status: "already_settled" } });
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: runpodJobFetch([{ id: "zh-job", status: "COMPLETED", executionTime: 8_000, output: { practice_asr_contract_version: 3 } }]),
+  });
+  const cookie = await publicCookie(env);
+  await handleRequest(attemptJobRequest(cookie), env);
+  const reserveKey = credit.calls[0].payload.idempotency_key;
+
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+
+  assert.equal(credit.calls.filter((call) => call.method === "settle").length, 1);
+  assert.equal(db.__tables.reservations.get(reserveKey).status, "resolved_elsewhere");
+});
+
+test("Cloudflare worker leaves free-quota polling untouched by the reservation table", async () => {
+  const credit = fakeCreditBase();
+  const kv = fakeKv();
+  const db = fakeD1();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    admin_google_emails: ["admin@example.com"],
+    features: { speakloop: { daily_limit: 50, total_limit: 50, audio_max_bytes: 8000000, text_max_chars: 800 } },
+  }));
+  const env = adminAuthEnv(runpodJobFetch([{ id: "zh-job", status: "COMPLETED", executionTime: 8_000, output: { practice_asr_contract_version: 3 } }]), {
+    kv, db, googleEmail: "viewer@example.com", googleSub: "viewer-subject",
+  });
+  env.CREDIT_CONSUME_ENABLED = "1";
+  env.CREDIT_BASE = credit;
+  const cookie = await publicCookie(env);
+
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+
+  assert.deepEqual(credit.calls, []);
+  assert.deepEqual(db.__reservationQueries, []);
+});
+
+test("Cloudflare worker finds the reservation without the KV marker when no KV namespace is bound", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: runpodJobFetch([{ id: "zh-job", status: "COMPLETED", executionTime: 8_000, output: { practice_asr_contract_version: 3 } }]),
+  });
+  const cookie = await publicCookie(env);
+  await handleRequest(attemptJobRequest(cookie), env);
+  const reserveKey = credit.calls[0].payload.idempotency_key;
+  db.__tables.reservations.get(reserveKey).job_id = "zh-job";
+  env.MO_SPEECH_KV = null;
+
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+
+  assert.ok(db.__reservationQueries.includes("selectByJobId"));
+  assert.equal(db.__tables.reservations.get(reserveKey).status, "settled");
+});
+
+function httpErrorForTest(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+test("Cloudflare worker returns the reserved credits when a recording request fails after the reservation", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: practiceOpenAiFetch({
+      "https://api.openai.com/v1/audio/speech": () => new Response("tts is down", { status: 502 }),
+    }),
+  });
+  const cookie = await publicCookie(env);
+  const form = new FormData();
+  form.append("audio", new Blob(["prompt"], { type: "audio/webm" }), "recording.webm");
+  form.append("target_language", "en-US");
+  form.append("recording_intent", "prompt");
+
+  const response = await handleRequest(new Request("https://example.com/api/practice/recordings", {
+    method: "POST", headers: { cookie }, body: form,
+  }), env);
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
+  assert.equal(credit.calls[0].payload.feature, "practice-recordings");
+  assert.equal(credit.calls[0].payload.amount, 8);
+  assert.equal(db.__tables.reservations.get(credit.calls[0].payload.idempotency_key).status, "released");
+});
+
+test("Cloudflare worker returns the reserved credits when a same-request attempt comparison fails", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => {
+      if (url === "https://api.openai.com/v1/audio/transcriptions") return new Response("asr is down", { status: 502 });
+      throw new Error(`unexpected external request: ${url}`);
+    },
+  });
+  const cookie = await publicCookie(env);
+  const form = new FormData();
+  form.append("audio", new Blob(["repeat"], { type: "audio/webm" }), "repeat.webm");
+  form.append("model_audio", new Blob(["model"], { type: "audio/wav" }), "model.wav");
+  form.append("target_language", "en-US");
+  form.append("target_text", "I want a coffee.");
+  form.append("asr_model", "whisper-1");
+
+  const response = await handleRequest(new Request("https://example.com/api/practice/attempt-jobs", {
+    method: "POST", headers: { cookie }, body: form,
+  }), env);
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
+  assert.equal(credit.calls[0].payload.feature, "practice-attempt-jobs");
+  assert.equal(db.__tables.reservations.get(credit.calls[0].payload.idempotency_key).status, "released");
+});
+
+test("Cloudflare worker never reaches the credit path for the admin-only voice conversion feature", async () => {
+  const credit = fakeCreditBase();
+  const kv = fakeKv();
+  const db = fakeD1();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    admin_google_emails: ["admin@example.com"],
+    features: { speakloop: { daily_limit: 0, total_limit: 0 }, voice_conversion: { daily_limit: 0, total_limit: 0 } },
+  }));
+  const env = adminAuthEnv(async (url) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/run") return json({ id: "vc-job", status: "IN_QUEUE" });
+    throw new Error(`unexpected external request: ${url}`);
+  }, { kv, db, googleEmail: "admin@example.com", googleSub: "admin-subject" });
+  env.CREDIT_CONSUME_ENABLED = "1";
+  env.CREDIT_BASE = credit;
+  const cookie = await publicCookie(env);
+  const form = new FormData();
+  form.append("source_audio", new Blob(["source"], { type: "audio/wav" }), "source.wav");
+  form.append("reference_audio", new Blob(["reference"], { type: "audio/wav" }), "reference.wav");
+
+  const response = await handleRequest(new Request("https://example.com/api/voice-conversion-jobs", {
+    method: "POST", headers: { cookie }, body: form,
+  }), env);
+
+  // 管理者は無料枠の判定を免除されるので、この機能ではクレジット経路へ到達しない。
+  // 非管理者へ開放するまで、ここは配線が誤って発火しないことだけを見張る
+  assert.equal(response.status, 200);
+  assert.deepEqual(credit.calls, []);
+  assert.equal(db.__tables.reservations.size, 0);
+});
+
+test("Cloudflare worker never settles a GPU job for zero credits", async () => {
+  for (const [executionTime, expected] of [[0, 1], [undefined, 10], [1200, 1], [48_000, 12]]) {
+    const credit = fakeCreditBase();
+    const { env } = await exhaustedQuotaCreditEnv({
+      credit,
+      fetchImpl: runpodJobFetch([{
+        id: "zh-job",
+        status: "COMPLETED",
+        ...(executionTime === undefined ? {} : { executionTime }),
+        output: { practice_asr_contract_version: 3 },
+      }]),
+    });
+    const cookie = await publicCookie(env);
+    await handleRequest(attemptJobRequest(cookie), env);
+    await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+
+    const settle = credit.calls.find((call) => call.method === "settle");
+    assert.equal(settle.payload.actual_amount, expected, `executionTime=${executionTime}`);
+  }
+});
+
+async function creditCallbackUrlForTest(reserveKey, issuedAt, secret = "callback-secret") {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${reserveKey}\n${issuedAt}`)));
+  const hex = [...signature].map((value) => value.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  const query = new URLSearchParams({ iat: issuedAt, sig: hex });
+  return `https://example.com/api/internal/credit-jobs/${encodeURIComponent(reserveKey)}?${query}`;
+}
+
+function creditStatusEnv(fetchImpl = async (url) => { throw new Error(`unexpected external request: ${url}`); }) {
+  const db = fakeD1();
+  const env = fakeEnv(fetchImpl, { db, kv: fakeKv() });
+  env.CREDIT_BASE_CALLBACK_SECRET = "callback-secret";
+  return { env, db };
+}
+
+function seedReservation(db, overrides = {}) {
+  const row = {
+    reserve_key: "r1", job_id: null, subject_id: "google:1", feature: "practice-attempt-jobs", kind: "job",
+    reserved_amount: 10, status: "in_flight", job_status: null, execution_time_ms: null,
+    settled_amount: null, created_at: "2026-09-03T00:00:00.000Z", resolved_at: null, ...overrides,
+  };
+  db.__tables.reservations.set(row.reserve_key, row);
+  return row;
+}
+
+async function creditStatus(env, reserveKey, issuedAt, secret) {
+  const response = await handleRequest(new Request(await creditCallbackUrlForTest(reserveKey, issuedAt, secret)), env);
+  return { status: response.status, body: parseJsonBody(await response.text()) };
+}
+
+test("Cloudflare worker only answers credit job status for correctly signed callback URLs", async () => {
+  const { env } = creditStatusEnv();
+  const now = new Date().toISOString();
+
+  const wrongKey = await creditStatus(env, "r1", now, "not-the-secret");
+  assert.equal(wrongKey.status, 401);
+
+  const unsigned = await handleRequest(new Request("https://example.com/api/internal/credit-jobs/r1"), env);
+  assert.equal(unsigned.status, 401);
+
+  // 別の予約の署名は使い回せない
+  const other = await creditCallbackUrlForTest("r2", now);
+  const swapped = await handleRequest(new Request(other.replace("/credit-jobs/r2", "/credit-jobs/r1")), env);
+  assert.equal(swapped.status, 401);
+});
+
+test("Cloudflare worker keeps answering callback URLs signed with the previous key during a rotation", async () => {
+  const { env, db } = creditStatusEnv();
+  env.CREDIT_BASE_CALLBACK_SECRET = "new-secret";
+  env.CREDIT_BASE_CALLBACK_SECRET_PREVIOUS = "callback-secret";
+  seedReservation(db, { status: "settled", settled_amount: 12, resolved_at: "2026-09-03T00:01:00.000Z" });
+
+  const answered = await creditStatus(env, "r1", new Date().toISOString(), "callback-secret");
+
+  assert.equal(answered.status, 200);
+  assert.deepEqual(answered.body, { status: "succeeded", cost_credits: 12 });
+});
+
+test("Cloudflare worker answers credit job status from the reservation table before asking RunPod", async () => {
+  const now = new Date().toISOString();
+  const cases = [
+    [{ status: "settled", settled_amount: 12, resolved_at: now }, { status: "succeeded", cost_credits: 12 }],
+    [{ status: "released", resolved_at: now }, { status: "failed", cost_credits: 0 }],
+    [{ status: "resolved_elsewhere", resolved_at: now }, { status: "failed", cost_credits: 0 }],
+    [{ job_status: "succeeded", execution_time_ms: 48_000, job_id: "zh-job" }, { status: "succeeded", cost_credits: 12 }],
+    [{ job_status: "succeeded", kind: "sync", reserved_amount: 5 }, { status: "succeeded", cost_credits: 5 }],
+    [{ job_status: "failed", job_id: "zh-job" }, { status: "failed", cost_credits: 0 }],
+  ];
+
+  for (const [overrides, expected] of cases) {
+    const { env, db } = creditStatusEnv();
+    seedReservation(db, overrides);
+    const answered = await creditStatus(env, "r1", now);
+    assert.equal(answered.status, 200);
+    assert.deepEqual(answered.body, expected, JSON.stringify(overrides));
+  }
+});
+
+test("Cloudflare worker holds unobserved reservations until their reservation TTL runs out", async () => {
+  const fresh = new Date().toISOString();
+  const stale = new Date(Date.now() - 700 * 1000).toISOString();
+  const cases = [
+    [{ kind: "sync", reserved_amount: 5 }, fresh, { status: "running", cost_credits: 0 }],
+    [{ kind: "sync", reserved_amount: 5 }, stale, { status: "failed", cost_credits: 0 }],
+    [{ kind: "job", job_id: null }, fresh, { status: "running", cost_credits: 0 }],
+    [{ kind: "job", job_id: null }, stale, { status: "failed", cost_credits: 0 }],
+  ];
+
+  for (const [overrides, issuedAt, expected] of cases) {
+    const { env, db } = creditStatusEnv();
+    seedReservation(db, overrides);
+    const answered = await creditStatus(env, "r1", issuedAt);
+    assert.deepEqual(answered.body, expected, `${JSON.stringify(overrides)} ${issuedAt}`);
+  }
+});
+
+test("Cloudflare worker asks RunPod for jobs nobody has observed yet and records what it learns", async () => {
+  const now = new Date().toISOString();
+  const cases = [
+    [json({ id: "zh-job", status: "COMPLETED", executionTime: 48_000 }), { status: "succeeded", cost_credits: 12 }, "succeeded"],
+    [json({ id: "zh-job", status: "FAILED" }), { status: "failed", cost_credits: 0 }, "failed"],
+    [json({ id: "zh-job", status: "IN_PROGRESS" }), { status: "running", cost_credits: 0 }, null],
+  ];
+
+  for (const [runpodResponse, expected, recorded] of cases) {
+    const { env, db } = creditStatusEnv(async (url) => {
+      if (url === "https://api.runpod.ai/v2/endpoint/status/zh-job") return runpodResponse;
+      throw new Error(`unexpected external request: ${url}`);
+    });
+    seedReservation(db, { job_id: "zh-job" });
+    const answered = await creditStatus(env, "r1", now);
+    assert.deepEqual(answered.body, expected);
+    assert.equal(db.__tables.reservations.get("r1").job_status, recorded);
+  }
+});
+
+test("Cloudflare worker separates a lost RunPod result from a RunPod it cannot reach", async () => {
+  const fresh = new Date().toISOString();
+  const old = new Date(Date.now() - 90_000 * 1000).toISOString();
+  const gone = () => new Response("not found", { status: 404 });
+  const broken = () => new Response("bad gateway", { status: 502 });
+  const unreachable = () => { throw new Error("network is unreachable"); };
+
+  const cases = [
+    [gone, fresh, { status: "running", cost_credits: 0 }],
+    [gone, old, { status: "failed", cost_credits: 0 }],
+    // 通信できないだけなら保留する。復旧すれば次の掃除で決着する
+    [broken, old, { status: "running", cost_credits: 0 }],
+    [unreachable, old, { status: "running", cost_credits: 0 }],
+  ];
+
+  for (const [runpod, issuedAt, expected] of cases) {
+    const { env, db } = creditStatusEnv(async (url) => {
+      if (url === "https://api.runpod.ai/v2/endpoint/status/zh-job") return runpod();
+      throw new Error(`unexpected external request: ${url}`);
+    });
+    seedReservation(db, { job_id: "zh-job" });
+    assert.deepEqual((await creditStatus(env, "r1", issuedAt)).body, expected, `${issuedAt}`);
+  }
+});
+
+test("Cloudflare worker frees reservations whose row is gone once the grace period passes", async () => {
+  const { env } = creditStatusEnv();
+
+  assert.deepEqual((await creditStatus(env, "missing", new Date().toISOString())).body, { status: "running", cost_credits: 0 });
+  const old = new Date(Date.now() - 90_000 * 1000).toISOString();
+  assert.deepEqual((await creditStatus(env, "missing", old)).body, { status: "failed", cost_credits: 0 });
+});
+
+test("Cloudflare worker retains in-flight reservations while sweeping resolved ones", async () => {
+  const { env, db } = creditStatusEnv();
+  seedReservation(db, { reserve_key: "old", status: "settled", settled_amount: 5, resolved_at: "2020-01-01T00:00:00.000Z" });
+  seedReservation(db, { reserve_key: "recent", status: "settled", settled_amount: 5, resolved_at: new Date().toISOString() });
+  seedReservation(db, { reserve_key: "pending" });
+
+  await runPublicDataRetention(env, new Date());
+
+  assert.deepEqual([...db.__tables.reservations.keys()].sort(), ["pending", "recent"]);
+});
+
+test("Cloudflare worker returns the reserved credits even when the reservation row cannot be written", async () => {
+  const credit = fakeCreditBase();
+  const db = fakeD1();
+  const realPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (sql === CREDIT_RESERVATION_SQL.insert) {
+      return { bind: () => ({ async run() { throw new Error("D1_ERROR: disk is full"); } }) };
+    }
+    return realPrepare(sql);
+  };
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit, db,
+    fetchImpl: async (url) => { throw new Error(`OpenAI must not be called: ${url}`); },
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  // 対応表が書けないと誰も精算できない。応答を返す前にその場で枠を返す
+  assert.equal(response.status, 500);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
+  assert.equal(credit.calls[1].payload.reserve_key, credit.calls[0].payload.idempotency_key);
+});
+
+test("Cloudflare worker refuses to spend credits without a callback signing key", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => { throw new Error(`no external call is expected: ${url}`); },
+  });
+  delete env.CREDIT_BASE_CALLBACK_SECRET;
+
+  const response = await handleRequest(practicePromptRequest(await publicCookie(env)), env);
+
+  // 署名鍵が無いと callback_url を組めず、cronが掃除できない予約だけが溜まる
+  assert.equal(response.status, 429);
+  assert.deepEqual(credit.calls, []);
+  assert.equal(db.__tables.audit.at(-1).action, "credit_disabled_misconfigured");
+});
+
+test("Cloudflare worker rejects a malformed credit job path as an unsigned request", async () => {
+  const { env } = creditStatusEnv();
+
+  const response = await handleRequest(new Request("https://example.com/api/internal/credit-jobs/%?iat=x&sig=y"), env);
+
+  assert.equal(response.status, 401);
+});
+
+test("Cloudflare worker returns the reserved credits when RunPod accepts a job without an id", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => {
+      // idが返らないと、あとからジョブの状態を照会する手立てがない
+      if (url === "https://api.runpod.ai/v2/endpoint/run") return json({ status: "IN_QUEUE" });
+      if (url === "https://api.runpod.ai/v2/endpoint/health") return json({ workers: {} });
+      throw new Error(`unexpected external request: ${url}`);
+    },
+  });
+  const cookie = await publicCookie(env);
+
+  const response = await handleRequest(attemptJobRequest(cookie), env);
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
+  assert.equal(db.__tables.reservations.get(credit.calls[0].payload.idempotency_key).status, "released");
 });
