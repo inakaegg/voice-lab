@@ -64,22 +64,36 @@ test("portal links to the GitHub repository with hover and focus help", () => {
   assert.match(githubMarkWhite, /viewBox="0 0 98 96"[\s\S]*fill="white"/);
   assert.equal(createHash("sha256").update(githubMarkBlack).digest("hex"), "693d7abe6f899646cc2e96856723b45e95f71885a54910b2749f6decdf7e1ee1");
   assert.equal(createHash("sha256").update(githubMarkWhite).digest("hex"), "ccd84c89b1056345608fc3489357f8acc7397e49a3cdc2d418b6c8016911d47b");
-  assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
+  assert.match(shared, /"https:\/\/github\.com\/inakaegg\/voice-lab"/);
   assert.match(shared, /target="_blank"/);
   assert.match(shared, /rel="noopener noreferrer"/);
   assert.match(shared, /aria-describedby=\{tooltipId\}/);
-  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*t\("shared\.githubTooltip"\)/);
+  assert.match(shared, /id=\{tooltipId\}[\s\S]*role="tooltip"[\s\S]*"shared\.githubTooltip"/);
   assert.match(messages, /"shared\.githubTooltip": "実際の動作を/);
 });
 
 test("SpeakLoop reuses the portal GitHub repository link", () => {
   assert.match(shared, /export function GitHubRepositoryLink/);
   assert.match(shared, /src="\/react\/github-invertocat-black\.svg"[\s\S]*src="\/react\/github-invertocat-white\.svg"/);
-  assert.match(shared, /href="https:\/\/github\.com\/inakaegg\/voice-lab"/);
+  assert.match(shared, /"https:\/\/github\.com\/inakaegg\/voice-lab"/);
   assert.match(shared, /target="_blank"/);
   assert.match(shared, /rel="noopener noreferrer"/);
   assert.match(messages, /"shared\.githubTooltip": "実際の動作を/);
   assert.match(speakloop, /<ProductHeader[\s\S]*githubLink/);
+});
+
+// GitHubアイコンのtooltipはhoverしないと出ない。操作しない訪問者にも録画の存在が伝わるよう、
+// SpeakLoopではその吹き出しを常時表示にし、飛び先をREADMEのデモ動画見出しへ寄せる。
+test("SpeakLoop always shows the demo video note under the GitHub icon", () => {
+  assert.match(shared, /ja: "https:\/\/github\.com\/inakaegg\/voice-lab\/blob\/main\/README\.ja\.md#デモ動画"/);
+  assert.match(shared, /en: "https:\/\/github\.com\/inakaegg\/voice-lab#demo-videos"/);
+  assert.match(shared, /href=\{demoVideoNote \? demoVideoUrls\[locale\] :/);
+  assert.match(shared, /data-demo-video-link=\{demoVideoNote \|\| undefined\}/);
+  assert.match(speakloop, /<ProductHeader[^>]*githubDemoVideoNote/);
+  // ポータルは従来どおりhoverで出るtooltipのままにする。
+  assert.doesNotMatch(portal, /githubDemoVideoNote/);
+  assert.match(messages, /"shared\.demoVideoNote": "実際の動作をデモ動画で確認できます"/);
+  assert.match(styles, /\.portal-github-link-demo-note \.portal-github-tooltip \{[^}]*visibility: visible/);
 });
 
 test("SpeakLoop places the shared privacy notice after its main workflow", () => {
