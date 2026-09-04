@@ -33,7 +33,7 @@ function CancelRecordingButton({ id }: { id: string }) {
 function SpeakLoop() {
   const t = useT();
   return <PageShell className="practice-shell react-practice-shell">
-    <ProductHeader product="SpeakLoop" title={t("speakloop.headerTitle")} githubLink languageSwitch />
+    <ProductHeader product="SpeakLoop" title={t("speakloop.headerTitle")} githubLink githubDemoVideoNote languageSwitch />
     <section className="react-intro-grid">
       <div className="react-intro-copy"><p className="react-step-label">Speak naturally. Learn actively.</p><h2>{t("speakloop.tagline")}</h2><p>{t("speakloop.lead")}</p></div>
     </section>

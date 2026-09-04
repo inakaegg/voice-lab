@@ -14,29 +14,39 @@ export function activateCompactLayout(): void {
     : preference;
 }
 
-export function GitHubRepositoryLink({ tooltipId }: { tooltipId: string }) {
+// READMEはja/enで別ファイルなので、表示言語に合うほうのデモ動画見出しへ直接ジャンプさせる。
+const demoVideoUrls = {
+  ja: "https://github.com/inakaegg/voice-lab/blob/main/README.ja.md#デモ動画",
+  en: "https://github.com/inakaegg/voice-lab#demo-videos",
+} as const;
+
+// demoVideoNote は吹き出しを常時表示へ変え、飛び先をデモ動画へ寄せる。公開デモを自分で
+// 操作しない訪問者には、hoverしないと出ない案内では録画の存在自体が伝わらないため。
+export function GitHubRepositoryLink({ tooltipId, demoVideoNote = false }: { tooltipId: string; demoVideoNote?: boolean }) {
   const t = useT();
+  const locale = useLocale();
   return <a
-    className="portal-github-link group"
-    href="https://github.com/inakaegg/voice-lab"
+    className={`portal-github-link group${demoVideoNote ? " portal-github-link-demo-note" : ""}`}
+    href={demoVideoNote ? demoVideoUrls[locale] : "https://github.com/inakaegg/voice-lab"}
     target="_blank"
     rel="noopener noreferrer"
-    aria-label={t("shared.githubRepository")}
+    aria-label={t(demoVideoNote ? "shared.demoVideoLink" : "shared.githubRepository")}
     aria-describedby={tooltipId}
+    data-demo-video-link={demoVideoNote || undefined}
   >
     <img className="portal-github-mark portal-github-mark-black" src="/react/github-invertocat-black.svg" width="98" height="96" alt="" aria-hidden="true" />
     <img className="portal-github-mark portal-github-mark-white" src="/react/github-invertocat-white.svg" width="98" height="96" alt="" aria-hidden="true" />
-    <span id={tooltipId} role="tooltip" className="portal-github-tooltip">{t("shared.githubTooltip")}</span>
+    <span id={tooltipId} role="tooltip" className="portal-github-tooltip">{t(demoVideoNote ? "shared.demoVideoNote" : "shared.githubTooltip")}</span>
   </a>;
 }
 
 // languageSwitch は表示言語の切り替えを載せる画面だけ true にする。文言をまだ辞書へ移していない
 // 画面に切替UIを出すと、切り替えたのに本文が日本語のままで、利用者には故障に見えるため。
-export function ProductHeader({ product, title, badge, back = true, githubLink = false, languageSwitch = false }: { product: string; title: string; badge?: string; back?: boolean; githubLink?: boolean; languageSwitch?: boolean }) {
+export function ProductHeader({ product, title, badge, back = true, githubLink = false, githubDemoVideoNote = false, languageSwitch = false }: { product: string; title: string; badge?: string; back?: boolean; githubLink?: boolean; githubDemoVideoNote?: boolean; languageSwitch?: boolean }) {
   const t = useT();
   return <header className="react-product-header">
     <div className="react-product-heading">{back && <a className="react-back-link" href="/" aria-label={t("shared.backToVoiceLab")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg></a>}<div><p className="react-eyebrow">{product}</p><h1>{title}{badge && <span className="ml-2 inline-block whitespace-nowrap rounded-full border border-[var(--react-border)] px-2 py-0.5 align-middle text-[0.62rem] font-bold tracking-[0.08em] text-[var(--react-muted)]">{badge}</span>}</h1></div></div>
-    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><div className="react-header-actions">{githubLink && <GitHubRepositoryLink tooltipId={`${product.toLowerCase()}-github-tooltip`} />}<DisplaySettings language={languageSwitch}/></div></div>
+    <div className="react-header-tools"><AuthPanel productPath={`/${product.toLowerCase()}`} /><div className="react-header-actions">{githubLink && <GitHubRepositoryLink tooltipId={`${product.toLowerCase()}-github-tooltip`} demoVideoNote={githubDemoVideoNote} />}<DisplaySettings language={languageSwitch}/></div></div>
   </header>;
 }
 

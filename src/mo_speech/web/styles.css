@@ -3151,6 +3151,31 @@ button.practice-diff-cell:focus-visible {
   transform: translateY(0);
   visibility: visible;
 }
+
+/* hoverしないと出ない案内では、画面を操作しない訪問者へデモ動画の存在が伝わらない。
+   デモ動画へ寄せたlinkでは吹き出しを出したままにし、吹き出し自体も押せるようにする。 */
+.react-public-body .portal-github-link-demo-note .portal-github-tooltip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+}
+/* 常時表示の吹き出しは絶対配置のままなので、headerの下へその分の帯を空ける。
+   空けないと狭い幅で見出しへ重なる。 */
+.react-public-body .react-product-header:has(.portal-github-link-demo-note) {
+  padding-bottom: 42px;
+}
+
+.react-public-body .portal-github-link-demo-note .portal-github-tooltip::after {
+  border: 6px solid transparent;
+  border-bottom-color: var(--react-ink);
+  bottom: 100%;
+  content: "";
+  height: 0;
+  position: absolute;
+  right: 12px;
+  width: 0;
+}
 @media (max-width: 820px) {
   .react-public-body .portal-github-link { height: 40px; width: 40px; }
 }
