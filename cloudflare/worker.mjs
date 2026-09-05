@@ -34,6 +34,8 @@ const CREDIT_JOB_RESERVE_TTL_SECONDS = 600;
 const CREDIT_RUNPOD_CREDITS_PER_SECOND = 0.25;
 // 状態を取り戻せなくなった予約を failed へ倒すまでの猶予
 const CREDIT_UNKNOWN_JOB_GRACE_SECONDS = 60 * 60 * 24;
+// 残高不足を伝える固定文言。残高の数値も台帳の状態も出さず、チャージが要ることだけを伝える
+const CREDIT_INSUFFICIENT_PUBLIC_MESSAGE = "クレジットが不足しています。チャージしてからもう一度お試しください。";
 const PRACTICE_ATTEMPT_RESULT_KV_PREFIX = "practice-attempt-result:";
 // フロントエンド(app_practice.js)のattempt-jobsポーリング締め切りは30分。RunPodジョブが
 // 完了するまでこの時間だけ待たれ得るため、comparison_model等を保持するKVのTTLは
@@ -1963,6 +1965,11 @@ async function startCreditConsumption(request, env, session, credit) {
     });
     return null;
   }
+  if (!(creditRunpodRatePerSecond(env) > 0)) {
+    // 単価の打ち間違いを黙って通すと、どのGPUジョブも最小の1creditへ丸められて請求漏れが続く
+    await appendPublicAuditEvent(env, { action: "credit_disabled_misconfigured", ...auditBase });
+    return null;
+  }
   if (!String(env.CREDIT_BASE_CALLBACK_SECRET || "").trim() || !String(env.PUBLIC_CANONICAL_ORIGIN || "").trim()) {
     // 照会先を署名して組めないと callback_url なしで予約することになる。credit-base の cron は
     // 照会先の無い予約を掃除せず保留し続けるので、手で精算するまで残り続ける
@@ -2005,7 +2012,7 @@ async function startCreditConsumption(request, env, session, credit) {
 
   if (result.status === "insufficient_balance") {
     await appendPublicAuditEvent(env, { action: "credit_insufficient", amount, ...auditBase });
-    throw httpError(402, "credit balance is insufficient", { code: "credit_insufficient" });
+    throw httpError(402, CREDIT_INSUFFICIENT_PUBLIC_MESSAGE, { code: "credit_insufficient" });
   }
 
   const consumption = {
@@ -2363,11 +2370,11 @@ async function finishCreditSettlement(env, { reserveKey, result, settledAmount, 
     // 記録するのは台帳へ実際に入った額。実費が予約額を超えるとcredit-base側で頭打ちになるので、
     // こちらが送った額のまま残すと、照会エンドポイントが台帳と食い違う値を返す
     const billed = Number.isFinite(Number(result.billed)) ? Number(result.billed) : settledAmount;
-    await finalizeCreditReservation(env, reserveKey, status, billed, now);
+    await finalizeQuietly(env, reserveKey, status, billed, now, auditBase);
     await appendPublicAuditEvent(env, { action: recordedAction, idempotency_key: reserveKey, ...auditBase });
     return;
   }
-  await finalizeCreditReservation(env, reserveKey, "resolved_elsewhere", settledAmount, now);
+  await finalizeQuietly(env, reserveKey, "resolved_elsewhere", settledAmount, now, auditBase);
   if (result.status === "idempotency_key_conflict") {
     // 単価を改定した直後の再試行を除き、起きてはならない
     await appendPublicAuditEvent(env, {
@@ -2375,6 +2382,21 @@ async function finishCreditSettlement(env, { reserveKey, result, settledAmount, 
       idempotency_key: reserveKey,
       ...auditBase,
     });
+  }
+}
+
+/**
+ * 台帳の記帳が確定した後の手元の後始末は、落ちても利用者への応答を壊さない。
+ *
+ * ここで例外を投げると、課金は済んでいるのに同期経路が500を返し、利用者は結果を失う。
+ * 行が `in_flight` のまま残っても、次のポーリングが `duplicate` か `already_settled` を受けて
+ * 終端化するか、cronが照会エンドポイント経由で決着させる。
+ */
+async function finalizeQuietly(env, reserveKey, status, settledAmount, now, auditBase) {
+  try {
+    await finalizeCreditReservation(env, reserveKey, status, settledAmount, now);
+  } catch (_error) {
+    await appendPublicAuditEvent(env, { action: "credit_call_failed", method: "finalize", ...auditBase });
   }
 }
 
@@ -2503,9 +2525,15 @@ async function findCreditReservationForJob(env, jobId) {
  * 短いジョブが無料になる。上限は設けない。予約額での頭打ちと超過分の記録はcredit-base側が行う。
  */
 function creditCostFromExecutionTime(env, executionTimeMs, reservedAmount) {
+  const perSecond = creditRunpodRatePerSecond(env);
+  // 単価が壊れているときに最小の1creditへ倒すと請求漏れになる。予約額をそのまま実費とする
+  if (!(perSecond > 0)) return reservedAmount;
   if (!Number.isFinite(executionTimeMs)) return reservedAmount;
-  const perSecond = numberFromEnv(env.CREDIT_RUNPOD_CREDITS_PER_SECOND, CREDIT_RUNPOD_CREDITS_PER_SECOND);
   return Math.max(1, Math.ceil((executionTimeMs / 1000) * perSecond));
+}
+
+function creditRunpodRatePerSecond(env) {
+  return numberFromEnv(env.CREDIT_RUNPOD_CREDITS_PER_SECOND, CREDIT_RUNPOD_CREDITS_PER_SECOND);
 }
 
 /**
@@ -3445,13 +3473,15 @@ async function createPracticeAttemptJob(request, env) {
         }),
     });
     const jobId = String(body?.id || body?.job_id || "");
+    // 投入後の後片付けより先に予約を結び付ける。ここより後で落ちると、GPUジョブが走っているのに
+    // リクエストの出口が枠を返してしまい、請求できない実行になる
+    await consumption.attachJob(jobId);
     await savePracticeAttemptLlmOptions(env, jobId, {
       comparison_model: comparisonModel,
       playback_padding_seconds: playbackPaddingSeconds,
       model_audio_cache_key: modelAudioCacheKey,
       cached_model_transcription: cachedModelTranscription || null,
     });
-    await consumption.attachJob(jobId);
     let health = null;
     if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
       try {

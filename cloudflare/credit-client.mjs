@@ -14,6 +14,19 @@
 export const CREDIT_ERROR_INVALID_REQUEST = "invalid_request";
 export const CREDIT_ERROR_UNKNOWN = "unknown";
 
+/**
+ * credit-base が返し得る記帳結果。ここに無い値は「意味の分からない応答」として例外にする。
+ * 版ずれや壊れた応答を黙って成功と読むと、枠を確保できていないまま有料の処理へ進む。
+ */
+const CREDIT_STATUSES = new Set([
+  "recorded",
+  "duplicate",
+  "insufficient_balance",
+  "reserve_not_found",
+  "already_settled",
+  "idempotency_key_conflict",
+]);
+
 /** 接続手段が無い理由。監査ログの種別に使う */
 export const CREDIT_UNAVAILABLE_NO_CLIENT = "no_client";
 export const CREDIT_UNAVAILABLE_MISCONFIGURED = "misconfigured";
@@ -45,16 +58,18 @@ export function resolveCreditClient(env = {}) {
  * RPC（WorkerEntrypoint）経由。binding の宣言そのものが認可なので secret を渡さない。
  */
 function rpcCreditClient(binding) {
-  const call = async (method, payload) => {
+  const call = async (method, payload, requireStatus = true) => {
+    let raw;
     try {
-      return normalizeCreditResult(await binding[method](payload));
+      raw = await binding[method](payload);
     } catch (error) {
       throw taggedCreditError(error, creditErrorKindFromName(error));
     }
+    return normalizeCreditResult(raw, requireStatus);
   };
   return {
     transport: "rpc",
-    getBalance: (input) => call("getBalance", { subject_id: input.subjectId }),
+    getBalance: (input) => call("getBalance", { subject_id: input.subjectId }, false),
     reserve: (input) => call("reserve", reserveBody(input)),
     settle: (input) => call("settle", settleBody(input)),
     release: (input) => call("release", releaseBody(input)),
@@ -68,7 +83,7 @@ function httpCreditClient(env, baseUrl, secret) {
   const origin = baseUrl.replace(/\/+$/, "");
   const fetchImpl = env.__fetch || fetch;
 
-  const call = async (method, path, body) => {
+  const call = async (method, path, body, requireStatus = true) => {
     let response;
     try {
       response = await fetchImpl(`${origin}${path}`, {
@@ -93,19 +108,13 @@ function httpCreditClient(env, baseUrl, secret) {
         CREDIT_ERROR_INVALID_REQUEST,
       );
     }
-    if (typeof payload.status !== "string") {
-      throw taggedCreditError(
-        new Error(`credit-base returned HTTP ${response.status} without a status`),
-        CREDIT_ERROR_UNKNOWN,
-      );
-    }
-    return normalizeCreditResult(payload);
+    return normalizeCreditResult(payload, requireStatus);
   };
 
   return {
     transport: "http",
     getBalance: (input) =>
-      call("GET", `/internal/balance?subject_id=${encodeURIComponent(String(input.subjectId ?? ""))}`),
+      call("GET", `/internal/balance?subject_id=${encodeURIComponent(String(input.subjectId ?? ""))}`, undefined, false),
     reserve: (input) => call("POST", "/internal/reserve", reserveBody(input)),
     settle: (input) => call("POST", "/internal/settle", settleBody(input)),
     release: (input) => call("POST", "/internal/release", releaseBody(input)),
@@ -146,9 +155,16 @@ function releaseBody(input) {
  * credit-base はRPC化に合わせて出力キーをsnake_caseへ統一する予定だが、それが入るまで
  * HTTP経路はcamelCaseを返す。両方を受けて呼び出し側を移行の順序から切り離す。
  */
-export function normalizeCreditResult(raw) {
+export function normalizeCreditResult(raw, requireStatus = true) {
   if (raw === null || typeof raw !== "object") {
     throw taggedCreditError(new Error("credit-base returned an unexpected result"), CREDIT_ERROR_UNKNOWN);
+  }
+  if (requireStatus && !CREDIT_STATUSES.has(raw.status)) {
+    // 空の応答や知らない語彙を「成功でない何か」として通すと、呼び出し側が枠を取れたと誤認する
+    throw taggedCreditError(
+      new Error(`credit-base returned an unrecognized status: ${JSON.stringify(raw.status ?? null)}`),
+      CREDIT_ERROR_UNKNOWN,
+    );
   }
   const pick = (snake, camel) => (raw[snake] !== undefined ? raw[snake] : raw[camel]);
   const result = {

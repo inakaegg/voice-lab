@@ -56,16 +56,44 @@ Browser
 
 **この鍵を登録しないままクレジット消費を有効にしても、消費は始まらない。** 照会先を署名して組めない状態で予約を作ると、cronが掃除できない予約が溜まるためである。鍵が無いあいだは無料枠を超えた要求を従来どおり429で断り、監査ログへ理由を残す。有効にする前に必ず登録する。
 
-数値の設定は `wrangler.toml` の `vars` に置く。`CREDIT_RUNPOD_CREDITS_PER_SECOND` はGPUの実行時間を消費creditへ換算する係数である。`CREDIT_SYNC_RESERVE_TTL_SECONDS` と `CREDIT_JOB_RESERVE_TTL_SECONDS` は予約の有効期間で、これを過ぎるとcronが後始末を引き取る。
+数値の設定は `wrangler.toml` の `vars` に置く。`CREDIT_RUNPOD_CREDITS_PER_SECOND` はGPUの実行時間を消費creditへ換算する係数である。0以下を設定すると請求漏れになるため、その場合はクレジット消費を無効化する。`CREDIT_SYNC_RESERVE_TTL_SECONDS` と `CREDIT_JOB_RESERVE_TTL_SECONDS` は予約の有効期間で、これを過ぎるとcronが後始末を引き取る。
+
+#### 機能別の消費credit
+
+無料枠を超えた分だけを消費する。金額は操作ごとに決まっており、利用者の入力量では変わらない。
+
+| API | 消費credit |
+|---|---|
+| `POST /api/practice/prompts` | 5 |
+| `POST /api/practice/recordings` | 8 |
+| `POST /api/practice/attempt-jobs` | 10 |
+| `POST /api/voice-conversion-jobs` | 30（予約額。GPUの実行時間で精算し、予約額を上限とする） |
+
+`attempt-jobs` の中国語経路も同じくGPUの実行時間で精算し、予約額10を上限とする。上限に達した分は課金サービス側に未請求として記録され、単価を見直す手がかりになる。
+
+#### 課金サービスが使えないときの挙動
+
+クレジット消費を有効にしていても、次のどれかに当たると無料枠だけの運用へ落ちる。無料枠を超えた要求は従来どおりHTTP 429で断り、理由を監査ログへ残す。
+
+- D1（`MO_SPEECH_DB`）が無い
+- 課金サービスへの接続手段が無い
+- `CREDIT_BASE_CALLBACK_SECRET` または `PUBLIC_CANONICAL_ORIGIN` が未設定
+- `CREDIT_RUNPOD_CREDITS_PER_SECOND` が0以下
+- セッションがGoogleの `sub` を持たない。この項目を持つ前に発行された古いセッションで、再ログインすれば解消する
+
+課金サービスへは接続できたが枠の確保に失敗した場合は、AI処理を始めずにHTTP 503を返す。無料枠超過（429）と取り違えないためである。残高が足りない場合はHTTP 402を返し、チャージが要ることだけを伝える。
 
 #### `CREDIT_BASE_CALLBACK_SECRET` の回転手順
 
 鍵を差し替えると、発行済みのURLは署名が合わずに401を返す。cronはそれを保留として扱い、対象の予約が精算されないまま残る。旧鍵を残す期間を必ず設ける。
 
-1. 新しい鍵を `CREDIT_BASE_CALLBACK_SECRET` へ登録する。
-2. 直前の鍵を `CREDIT_BASE_CALLBACK_SECRET_PREVIOUS` へ登録する。両方の鍵で署名されたURLを受け付ける。
-3. 旧鍵で署名した予約がすべて決着するまで待つ。最短でも24時間とcron間隔（5分）を置く。
-4. credit-base側の未精算の予約が0件であることを確認してから `CREDIT_BASE_CALLBACK_SECRET_PREVIOUS` を削除する。
+1. **現在の鍵の値を `CREDIT_BASE_CALLBACK_SECRET_PREVIOUS` へ先に登録する。** Worker secretは書き込み専用で読み戻せないため、現在の値を手元に持っていない場合はこの手順から始められない。回転を始める前に控えがあることを確かめる。
+2. 発行済みのURLが引き続き200を返すことを確認する。両方の鍵が受け付けられている状態になる。
+3. 新しい鍵を `CREDIT_BASE_CALLBACK_SECRET` へ登録して差し替える。
+4. 旧鍵で署名した予約がすべて決着するまで待つ。最短でも24時間とcron間隔（5分）を置く。
+5. credit-base側の未精算の予約が0件であることを確認してから `CREDIT_BASE_CALLBACK_SECRET_PREVIOUS` を削除する。
+
+順序を逆にして先に現在の鍵を差し替えると、旧鍵を登録し終えるまでのあいだ発行済みのURLがすべて401になる。その間にcronが照会した予約は保留のまま残る。
 
 Google OAuth clientの「承認済みのリダイレクトURI」には `https://voice-lab.inakaegg.workers.dev/auth/google/callback` を登録する。旧Worker URLから切り替える間は旧URIを残してよいが、新URLでログイン確認が完了した後に不要な旧URIを削除する。
 

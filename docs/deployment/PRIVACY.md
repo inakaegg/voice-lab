@@ -27,9 +27,10 @@ Cloudflare TurnstileとGoogle Cloud Runの行はZoovoice専用である。この
 - Google emailはquotaと監査の識別に使う前にSHA-256 hash化する。D1と現在のKV fallbackは、quota keyとaudit eventへ平文emailを新規保存しない。
 - ログインしたメールアドレスと日時は `public_users` テーブルへ平文で保存し、管理者だけが `GET /api/public-users` と `/admin` の利用者一覧で読む。quota keyとaudit eventは従来どおりhashだけを保存する。平文emailは公開デモの運用中に限り保持し、公開デモ終了時に削除する。
 - 2026-07-16より前に作られた平文emailを含むlegacy KV quota keyは、新Workerのproduction反映後に2件を削除した。2026-07-17の再検査で、legacy KVの平文email keyは0件である。
-- Googleログイン後のブラウザには署名cookieを保存する。cookieの内容はemail、発行時刻、有効期限である。保存属性は `HttpOnly`、`Secure`、`SameSite=Lax` とする。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
-- iOSクライアントのログインは、Google ID tokenを `POST /api/native-session` で短期のsession tokenへ交換して行う。tokenはcookieと同じ署名・同じ内容（email・発行時刻・有効期限）で、有効期間は最大1時間かつGoogle ID tokenの期限以下とする。以後のrequestでは `Authorization: Bearer` ヘッダで送る。WorkerはGoogle ID token・session token・Authorizationヘッダをlog・D1・KV・R2のいずれにも保存しない。交換成功の記録は、既存ログインと同じ `public_users` の日時更新と、hash化識別子だけのaudit event（`google_native_login_success`）に限る。
-- D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
+- Googleログイン後のブラウザには署名cookieを保存する。cookieの内容はemail、Googleアカウントの識別子（`sub`）、発行時刻、有効期限である。`sub` はクレジット消費の主体を決めるために持つ。emailと違って変わらないので、購入した残高と消費を同じ利用者へ結び付けられる。保存属性は `HttpOnly`、`Secure`、`SameSite=Lax` とする。payloadは改ざん検知されるが暗号化はされない。有効期間は30日とし、ログアウト時に削除する。未使用のGoogle表示名と画像URLはcookieへ保存しない。
+- iOSクライアントのログインは、Google ID tokenを `POST /api/native-session` で短期のsession tokenへ交換して行う。tokenはcookieと同じ署名・同じ内容（email・`sub`・発行時刻・有効期限）で、有効期間は最大1時間かつGoogle ID tokenの期限以下とする。以後のrequestでは `Authorization: Bearer` ヘッダで送る。WorkerはGoogle ID token・session token・Authorizationヘッダをlog・D1・KV・R2のいずれにも保存しない。交換成功の記録は、既存ログインと同じ `public_users` の日時更新と、hash化識別子だけのaudit event（`google_native_login_success`）に限る。
+- D1はquota使用数、hash化した識別子、簡易audit event、公開サンプルmetadataを保存する。48時間を超えた日次quotaと90日を超えたaudit eventを日次処理で削除するため、実際の最大保持期間はそれぞれ3日未満、91日未満となる。
+- クレジット消費を有効にした配備では、D1の `credit_job_reservations` へ予約1件ごとの記録を保存する。保存する項目は主体ID（`google:<sub>` の形）・機能名・予約額・精算状態・RunPodのjob IDである。emailは保存しない。決着した行は精算から90日を超えると日次処理で削除するため、実際の最大保持期間は91日未満となる。決着していない行は、精算漏れを検知できるよう残す。累計quotaと対応するhash識別子は利用上限を維持するため公開デモの運用中に限り保持する。
 - R2は管理者が公開用として登録したサンプル音声だけを保存する。
 - 過去の研究機能で登録したsampleは、一般向けsample APIから返らない。保持は保証せず、管理者のsample保存・削除操作で削除され得る。
 - KVは短期job snapshot、ready状態、公開アクセス設定、bindingがない環境のfallbackに使う。短期job snapshotは1時間、fallbackの日次quotaは48時間、audit eventは90日で失効する。fallbackの累計quotaは公開デモの運用中に限り保持する。管理設定の `admin_google_emails` には運営者の平文emailを保存する。一般利用者のquota・audit識別子とは用途を分ける。

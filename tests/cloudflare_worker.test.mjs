@@ -4665,7 +4665,11 @@ test("Cloudflare worker refuses the request without calling OpenAI when the cred
   const response = await handleRequest(practicePromptRequest(cookie), env);
 
   assert.equal(response.status, 402);
-  assert.equal(parseJsonBody(await response.text()).code, "credit_insufficient");
+  const body = parseJsonBody(await response.text());
+  assert.equal(body.code, "credit_insufficient");
+  // チャージが要ることだけを伝える。残高の数値や台帳の状態は出さない
+  assert.equal(body.detail, "クレジットが不足しています。チャージしてからもう一度お試しください。");
+  assert.deepEqual(Object.keys(body).sort(), ["code", "detail"]);
   assert.deepEqual(credit.calls.map((call) => call.method), ["reserve"]);
 });
 
@@ -5254,4 +5258,81 @@ test("Cloudflare worker returns the reserved credits when RunPod accepts a job w
   assert.equal(response.status, 202);
   assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "release"]);
   assert.equal(db.__tables.reservations.get(credit.calls[0].payload.idempotency_key).status, "released");
+});
+
+test("Cloudflare worker keeps the reservation attached when post-submit bookkeeping fails", async () => {
+  const credit = fakeCreditBase();
+  const { env, db } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: runpodJobFetch([{ id: "zh-job", status: "IN_QUEUE" }]),
+  });
+  const realPut = env.MO_SPEECH_KV.put.bind(env.MO_SPEECH_KV);
+  env.MO_SPEECH_KV.put = async (key, ...rest) => {
+    // ジョブは既にRunPodで走っている。ここで枠を返すと無請求のGPU実行になる
+    if (String(key).startsWith("practice-attempt-llm-options:")) throw new Error("KV write failed");
+    return realPut(key, ...rest);
+  };
+
+  const response = await handleRequest(attemptJobRequest(await publicCookie(env)), env);
+
+  assert.equal(response.status, 500);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve"]);
+  assert.equal(db.__tables.reservations.get(credit.calls[0].payload.idempotency_key).status, "in_flight");
+});
+
+test("Cloudflare worker still answers a charged request when the local reservation row cannot be finalized", async () => {
+  const credit = fakeCreditBase();
+  const db = fakeD1();
+  const realPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (sql === CREDIT_RESERVATION_SQL.finalize) {
+      return { bind: () => ({ async run() { throw new Error("D1_ERROR: disk is full"); } }) };
+    }
+    return realPrepare(sql);
+  };
+  const { env } = await exhaustedQuotaCreditEnv({ credit, db });
+
+  const response = await handleRequest(practicePromptRequest(await publicCookie(env)), env);
+
+  // 台帳では課金が確定している。手元の後始末が落ちただけで結果を捨てない
+  assert.equal(response.status, 200);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "settle"]);
+});
+
+test("credit client refuses a response whose status it does not recognize", async () => {
+  const client = resolveCreditClient({ CREDIT_BASE: { async reserve() { return {}; } } }).client;
+
+  await assert.rejects(
+    () => client.reserve({ subjectId: "google:1", amount: 5, idempotencyKey: "k1" }),
+    (error) => error.creditKind === "unknown",
+  );
+});
+
+test("Cloudflare worker does not start paid work on an unrecognized reservation response", async () => {
+  const credit = fakeCreditBase({ reserve: {} });
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit,
+    fetchImpl: async (url) => { throw new Error(`OpenAI must not be called: ${url}`); },
+  });
+
+  const response = await handleRequest(practicePromptRequest(await publicCookie(env)), env);
+
+  assert.equal(response.status, 503);
+});
+
+test("Cloudflare worker refuses to spend credits with a non-positive conversion rate", async () => {
+  for (const rate of ["0", "-1"]) {
+    const credit = fakeCreditBase();
+    const { env, db } = await exhaustedQuotaCreditEnv({
+      credit,
+      fetchImpl: async (url) => { throw new Error(`no external call is expected: ${url}`); },
+    });
+    env.CREDIT_RUNPOD_CREDITS_PER_SECOND = rate;
+
+    const response = await handleRequest(practicePromptRequest(await publicCookie(env)), env);
+
+    assert.equal(response.status, 429, rate);
+    assert.deepEqual(credit.calls, [], rate);
+    assert.equal(db.__tables.audit.at(-1).action, "credit_disabled_misconfigured", rate);
+  }
 });
