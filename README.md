@@ -64,6 +64,7 @@ The diagram is generated from [docs/diagrams/architecture.py](docs/diagrams/arch
 
 - API keys for OpenAI and RunPod never reach the browser. They live in Worker secrets or server-side environment variables.
 - The public deployment handles Google login, per-feature quotas, input limits, and a simple audit log in the Cloudflare Worker.
+- Usage beyond the free quota can draw on a prepaid credit balance managed by a separate billing service in a private repository. That integration is behind a feature flag, off by default. Running and testing this repository locally needs nothing from the billing service; see [the Cloudflare deployment notes](docs/deployment/CLOUDFLARE.md) for what a deployment to another account has to do. The codebase holds only a thin client and a test fake.
 - Chinese pronunciation comparison and optional voice conversion temporarily send only the required audio to a private RunPod Serverless backend.
 - Zoovoice audio processing runs on a private Go service on Google Cloud Run (whisper.cpp, OpenAI API, ffmpeg). The Worker relays with a Google-issued ID token. On a token-cache miss, it exchanges a signed service-account JWT for a new ID token at Google's token endpoint.
 - Zoovoice uses Cloudflare Turnstile against automated access, with shared usage limits managed in D1.

@@ -61,6 +61,7 @@ https://github.com/user-attachments/assets/4ef52293-8252-48bd-b1ae-0f942a24930d
 
 - ブラウザへOpenAIやRunPodのAPI keyを渡さず、Worker secretまたはサーバー環境変数で管理します。
 - 公開版はGoogleログイン、機能別quota、入力上限、簡易監査ログをCloudflare Workerで処理します。
+- 無料枠を超えた利用は、別の非公開repositoryにある課金サービスのプリペイドクレジット残高から支払えます。接続は機能フラグで切り替え、既定はOFFです。ローカルでの動作・検証は課金サービスなしで完結します。別のアカウントへ配備するときの扱いは [Cloudflareデモ構成](docs/deployment/CLOUDFLARE.md) を参照してください。同梱するのは小さなclient実装とテスト用のfakeだけです。
 - 中国語の発音比較と任意の声質変換は、privateなRunPod Serverlessへ必要な音声だけを一時送信します。
 - Zoovoiceの音声処理はprivateなGoogle Cloud Run上のGoサービス（whisper.cpp・OpenAI API・ffmpeg）が担当します。WorkerはGoogle発行のID tokenを付けて中継します。ID tokenのcache miss時は、署名付きservice account JWTをGoogle token endpointで交換します。
 - ZoovoiceはCloudflare Turnstileで自動アクセスを抑止し、共通の利用上限をD1で管理します。

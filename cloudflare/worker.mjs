@@ -8,11 +8,35 @@ import {
   storePracticeModelAsrCache,
 } from "./src/practice-model-asr-cache.ts";
 import { handleZoovoiceApiRequest } from "./zoovoice-gateway.mjs";
+import {
+  CREDIT_ERROR_INVALID_REQUEST,
+  CREDIT_UNAVAILABLE_MISCONFIGURED,
+  resolveCreditClient,
+} from "./credit-client.mjs";
 
 const RUNPOD_DEFAULT_BASE_URL = "https://api.runpod.ai/v2";
 const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX = "practice-attempt-llm-options:";
+const CREDIT_RESERVE_MARKER_KV_PREFIX = "credit-reserve:";
+const CREDIT_JOB_ID_MARKER_KV_PREFIX = "credit-reserve-key:";
+const CREDIT_PRODUCT = "voice-lab";
+// 消費credit（credit-base docs/billing-spec.md §10）。事前に決まる固定額
+const CREDIT_FEATURE_AMOUNTS = {
+  "practice-prompts": 5,
+  "practice-recordings": 8,
+  "practice-attempt-jobs": 10,
+  "voice-conversion-jobs": 30,
+};
+const CREDIT_SYNC_RESERVE_TTL_SECONDS = 600;
+const CREDIT_JOB_RESERVE_TTL_SECONDS = 600;
+// GPU実費の換算。§10の voice-conversion-jobs（120秒で予約額30）から 30/120 = 0.25。
+// 実測で単価が確定したら差し替える（§11の未決事項）
+const CREDIT_RUNPOD_CREDITS_PER_SECOND = 0.25;
+// 状態を取り戻せなくなった予約を failed へ倒すまでの猶予
+const CREDIT_UNKNOWN_JOB_GRACE_SECONDS = 60 * 60 * 24;
+// 残高不足を伝える固定文言。残高の数値も台帳の状態も出さず、チャージが要ることだけを伝える
+const CREDIT_INSUFFICIENT_PUBLIC_MESSAGE = "クレジットが不足しています。チャージしてからもう一度お試しください。";
 const PRACTICE_ATTEMPT_RESULT_KV_PREFIX = "practice-attempt-result:";
 // フロントエンド(app_practice.js)のattempt-jobsポーリング締め切りは30分。RunPodジョブが
 // 完了するまでこの時間だけ待たれ得るため、comparison_model等を保持するKVのTTLは
@@ -888,6 +912,7 @@ async function handleGoogleCallback(request, env, url) {
   }
   const sessionCookie = await createPublicSessionCookie(env, {
     email,
+    sub: String(userInfo.sub || ""),
     name: String(userInfo.name || ""),
     picture: String(userInfo.picture || ""),
   });
@@ -963,7 +988,7 @@ async function handleNativeSessionRequest(request, env) {
     if (expiresAt <= now) {
       throw httpError(401, "invalid Google ID token");
     }
-    const sessionToken = await createPublicSessionValue(env, { email: identity.email }, expiresAt);
+    const sessionToken = await createPublicSessionValue(env, { email: identity.email, sub: identity.sub }, expiresAt);
     const settings = await readPublicAccessSettings(env);
     await recordPublicUserLogin(env, identity.email);
     await appendPublicAuditEvent(env, {
@@ -1087,6 +1112,9 @@ async function createPublicSessionCookie(env, user) {
 async function createPublicSessionValue(env, user, expiresAt, issuedAt = Math.floor(Date.now() / 1000)) {
   return createSignedPayload({
     email: normalizeEmail(user.email),
+    // Googleのsubject IDは課金基盤の主体ID（google:<sub>）を組むために要る。
+    // emailは変わり得るので、台帳の主体をemailに紐づけない。
+    sub: String(user.sub || ""),
     iat: issuedAt,
     exp: expiresAt,
   }, publicSessionSecret(env));
@@ -1117,6 +1145,9 @@ async function readPublicSession(request, env) {
     }
     return {
       email,
+      // subを持たないのはこの項目を載せる前に発行されたセッション。空文字で返し、
+      // 呼び出し側がクレジット消費を見送れるようにする（再ログインで解消する）。
+      sub: String(payload.sub || ""),
       name: String(payload.name || ""),
       picture: String(payload.picture || ""),
       exp: Number(payload.exp || 0),
@@ -1235,6 +1266,10 @@ async function handleApiRequest(request, env, ctx, url) {
     if (zoovoiceResponse) {
       return zoovoiceResponse;
     }
+    if (request.method === "GET" && url.pathname.startsWith("/api/internal/credit-jobs/")) {
+      // awaitを外すと、rejectがこのtryを抜けた後に起きて401へ変換されない
+      return await handleCreditJobStatusRequest(request, env, url);
+    }
     if (request.method === "GET" && url.pathname === "/api/public-session") {
       return jsonResponse(await publicSessionPayload(request, env));
     }
@@ -1321,6 +1356,8 @@ async function handleApiRequest(request, env, ctx, url) {
     }
     return jsonResponse({ detail: "not found" }, { status: 404 });
   } catch (error) {
+    // 予約を取った後に落ちたリクエストの枠を返す。取っていなければ何もしない
+    await releaseCreditConsumptionForRequest(request);
     if (error instanceof PracticeAlignmentInputError) {
       return jsonResponse(practiceAlignmentErrorEnvelope(error), { status: 400 });
     }
@@ -1336,7 +1373,10 @@ async function handleApiRequest(request, env, ctx, url) {
       status: error.status || 500,
       detail: errorMessage(error).slice(0, 300),
     }));
-    return jsonResponse({ detail: errorMessage(error) }, { status: error.status || 500 });
+    // codeは機械判定用の追加情報。codeを持たない既存のエラーの応答本文は変わらない
+    const envelope = { detail: errorMessage(error) };
+    if (error?.code) envelope.code = error.code;
+    return jsonResponse(envelope, { status: error.status || 500 });
   }
 }
 
@@ -1807,7 +1847,7 @@ function isPublicAdminEmail(email, settings) {
   return settings.admin_google_emails.includes(normalizeEmail(email));
 }
 
-async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
+async function enforcePublicFeatureAccess(request, env, feature, limits = {}, credit = null) {
   const settings = await readPublicAccessSettings(env);
   const featureSettings = settings.features[feature] || {};
   validatePublicInputLimits(featureSettings, limits);
@@ -1829,10 +1869,10 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
       is_admin: true,
       ...requestAuditContext(request),
     });
-    return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email };
+    return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email, consumption: inactiveCreditConsumption() };
   }
   if (!settings.google_login_required) {
-    return { settings, consumed: false, authenticated: false, is_admin: false };
+    return { settings, consumed: false, authenticated: false, is_admin: false, consumption: inactiveCreditConsumption() };
   }
   if (!publicGoogleAuthConfigured(env)) {
     throw httpError(503, "Google login is not configured");
@@ -1850,10 +1890,177 @@ async function enforcePublicFeatureAccess(request, env, feature, limits = {}) {
       is_admin: true,
       ...requestAuditContext(request),
     });
-    return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email };
+    return { settings, consumed: false, authenticated: true, is_admin: true, email: session.email, consumption: inactiveCreditConsumption() };
   }
-  await consumePublicQuota(env, feature, session.email, featureSettings, request);
-  return { settings, consumed: true, authenticated: true, is_admin: false, email: session.email };
+  try {
+    await consumePublicQuota(env, feature, session.email, featureSettings, request);
+  } catch (error) {
+    // 無料枠の超過だけをクレジット経路へ回す。他の429と取り違えないよう目印で判定する
+    if (!error?.publicQuotaExceeded) throw error;
+    const consumption = await startCreditConsumption(request, env, session, credit);
+    if (!consumption) throw error;
+    return { settings, consumed: false, authenticated: true, is_admin: false, email: session.email, consumption };
+  }
+  return { settings, consumed: true, authenticated: true, is_admin: false, email: session.email, consumption: inactiveCreditConsumption() };
+}
+
+/**
+ * 進行中の予約をリクエストごとに覚えておく。
+ *
+ * 予約を取ってから応答が確定するまでのあいだに何が落ちても枠を返せるよう、後始末は
+ * リクエストの出口（handleApiRequest の catch）に1か所だけ置く。各ハンドラの本文を
+ * try/catch で囲って回ると、AI呼び出しと応答生成のどちらの失敗も拾い漏らしやすい。
+ */
+const activeCreditConsumptions = new WeakMap();
+
+/** 応答が確定しなかったリクエストの枠を返す。精算済みなら何もしない */
+async function releaseCreditConsumptionForRequest(request) {
+  const consumption = request ? activeCreditConsumptions.get(request) : null;
+  if (!consumption) return;
+  activeCreditConsumptions.delete(request);
+  try {
+    await consumption.release();
+  } catch (error) {
+    // 課金の後始末の失敗で、利用者が受け取るエラーの中身をすり替えない
+    console.error("credit release failed", JSON.stringify({ detail: errorMessage(error).slice(0, 200) }));
+  }
+}
+
+/** クレジットを使わなかったときの受け皿。呼び出し元が分岐せずに済むようにする */
+function inactiveCreditConsumption() {
+  return {
+    active: false,
+    reserveKey: "",
+    amount: 0,
+    async settle() {},
+    async release() {},
+    async attachJob() {},
+  };
+}
+
+/**
+ * 無料枠を超えた利用者のために、credit-base で枠を取る。
+ *
+ * 取れなければ null を返し、呼び出し元は元の429をそのまま投げる。クレジットを使えない理由は
+ * 監査ログへ種別つきで残す。原因（未設定・設定の誤り・subject不明）を後から分けられないと運用で困る。
+ *
+ * 仕様§4の charge ではなく reserve→settle を使う。charge は「残高判定 → AI実行 → 記帳」の
+ * 3手に分かれ、判定と記帳のあいだに同一subjectの並行リクエストが残高を使い切れる。
+ * reserve は条件付きINSERTひとつで枠取りと残高判定を同時に行うので、その競合が閉じる。
+ */
+async function startCreditConsumption(request, env, session, credit) {
+  if (!credit?.feature) return null;
+  if (env.CREDIT_CONSUME_ENABLED !== "1") return null;
+
+  const auditBase = { feature: credit.feature, email: session.email, ...requestAuditContext(request) };
+  if (!env.MO_SPEECH_DB) {
+    // 対応表を書けない。予約を作ると誰も精算できなくなるので、クレジット経路ごと止める
+    await appendPublicAuditEvent(env, { action: "credit_disabled_no_db", ...auditBase });
+    return null;
+  }
+  const { client, reason } = resolveCreditClient(env);
+  if (!client) {
+    await appendPublicAuditEvent(env, {
+      action: reason === CREDIT_UNAVAILABLE_MISCONFIGURED ? "credit_disabled_misconfigured" : "credit_disabled_no_client",
+      ...auditBase,
+    });
+    return null;
+  }
+  if (!(creditRunpodRatePerSecond(env) > 0)) {
+    // 単価の打ち間違いを黙って通すと、どのGPUジョブも最小の1creditへ丸められて請求漏れが続く
+    await appendPublicAuditEvent(env, { action: "credit_disabled_misconfigured", ...auditBase });
+    return null;
+  }
+  if (!String(env.CREDIT_BASE_CALLBACK_SECRET || "").trim() || !String(env.PUBLIC_CANONICAL_ORIGIN || "").trim()) {
+    // 照会先を署名して組めないと callback_url なしで予約することになる。credit-base の cron は
+    // 照会先の無い予約を掃除せず保留し続けるので、手で精算するまで残り続ける
+    await appendPublicAuditEvent(env, { action: "credit_disabled_misconfigured", ...auditBase });
+    return null;
+  }
+  if (!session.sub) {
+    // この項目を載せる前に発行されたセッション。再ログインで解消する
+    await appendPublicAuditEvent(env, { action: "credit_skipped_no_subject", ...auditBase });
+    return null;
+  }
+
+  const subjectId = `google:${session.sub}`;
+  const amount = CREDIT_FEATURE_AMOUNTS[credit.feature];
+  const reserveKey = crypto.randomUUID();
+  const issuedAt = new Date().toISOString();
+  const ttlSeconds = credit.kind === "sync" ? creditSyncReserveTtl(env) : creditJobReserveTtl(env);
+
+  let result;
+  try {
+    result = await client.reserve({
+      subjectId,
+      amount,
+      product: CREDIT_PRODUCT,
+      feature: credit.feature,
+      idempotencyKey: reserveKey,
+      callbackUrl: await creditCallbackUrl(env, reserveKey, issuedAt),
+      ttlSeconds,
+    });
+  } catch (error) {
+    await appendPublicAuditEvent(env, {
+      action: error?.creditKind === CREDIT_ERROR_INVALID_REQUEST ? "credit_call_invalid" : "credit_call_failed",
+      method: "reserve",
+      idempotency_key: reserveKey,
+      ...auditBase,
+    });
+    // AIをまだ呼んでいないので中止する。課金基盤が使えない状態を無料枠超過と偽らない
+    throw httpError(503, "credit service is unavailable");
+  }
+
+  if (result.status === "insufficient_balance") {
+    await appendPublicAuditEvent(env, { action: "credit_insufficient", amount, ...auditBase });
+    throw httpError(402, CREDIT_INSUFFICIENT_PUBLIC_MESSAGE, { code: "credit_insufficient" });
+  }
+
+  const consumption = {
+    active: true,
+    reserveKey,
+    amount,
+    async settle(actualAmount) {
+      activeCreditConsumptions.delete(request);
+      await settleCreditReservation(env, { client, reserveKey, actualAmount, reservedAmount: amount, auditBase });
+    },
+    async release() {
+      activeCreditConsumptions.delete(request);
+      await releaseCreditReservation(env, { client, reserveKey, auditBase });
+    },
+    // 非同期経路は投入後に精算をポーリング側へ渡す。ここで登録を解いて、
+    // 応答が返った後に枠が返されないようにする
+    async attachJob(jobId) {
+      activeCreditConsumptions.delete(request);
+      if (!jobId) {
+        // RunPodがidを返さなければ、あとからジョブの終了状態を照会する手立てが無い。
+        // 予約のTTL切れをcronに待たせず、その場で枠を返す
+        await releaseCreditReservation(env, { client, reserveKey, auditBase });
+        return;
+      }
+      // ここへ来た時点でRunPodはジョブを受理している。記録に失敗しても枠を返さない。
+      // 返すと走っているGPUジョブが無請求になる。印と行のどちらかが残れば、
+      // 次のポーリング（印）かcronの照会（行）が決着まで運べる
+      const markerTtl = ttlSeconds + CREDIT_UNKNOWN_JOB_GRACE_SECONDS;
+      await attachCreditReservationJobIdQuietly(env, reserveKey, jobId, auditBase);
+      await saveCreditReserveMarkerQuietly(env, jobId, reserveKey, markerTtl, auditBase);
+      await runQuietly(env, () => saveCreditJobIdMarker(env, reserveKey, jobId, markerTtl), "save_job_id_marker", auditBase);
+    },
+  };
+  // 対応表へ書く前に登録する。書き込みが落ちたとき、credit-base には予約だけが残り、
+  // 対応表に行が無いので照会エンドポイントは「状態不明」の猶予（24時間）へ落ちる。
+  // 先に登録しておけば、このリクエストの出口でその場で枠が返る
+  activeCreditConsumptions.set(request, consumption);
+  await insertCreditReservation(env, {
+    reserveKey,
+    subjectId,
+    feature: credit.feature,
+    kind: credit.kind,
+    reservedAmount: amount,
+    now: issuedAt,
+  });
+  await appendPublicAuditEvent(env, { action: "credit_reserved", amount, idempotency_key: reserveKey, ...auditBase });
+  return consumption;
 }
 
 async function requirePublicFeaturePollingAccess(request, env, feature) {
@@ -1932,7 +2139,7 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
       limit: dailyLimit,
       ...requestAuditContext(request),
     });
-    throw httpError(429, "public quota exceeded");
+    throw httpError(429, "public quota exceeded", { publicQuotaExceeded: true });
   }
   if (totalLimit >= 0 && totalUsed >= totalLimit) {
     await appendPublicAuditEvent(env, {
@@ -1944,7 +2151,7 @@ async function consumePublicQuota(env, feature, email, featureSettings, request 
       limit: totalLimit,
       ...requestAuditContext(request),
     });
-    throw httpError(429, "public quota exceeded");
+    throw httpError(429, "public quota exceeded", { publicQuotaExceeded: true });
   }
   await publicUsagePut(env, dailyKey, dailyUsed + 1, PUBLIC_DAILY_QUOTA_RETENTION_SECONDS);
   await publicUsagePut(env, totalKey, totalUsed + 1);
@@ -1976,11 +2183,11 @@ async function consumePublicQuotaD1(env, feature, email, featureSettings, reques
   const totalUsed = total ? Number(total.usage_count || 0) : await publicUsageGet(env, legacyTotalKey);
   if (dailyLimit >= 0 && dailyUsed >= dailyLimit) {
     await appendPublicAuditEvent(env, { action: "public_quota_blocked", email, feature, limit_type: "daily", used: dailyUsed, limit: dailyLimit, ...requestAuditContext(request) });
-    throw httpError(429, "public quota exceeded");
+    throw httpError(429, "public quota exceeded", { publicQuotaExceeded: true });
   }
   if (totalLimit >= 0 && totalUsed >= totalLimit) {
     await appendPublicAuditEvent(env, { action: "public_quota_blocked", email, feature, limit_type: "total", used: totalUsed, limit: totalLimit, ...requestAuditContext(request) });
-    throw httpError(429, "public quota exceeded");
+    throw httpError(429, "public quota exceeded", { publicQuotaExceeded: true });
   }
   const now = new Date().toISOString();
   await env.MO_SPEECH_DB.batch([
@@ -2000,6 +2207,524 @@ async function consumePublicQuotaD1(env, feature, email, featureSettings, reques
     total_used: totalUsed + 1, total_limit: totalLimit,
     ...requestAuditContext(request),
   });
+}
+
+/**
+ * credit-base の予約と、voice-lab 側の処理・RunPodジョブの対応表。
+ *
+ * SQLはこの定数群だけに置く。テストのfake D1はこの定数と完全一致で分岐するので、
+ * 本体側で文を変えるとfakeが即座に「知らない問い合わせ」で落ちる。部分一致で拾わせると、
+ * 文を変えてもfakeが古い解釈のまま応え続け、テストが素通りする。
+ */
+const CREDIT_RESERVATION_COLUMNS =
+  "reserve_key, job_id, subject_id, feature, kind, reserved_amount, status, "
+  + "job_status, execution_time_ms, settled_amount, created_at, resolved_at";
+
+export const CREDIT_RESERVATION_SQL = {
+  insert:
+    "INSERT INTO credit_job_reservations "
+    + "(reserve_key, job_id, subject_id, feature, kind, reserved_amount, status, created_at) "
+    + "VALUES (?, NULL, ?, ?, ?, ?, 'in_flight', ?)",
+  attachJobId:
+    "UPDATE credit_job_reservations SET job_id = ? WHERE reserve_key = ?",
+  recordOutcome:
+    "UPDATE credit_job_reservations SET job_status = ?, execution_time_ms = ? "
+    + "WHERE reserve_key = ? AND status = 'in_flight'",
+  finalize:
+    "UPDATE credit_job_reservations SET status = ?, settled_amount = ?, resolved_at = ? "
+    + "WHERE reserve_key = ? AND status = 'in_flight'",
+  selectByKey:
+    `SELECT ${CREDIT_RESERVATION_COLUMNS} FROM credit_job_reservations WHERE reserve_key = ?`,
+  selectByJobId:
+    `SELECT ${CREDIT_RESERVATION_COLUMNS} FROM credit_job_reservations WHERE job_id = ?`,
+  deleteResolved:
+    "DELETE FROM credit_job_reservations WHERE status != 'in_flight' AND resolved_at < ?",
+};
+
+async function insertCreditReservation(env, { reserveKey, subjectId, feature, kind, reservedAmount, now }) {
+  await env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.insert)
+    .bind(reserveKey, subjectId, feature, kind, reservedAmount, now)
+    .run();
+}
+
+async function attachCreditReservationJobId(env, reserveKey, jobId) {
+  await env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.attachJobId).bind(jobId, reserveKey).run();
+}
+
+/**
+ * 観測したジョブの終了状態を残す。精算より先に呼ぶ。
+ * 精算が落ちても、この記録があればcronが照会エンドポイント経由で決着できる。
+ */
+async function recordCreditReservationOutcome(env, reserveKey, jobStatus, executionTimeMs) {
+  await env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.recordOutcome)
+    .bind(jobStatus, Number.isFinite(executionTimeMs) ? Math.max(0, Math.round(executionTimeMs)) : null, reserveKey)
+    .run();
+}
+
+/** 精算が決着したことを記録し、以後の再試行を止める */
+async function finalizeCreditReservation(env, reserveKey, status, settledAmount, now) {
+  await env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.finalize)
+    .bind(status, Number.isFinite(settledAmount) ? settledAmount : null, now, reserveKey)
+    .run();
+}
+
+async function findCreditReservationByKey(env, reserveKey) {
+  return env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.selectByKey).bind(reserveKey).first();
+}
+
+async function findCreditReservationByJobId(env, jobId) {
+  return env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.selectByJobId).bind(jobId).first();
+}
+
+/**
+ * 予約のあるジョブだけに印を付けておく。
+ *
+ * ポーリングはまずこの印を読み、無ければ対応表を引かない。無料枠の利用者は印を持たないので、
+ * 課金と無関係なポーリングにD1読みが増えない。KVが無い環境では印を介さず対応表を直接引く
+ * （印は読みを省くための最適化であって、正しさをここへ預けない）。
+ */
+async function saveCreditReserveMarker(env, jobId, reserveKey, ttlSeconds) {
+  const kv = stateKv(env);
+  if (!kv || !jobId) return;
+  await kv.put(`${CREDIT_RESERVE_MARKER_KV_PREFIX}${jobId}`, reserveKey, { expirationTtl: ttlSeconds });
+}
+
+async function readCreditReserveMarker(env, jobId) {
+  const kv = stateKv(env);
+  if (!kv || !jobId) return null;
+  return kv.get(`${CREDIT_RESERVE_MARKER_KV_PREFIX}${jobId}`);
+}
+
+/**
+ * 予約キーからjobIdを引く逆引きの印。
+ *
+ * cronの照会は予約キーしか持たない。投入時に対応表の更新が落ちて行にjobIdが入らなかった場合、
+ * これが無いと「ジョブが走っているのか確かめる手立てが無い」状態になり、TTL切れで枠を返して
+ * 走行中のGPUジョブが無請求になる。
+ */
+async function saveCreditJobIdMarker(env, reserveKey, jobId, ttlSeconds) {
+  const kv = stateKv(env);
+  if (!kv || !reserveKey || !jobId) return;
+  await kv.put(`${CREDIT_JOB_ID_MARKER_KV_PREFIX}${reserveKey}`, jobId, { expirationTtl: ttlSeconds });
+}
+
+async function readCreditJobIdMarker(env, reserveKey) {
+  const kv = stateKv(env);
+  if (!kv || !reserveKey) return null;
+  try {
+    return await kv.get(`${CREDIT_JOB_ID_MARKER_KV_PREFIX}${reserveKey}`);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function deleteCreditReserveMarker(env, jobId) {
+  const kv = stateKv(env);
+  if (!kv || !jobId) return;
+  await kv.delete(`${CREDIT_RESERVE_MARKER_KV_PREFIX}${jobId}`);
+}
+
+/**
+ * 精算する。対応表へ観測結果を先に書いてから credit-base を呼ぶ。
+ *
+ * 先に書くのは2つの理由から。credit-base の呼び出しが落ちても、cron が照会エンドポイント経由で
+ * 決着できる。そして精算額を必ず記録値から算出できるので、再試行のたびに額が変わって
+ * 冪等キーの衝突（idempotency_key_conflict）になることがない。
+ */
+async function settleCreditReservation(env, { client, reserveKey, actualAmount, reservedAmount, executionTimeMs = null, auditBase = {} }) {
+  await recordOutcomeQuietly(env, reserveKey, "succeeded", executionTimeMs, auditBase);
+  const amount = Number.isFinite(actualAmount) && actualAmount >= 1 ? Math.round(actualAmount) : reservedAmount;
+  let result;
+  try {
+    result = await client.settle({ reserveKey, actualAmount: amount, idempotencyKey: `vl:${reserveKey}:settle` });
+  } catch (error) {
+    await appendPublicAuditEvent(env, {
+      action: error?.creditKind === CREDIT_ERROR_INVALID_REQUEST ? "credit_call_invalid" : "credit_call_failed",
+      method: "settle",
+      idempotency_key: `vl:${reserveKey}:settle`,
+      ...auditBase,
+    });
+    return;
+  }
+  await finishCreditSettlement(env, {
+    reserveKey,
+    result,
+    settledAmount: amount,
+    recordedAction: "credit_settled",
+    auditBase: { ...auditBase, amount },
+  });
+  if (Number(result.unbilledOverage || 0) > 0) {
+    await appendPublicAuditEvent(env, {
+      action: "credit_unbilled_overage",
+      unbilled_overage: Number(result.unbilledOverage),
+      ...auditBase,
+    });
+  }
+}
+
+/** 枠を返す。処理が失敗したときと、ジョブを投入できなかったときに使う */
+async function releaseCreditReservation(env, { client, reserveKey, auditBase = {} }) {
+  await recordOutcomeQuietly(env, reserveKey, "failed", null, auditBase);
+  let result;
+  try {
+    result = await client.release({ reserveKey, idempotencyKey: `vl:${reserveKey}:release` });
+  } catch (error) {
+    await appendPublicAuditEvent(env, {
+      action: error?.creditKind === CREDIT_ERROR_INVALID_REQUEST ? "credit_call_invalid" : "credit_call_failed",
+      method: "release",
+      idempotency_key: `vl:${reserveKey}:release`,
+      ...auditBase,
+    });
+    return;
+  }
+  await finishCreditSettlement(env, {
+    reserveKey,
+    result,
+    settledAmount: 0,
+    recordedAction: "credit_released",
+    auditBase,
+  });
+}
+
+/**
+ * 対応表を終端へ移し、再試行を止める。
+ *
+ * recorded 以外の3つも「これ以上呼んでも状況が変わらない」ことを意味する。in_flight のまま
+ * 残すとポーリングのたびに同じ呼び出しを繰り返し、保持規則（終端の行だけ消す）で永久に残る。
+ */
+async function finishCreditSettlement(env, { reserveKey, result, settledAmount, recordedAction, auditBase }) {
+  const now = new Date().toISOString();
+  if (result.status === "recorded") {
+    const status = recordedAction === "credit_settled" ? "settled" : "released";
+    // 記録するのは台帳へ実際に入った額。実費が予約額を超えるとcredit-base側で頭打ちになるので、
+    // こちらが送った額のまま残すと、照会エンドポイントが台帳と食い違う値を返す
+    const billed = Number.isFinite(Number(result.billed)) ? Number(result.billed) : settledAmount;
+    await finalizeQuietly(env, reserveKey, status, billed, now, auditBase);
+    await appendPublicAuditEvent(env, { action: recordedAction, idempotency_key: reserveKey, ...auditBase });
+    return;
+  }
+  await finalizeQuietly(env, reserveKey, "resolved_elsewhere", settledAmount, now, auditBase);
+  if (result.status === "idempotency_key_conflict") {
+    // 単価を改定した直後の再試行を除き、起きてはならない
+    await appendPublicAuditEvent(env, {
+      action: "credit_idempotency_conflict",
+      idempotency_key: reserveKey,
+      ...auditBase,
+    });
+  }
+}
+
+/**
+ * 台帳の記帳が確定した後の手元の後始末は、落ちても利用者への応答を壊さない。
+ *
+ * ここで例外を投げると、課金は済んでいるのに同期経路が500を返し、利用者は結果を失う。
+ * 行が `in_flight` のまま残っても、次のポーリングが `duplicate` か `already_settled` を受けて
+ * 終端化するか、cronが照会エンドポイント経由で決着させる。
+ */
+async function finalizeQuietly(env, reserveKey, status, settledAmount, now, auditBase) {
+  await runQuietly(env, () => finalizeCreditReservation(env, reserveKey, status, settledAmount, now), "finalize", auditBase);
+}
+
+/**
+ * 課金の後始末を、失敗しても本処理を巻き添えにしない形で実行する。
+ *
+ * 監査ログの書き込み自体もKVを読むため例外を投げ得る（`migrateLegacyAuditEventsToD1`）。
+ * ここで漏らすと、握ったつもりの失敗がそのまま利用者への500になる。
+ */
+async function runQuietly(env, work, method, auditBase) {
+  try {
+    await work();
+  } catch (_error) {
+    try {
+      await appendPublicAuditEvent(env, { action: "credit_call_failed", method, ...auditBase });
+    } catch (_auditError) {
+      console.error("credit bookkeeping failed", JSON.stringify({ method }));
+    }
+  }
+}
+
+/** ジョブとの結び付けが落ちても、GPUが動いている以上は枠を返さない */
+async function attachCreditReservationJobIdQuietly(env, reserveKey, jobId, auditBase) {
+  await runQuietly(env, () => attachCreditReservationJobId(env, reserveKey, jobId), "attach_job", auditBase);
+}
+
+async function saveCreditReserveMarkerQuietly(env, jobId, reserveKey, ttlSeconds, auditBase) {
+  await runQuietly(env, () => saveCreditReserveMarker(env, jobId, reserveKey, ttlSeconds), "save_marker", auditBase);
+}
+
+/** 観測結果の記録が落ちても精算は試みる。ここで止めると、成功した処理が無料になる */
+async function recordOutcomeQuietly(env, reserveKey, jobStatus, executionTimeMs, auditBase) {
+  await runQuietly(env, () => recordCreditReservationOutcome(env, reserveKey, jobStatus, executionTimeMs), "record_outcome", auditBase);
+}
+
+function creditSyncReserveTtl(env) {
+  return numberFromEnv(env.CREDIT_SYNC_RESERVE_TTL_SECONDS, CREDIT_SYNC_RESERVE_TTL_SECONDS);
+}
+
+function creditJobReserveTtl(env) {
+  return numberFromEnv(env.CREDIT_JOB_RESERVE_TTL_SECONDS, CREDIT_JOB_RESERVE_TTL_SECONDS);
+}
+
+/**
+ * cronがジョブの終了状態を照会する先を組む。
+ *
+ * credit-base のcronは認証ヘッダを送らないので、URL自体に署名を載せる。iat を署名対象へ含めるのは、
+ * 対応表の行が失われても予約の経過時間が分かるようにするため。ISO8601のZ表記に固定するのは、
+ * `+09:00` 形式だとクエリ文字列で `+` が空白へ解釈されて署名が合わなくなるため。
+ */
+async function creditCallbackUrl(env, reserveKey, issuedAt) {
+  const secret = String(env.CREDIT_BASE_CALLBACK_SECRET || "").trim();
+  const origin = String(env.PUBLIC_CANONICAL_ORIGIN || "").trim().replace(/\/+$/, "");
+  if (!secret || !origin) return null;
+  const signature = await creditCallbackSignature(reserveKey, issuedAt, secret);
+  const query = new URLSearchParams({ iat: issuedAt, sig: signature });
+  return `${origin}/api/internal/credit-jobs/${encodeURIComponent(reserveKey)}?${query}`;
+}
+
+async function creditCallbackSignature(reserveKey, issuedAt, secret) {
+  return (await hmacSha256Hex(`${reserveKey}\n${issuedAt}`, secret)).slice(0, 32);
+}
+
+/**
+ * ジョブのポーリングに合わせて予約を精算する。
+ *
+ * RunPodを呼ぶ前に対応表を見るのが肝。`runpodRequest` は404も5xxもtimeoutも例外にするので
+ * （非2xxをhttpErrorへ変える）、RunPodを先に呼ぶと、1回目の精算が落ちた後にRunPodが結果を
+ * 捨てた時点で例外が先に出て、精算の再試行へ二度と到達できない。予約は in_flight のまま残る。
+ *
+ * 戻り値はRunPodの生の応答（呼び出し元がそのまま使う）。
+ */
+async function settleCreditForPolledJob(env, jobId, fetchRunpodBody) {
+  const reservation = await findCreditReservationForJob(env, jobId);
+  if (!reservation || reservation.status !== "in_flight") {
+    if (reservation) await deleteCreditReserveMarker(env, jobId);
+    return fetchRunpodBody();
+  }
+
+  const { client } = resolveCreditClient(env);
+  if (!client) return fetchRunpodBody();
+  const auditBase = { feature: reservation.feature, job_id: jobId };
+
+  // 投入時に行を更新できなかった予約を結び直す。cronの照会が行にjob_idを見つけられないと、
+  // 走っているジョブでもTTL切れで枠を返してしまう
+  if (!reservation.job_id) {
+    await attachCreditReservationJobIdQuietly(env, reservation.reserve_key, jobId, auditBase);
+  }
+
+  // 終了状態を観測済みなら、RunPodを呼ばずに記録値で精算をやり直す
+  if (reservation.job_status) {
+    await settleFromCreditReservationRecord(env, client, reservation, auditBase);
+    return fetchRunpodBody();
+  }
+
+  const body = await fetchRunpodBody();
+  const status = String(body?.status || "").toUpperCase();
+  if (status === "COMPLETED") {
+    // 後段のLLM比較が失敗しても精算する。GPUの原価は既に発生している
+    await recordCreditReservationOutcome(env, reservation.reserve_key, "succeeded", Number(body?.executionTime));
+  } else if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
+    await recordCreditReservationOutcome(env, reservation.reserve_key, "failed", Number(body?.executionTime));
+  } else {
+    return body;
+  }
+  await settleFromCreditReservationRecord(env, client, await findCreditReservationByKey(env, reservation.reserve_key), auditBase);
+  return body;
+}
+
+/** 対応表に記録した終了状態と実行時間だけを見て精算する。再試行しても額が変わらない */
+async function settleFromCreditReservationRecord(env, client, reservation, auditBase) {
+  if (!reservation || reservation.status !== "in_flight" || !reservation.job_status) return;
+  if (reservation.job_status === "succeeded") {
+    await settleCreditReservation(env, {
+      client,
+      reserveKey: reservation.reserve_key,
+      actualAmount: creditCostFromExecutionTime(env, reservation.execution_time_ms, reservation.reserved_amount),
+      reservedAmount: reservation.reserved_amount,
+      executionTimeMs: reservation.execution_time_ms,
+      auditBase,
+    });
+  } else {
+    await releaseCreditReservation(env, { client, reserveKey: reservation.reserve_key, auditBase });
+  }
+  // 印を消すのは決着したときだけ。精算が落ちた回にも消すと、次のポーリングが
+  // 「予約なし」と判断して再試行へ到達できなくなる
+  const settled = await findCreditReservationByKey(env, reservation.reserve_key);
+  if (settled && settled.status !== "in_flight") {
+    await deleteCreditReserveMarker(env, reservation.job_id);
+  }
+}
+
+/**
+ * 予約のあるジョブだけ対応表を引く。
+ *
+ * 印が無ければ予約も無いので、無料枠の利用者のポーリングにD1読みが増えない。
+ * KVが無い環境では印を作れないので対応表を直接引く（印は読みを省くための最適化で、
+ * 正しさをここへ預けない）。
+ */
+async function findCreditReservationForJob(env, jobId) {
+  // フラグOFFのときは予約そのものが存在しない。KVが一時的に落ちているだけで
+  // 無料枠のポーリングを失敗させないよう、ここで抜ける
+  if (env.CREDIT_CONSUME_ENABLED !== "1") return null;
+  if (!env.MO_SPEECH_DB) return null;
+  if (stateKv(env)) {
+    let reserveKey = null;
+    try {
+      reserveKey = await readCreditReserveMarker(env, jobId);
+    } catch (_error) {
+      // 印が読めないだけなら「予約なし」として扱う。決着はcronの照会が引き受ける
+      return null;
+    }
+    if (!reserveKey) return null;
+    return findCreditReservationByKey(env, reserveKey);
+  }
+  return findCreditReservationByJobId(env, jobId);
+}
+
+/**
+ * GPUの実行時間を消費creditへ換算する。
+ *
+ * 切り上げて最小1にするのは、credit-base の settle が1以上の整数しか受けず、cronが
+ * `cost_credits === 0` を「成功したが原価0」として枠を返してしまうため。切り捨てると
+ * 短いジョブが無料になる。上限は設けない。予約額での頭打ちと超過分の記録はcredit-base側が行う。
+ */
+function creditCostFromExecutionTime(env, executionTimeMs, reservedAmount) {
+  const perSecond = creditRunpodRatePerSecond(env);
+  // 単価が壊れているときに最小の1creditへ倒すと請求漏れになる。予約額をそのまま実費とする
+  if (!(perSecond > 0)) return reservedAmount;
+  if (!Number.isFinite(executionTimeMs)) return reservedAmount;
+  return Math.max(1, Math.ceil((executionTimeMs / 1000) * perSecond));
+}
+
+function creditRunpodRatePerSecond(env) {
+  return numberFromEnv(env.CREDIT_RUNPOD_CREDITS_PER_SECOND, CREDIT_RUNPOD_CREDITS_PER_SECOND);
+}
+
+/**
+ * credit-base のcronが、予約に対応するジョブの終了状態を尋ねてくる先。
+ *
+ * cronは認証ヘッダを送らないので、URLに載せた署名だけで守る。応答は状態と実費だけで、
+ * 主体を特定できる情報を返さない。署名は予約ごとに異なり、他の予約には使えない。
+ *
+ * 200以外を返すと cron は「保留」にして状態が伝わらないので、署名が通ったら必ず200を返す。
+ */
+async function handleCreditJobStatusRequest(request, env, url) {
+  let reserveKey;
+  try {
+    reserveKey = decodeURIComponent(url.pathname.slice("/api/internal/credit-jobs/".length));
+  } catch (_error) {
+    // 壊れたパーセントエンコード。こちらが発行したURLではないので、署名なしと同じ扱いにする
+    throw httpError(401, "invalid credit job signature");
+  }
+  const issuedAt = url.searchParams.get("iat") || "";
+  const signature = url.searchParams.get("sig") || "";
+  if (!reserveKey || !issuedAt || !signature) {
+    throw httpError(401, "invalid credit job signature");
+  }
+  if (!(await creditCallbackSignatureMatches(env, reserveKey, issuedAt, signature))) {
+    throw httpError(401, "invalid credit job signature");
+  }
+  return jsonResponse(await creditJobStatusPayload(env, reserveKey, issuedAt));
+}
+
+/**
+ * 現行の鍵と、回転中の旧鍵の両方を受ける。
+ * 鍵を差し替えた瞬間に発行済みのURLが401になると、cronが保留し続けて予約が永久に残る。
+ */
+async function creditCallbackSignatureMatches(env, reserveKey, issuedAt, presented) {
+  for (const key of [env.CREDIT_BASE_CALLBACK_SECRET, env.CREDIT_BASE_CALLBACK_SECRET_PREVIOUS]) {
+    const secret = String(key || "").trim();
+    if (!secret) continue;
+    if (constantTimeEqual(presented, await creditCallbackSignature(reserveKey, issuedAt, secret))) return true;
+  }
+  return false;
+}
+
+async function creditJobStatusPayload(env, reserveKey, issuedAt) {
+  const reservation = env.MO_SPEECH_DB ? await findCreditReservationByKey(env, reserveKey) : null;
+
+  if (reservation?.status === "settled") {
+    return { status: "succeeded", cost_credits: Number(reservation.settled_amount || 0) };
+  }
+  // 別の経路が先に精算した予約。credit-base 側は already_settled で止まるので、どちらを返しても
+  // 台帳は変わらない。実装で迷わないよう1つに固定する
+  if (reservation && reservation.status !== "in_flight") {
+    return { status: "failed", cost_credits: 0 };
+  }
+  if (reservation?.job_status === "succeeded") {
+    return {
+      status: "succeeded",
+      cost_credits: reservation.kind === "sync"
+        ? Number(reservation.reserved_amount || 0)
+        : creditCostFromExecutionTime(env, reservation.execution_time_ms, reservation.reserved_amount),
+    };
+  }
+  if (reservation?.job_status === "failed") {
+    return { status: "failed", cost_credits: 0 };
+  }
+
+  // ここから先は終了状態を誰も観測していない。同期経路はRunPodへ尋ねる手立てが無いので、
+  // 予約のTTLを過ぎたら失敗として枠を返す
+  if (reservation && reservation.kind === "sync") {
+    return creditElapsedSeconds(issuedAt) > creditSyncReserveTtl(env)
+      ? { status: "failed", cost_credits: 0 }
+      : { status: "running", cost_credits: 0 };
+  }
+
+  // 投入時に行を更新できなかった予約は、逆引きの印からjobIdを取り戻す
+  const jobId = reservation?.job_id || (reservation ? await readCreditJobIdMarker(env, reserveKey) : null);
+  if (reservation && !reservation.job_id && jobId) {
+    await attachCreditReservationJobIdQuietly(env, reserveKey, jobId, { feature: reservation.feature, job_id: jobId });
+  }
+
+  if (reservation && jobId) {
+    let body;
+    try {
+      body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
+    } catch (error) {
+      // 404は「もう結果が無い」という確定した答えで、通信の失敗ではない。
+      // timeout・5xx・ネットワーク例外は running を返して credit-base 側の保留に載せる
+      if (Number(error?.status) !== 404) return { status: "running", cost_credits: 0 };
+      return creditUnknownJobPayload(issuedAt);
+    }
+    const status = String(body?.status || "").toUpperCase();
+    const auditBase = { feature: reservation.feature, job_id: jobId };
+    if (status === "COMPLETED") {
+      // 照会側で終了を観測したときも記録しておく。次のポーリングがRunPodへ問い直さずに済む
+      await recordOutcomeQuietly(env, reserveKey, "succeeded", Number(body?.executionTime), auditBase);
+      return {
+        status: "succeeded",
+        cost_credits: creditCostFromExecutionTime(env, Number(body?.executionTime), reservation.reserved_amount),
+      };
+    }
+    if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
+      await recordOutcomeQuietly(env, reserveKey, "failed", Number(body?.executionTime), auditBase);
+      return { status: "failed", cost_credits: 0 };
+    }
+    return { status: "running", cost_credits: 0 };
+  }
+
+  // 対応表に行が無いか、行はあってもjobIdを取り戻せない。ジョブが走っているかどうか
+  // 確かめる手立てが無いので、予約のTTLではなく猶予いっぱいまで保留する。
+  // TTL切れで枠を返すと、走行中のGPUジョブが無請求になる
+  return creditUnknownJobPayload(issuedAt);
+}
+
+/**
+ * 状態を取り戻す手立てが無くなった予約の扱い。
+ *
+ * その日のうちに運用が気づける長さだけ running で保留し、過ぎたら失敗として枠を返す。
+ * 取りはぐれる原価は予約額に有界なので、永久に保留して利用者の枠を塞ぐより返すほうがよい。
+ */
+function creditUnknownJobPayload(issuedAt) {
+  return creditElapsedSeconds(issuedAt) > CREDIT_UNKNOWN_JOB_GRACE_SECONDS
+    ? { status: "failed", cost_credits: 0 }
+    : { status: "running", cost_credits: 0 };
+}
+
+function creditElapsedSeconds(issuedAt) {
+  const issued = Date.parse(issuedAt);
+  if (!Number.isFinite(issued)) return Number.POSITIVE_INFINITY;
+  return (Date.now() - issued) / 1000;
 }
 
 async function readPublicUsers(env, url = null) {
@@ -2110,7 +2835,12 @@ async function readPublicAuditLog(env, url = null) {
 
 async function appendPublicAuditEvent(env, event) {
   if (env.MO_SPEECH_DB) {
-    await migrateLegacyAuditEventsToD1(env);
+    try {
+      await migrateLegacyAuditEventsToD1(env);
+    } catch (_error) {
+      // legacy移行はKVを読む。ここが落ちても監査ログの追記と本処理は続ける
+      // （この関数は「保存に失敗しても本処理を止めない」約束で書かれている）
+    }
     const now = new Date();
     const entry = await publicAuditEventWithHashedEmail({ id: crypto.randomUUID(), created_at: now.toISOString(), created_at_unix: Math.floor(now.getTime() / 1000), ...event });
     const emailHash = entry.email_hash || null;
@@ -2174,6 +2904,8 @@ export async function runPublicDataRetention(env = {}, now = new Date()) {
     await env.MO_SPEECH_DB.batch([
       env.MO_SPEECH_DB.prepare("DELETE FROM quota_usage_daily WHERE updated_at < ?").bind(dailyQuotaCutoff),
       env.MO_SPEECH_DB.prepare("DELETE FROM audit_events WHERE occurred_at < ?").bind(auditCutoff),
+      // 決着した予約だけを消す。in_flight の行は resolved_at がNULLで比較が偽になるため残る
+      env.MO_SPEECH_DB.prepare(CREDIT_RESERVATION_SQL.deleteResolved).bind(auditCutoff),
     ]);
   }
 
@@ -2322,9 +3054,13 @@ async function createVoiceConversionJob(request, env) {
   const form = await request.formData();
   const sourceAudio = requiredBlob(form, "source_audio");
   const referenceAudio = requiredBlob(form, "reference_audio");
-  await enforcePublicFeatureAccess(request, env, "voice_conversion", {
-    audioBytes: Math.max(Number(sourceAudio.size || 0), Number(referenceAudio.size || 0)),
-  });
+  const { consumption } = await enforcePublicFeatureAccess(
+    request,
+    env,
+    "voice_conversion",
+    { audioBytes: Math.max(Number(sourceAudio.size || 0), Number(referenceAudio.size || 0)) },
+    { feature: "voice-conversion-jobs", kind: "job" },
+  );
   const sourceAudioBase64 = await blobToBase64(sourceAudio);
   const sourceAudioMimeType = normalizeMimeType(sourceAudio.type || guessAudioMimeType(sourceAudio.name));
   const referenceAudioBase64 = await blobToBase64(referenceAudio);
@@ -2341,6 +3077,7 @@ async function createVoiceConversionJob(request, env) {
   };
   const body = await submitRunpodJob(env, payload);
   const snapshot = jobSnapshotFromRunpod(body, "voice_conversion");
+  await consumption.attachJob(snapshot.job_id);
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, "voice_conversion")) {
     await saveRunpodVcReadyState(env, snapshot, "voice_conversion");
   }
@@ -2364,7 +3101,8 @@ async function getRunpodJobSnapshot(jobId, env, kind) {
   if (!jobId) {
     throw httpError(400, "job_id is required");
   }
-  const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
+  const body = await settleCreditForPolledJob(env, jobId, () =>
+    runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" }));
   const health = null;
   const snapshot = jobSnapshotFromRunpod(body, kind, health);
   if (snapshot.status === "succeeded" && isRunpodVcReadyResult(snapshot.result, kind)) {
@@ -2578,7 +3316,13 @@ async function createPracticePrompt(request, env) {
   const targetLanguage = supportedPracticeTargetLanguage(stringFormValue(form, "target_language", "ja-JP"));
   const asrModel = supportedPracticeAsrModel(stringFormValue(form, "asr_model", OPENAI_DEFAULT_PRACTICE_ASR_MODEL));
   const includePinyin = targetLanguage === "zh-CN" && optionEnabled(stringFormValue(form, "include_pinyin", "false"));
-  await enforcePublicFeatureAccess(request, env, "speakloop", { audioBytes: Number(audio.size || 0) });
+  const { consumption } = await enforcePublicFeatureAccess(
+    request,
+    env,
+    "speakloop",
+    { audioBytes: Number(audio.size || 0) },
+    { feature: "practice-prompts", kind: "sync" },
+  );
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -2632,6 +3376,7 @@ async function createPracticePrompt(request, env) {
     },
     detected_source_language: translation.source_language,
   };
+  await consumption.settle(consumption.amount);
   return result;
 }
 
@@ -2663,10 +3408,13 @@ async function createPracticeRecording(request, env) {
       throw httpError(400, "own voice only accepts the same-session SpeakLoop recording");
     }
   }
-  await enforcePublicFeatureAccess(request, env, "speakloop", {
-    audioBytes: Number(audio.size || 0),
-    textChars: currentTargetText.trim().length,
-  });
+  const { consumption } = await enforcePublicFeatureAccess(
+    request,
+    env,
+    "speakloop",
+    { audioBytes: Number(audio.size || 0), textChars: currentTargetText.trim().length },
+    { feature: "practice-recordings", kind: "sync" },
+  );
   const audioBytes = await audio.arrayBuffer();
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
 
@@ -2734,6 +3482,8 @@ async function createPracticeRecording(request, env) {
     });
     result.voice_conversion_job = jobSnapshotFromRunpod(body, "voice_conversion");
   }
+  // 声質変換の付随ジョブは practice-recordings の固定額に含める（別に予約を取らない）
+  await consumption.settle(consumption.amount);
   return result;
 }
 
@@ -2765,10 +3515,14 @@ async function createPracticeAttemptJob(request, env) {
   const playbackPaddingSeconds = validatePlaybackPaddingSeconds(
     stringFormValue(form, "playback_padding_seconds", ""),
   );
-  await enforcePublicFeatureAccess(request, env, "speakloop", {
-    audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0),
-    textChars: targetText.length,
-  });
+  const { consumption } = await enforcePublicFeatureAccess(
+    request,
+    env,
+    "speakloop",
+    { audioBytes: Number(audio.size || 0) + Number(modelAudio.size || 0), textChars: targetText.length },
+    // zh-CNはRunPodへ非同期投入するのでポーリング側で精算する。それ以外は同じリクエスト内で完結する
+    { feature: "practice-attempt-jobs", kind: targetLanguage === "zh-CN" ? "job" : "sync" },
+  );
   const [audioBytes, modelAudioBytes] = await Promise.all([audio.arrayBuffer(), modelAudio.arrayBuffer()]);
   const audioMimeType = normalizeMimeType(audio.type || guessAudioMimeType(audio.name));
   const modelAudioMimeType = normalizeMimeType(modelAudio.type || guessAudioMimeType(modelAudio.name));
@@ -2795,6 +3549,9 @@ async function createPracticeAttemptJob(request, env) {
         }),
     });
     const jobId = String(body?.id || body?.job_id || "");
+    // 投入後の後片付けより先に予約を結び付ける。ここより後で落ちると、GPUジョブが走っているのに
+    // リクエストの出口が枠を返してしまい、請求できない実行になる
+    await consumption.attachJob(jobId);
     await savePracticeAttemptLlmOptions(env, jobId, {
       comparison_model: comparisonModel,
       playback_padding_seconds: playbackPaddingSeconds,
@@ -2858,6 +3615,7 @@ async function createPracticeAttemptJob(request, env) {
     playbackPaddingSeconds,
     env,
   });
+  await consumption.settle(consumption.amount);
   return {
     job_id: "",
     status: "succeeded",
@@ -2878,7 +3636,8 @@ async function getPracticeAttemptJob(jobId, env) {
   if (!jobId) {
     throw httpError(400, "job_id is required");
   }
-  const body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
+  const body = await settleCreditForPolledJob(env, jobId, () =>
+    runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" }));
   let health = null;
   if (["", "IN_QUEUE", "QUEUED"].includes(String(body.status || "").toUpperCase())) {
     try {
@@ -3860,9 +4619,11 @@ function jsonResponse(payload, init = {}) {
   return new Response(init.status === 204 ? null : JSON.stringify(payload), { ...init, headers });
 }
 
-function httpError(status, message) {
+function httpError(status, message, extra = null) {
   const error = new Error(String(message));
   error.status = status;
+  // extra は内部の目印。応答本文へ出すのは `code` だけで、他は外へ漏らさない
+  if (extra) Object.assign(error, extra);
   return error;
 }
 
