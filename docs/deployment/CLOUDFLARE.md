@@ -52,6 +52,8 @@ Browser
 
 共通課金基盤（credit-base）の内部APIはService BindingのRPCで呼ぶ。`wrangler.toml` の `[[services]]` に `CREDIT_BASE` / `credit-base` / `CreditBase` を宣言してあり、binding宣言そのものが認可になる。この経路にsecretは要らない。HTTP経路（`CREDIT_BASE_URL` と `CREDIT_BASE_SECRET`）はローカル開発とテスト専用で、`.dev.vars` にだけ置く。`wrangler.toml` へ書かない。
 
+**課金サービスを持たないアカウントへ配備する場合は、`wrangler.toml` の `[[services]]` を消す。** この宣言はdeploy時に相手のWorkerを解決するため、`credit-base` が存在しないアカウントでは `wrangler deploy` が失敗する。ローカル起動（`wrangler dev`）とテストは宣言があっても動くので、消す必要があるのは実際に配備するときだけである。宣言を消してもクレジット消費は既定でOFFなので、他の挙動は変わらない。
+
 `CREDIT_BASE_CALLBACK_SECRET` は、credit-baseのcronが問い合わせてくる `GET /api/internal/credit-jobs/<予約キー>` を守る署名鍵である。cronは認証ヘッダを送らないため、この鍵で署名した値をURLへ載せる。応答は状態と消費creditだけで、利用者を特定できる情報を含まない。
 
 **この鍵を登録しないままクレジット消費を有効にしても、消費は始まらない。** 照会先を署名して組めない状態で予約を作ると、cronが掃除できない予約が溜まるためである。鍵が無いあいだは無料枠を超えた要求を従来どおり429で断り、監査ログへ理由を残す。有効にする前に必ず登録する。
@@ -68,6 +70,8 @@ Browser
 | `POST /api/practice/recordings` | 8 |
 | `POST /api/practice/attempt-jobs` | 10 |
 | `POST /api/voice-conversion-jobs` | 30（予約額。GPUの実行時間で精算し、予約額を上限とする） |
+
+声質変換は現在も管理者専用で、管理者は無料枠の判定を免除される。そのためこの30creditは実際には消費されない。配線だけ用意してあり、非管理者へ開放したときに効き始める。
 
 `attempt-jobs` の中国語経路も同じくGPUの実行時間で精算し、予約額10を上限とする。上限に達した分は課金サービス側に未請求として記録され、単価を見直す手がかりになる。
 
@@ -97,7 +101,7 @@ Browser
 
 Google OAuth clientの「承認済みのリダイレクトURI」には `https://voice-lab.inakaegg.workers.dev/auth/google/callback` を登録する。旧Worker URLから切り替える間は旧URIを残してよいが、新URLでログイン確認が完了した後に不要な旧URIを削除する。
 
-iOSアプリなどのnativeクライアントは、cookieの代わりに後述のnative session交換でログインする。Google Cloud Console側では、同じprojectへapplication type「iOS」のOAuth clientを追加する。アプリのserver client ID（Google Sign-In SDKの `GIDServerClientID`）には、上記Web applicationのclient ID（`GOOGLE_CLIENT_ID` と同じ値）を指定する。これでアプリが取得するGoogle ID tokenの `aud` が `GOOGLE_CLIENT_ID` と一致し、Workerが検証できる。iOS clientにsecretは発行されず、この対応で追加するWorker secretもない。
+iOSアプリなどのnativeクライアントは、cookieの代わりに後述のnative session交換でログインする。cookieとnative session tokenのpayloadには、emailと発行時刻・有効期限に加えてGoogleアカウントの識別子（`sub`）が入る。クレジット消費の主体を決めるために使う。Google Cloud Console側では、同じprojectへapplication type「iOS」のOAuth clientを追加する。アプリのserver client ID（Google Sign-In SDKの `GIDServerClientID`）には、上記Web applicationのclient ID（`GOOGLE_CLIENT_ID` と同じ値）を指定する。これでアプリが取得するGoogle ID tokenの `aud` が `GOOGLE_CLIENT_ID` と一致し、Workerが検証できる。iOS clientにsecretは発行されず、この対応で追加するWorker secretもない。
 
 ### Zoovoiceのsecretとflag
 

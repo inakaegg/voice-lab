@@ -159,6 +159,10 @@ export function normalizeCreditResult(raw, requireStatus = true) {
   if (raw === null || typeof raw !== "object") {
     throw taggedCreditError(new Error("credit-base returned an unexpected result"), CREDIT_ERROR_UNKNOWN);
   }
+  if (!requireStatus && (typeof raw.balance !== "number" || !Number.isFinite(raw.balance))) {
+    // 残高照会の応答。数値が無ければ読み違えているので、0として扱わない
+    throw taggedCreditError(new Error("credit-base returned a balance reply without a balance"), CREDIT_ERROR_UNKNOWN);
+  }
   if (requireStatus && !CREDIT_STATUSES.has(raw.status)) {
     // 空の応答や知らない語彙を「成功でない何か」として通すと、呼び出し側が枠を取れたと誤認する
     throw taggedCreditError(

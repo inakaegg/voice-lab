@@ -21,6 +21,10 @@ preview_bucket_name = "mo-speech-audio-preview"
 
 # 共通課金基盤（credit-base）の内部API。RPCなのでbinding宣言そのものが認可になり、
 # shared secretを配らずに済む。HTTP経路はローカル開発とテスト用で、.dev.varsにだけ置く。
+#
+# この宣言はdeploy時に相手のWorkerを解決する。credit-baseを持たないアカウントへ配備するときは
+# このblockごと消す（docs/deployment/CLOUDFLARE.md の該当節を参照）。wrangler devとテストは
+# 宣言があっても動くので、消すのは実際に配備するときだけでよい。
 [[services]]
 binding = "CREDIT_BASE"
 service = "credit-base"

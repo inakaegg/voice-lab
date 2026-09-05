@@ -19,6 +19,7 @@ const RUNPOD_TERMINAL_FAILURE_STATES = new Set(["FAILED", "CANCELLED", "TIMED_OU
 const RUNPOD_RUNNING_STATES = new Set(["IN_QUEUE", "IN_PROGRESS", "RUNNING"]);
 const PRACTICE_LLM_ATTEMPT_OPTIONS_KV_PREFIX = "practice-attempt-llm-options:";
 const CREDIT_RESERVE_MARKER_KV_PREFIX = "credit-reserve:";
+const CREDIT_JOB_ID_MARKER_KV_PREFIX = "credit-reserve-key:";
 const CREDIT_PRODUCT = "voice-lab";
 // 消費credit（credit-base docs/billing-spec.md §10）。事前に決まる固定額
 const CREDIT_FEATURE_AMOUNTS = {
@@ -2037,8 +2038,13 @@ async function startCreditConsumption(request, env, session, credit) {
         await releaseCreditReservation(env, { client, reserveKey, auditBase });
         return;
       }
-      await attachCreditReservationJobId(env, reserveKey, jobId);
-      await saveCreditReserveMarker(env, jobId, reserveKey, ttlSeconds + CREDIT_UNKNOWN_JOB_GRACE_SECONDS);
+      // ここへ来た時点でRunPodはジョブを受理している。記録に失敗しても枠を返さない。
+      // 返すと走っているGPUジョブが無請求になる。印と行のどちらかが残れば、
+      // 次のポーリング（印）かcronの照会（行）が決着まで運べる
+      const markerTtl = ttlSeconds + CREDIT_UNKNOWN_JOB_GRACE_SECONDS;
+      await attachCreditReservationJobIdQuietly(env, reserveKey, jobId, auditBase);
+      await saveCreditReserveMarkerQuietly(env, jobId, reserveKey, markerTtl, auditBase);
+      await runQuietly(env, () => saveCreditJobIdMarker(env, reserveKey, jobId, markerTtl), "save_job_id_marker", auditBase);
     },
   };
   // 対応表へ書く前に登録する。書き込みが落ちたとき、credit-base には予約だけが残り、
@@ -2289,6 +2295,29 @@ async function readCreditReserveMarker(env, jobId) {
   return kv.get(`${CREDIT_RESERVE_MARKER_KV_PREFIX}${jobId}`);
 }
 
+/**
+ * 予約キーからjobIdを引く逆引きの印。
+ *
+ * cronの照会は予約キーしか持たない。投入時に対応表の更新が落ちて行にjobIdが入らなかった場合、
+ * これが無いと「ジョブが走っているのか確かめる手立てが無い」状態になり、TTL切れで枠を返して
+ * 走行中のGPUジョブが無請求になる。
+ */
+async function saveCreditJobIdMarker(env, reserveKey, jobId, ttlSeconds) {
+  const kv = stateKv(env);
+  if (!kv || !reserveKey || !jobId) return;
+  await kv.put(`${CREDIT_JOB_ID_MARKER_KV_PREFIX}${reserveKey}`, jobId, { expirationTtl: ttlSeconds });
+}
+
+async function readCreditJobIdMarker(env, reserveKey) {
+  const kv = stateKv(env);
+  if (!kv || !reserveKey) return null;
+  try {
+    return await kv.get(`${CREDIT_JOB_ID_MARKER_KV_PREFIX}${reserveKey}`);
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function deleteCreditReserveMarker(env, jobId) {
   const kv = stateKv(env);
   if (!kv || !jobId) return;
@@ -2393,20 +2422,39 @@ async function finishCreditSettlement(env, { reserveKey, result, settledAmount, 
  * 終端化するか、cronが照会エンドポイント経由で決着させる。
  */
 async function finalizeQuietly(env, reserveKey, status, settledAmount, now, auditBase) {
+  await runQuietly(env, () => finalizeCreditReservation(env, reserveKey, status, settledAmount, now), "finalize", auditBase);
+}
+
+/**
+ * 課金の後始末を、失敗しても本処理を巻き添えにしない形で実行する。
+ *
+ * 監査ログの書き込み自体もKVを読むため例外を投げ得る（`migrateLegacyAuditEventsToD1`）。
+ * ここで漏らすと、握ったつもりの失敗がそのまま利用者への500になる。
+ */
+async function runQuietly(env, work, method, auditBase) {
   try {
-    await finalizeCreditReservation(env, reserveKey, status, settledAmount, now);
+    await work();
   } catch (_error) {
-    await appendPublicAuditEvent(env, { action: "credit_call_failed", method: "finalize", ...auditBase });
+    try {
+      await appendPublicAuditEvent(env, { action: "credit_call_failed", method, ...auditBase });
+    } catch (_auditError) {
+      console.error("credit bookkeeping failed", JSON.stringify({ method }));
+    }
   }
+}
+
+/** ジョブとの結び付けが落ちても、GPUが動いている以上は枠を返さない */
+async function attachCreditReservationJobIdQuietly(env, reserveKey, jobId, auditBase) {
+  await runQuietly(env, () => attachCreditReservationJobId(env, reserveKey, jobId), "attach_job", auditBase);
+}
+
+async function saveCreditReserveMarkerQuietly(env, jobId, reserveKey, ttlSeconds, auditBase) {
+  await runQuietly(env, () => saveCreditReserveMarker(env, jobId, reserveKey, ttlSeconds), "save_marker", auditBase);
 }
 
 /** 観測結果の記録が落ちても精算は試みる。ここで止めると、成功した処理が無料になる */
 async function recordOutcomeQuietly(env, reserveKey, jobStatus, executionTimeMs, auditBase) {
-  try {
-    await recordCreditReservationOutcome(env, reserveKey, jobStatus, executionTimeMs);
-  } catch (_error) {
-    await appendPublicAuditEvent(env, { action: "credit_call_failed", method: "record_outcome", ...auditBase });
-  }
+  await runQuietly(env, () => recordCreditReservationOutcome(env, reserveKey, jobStatus, executionTimeMs), "record_outcome", auditBase);
 }
 
 function creditSyncReserveTtl(env) {
@@ -2456,6 +2504,12 @@ async function settleCreditForPolledJob(env, jobId, fetchRunpodBody) {
   const { client } = resolveCreditClient(env);
   if (!client) return fetchRunpodBody();
   const auditBase = { feature: reservation.feature, job_id: jobId };
+
+  // 投入時に行を更新できなかった予約を結び直す。cronの照会が行にjob_idを見つけられないと、
+  // 走っているジョブでもTTL切れで枠を返してしまう
+  if (!reservation.job_id) {
+    await attachCreditReservationJobIdQuietly(env, reservation.reserve_key, jobId, auditBase);
+  }
 
   // 終了状態を観測済みなら、RunPodを呼ばずに記録値で精算をやり直す
   if (reservation.job_status) {
@@ -2508,9 +2562,18 @@ async function settleFromCreditReservationRecord(env, client, reservation, audit
  * 正しさをここへ預けない）。
  */
 async function findCreditReservationForJob(env, jobId) {
+  // フラグOFFのときは予約そのものが存在しない。KVが一時的に落ちているだけで
+  // 無料枠のポーリングを失敗させないよう、ここで抜ける
+  if (env.CREDIT_CONSUME_ENABLED !== "1") return null;
   if (!env.MO_SPEECH_DB) return null;
   if (stateKv(env)) {
-    const reserveKey = await readCreditReserveMarker(env, jobId);
+    let reserveKey = null;
+    try {
+      reserveKey = await readCreditReserveMarker(env, jobId);
+    } catch (_error) {
+      // 印が読めないだけなら「予約なし」として扱う。決着はcronの照会が引き受ける
+      return null;
+    }
     if (!reserveKey) return null;
     return findCreditReservationByKey(env, reserveKey);
   }
@@ -2599,19 +2662,24 @@ async function creditJobStatusPayload(env, reserveKey, issuedAt) {
     return { status: "failed", cost_credits: 0 };
   }
 
-  // ここから先は終了状態を誰も観測していない。同期経路と、ジョブIDを記録できなかった予約は
-  // RunPodへ尋ねる手立てがないので、予約のTTLを過ぎたら失敗として枠を返す
-  if (reservation && (reservation.kind === "sync" || !reservation.job_id)) {
-    const ttl = reservation.kind === "sync" ? creditSyncReserveTtl(env) : creditJobReserveTtl(env);
-    return creditElapsedSeconds(issuedAt) > ttl
+  // ここから先は終了状態を誰も観測していない。同期経路はRunPodへ尋ねる手立てが無いので、
+  // 予約のTTLを過ぎたら失敗として枠を返す
+  if (reservation && reservation.kind === "sync") {
+    return creditElapsedSeconds(issuedAt) > creditSyncReserveTtl(env)
       ? { status: "failed", cost_credits: 0 }
       : { status: "running", cost_credits: 0 };
   }
 
-  if (reservation?.job_id) {
+  // 投入時に行を更新できなかった予約は、逆引きの印からjobIdを取り戻す
+  const jobId = reservation?.job_id || (reservation ? await readCreditJobIdMarker(env, reserveKey) : null);
+  if (reservation && !reservation.job_id && jobId) {
+    await attachCreditReservationJobIdQuietly(env, reserveKey, jobId, { feature: reservation.feature, job_id: jobId });
+  }
+
+  if (reservation && jobId) {
     let body;
     try {
-      body = await runpodRequest(env, `/status/${encodeURIComponent(reservation.job_id)}`, { method: "GET" });
+      body = await runpodRequest(env, `/status/${encodeURIComponent(jobId)}`, { method: "GET" });
     } catch (error) {
       // 404は「もう結果が無い」という確定した答えで、通信の失敗ではない。
       // timeout・5xx・ネットワーク例外は running を返して credit-base 側の保留に載せる
@@ -2619,22 +2687,25 @@ async function creditJobStatusPayload(env, reserveKey, issuedAt) {
       return creditUnknownJobPayload(issuedAt);
     }
     const status = String(body?.status || "").toUpperCase();
+    const auditBase = { feature: reservation.feature, job_id: jobId };
     if (status === "COMPLETED") {
       // 照会側で終了を観測したときも記録しておく。次のポーリングがRunPodへ問い直さずに済む
-      await recordCreditReservationOutcome(env, reserveKey, "succeeded", Number(body?.executionTime));
+      await recordOutcomeQuietly(env, reserveKey, "succeeded", Number(body?.executionTime), auditBase);
       return {
         status: "succeeded",
         cost_credits: creditCostFromExecutionTime(env, Number(body?.executionTime), reservation.reserved_amount),
       };
     }
     if (RUNPOD_TERMINAL_FAILURE_STATES.has(status)) {
-      await recordCreditReservationOutcome(env, reserveKey, "failed", Number(body?.executionTime));
+      await recordOutcomeQuietly(env, reserveKey, "failed", Number(body?.executionTime), auditBase);
       return { status: "failed", cost_credits: 0 };
     }
     return { status: "running", cost_credits: 0 };
   }
 
-  // 対応表に行が無い。予約は通ったが行を書けなかったか、行が消えている
+  // 対応表に行が無いか、行はあってもjobIdを取り戻せない。ジョブが走っているかどうか
+  // 確かめる手立てが無いので、予約のTTLではなく猶予いっぱいまで保留する。
+  // TTL切れで枠を返すと、走行中のGPUジョブが無請求になる
   return creditUnknownJobPayload(issuedAt);
 }
 
@@ -2764,7 +2835,12 @@ async function readPublicAuditLog(env, url = null) {
 
 async function appendPublicAuditEvent(env, event) {
   if (env.MO_SPEECH_DB) {
-    await migrateLegacyAuditEventsToD1(env);
+    try {
+      await migrateLegacyAuditEventsToD1(env);
+    } catch (_error) {
+      // legacy移行はKVを読む。ここが落ちても監査ログの追記と本処理は続ける
+      // （この関数は「保存に失敗しても本処理を止めない」約束で書かれている）
+    }
     const now = new Date();
     const entry = await publicAuditEventWithHashedEmail({ id: crypto.randomUUID(), created_at: now.toISOString(), created_at_unix: Math.floor(now.getTime() / 1000), ...event });
     const emailHash = entry.email_hash || null;

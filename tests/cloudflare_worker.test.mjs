@@ -5116,8 +5116,10 @@ test("Cloudflare worker holds unobserved reservations until their reservation TT
   const cases = [
     [{ kind: "sync", reserved_amount: 5 }, fresh, { status: "running", cost_credits: 0 }],
     [{ kind: "sync", reserved_amount: 5 }, stale, { status: "failed", cost_credits: 0 }],
+    // 非同期でjobIdを取り戻せない予約は、TTL切れでは枠を返さない。走行中のGPUジョブを
+    // 無請求にしないため、猶予いっぱいまで保留する
     [{ kind: "job", job_id: null }, fresh, { status: "running", cost_credits: 0 }],
-    [{ kind: "job", job_id: null }, stale, { status: "failed", cost_credits: 0 }],
+    [{ kind: "job", job_id: null }, stale, { status: "running", cost_credits: 0 }],
   ];
 
   for (const [overrides, issuedAt, expected] of cases) {
@@ -5334,5 +5336,150 @@ test("Cloudflare worker refuses to spend credits with a non-positive conversion 
     assert.equal(response.status, 429, rate);
     assert.deepEqual(credit.calls, [], rate);
     assert.equal(db.__tables.audit.at(-1).action, "credit_disabled_misconfigured", rate);
+  }
+});
+
+test("Cloudflare worker keeps a running GPU job billable when the job id cannot be stored", async () => {
+  const credit = fakeCreditBase();
+  const db = fakeD1();
+  const realPrepare = db.prepare.bind(db);
+  let attachFails = true;
+  db.prepare = (sql) => {
+    if (sql === CREDIT_RESERVATION_SQL.attachJobId && attachFails) {
+      return { bind: () => ({ async run() { throw new Error("D1_ERROR: disk is full"); } }) };
+    }
+    return realPrepare(sql);
+  };
+  const { env } = await exhaustedQuotaCreditEnv({
+    credit, db,
+    fetchImpl: runpodJobFetch([{ id: "zh-job", status: "COMPLETED", executionTime: 20_000, output: { practice_asr_contract_version: 3 } }]),
+  });
+  const cookie = await publicCookie(env);
+
+  const submitted = await handleRequest(attemptJobRequest(cookie), env);
+
+  // RunPodが受理した後なので、記録に失敗しても枠を返さない
+  assert.equal(submitted.status, 202);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve"]);
+  const reserveKey = credit.calls[0].payload.idempotency_key;
+  assert.equal(db.__tables.reservations.get(reserveKey).job_id, null);
+
+  // 次のポーリングでjob idを結び直し、精算まで進む
+  attachFails = false;
+  await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "settle"]);
+  assert.equal(db.__tables.reservations.get(reserveKey).job_id, "zh-job");
+  assert.equal(db.__tables.reservations.get(reserveKey).status, "settled");
+});
+
+test("Cloudflare worker polls free-quota jobs without touching the credit marker", async () => {
+  const reads = [];
+  const kv = fakeKv();
+  const realGet = kv.get.bind(kv);
+  kv.get = async (key, ...rest) => {
+    reads.push(String(key));
+    if (String(key).startsWith("credit-reserve:")) throw new Error("KV is unavailable");
+    return realGet(key, ...rest);
+  };
+  const db = fakeD1();
+  await kv.put("public-access-settings", JSON.stringify({
+    google_login_required: true,
+    admin_google_emails: ["admin@example.com"],
+    features: { speakloop: { daily_limit: 50, total_limit: 50 } },
+  }));
+  const env = adminAuthEnv(runpodJobFetch([{ id: "zh-job", status: "IN_PROGRESS" }]), {
+    kv, db, googleEmail: "viewer@example.com", googleSub: "viewer-subject",
+  });
+  const cookie = await publicCookie(env);
+
+  // フラグOFFではマーカーを読まない
+  const off = await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  assert.equal(off.status, 200);
+  assert.deepEqual(reads.filter((key) => key.startsWith("credit-reserve:")), []);
+
+  // フラグONでKVが落ちていても、マーカー無しとして扱いポーリングは通る
+  env.CREDIT_CONSUME_ENABLED = "1";
+  const on = await handleRequest(new Request("https://example.com/api/practice/attempt-jobs/zh-job", { headers: { cookie } }), env);
+  assert.equal(on.status, 200);
+  assert.equal(reads.filter((key) => key.startsWith("credit-reserve:")).length, 1);
+});
+
+test("credit client refuses a balance reply without a balance", async () => {
+  const client = resolveCreditClient({ CREDIT_BASE: { async getBalance() { return {}; } } }).client;
+
+  await assert.rejects(
+    () => client.getBalance({ subjectId: "google:1" }),
+    (error) => error.creditKind === "unknown",
+  );
+});
+
+test("Cloudflare worker recovers an unattached job id from the reverse marker when the billing cron asks", async () => {
+  const { env, db } = creditStatusEnv(async (url) => {
+    if (url === "https://api.runpod.ai/v2/endpoint/status/zh-job") {
+      return json({ id: "zh-job", status: "COMPLETED", executionTime: 20_000 });
+    }
+    throw new Error(`unexpected external request: ${url}`);
+  });
+  // 投入時にD1の結び付けだけが落ちた予約
+  seedReservation(db, { kind: "job", job_id: null });
+  await env.MO_SPEECH_KV.put("credit-reserve-key:r1", "zh-job");
+  const expired = new Date(Date.now() - 700 * 1000).toISOString();
+
+  const answered = await creditStatus(env, "r1", expired);
+
+  assert.deepEqual(answered.body, { status: "succeeded", cost_credits: 5 });
+  assert.equal(db.__tables.reservations.get("r1").job_id, "zh-job");
+  assert.equal(db.__tables.reservations.get("r1").job_status, "succeeded");
+});
+
+test("Cloudflare worker holds an unattached async reservation instead of freeing a job it cannot check", async () => {
+  const { env, db } = creditStatusEnv();
+  // D1もKVも落ちて、ジョブが走っているかどうか確かめる手立てがない
+  seedReservation(db, { kind: "job", job_id: null });
+  const expired = new Date(Date.now() - 700 * 1000).toISOString();
+
+  const answered = await creditStatus(env, "r1", expired);
+
+  // 予約TTLを過ぎただけで枠を返すと、走っているGPUジョブが無請求になる
+  assert.deepEqual(answered.body, { status: "running", cost_credits: 0 });
+  // 猶予を過ぎたら諦めて枠を返す
+  const abandoned = await creditStatus(env, "r1", new Date(Date.now() - 90_000 * 1000).toISOString());
+  assert.deepEqual(abandoned.body, { status: "failed", cost_credits: 0 });
+});
+
+test("Cloudflare worker still answers when the audit log itself cannot be written", async () => {
+  const credit = fakeCreditBase();
+  const db = fakeD1();
+  const realPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (sql === CREDIT_RESERVATION_SQL.finalize) {
+      return { bind: () => ({ async run() { throw new Error("D1_ERROR: disk is full"); } }) };
+    }
+    return realPrepare(sql);
+  };
+  const { env } = await exhaustedQuotaCreditEnv({ credit, db });
+  const cookie = await publicCookie(env);
+  // 監査ログの書き込みはKVも読む（legacy移行の判定）。そこが落ちても本処理を巻き添えにしない
+  const realGet = env.MO_SPEECH_KV.get.bind(env.MO_SPEECH_KV);
+  env.MO_SPEECH_KV.get = async (key, ...rest) => {
+    if (String(key) === "public-audit-log:d1-migrated") throw new Error("KV is unavailable");
+    return realGet(key, ...rest);
+  };
+
+  const response = await handleRequest(practicePromptRequest(cookie), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(credit.calls.map((call) => call.method), ["reserve", "settle"]);
+});
+
+test("credit client rejects balance replies whose balance is not a number", async () => {
+  for (const balance of [null, "", false, []]) {
+    const client = resolveCreditClient({ CREDIT_BASE: { async getBalance() { return { balance }; } } }).client;
+    await assert.rejects(
+      () => client.getBalance({ subjectId: "google:1" }),
+      (error) => error.creditKind === "unknown",
+      JSON.stringify(balance),
+    );
   }
 });
